@@ -17,9 +17,11 @@ Today a collection must have at least one vector field. This document lifts
 the restriction: a collection can be created without a vector field, and
 apart from vector search it behaves like any other collection. Section 2
 describes what the user sees. Two internal rules have to change for it: index
-readiness (Section 3) and segment size (Section 4). Both changes apply to
-collections without a vector field only: index readiness and the segment size
-rules of collections with vectors do not change (Section 5).
+readiness (Section 3) and segment size (Section 4). The index readiness
+change applies to collections without a vector field only. The segment size
+change is a row limit per segment that applies to every collection; it has an
+effect only on collections of narrow rows, with or without a vector field
+(Sections 4.2 and 5).
 
 ## Background
 
@@ -43,8 +45,9 @@ vector field.
 Whether a collection has vectors is read from its current schema, by one
 predicate (`typeutil.HasVectorField`: top-level vector fields, vector
 sub-fields of struct array fields, and function outputs). A collection can
-move between the two states; the rules for load, compaction and the segment
-row cap follow the schema at the time they are evaluated. A struct array
+move between the two states; the rules for load and compaction follow the
+schema at the time they are evaluated, and the segment row cap does not
+depend on the schema (Section 4.2). A struct array
 field with only scalar sub-fields does not make a vector collection.
 
 The implementation is Draft PR #54604, one PR for creating collections
@@ -118,20 +121,26 @@ because each of them reads the current schema:
 | Load needs a vector index | Proxy load task, QueryCoord automatic load | applies from the next load after a vector field is added; stops applying after the last one is dropped |
 | Search is rejected | Proxy search task | follows the schema immediately |
 | Index readiness for handoff and compaction input (Section 3) | computed per evaluation from the schema and the index metadata | the fields to wait for change with the schema; a vector field with no index defined is not waited for |
-| Growing segment seal on rows (Section 4) | StreamingNode shard manager, updated on schema change | segments sealed after the change follow the new state |
-| Compaction planners and writer row cap (Section 4) | DataCoord, per trigger | after a vector field is added the capped segments are merged on bytes; after the last one is dropped, segments above `maxRows` are cut at `maxRows` by the next compaction that rewrites them |
+| Segment row cap (Section 4) | not read from the schema | unchanged by a conversion: segments are sealed, compacted and imported at `maxSize` bytes or `maxRows` rows before and after it |
 
-Measured with `maxRows` set to 400 k (local standalone, #54604 head
-`ff26017cbc`):
+An earlier revision of #54604 applied the row cap to collections without a
+vector field only. Adding a vector field then lifted the cap at once, while
+the rows written earlier stayed narrow (there is no backfill): with
+`maxRows` set to 400 k, three capped segments of 400 k rows were merged into
+one of 1.2 M rows about 30 s after the field was added, and after another
+1.2 M rows without a vector a compaction left one segment of 2.4 M rows. The
+cap therefore no longer depends on the schema. Measured with `maxRows` set to
+400 k (local standalone, 2026-11-11):
 
 | Direction | Step | Segment rows |
 |---|---|---|
-| no vector → vector | 1 M rows before the change | 400 k, 400 k, 200 k |
-| | 600 k rows with vectors after the change, flushed | 1 M (merged), 600 k: sealed on bytes, above `maxRows` |
-| | one manual compaction | 1.6 M in one segment |
-| vector → no vector | 1 M rows (dim 8) before the change | 1 M in one segment |
-| | 500 k rows after the change, flushed | 1 M, 400 k, 100 k: new segments sealed at `maxRows` |
-| | one manual compaction | 400 k, 400 k, 400 k, 200 k, 100 k; unchanged over the next 120 s |
+| no vector → vector | 1.2 M rows before the change | 400 k, 400 k, 400 k |
+| | vector field added, nothing written; then a manual compaction | 400 k, 400 k, 400 k: not merged |
+| | 1.2 M rows without a vector after the change, flushed, compacted | six segments of 400 k; unchanged over the next 120 s |
+| | (second run) 600 k rows with 8-dim vectors after the change | sealed at 400 k; no segment above `maxRows` after a compaction |
+| vector → no vector | 1 M rows (dim 8) before the change | 391 k, 368 k, 241 k |
+| | 500 k rows after the change, flushed | new segments sealed at `maxRows` |
+| | one manual compaction | 400 k, 391 k, 368 k, 341 k; full segments keep their IDs over the next 120 s |
 
 One defect was found and fixed: a collection loaded while it had no vector
 field and no index has no index meta in segcore, and a search on a vector
@@ -434,8 +443,8 @@ stay at 1.3–3 ms.
 #### The rule
 
 Both costs above are bounded by the rows per segment, so rows are what has
-to be limited. For a collection without a vector field this design adds a
-limit counted in rows:
+to be limited. This design adds a limit counted in rows, for every
+collection:
 
 ```
 a segment is full  ⇔  bytes ≥ expectedSize  or  rows ≥ maxRows
@@ -444,13 +453,17 @@ a segment is full  ⇔  bytes ≥ expectedSize  or  rows ≥ maxRows
 - `expectedSize` is the byte target master has today (`maxSize`, or the
   DiskANN size). This design does not change it.
 - `maxRows` is a new parameter, `dataCoord.segment.maxRows`, 4,000,000 by
-  default; 0 means no limit, and it can be changed online.
-- The cap applies only to collections without a vector field
-  (`HasVectorField(schema) == false`). A collection with a vector field does
-  not read the parameter and behaves exactly as today.
+  default; 0 means no limit, and it can be changed online. The collection
+  property `collection.segment.maxRows` overrides it for one collection
+  (below).
+- The rule does not read the schema. Which of the two limits a segment
+  reaches first is decided by its data: rows wider than
+  `expectedSize / maxRows` (268 B by default) reach the byte limit first and
+  behave exactly as today; narrower rows reach the row limit first.
 - Rows are counted. Nothing goes through an estimate of the row size. A JSON
-  field, a dynamic field or a long `varchar` in the schema does not affect
-  whether the cap applies, and adding a scalar field does not move it.
+  field, a dynamic field, a long `varchar` or a vector field in the schema
+  does not affect whether the cap applies, and adding or dropping a field
+  does not move it.
 
 The previous version of this document converted `maxRows` into a byte target
 with the row size estimated from the schema (`EstimateSizePerRecord`). That
@@ -460,6 +473,65 @@ collection without a vector field is mostly its variable-length fields, so
 the conversion was off from the real row count by several times and the cap
 did not apply at all once the schema had one JSON field. Section 7 gives the
 reasons for counting instead and the alternatives that were dropped.
+
+#### Which collections it affects
+
+A collection without a vector field is the common case of narrow rows, and
+the reason the cap exists. Collections with a vector field are affected only
+when their rows are narrower than 268 B. Counting the vector alone, that is
+a `FLOAT_VECTOR` below about 67 dimensions, `FLOAT16_VECTOR` below about
+134, `INT8_VECTOR` below about 268, `BINARY_VECTOR` below about 2,144, and
+sparse vectors of short documents. A vector collection of the common
+dimensions is not affected: 1 GB is about 350 k rows at dim 768 and 2 M rows
+at dim 128.
+
+An earlier revision applied the cap to collections without a vector field
+only, by reading the schema. It was changed for two reasons. A schema change
+does not change the data: adding a vector field to a collection without one
+lifted the cap while the rows stayed narrow (Section 2, "Conversion"). And
+the per-segment costs of Section 4.1 depend on the rows of a segment, not on
+whether its schema declares a vector.
+
+What the cap costs a vector collection of narrow rows was measured on 24 M
+rows with two layouts, sealed on bytes (3 segments, the largest about
+11.5 M rows) against about 4 M rows per segment (7 segments); Appendix B.7:
+
+| Index | Index build, total | Search |
+|---|---|---|
+| `HNSW`, `FLOAT_VECTOR` dim 16 | 493 s → 402 s | QPS 1,663 → 1,542; single-thread p50 2.36 → 2.61 ms |
+| `IVF_FLAT`, `FLOAT_VECTOR` dim 16 | 9.7 s → 9.2 s | unchanged |
+| `BIN_IVF_FLAT`, `BINARY_VECTOR` dim 512 | 96.5 s → 205.1 s | unchanged |
+| `BIN_FLAT`, `BINARY_VECTOR` dim 512 | no build | single-thread p50 83 → 43 ms; QPS unchanged |
+
+`BIN_IVF_FLAT` spends about 29 s per segment whatever its row count, so its
+total build time grows with the number of segments. That is the largest
+cost found, and the reason for the collection property below.
+
+Existing segments are not rewritten when the cap starts to apply to a
+collection, on upgrade or when the value is lowered: a segment above
+`maxRows` rows is full to the planners and no plan is generated to split
+it (observed for 30 minutes after lowering the value). It is cut at
+`maxRows` only when a compaction rewrites it for another reason: a manual
+compaction, the delete ratio, expiry, clustering, or a schema or storage
+version bump. New segments follow the cap from the start.
+
+#### The collection property
+
+`collection.segment.maxRows` is a collection property: a non-negative
+integer, 0 for no row limit on this collection. It is set at create or with
+`AlterCollection`, and removed with the delete keys of `AlterCollection`,
+which returns the collection to `dataCoord.segment.maxRows`. A value that is
+not a non-negative integer is rejected (1100). The property overrides the
+configuration in both directions: it may be lower or higher.
+
+A change takes effect on growing segments allocated after it, and on the
+compactions and imports planned after it; a growing segment that is already
+open keeps the limit it was allocated with, as it does when the
+configuration is changed. No flush is triggered. The property reaches the
+StreamingNode with the `AlterCollection` message, which replaces the
+properties of its schema snapshot, and is kept in the recovery metadata of
+the channel; DataCoord reads the properties of the collection for every
+plan.
 
 #### Where the cap is applied
 
@@ -556,9 +628,10 @@ The fragment tier of the two-tier planner uses `expectedSize / 4` as
 `max_size`; its `max_segment_rows` shrinks by the same ratio to
 `maxRows / 4`, and the equality above still holds.
 
-After `maxRows` is raised online, segments that were full under the old cap
-are merged once more, the same as when an operator raises `maxSize`.
-Lowering it does not split existing segments.
+After `maxRows` is raised, in the configuration or by the collection
+property, segments that were full under the old cap are merged once more,
+the same as when an operator raises `maxSize`. Lowering it does not split
+existing segments; they are cut when a compaction rewrites them.
 
 ## 5. Compatibility
 
@@ -573,12 +646,18 @@ Lowering it does not split existing segments.
 - Clients are described in Section 2 ("Clients"). Restore or
   CDC (Change Data Capture) into an old cluster fails at `CreateCollection`
   with the old error.
-- Collections with a vector field are not affected by the row cap:
-  `dataCoord.segment.maxRows` applies to collections without a vector field
-  only, and their segment size target, seal, compaction and import are the
-  same as today. No existing collection changes its segmentation unless its
-  last vector field is dropped, after which it is sealed and compacted under
-  the row cap (Section 2, "Conversion").
+- The row cap applies to every collection. A collection whose rows are
+  wider than 268 B, which is a vector collection of the common dimensions,
+  reaches the byte limit first and is sealed, compacted and imported as
+  today. An existing collection of narrower rows, with or without a vector
+  field (Section 4.2 lists the vector types), changes as follows after the
+  upgrade: new segments are sealed and merged at `maxRows` rows; existing
+  segments above `maxRows` are not rewritten, and are cut only when a
+  compaction rewrites them for another reason. To keep the behaviour of
+  today for one collection, set `collection.segment.maxRows` to 0; for the
+  cluster, set `dataCoord.segment.maxRows` to 0.
+- `collection.segment.maxRows` is a new collection property. A component
+  that does not know it ignores it.
 - The row cap during a rolling upgrade: `max_segment_rows` on a mix
   compaction plan is a new use, and an old DataNode ignores it and cuts on
   bytes only, so an output may exceed `maxRows`; the new planner treats such
@@ -597,8 +676,12 @@ Lowering it does not split existing segments.
   - every touchpoint of Appendix A, with and without a vector field;
   - the two readiness predicates with no index, scalar indexes only, and a
     vector index building or finished;
-  - the row cap applies to schemas without a vector field only, still
-    applies with a JSON field, and is disabled by `maxRows=0`;
+  - the row cap is the configured value whatever the schema, is overridden
+    by the collection property in both directions, and is disabled by 0 in
+    either; a property that does not parse is rejected at create and alter;
+  - an `AlterCollection` that changes only the properties updates the row
+    cap of the StreamingNode without a flush;
+  - no plan is generated to split segments above `maxRows` rows;
   - both mix planners produce no plan for segments holding `maxRows` rows
     and pack smaller segments up to at most `maxRows` rows;
   - the compaction writer cuts at `max_segment_rows`; the row limit of the
@@ -624,7 +707,7 @@ Lowering it does not split existing segments.
     outputs stay at or below `maxRows` rows and the IDs of full segments do
     not change over the following automatic trigger cycles; an import of
     12 M narrow rows produces at least 3 segments; a low-dimensional vector
-    collection is not capped;
+    collection is capped as well;
   - every role restarted with the switch off and on again (Appendix B.4).
 
 ### 6.1 Results
@@ -651,7 +734,7 @@ Row cap script at the default `maxRows`:
 | 12 M rows imported from one parquet file | 3 segments of 5.60 M, 3.61 M, 2.80 M rows |
 | Manual compaction of the imported collection | 4,000,000, 3.61 M, 2.80 M, 1.60 M rows: the segment above `maxRows` is cut at `maxRows` |
 | 200 s of automatic trigger cycles | no segment changes |
-| Vector collection, dim 8, 6 M rows | 1 segment of 6 M rows: not capped |
+| Vector collection, dim 8, 6 M rows | at `2cc7740f6e`: 1 segment of 6 M rows, not capped. With the cap applied to every collection (6.3): 3.80 M and 2.20 M rows |
 
 Upstream CI has not run its build, unit test and e2e pipelines on #54604
 yet; they do not start while the PR is a draft.
@@ -684,12 +767,16 @@ The local scripts cover, per group:
 | Struct array | 4 | a struct field with a vector sub-field added and dropped, only the vector sub-field dropped, and the two shapes at creation |
 | Struct array vector as the first vector | 3, each also on a control with a `FLOAT_VECTOR` field; run on a default instance and on one with StorageV3 | a struct field with a vector sub-field added to a loaded collection with no index at all; a vector sub-field added to a struct field that had only scalar sub-fields (element-level index and search over REST), then dropped; a struct vector added to a collection loaded with only a scalar index. Old rows read the struct, or its new sub-field, as null; search before the index is loaded returns "not loaded"; load without an index is rejected; after index and load, search returns only the rows that have the vector. Same result on both collections |
 | Index build | 1 | the vector index finishes on segments written before the field existed |
-| Row cap | 2 | both directions, numbers in Section 2 |
+| Row cap | 2 | both directions; rerun after the cap stopped depending on the schema (6.3), numbers in Section 2 |
 | Switch off | 1 | create and every form of dropping the last vector are rejected; dropping one of two vector fields is allowed |
 | Function field | 2 | dropping a BM25 function field that holds the only vector passes; adding one is covered by the backfill cases below |
 | Import after a conversion | 2 | parquet import into a collection that gained a vector field (file with and without the vector column) and into one that lost its last vector field (file without and with the dropped column); each result equals that of a control collection created with the final schema; rows, null values and search results are checked |
 | Clustering compaction | 2 | 1 M rows, the schema change sent 1.5 s after the trigger. The log shows the change inside the execution of the plan in both directions (drop: plan 09:29:20.1 to 24.6, change at 21.4; add: plan 09:30:20.1 to 22.9, change at 21.2). The plan completes, the row count is unchanged, and a second clustering compaction after the change completes |
 | Two replicas (cluster only) | 2 | both conversions on a collection loaded with two replicas on two QueryNodes: repeated queries and searches return the same result or the same error, and the collection loads with two replicas again |
+
+The row cap cases of this run recorded that adding a vector field lifted the
+cap and the capped segments were merged on bytes. That was read as expected
+at the time and is the gap closed in 6.3.
 
 The struct array cases found one gap of the collection without a vector
 field itself, not of the conversion: RESTful search and hybrid search
@@ -731,6 +818,40 @@ cluster) set the time: 157.7 s for the collection without a vector field,
 whose second segment waited for the next window, against 17.5 s for the
 control, whose segments had been upgraded in the earlier window.
 
+### 6.3 Row cap for every collection, and the collection property
+
+Run on the #54604 branch with the row cap change, local x86 standalone,
+2026-11-11.
+
+| Test | Result |
+|---|---|
+| Go unit tests of DataCoord (all packages), the StreamingNode WAL packages, `internal/proxy/ddl`, `internal/rootcoord`, `pkg/common`, `pkg/util/paramtable`, `pkg/streaming/util/message` | 74 packages pass. `TestQueryStreamRetriesTransientReads` of `walsummary`, a package the change does not touch, timed out once in the full run and passes 5 times out of 5 alone |
+| Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (5 cases, one new) and `test_milvus_client_collection_without_vector.py`, default configuration | 9 passed |
+| Row cap script, default `maxRows` 4 M | 8 of 8 checks pass |
+| Row cap script, `maxRows` 400 k, row counts divided by 10 | 7 of 8; the import check fails because of the reduced scale, as before (Appendix B.6) |
+| Conversion row cap script, `maxRows` 400 k | 11 of 11 checks pass, numbers in Section 2 |
+| Collection property script, `maxRows` 400 k | 21 of 21 checks pass |
+
+The new repository case
+(`test_segment_row_cap_survives_vector_field_conversion`) sets
+`collection.segment.maxRows` to 20,000 on a collection without a vector
+field, so it does not depend on the configuration of the instance: no
+segment holds more than the cap plus one insert batch before a vector field
+is added, after it, and after it is dropped again; an invalid value of the
+property is rejected and the property can be removed.
+
+Collection property script (`dataCoord.segment.maxRows` is 400 k):
+
+| Step | Segment rows |
+|---|---|
+| `BINARY_VECTOR` dim 512, 1 M rows, no property | 400 k, 376 k, 224 k: sealed at the configured cap; unchanged by a manual compaction |
+| property set to 0, 1 M more rows | the new rows are sealed in one segment of 1 M; a manual compaction leaves one segment of 2 M |
+| no vector field, property 200 k at create, 1 M rows | five segments of 200 k |
+| property raised to 600 k, 1.2 M more rows | new segments of 600 k; after a manual compaction 600 k, 600 k, 600 k, 400 k |
+| property lowered to 300 k | the segments above it are unchanged for 30 minutes; a manual compaction then gives seven segments of 300 k and one of 100 k |
+| property removed | a manual compaction packs up to the configured 400 k |
+| `-1`, `many`, `1.5` at create and at alter | rejected: 1100 `collection.segment.maxRows must be a non-negative integer` |
+
 ## 7. Alternatives
 
 - **An explicit table type or proto flag.** Every client and tool would have
@@ -771,12 +892,19 @@ control, whose segments had been upgraded in the earlier window.
   measuring a segment against itself is stable, and that is the same as
   comparing its row count. Import can convert this way because one import
   makes one static allocation (Section 4.2).
-- **Apply the row cap to all collections.** A low-dimensional vector
-  collection (`FLOAT_VECTOR` of dim 8, for example) also exceeds `maxRows`
-  rows at 1 GB. This document caps collections without a vector field only,
-  so that vector collections have no behaviour change; lifting the
-  restriction is removing the one `HasVectorField` condition, and is listed
-  in Section 8.
+- **Apply the row cap to collections without a vector field only** (an
+  earlier revision of this document and of #54604), so that no vector
+  collection changes behaviour. Dropped: the condition is read from the
+  schema, and adding a vector field changes the schema but not the rows, so
+  the cap was lifted from a collection that was still narrow and its capped
+  segments were merged back (Section 2, "Conversion"). Two narrower
+  conditions were considered and dropped as well: "no vector field that is
+  not nullable" keeps the cap after a conversion but leaves a rule that
+  depends on how a field is declared; a marker on collections that once had
+  no vector field adds state for one case. The rule without a condition is
+  the one that needs no exception; its cost is a behaviour change for vector
+  collections of narrow rows, which was measured (Section 4.2) and can be
+  turned off per collection.
 - **No row cap.** Index build and load replay are serial per segment and
   grow with the row count (Section 4.1); the cap can be turned off with
   `maxRows=0`. The cap stays.
@@ -800,8 +928,10 @@ control, whose segments had been upgraded in the earlier window.
 - Whether to change the default of `dataCoord.dataview.forceAllIndexReady`
   to true so that handoff of vector collections waits for scalar indexes too
   (Section 7).
-- Whether to extend the row cap to collections with a vector field
-  (Section 7).
+- The row cap on vector collections of narrow rows: recall at a fixed
+  search parameter was not compared between the two segment layouts, sparse
+  vectors were not measured, and each layout was run once on one machine
+  (Appendix B.7).
 - On import the DataNode writes each read batch into one of the allocated
   segments at random (`PickSegment`); with few batches the rows per segment
   differ by several times. Choosing the segment with the least data written
@@ -860,7 +990,8 @@ from `3df0cbcdd68`.
 | `datacoord/util.go:77` `FilterInIndexedSegments` (now in `datacoord/index/filter.go`) | with no vector the result depends on unrelated details (Section 3.2) | split into `handoffReady` / `compactionInputReady`; the handoff target fields are shared with the staging `PrepareReadiness` through `HandoffIndexTargetFields` |
 | `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` (now in `datacoord/index/meta.go`) | true at 0 dense fields, so a scalar-only collection gets the 2 GB DiskANN target | returns false when there is no vector field at all; a sparse-only collection keeps today's result |
 | `datanode/importv2` Parquet / NumPy / CSV / JSON readers | a file that matches no schema column makes the task loop forever: the reader produces no row and never reaches EOF; a vector field used to prevent this | rejected when the reader is constructed |
-| StreamingNode `segment_limitation_policy.go`; DataCoord `compaction/trigger.go`, `trigger_v2.go`, `compaction/policy/helpers.go`, `clustering.go`, `bulkimport`; DataNode `compactor/segment_writer.go` | seal, full check, split and allocation on bytes only | collections without a vector field get the additional `maxRows` row cap (Section 4.2); `GetExpectedSegmentSize` is unchanged |
+| StreamingNode `segment_limitation_policy.go`; DataCoord `compaction/trigger.go`, `trigger_v2.go`, `compaction/policy/helpers.go`, `clustering.go`, `bulkimport`; DataNode `compactor/segment_writer.go` | seal, full check, split and allocation on bytes only | every collection gets the additional `maxRows` row cap, from `dataCoord.segment.maxRows` or the collection property `collection.segment.maxRows` (Section 4.2); `GetExpectedSegmentSize` is unchanged |
+| `pkg/common` `CollectionSegmentMaxRowsKey`; Proxy `ddl/task.go` and RootCoord create and alter-properties entries | no such property | the property is validated as a non-negative integer |
 | Search entries, REST handlers | four different errors | one error |
 | pymilvus `orm/schema.py` `check_schema` (legacy ORM) | client-side reject | not changed; `MilvusClient` has no such check |
 | milvus-sdk-node `milvus/utils/Validate.ts` `checkCollectionFieldsWithOptions`; `milvus/utils/Search.ts` `buildSearchRequest` | client-side reject of create and of search | create check removed; a search on a collection without a vector field is sent to the server; milvus-io/milvus-sdk-node#626 |
@@ -1008,7 +1139,7 @@ Script `e2e_rowcap.py`.
 | No vector field, `int64 + int32`, 12 M rows imported from one parquet file | 3 segments allocated. Two runs: 7.80 M, 2.80 M, 1.40 M rows; 4.20 M, 4.20 M, 3.61 M rows |
 | One manual compaction of the collection of the second import run | 5 segments: 4,000,000, 4,000,000, 3.61 M, 197 k, 197 k rows; a segment above `maxRows` is cut at `maxRows` and the remainder becomes a small segment |
 | 200 s of automatic trigger cycles afterwards | the IDs of the three full segments do not change; they are not merged again |
-| Control: `int64 + int32 + FLOAT_VECTOR(dim 8)`, 6 M rows inserted, then a manual compaction | 1 segment of 6 M rows; a vector collection is not capped |
+| Control: `int64 + int32 + FLOAT_VECTOR(dim 8)`, 6 M rows inserted, then a manual compaction | 1 segment of 6 M rows; a vector collection was not capped at this revision. With the cap applied to every collection: 3.80 M and 2.20 M rows (Appendix B.7) |
 
 The collection of the first row has a dynamic field (JSON). Under the
 schema-estimate conversion its estimated row size exceeds 268 B, the cap
@@ -1030,7 +1161,7 @@ set to 400 k and every row count divided by 10.
 | Import from one parquet file (12 M / 1.2 M rows) | 3 segments allocated; 5.60 M, 3.61 M, 2.80 M rows | 3 segments allocated; all 1.2 M rows in one of them, the two empty ones are dropped |
 | One manual compaction of the imported collection | 4,000,000, 3.61 M, 2.80 M, 1.60 M rows | 400,000, 400,000, 400,000 rows |
 | 200 s of automatic trigger cycles afterwards | unchanged | unchanged |
-| Control: vector collection, dim 8 (6 M / 600 k rows) | 1 segment of 6 M rows | 1 segment of 600 k rows |
+| Control: vector collection, dim 8 (6 M / 600 k rows), at this revision | 1 segment of 6 M rows | 1 segment of 600 k rows |
 
 In the 400 k import the file (1.2 M rows, 14.4 MB in memory, 12 B per row)
 is smaller than one read batch of the import, so the whole file is one
@@ -1039,6 +1170,60 @@ segments. The byte target after the conversion is 400 k × 12 B = 4.8 MB and
 14.4 MB / 4.8 MB gives the three segments seen in the DataCoord log. The
 segment count is right and the rows per segment are not, as Section 4.2
 states for the import path; the following compaction cuts at `maxRows`.
+
+### B.7 The row cap on narrow rows, with and without a vector field
+
+Local x86 standalone at #54604 `3f82d4f328`, 2026-11-11, 24 M rows per run,
+one run per configuration; other instances were running on the machine, so
+differences below 10 % are within the noise. Index builds ran one segment at
+a time on this instance. Scripts `seg_measure.py`, `run_all.sh`,
+`run_more.sh`.
+
+**No vector field**, `int64` primary key, a random `int64` and an `int32`
+of 100 distinct values (about 28 B per row). The seal proportion was set to
+1 so that a growing segment reaches `maxRows`; with the default 0.12 a
+growing segment of these rows is sealed on bytes at about 4.2 M rows
+(123 MB), and two such segments cannot be merged under a cap of 6 M.
+
+| `maxRows` | Segment rows | `INVERTED` on the random `int64` | `INVERTED` on the `int32` | Load with indexes |
+|---|---|---|---|---|
+| 4 M | six of 3.75–3.90 M, one of 1.0 M | 10.6 s | 5.5 s | 1.25 s |
+| 6 M | four of 5.75–6.00 M, one of 0.6 M | 13.6 s | 5.1 s | 1.24 s |
+| 8 M | three of 7.25–7.75 M, one of 1.5 M | 16.1 s | 5.5 s | 1.44 s |
+| 12 M | 11.80 M, 10.95 M, 1.25 M | 21.7 s | 6.1 s | 1.64 s |
+
+Query latency (count by the `int32`, lookup of 20 primary keys) is 1.6 to
+2.1 ms at p50 in every row. Reloading after 1 % of the rows were deleted
+takes the same time as the load with indexes. The build time of the index
+on the high-cardinality field grows steadily with the rows per segment and
+has no step; the default stays at 4 M.
+
+**Vector collections of narrow rows.** Layout X is the default
+configuration, sealed and compacted on bytes. Layout Y has `maxSize` lowered
+(353 and 355 MB) so that a full segment holds about 4 M rows, which is the
+layout a row cap of 4 M gives; the row cap itself did not apply to vector
+collections at this revision.
+
+| | X | Y |
+|---|---|---|
+| `BINARY_VECTOR` dim 512, segment rows | 11.58 M, 11.12 M, 1.30 M | six of 3.59–4.04 M, one of 0.94 M |
+| `BIN_IVF_FLAT` (nlist 1024, nprobe 16): build | 96.5 s (32.1, 28.6, 30.9 s per segment) | 205.1 s (27.8–29.3 s per segment) |
+| single thread, nq 1, top 10: p50 / p99 | 2.87 / 8.07 ms | 2.62 / 4.12 ms |
+| 16 threads | 927.5 QPS | 910.2 QPS |
+| `BIN_FLAT`: single thread, nq 1, top 10: p50 / p99 | 83.25 / 157.82 ms | 43.02 / 89.84 ms |
+| 16 threads | 27.7 QPS | 29.7 QPS |
+| `FLOAT_VECTOR` dim 16, segment rows | 11.51 M, 11.11 M, 1.38 M | six of 3.62–4.01 M, one of 0.96 M |
+| `HNSW` (M 16, efConstruction 100, ef 64): build | 493.3 s (229.7 and 236.7 s for the two large segments) | 401.6 s (59–69 s per segment of about 4 M) |
+| single thread, nq 1, top 10: p50 / p99 | 2.36 / 3.78 ms | 2.61 / 3.88 ms |
+| 16 threads | 1,663.3 QPS | 1,541.9 QPS |
+| `IVF_FLAT` (nlist 1024, nprobe 16): build | 9.7 s | 9.2 s |
+| single thread, nq 1, top 10: p50 / p99 | 3.28 / 8.66 ms | 2.87 / 4.21 ms |
+| 16 threads | 885.9 QPS | 868.6 QPS |
+
+Recall was not measured. With the row cap applied to every collection, the
+vector collection of dim 8 of Appendix B.6 (6 M rows) is sealed into
+segments of 3.80 M and 2.20 M rows, and 1 M rows of `BINARY_VECTOR` dim 512
+under a cap of 400 k into 400 k, 376 k and 224 k (Section 6.3).
 
 ## Appendix C. Verification record
 
@@ -1057,8 +1242,8 @@ standalone, unless stated otherwise.
   among them DataCoord `compaction` (with `policy`, `task`, `view`,
   `targets`), `bulkimport`, `meta`, `analyze` and the top-level package,
   DataNode `compactor`, StreamingNode `shard` and `internal/proxy`. New
-  cases cover: the row cap applies to schemas without a vector field only
-  and is not affected by a JSON field; both mix planners produce no plan for
+  cases cover (at this revision): the row cap applies to schemas without a
+  vector field only and is not affected by a JSON field; both mix planners produce no plan for
   segments holding `maxRows` rows and pack smaller ones; the writer cuts on
   rows and splits the record batch that crosses the limit; the output count
   estimate of the mix compactor counts rows; the row limit of the
