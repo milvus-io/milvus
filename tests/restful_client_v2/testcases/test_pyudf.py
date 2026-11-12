@@ -636,13 +636,17 @@ def create_udf(context):
                 payload["filter"] = "id >= 2"
                 expected_ids = [2, 3]
             elif flow == "group":
+                response = self.vector_client.vector_insert(
+                    {"collectionName": self.name, "data": [{"id": 4, "ts": 10, "vector": [0.001, 0.0]}]}
+                )
+                assert response["code"] == 0 and response["data"]["insertCount"] == 1, response
                 payload["groupingField"] = "ts"
             elif flow == "range_offset":
                 payload["data"] = [[0.009, 0.0]]
-                payload["searchParams"]["params"] = {"radius": 0.00015, "range_filter": 0.0}
+                payload["searchParams"]["params"] = {"radius": 0.0001, "range_filter": 0.0}
                 payload["offset"] = 1
                 payload["limit"] = 2
-                expected_ids = [3, 1]
+                expected_ids = [1]
             response = self._search_once(payload)
             if flow == "final":
                 assert response["code"] == 2400 and "$score" in response["message"], response
@@ -652,6 +656,9 @@ def create_udf(context):
                 assert [hit["id"] for hit in response["data"]] == expected_ids
                 assert [hit["distance"] for hit in response["data"]] == [pk * 20 for pk in expected_ids]
                 assert [hit["ts"] for hit in response["data"]] == [pk * 10 for pk in expected_ids]
+            if flow == "group":
+                response = self.vector_client.vector_delete({"collectionName": self.name, "filter": "id == 4"})
+                assert response["code"] == 0, response
             self._recovery(control, resource)
 
     @pytest.mark.tags(CaseLabel.L2)

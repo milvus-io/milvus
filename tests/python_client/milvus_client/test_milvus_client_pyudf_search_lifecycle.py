@@ -87,9 +87,19 @@ class UDF:
                 valid = value is None if invalid == "null" else math.isnan(value) if invalid == "nan" else value == -float("inf") if invalid == "negative_inf" else value == float("inf")
                 if not valid:
                     raise AssertionError("invalid intermediate value was lost")
+        if mode == "verify_fusion":
+            # Match the entire query batch against independently computed fusion inputs.
+            actual = {str(pk): score for pk, score in zip(columns[1].to_pylist(), columns[0].to_pylist())}
+            assert len(actual) == len(columns[0])
+            assert any(
+                actual.keys() == expected.keys() and all(
+                    math.isclose(score, expected[pk], rel_tol=1e-5, abs_tol=1e-6)
+                    for pk, score in actual.items()
+                ) for expected in params["expected_batches"]
+            ), ("fused scores delivered to UDF differ", actual, params["expected_batches"])
         if params.get("mode") == "count":
             values = [call] * len(columns[0])
-        elif params.get("mode") == "identity":
+        elif params.get("mode") in ("identity", "verify_fusion"):
             values = columns[0].to_pylist()
         elif params.get("mode") == "fusion":
             values = [100 * score.as_py() + 2 * ts.as_py() for score, ts in zip(columns[0], columns[1])]
@@ -580,18 +590,20 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 options["filter"] = "id >= 2"
                 expected = [2, 3]
             elif flow == "group":
+                # This near duplicate must be removed by grouping before reranking.
+                client.insert(name, [{"id": 4, "ts": 10, "vector": [0.001, 0.0]}])
                 options["group_by_field"] = "ts"
             elif flow == "range_offset":
                 options.update(
                     data=[[0.009, 0.0]],
                     search_params={
                         "metric_type": "L2",
-                        "params": {"radius": 0.00015, "range_filter": 0.0},
+                        "params": {"radius": 0.0001, "range_filter": 0.0},
                     },
                     offset=1,
                     limit=2,
                 )
-                expected = [3, 1]
+                expected = [1]
             if flow == "final":
                 self._assert_pyudf_error(client, name, chain, "$score", code=2400)
             else:
@@ -600,6 +612,8 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 assert [hit["distance"] for hit in result] == [pk * 20 for pk in expected]
                 assert [self._hit_field(hit, "ts") for hit in result] == [pk * 10 for pk in expected]
                 record_property("nonfinite_combination", json.dumps({"invalid": invalid, "flow": flow, "hits": result}))
+            if flow == "group":
+                client.delete(name, ids=[4])
             self._assert_pyudf_recovery(client, name, resource)
             assert resource in {item.name for item in client.list_file_resources()}
 
@@ -1613,6 +1627,8 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                         name, data=texts, anns_field="sparse", search_params={"metric_type": "BM25"}, limit=3
                     )
                     expected = []
+                    fused_batches = []
+                    assert len(dense_hits) == len(sparse_hits) == nq
                     for query_id, (first, second) in enumerate(zip(dense_hits, sparse_hits, strict=True)):
                         # ANN recall is measured independently from fusion and UDF
                         # correctness; use the actual branch candidates as input.
@@ -1633,6 +1649,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                                     else weight * (1 - normalized if dense_branch else normalized)
                                 )
                                 scores[hit["id"]] = scores.get(hit["id"], 0) + contribution
+                        fused_batches.append({str(pk): score for pk, score in scores.items()})
                         expected.append(
                             {pk: 100 * score + pk * 20 if rewrite else score for pk, score in scores.items()}
                         )
@@ -1642,7 +1659,11 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                     )
                     chain.map(
                         "$score" if rewrite else "read_fused",
-                        self._expr(resource, "$score", "ts", mode="fusion" if rewrite else "identity"),
+                        self._expr(resource, "$score", "ts", mode="fusion")
+                        if rewrite
+                        else self._expr(
+                            resource, "$score", "$id", mode="verify_fusion", expected_batches=fused_batches
+                        ),
                     )
                     chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
                     requests = [
