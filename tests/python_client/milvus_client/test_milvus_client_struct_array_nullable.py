@@ -32,6 +32,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.struct_array_data import vector_score_tolerance
 from minio import Minio
 from minio.error import S3Error
 from pymilvus import AnnSearchRequest, DataType, WeightedRanker
@@ -3076,6 +3077,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         probes = [(row, offset) for row in non_empty_rows for offset in range(len(row[STRUCT_FIELD]))]
+        score_tolerance = vector_score_tolerance(index_info, abs_tol=epsilon, rel_tol=0)
         query_vectors = [row[STRUCT_FIELD][offset][VECTOR_SUBFIELD] for row, offset in probes]
         if metric_type == "MAX_SIM_COSINE":
             query_vectors = [EmbeddingList().add(vector) for vector in query_vectors]
@@ -3098,7 +3100,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 assert len(hits) == 1, phase
                 hit = hits[0]
                 assert hit[PK_FIELD] == expected[PK_FIELD], phase
-                assert abs(hit["distance"] - 1.0) < epsilon, phase
+                if metric_type == "COSINE":
+                    assert hit["distance"] == pytest.approx(1.0, **score_tolerance), (phase, score_tolerance)
+                else:
+                    assert abs(hit["distance"] - 1.0) < epsilon, phase
                 if metric_type == "COSINE":
                     assert hit["offset"] == offset, phase
                 entity = search_entity(hit)

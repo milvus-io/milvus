@@ -41,6 +41,7 @@ from common.struct_array_data import (
     normalized_vector,
     nullable_children,
     vector_score,
+    vector_score_tolerance,
 )
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
 from pymilvus.client.embedding_list import EmbeddingList
@@ -545,7 +546,7 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         """
         target: preserve nullable coordinates and typed scores across index and mutation paths
         method: independent vector model, indexed population, delete/replacement and reload
-        expected: complete values, legal offsets, exact scores and tie-aware top-k recall
+        expected: complete values, legal offsets, bounded ANN score error and tie-aware top-k recall
         """
         client = self._client()
         score_deviations = [] if (dtype, kind, metric) in DISKANN_SCORE_PROFILES else None
@@ -775,6 +776,8 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
         return name
 
     def assert_precision_rows_and_search(self, client, name, model, kind, metric, index_type):
+        index, _ = self.describe_index(client, name, "clips[emb]")
+        tolerance = vector_score_tolerance(index, kind, abs_tol=3e-3, rel_tol=3e-3)
         rows, _ = self.query(
             client,
             name,
@@ -831,7 +834,13 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
                 scores = []
                 for hit, key in zip(hits, keys):
                     assert key in truth
-                    assert hit["distance"] == pytest.approx(truth[key], abs=3e-3, rel=3e-3)
+                    assert hit["distance"] == pytest.approx(truth[key], **tolerance), {
+                        "coordinate": key,
+                        "metric": metric,
+                        "tolerance": tolerance,
+                        "actual": hit["distance"],
+                        "expected": truth[key],
+                    }
                     assert hit["entity"]["revision"] == model[key[0]]["revision"]
                     scores.append(hit["distance"])
                 assert scores == sorted(scores, reverse=not ascending)
