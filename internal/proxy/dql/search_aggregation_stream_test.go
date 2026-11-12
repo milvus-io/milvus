@@ -184,7 +184,7 @@ func TestSearchAggregationStreamingMatchesBatch(t *testing.T) {
 					require.Equal(t, 1, legacy.searchCalled)
 					require.Empty(t, task.resultBuf.Collect(), "streamed candidates must not enter Batch reduction")
 					candidates, err := reduceResults(ctx, batchShards, task.GetNq(), task.GetTopk(), 0,
-						metric, schemapb.DataType_Int64, task.queryInfos[0], false, true, 1, nil)
+						metric, schemapb.DataType_Int64, task.queryInfos[0], false, true, 1, nil, false)
 					require.NoError(t, err)
 					if !tc.allEmpty {
 						require.True(t, proto.Equal(candidates.GetResults(), task.reducedResult.GetResults()),
