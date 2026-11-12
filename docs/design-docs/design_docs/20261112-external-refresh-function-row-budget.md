@@ -55,7 +55,8 @@ metadata pass is added and file-count planning is retained.
 
 ## Failure and cancellation
 
-Counts are estimates for a performance optimization. An estimation failure
+Counts are estimates for a performance optimization. An estimation failure,
+including a reader returning an unresolved negative count without an error,
 while the planning context is live falls back to `min(filesPerTask,64)` before
 ownership closure. This also avoids treating an unavailable count as zero.
 DataNode remains responsible for normal source validation and error handling;
@@ -65,11 +66,14 @@ That distinction matters: the native FFI preserves some extended codes but
 still has generic Arrow/exception fallbacks. The coordinator must not introduce
 a new permanent-error decision based only on such a category.
 
-Cancellation/expiry of the planning context returns without publishing a task
-plan. Queued metadata work checks the context before entering native code;
-already-running native reads drain before the resolver returns. The change
-does not make synchronous native I/O forcibly cancellable. Late plan publication
-is additionally rejected by the existing terminal-job guard.
+The planner checks cancellation/expiry before row-count resolution and again
+immediately before starting task-plan persistence. Queued metadata work checks
+the context before entering native code; already-running native reads drain
+before the resolver returns. Synchronous native I/O is not forcibly cancellable.
+The pre-write check does not cancel or roll back a catalog update already in
+flight: that update retains the existing catalog context, timeout and job
+publication-marker semantics. The existing terminal-job guard orders task-plan
+publication against job termination under the job lock.
 
 ## Documentation reconciliation
 
@@ -97,3 +101,29 @@ throughput, memory, native metadata behavior and end-to-end refresh completion
 require native dependencies and a running cluster. Per-segment progress,
 sub-file distributed tasks, resource-aware placement and row weighting for
 other formats are follow-ups rather than benefits claimed by this change.
+
+## Reproducing the SDK task-plan check
+
+Use an isolated instance with `dataCoord.externalCollectionFilesPerTask=10000`.
+Configure `dataCoord.externalCollection.functionRowsPerTask` on that instance
+before each run; the SDK test does not change server configuration.
+
+| Parquet files (3000 rows each) | Function row budget | Expected persisted tasks |
+| --- | --- | --- |
+| 10 | 0 | 1 |
+| 10 | 6000 | 5 |
+| 64 | 3000 | 64 |
+
+Run `TestExternalTableBM25Function` in `tests/go_client` with the standard
+`dynamic,test` tags and `-gcflags="all=-N -l"`. Set
+`MILVUS_TEST_EXPECT_REFRESH_TASK_COUNT` to the expected task count,
+`MILVUS_TEST_EXTERNAL_BM25_FILES` to the file count, and explicitly provide
+`MILVUS_TEST_ETCD_ENDPOINTS` and `MILVUS_TEST_ETCD_META_ROOT` for that instance.
+The metadata root includes the meta subpath, for example `my-test/meta`.
+
+The optional assertion reads the submitted job's exact metadata key and checks
+its collection ID and task count. The existing test also checks refresh
+completion, row count, index creation, loading and BM25 search results. Without
+the expectation variable, ordinary SDK tests require no etcd connection.
+The 64-task case exercises a plan larger than the default 64-op metadata
+transaction limit; the job publication marker must follow its task records.

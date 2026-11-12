@@ -489,7 +489,8 @@ func TestExternalTableBM25Function(t *testing.T) {
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 	// Step 1: Upload text parquet to MinIO
-	const numFiles, rowsPerFile = 10, int64(3000)
+	numFiles := externalBM25FileCount(t)
+	const rowsPerFile = int64(3000)
 	totalRows := int64(numFiles) * rowsPerFile
 	for i := 0; i < numFiles; i++ {
 		data, err := generateTextParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
@@ -558,6 +559,7 @@ func TestExternalTableBM25Function(t *testing.T) {
 		}
 	}
 refreshDone:
+	assertExternalRefreshTaskCount(t, ctx, refreshResult.JobID, coll.ID)
 
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
 	common.CheckErr(t, err, true)

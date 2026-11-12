@@ -3262,6 +3262,7 @@ func TestCreateTasksForJobFunctionRowBudget(t *testing.T) {
 		{"metadata_throttled", "16000000", true, merr.Wrap(packed.ErrLoonTransient, "throttled"), 16},
 		{"metadata_denied", "16000000", true, merr.Wrap(packed.ErrLoonPermanent, "access denied"), 16},
 		{"metadata_corrupt", "16000000", true, merr.WrapErrDataIntegrityMsg("corrupt footer"), 16},
+		{"metadata_negative_count", "16000000", true, nil, 16},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(param.Key, tc.budget))
@@ -3287,7 +3288,11 @@ func TestCreateTasksForJobFunctionRowBudget(t *testing.T) {
 			var reads atomic.Int32
 			fileInfo := mockey.Mock(packed.GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*packed.FileInfo, error) {
 				reads.Add(1)
-				return &packed.FileInfo{FilePath: path, NumRows: 1000000}, tc.readErr
+				rows := int64(1000000)
+				if tc.name == "metadata_negative_count" {
+					rows = -1
+				}
+				return &packed.FileInfo{FilePath: path, NumRows: rows}, tc.readErr
 			}).Build()
 			defer fileInfo.UnPatch()
 			scheduler := newStubScheduler()
