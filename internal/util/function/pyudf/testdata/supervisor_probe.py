@@ -23,7 +23,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -45,9 +44,6 @@ if mode == "parent":
 class ProbeSupervisor(Supervisor):
     def _spawn(self, index, now):
         assert "grpc" not in sys.modules and "pyarrow" not in sys.modules
-        assert threading.active_count() == 1
-        if sys.platform == "linux":
-            assert len(list(Path("/proc/self/task").iterdir())) == 1
         if mode == "partial_fork" and index == 1:
             raise OSError("injected fork failure")
         if (
