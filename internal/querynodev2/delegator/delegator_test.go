@@ -2681,7 +2681,8 @@ func TestUpdateSchemaUpdatesDelegatorRuntimeAfterCollectionAdvanced(t *testing.T
 	require.NoError(t, sd.UpdateSchema(context.Background(), newSchema, 100))
 	require.Equal(t, uint64(1), sd.collectionVersion.Load())
 	require.Equal(t, uint64(100), sd.schemaBarrierTs)
-	require.Error(t, sd.addDistributionIfSchemaBarrierOK(99))
+	require.ErrorIs(t, sd.addDistributionIfSchemaConsistent(oldSchema), merr.ErrServiceInternal)
+	require.NoError(t, sd.addDistributionIfSchemaConsistent(newSchema))
 	require.NotNil(t, sd.getIDFOracle())
 	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, key, 102, func(function.FunctionRunner) error {
 		return nil

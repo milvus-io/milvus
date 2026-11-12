@@ -185,9 +185,10 @@ type shardDelegator struct {
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schemaBarrierTs fences load results started before the latest schema update.
+	// schemaChangeMutex serializes schema updates with load publication.
 	schemaChangeMutex sync.RWMutex
-	schemaBarrierTs   uint64
+	// schemaBarrierTs orders same-version snapshots, including legacy TTL DDLs.
+	schemaBarrierTs uint64
 	// collectionVersion is the collection schema version applied to this delegator's
 	// channel-local FunctionRunner and IDF runtime.
 	collectionVersion atomic.Uint64
@@ -1394,9 +1395,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
-		// same-version schema payloads such as collection properties. Logical
-		// schema freshness is still guarded by schema.version in collectionManager.
+		// Retain timestamp ordering for legacy TTL updates with the same schema
+		// version. Load publication checks schema version and TTL state instead.
 		SchemaBarrierTs: schemaBarrierTs,
 	},
 		sealed,

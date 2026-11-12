@@ -764,8 +764,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
-		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker, entries)
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -796,11 +795,35 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
+func (sd *shardDelegator) addDistributionIfSchemaConsistent(schema *schemapb.CollectionSchema, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
-		return merr.WrapErrServiceInternal("schema barrier changed")
+	currentSchema, currentVersion, _ := sd.collection.SchemaSnapshot()
+	if schema == nil {
+		return merr.WrapErrServiceNotReadyMsg("load schema is missing (current schema version %d)", currentVersion)
+	}
+
+	// Load publication requires matching schema versions and TTL-field state.
+	// Load-affecting schema changes, including new TTL-field DDLs, must advance the
+	// version when preparing the broadcast payload. Legacy changes that keep
+	// the version must have their load-affecting state compared here.
+	if uint64(schema.GetVersion()) < currentVersion {
+		// Retrying the same RPC cannot catch up with a newer schema. Let QueryCoord
+		// fail this task and generate a new load request from refreshed metadata.
+		return merr.WrapErrServiceInternalMsg("load schema version %d is behind current schema version %d", schema.GetVersion(), currentVersion)
+	}
+	if uint64(schema.GetVersion()) != currentVersion {
+		return merr.WrapErrServiceNotReadyMsg("load schema version %d does not match current schema version %d", schema.GetVersion(), currentVersion)
+	}
+
+	// Legacy TTL DDLs can change runtime schema without advancing its version.
+	// Compare their state, not append timestamps: replaying the same DDL can
+	// advance the consumer's timestamp beyond the first ACK stored in metadata.
+	ttlField, hasTTLField := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionTTLFieldKey, schema.GetProperties())
+	currentTTLField, currentHasTTLField := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionTTLFieldKey, currentSchema.GetProperties())
+	if hasTTLField != currentHasTTLField || ttlField != currentTTLField {
+		return merr.WrapErrServiceNotReadyMsg("load ttl_field (present=%t, field=%q) does not match current schema (present=%t, field=%q), schema version %d",
+			hasTTLField, ttlField, currentHasTTLField, currentTTLField, currentVersion)
 	}
 
 	// alter distribution
@@ -1015,7 +1038,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaBarrierTs uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1145,7 +1167,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// Atomically add to distribution while still holding RLock, so no
 			// ProcessDelete can run between "deletes applied" and "segment
 			// visible".
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaConsistent(req.GetSchema(), entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
@@ -1181,7 +1203,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
 				)
 			}
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaConsistent(req.GetSchema(), entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}

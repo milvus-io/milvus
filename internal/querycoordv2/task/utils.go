@@ -193,8 +193,8 @@ func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCo
 		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
-		// The update timestamp is a load barrier, not the logical schema version.
-		// QueryNode uses it only to reject stale load results after schema changes.
+		// Retain the timestamp for older QueryNodes and ordering legacy TTL schema
+		// snapshots. Updated delegators validate loads by schema version and TTL state.
 		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
 	}
 }

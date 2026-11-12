@@ -65,8 +65,8 @@ type collectionSchemaUpdatePlan struct {
 	// logicalSchemaVersion is schema.Version from the accepted schema payload.
 	// It is the Go-side structural schema freshness key.
 	logicalSchemaVersion uint64
-	// schemaBarrierTs fences stale load results and orders same-version schema
-	// payload refreshes such as collection property snapshots.
+	// schemaBarrierTs orders same-version schema payload refreshes, including
+	// legacy TTL DDLs that did not advance the logical schema version.
 	schemaBarrierTs uint64
 	// segcoreSchemaVersion is only passed to C++ segcore UpdateSchema. Segcore
 	// still has a single increasing version gate, so QueryNode keeps this
@@ -181,7 +181,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	// - schema.Version is the logical collection schema version and prevents
 	//   older schema payloads from overwriting newer fields/functions.
 	// - schemaBarrierTs is the DDL barrier timestamp and advances for
-	//   properties-only schema snapshots such as ttl_field changes.
+	//   legacy properties-only schema snapshots such as ttl_field changes.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
 }
