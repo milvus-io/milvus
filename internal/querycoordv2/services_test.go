@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -113,7 +112,6 @@ type ServiceSuite struct {
 	collectionObserver *observers.CollectionObserver
 	cluster            *session.MockCluster
 	nodeMgr            *session.NodeManager
-	jobScheduler       *job.Scheduler
 	taskScheduler      *task.MockScheduler
 	balancer           balance.Balance
 
@@ -268,11 +266,9 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.HandleNodeUp(context.TODO(), node)
 	}
-	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.jobScheduler.Start()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	suite.balancer = balance.NewRowCountBasedBalancer(
@@ -310,7 +306,6 @@ func (suite *ServiceSuite) SetupTest() {
 		collectionObserver:  suite.collectionObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
-		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
 		distController:      suite.distController,
 		ctx:                 context.Background(),
@@ -2062,7 +2057,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.server.qviewsRuntime.stop()
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
-	suite.jobScheduler.Stop()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
