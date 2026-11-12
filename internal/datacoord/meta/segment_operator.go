@@ -95,6 +95,8 @@ func (sc *segmentCriterion) Match(segment *SegmentInfo) bool {
 	return true
 }
 
+// SegmentFilter selects segments. Match must not keep segment: a selection
+// reuses one value for every candidate (SegmentsInfo.RangeReused).
 type SegmentFilter interface {
 	Match(segment *SegmentInfo) bool
 	AddFilter(*segmentCriterion)
