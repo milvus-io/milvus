@@ -38,16 +38,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// ReduceStream is the Query counterpart of the Search ReduceStream contract.
-// Recv calls must be serial; Close may run concurrently with Recv to cancel it.
+// ReduceStream specializes the shared stream contract for Query results.
 // The first Chunk carries HasMoreResult: whether matching rows exist beyond
 // this stream's current result, not whether more Chunks will arrive. It is
 // known before any rows are emitted and may be omitted from later Chunks.
-type ReduceStream interface {
-	Recv() (*internalpb.RetrieveResults, error)
-	Close() error
-	Interrupt() (*internalpb.RetrieveResults, error)
-}
+type ReduceStream = reduce.ReduceStream[*internalpb.RetrieveResults]
 
 // queryReduceUnit is one reducible Query row, retaining its fields and timestamp for ordering and deduplication.
 type queryReduceUnit struct {

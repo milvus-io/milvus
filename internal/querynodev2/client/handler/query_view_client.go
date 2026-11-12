@@ -4,6 +4,7 @@ import (
 	"context"
 
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -43,7 +44,7 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, nodeID int64, req 
 
 func (qvc *queryViewClient) SearchOnViewStream(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (searchreducestream.ReduceStream, error) {
-		return searchreducestream.NewGRPCReduceStream(ctx, client, req)
+		return reduce.NewSearchGRPCReduceStream(ctx, client, req)
 	})
 }
 
@@ -55,7 +56,7 @@ func (qvc *queryViewClient) QueryOnView(ctx context.Context, nodeID int64, req *
 
 func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryreducestream.ReduceStream, error) {
-		return queryreducestream.NewGRPCReduceStream(ctx, client, req)
+		return reduce.NewQueryGRPCReduceStream(ctx, client, req)
 	})
 }
 func executeViewQueryRPC[T any](

@@ -34,14 +34,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// ReduceStream is the common parent-side contract for reduced streams and
-// transport-backed child streams. Recv calls must be serial; Close may run
-// concurrently with Recv to cancel it.
-type ReduceStream interface {
-	Recv() (*internalpb.SearchResults, error)
-	Close() error
-	Interrupt() (*internalpb.SearchResults, error)
-}
+// ReduceStream specializes the shared stream contract for Search results.
+type ReduceStream = reduce.ReduceStream[*internalpb.SearchResults]
 
 // searchReduceUnit is one reducible Search hit, retaining its score and query-vector index for ranking.
 type searchReduceUnit struct {
