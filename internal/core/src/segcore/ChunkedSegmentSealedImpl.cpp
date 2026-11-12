@@ -2679,16 +2679,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     const auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
     const auto column_groups = segment_load_info.GetColumnGroups();
 
     if (schema_snapshot->is_external_collection()) {
-        InjectExternalSpecProperties(*properties,
+        auto external_properties =
+            std::make_shared<milvus_storage::api::Properties>(*properties);
+        InjectExternalSpecProperties(*external_properties,
                                      segment_load_info.GetCollectionID(),
                                      schema_snapshot->get_external_source(),
                                      schema_snapshot->get_external_spec());
+        properties = std::move(external_properties);
     }
 
     const auto needed_columns = schema_snapshot->GetExternalColumnNames();
@@ -5764,7 +5766,7 @@ ReadTextLobBatch(
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto& cache = GetGlobalTextColumnCache();
-    return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+    return cache.ReadBatch(lob_base_path, fs, properties, encoded_refs);
 }
 
 void
@@ -9439,7 +9441,7 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     const std::vector<std::pair<int, std::vector<FieldId>>>& eager_cg_field_ids,
     const std::vector<std::pair<int, std::vector<FieldId>>>& lazy_cg_field_ids,
     const std::vector<VortexColumnGroupLocalFormat>& local_formats,
@@ -9583,7 +9585,7 @@ ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormats(
 void
 ChunkedSegmentSealedImpl::LoadVortexColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
@@ -9705,7 +9707,7 @@ ChunkedSegmentSealedImpl::LoadVortexColumnGroup(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const SegmentLoadInfo& segment_load_info,

@@ -1196,7 +1196,7 @@ ReadLoonManifest(const LoonManifestPath& manifest_path,
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
     auto manifest_path = ParseLoonManifestPath(path);
     if (!manifest_path.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,

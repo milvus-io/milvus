@@ -2095,7 +2095,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         const std::vector<std::pair<int, std::vector<FieldId>>>&
             eager_cg_field_ids,
         const std::vector<std::pair<int, std::vector<FieldId>>>&
@@ -2118,7 +2119,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids,
         const SegmentLoadInfo& segment_load_info,
@@ -2137,7 +2139,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadVortexColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
@@ -2529,7 +2532,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<ChunkedColumnInterface>
     TestStageLoadColumnGroupWithReader(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         const std::vector<FieldId>& field_ids,
         const SegmentLoadInfo& segment_load_info,
@@ -2550,7 +2554,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<std::shared_ptr<ChunkedColumnInterface>>
     TestStageLoadColumnGroupsWithReader(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         std::vector<std::pair<int, std::vector<FieldId>>> eager_cg_field_ids,
         std::vector<std::pair<int, std::vector<FieldId>>> lazy_cg_field_ids,
         const SegmentLoadInfo& segment_load_info,

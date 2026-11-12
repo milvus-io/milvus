@@ -258,7 +258,7 @@ func TestSegmentResourceQueryWaitCancellationReleasesPins(t *testing.T) {
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		entered := make(chan struct{})
-		mockey.Mock((instantTransformRegistration).WaitTransformVisible).To(func(_ instantTransformRegistration, ctx context.Context, _ uint64) error {
+		mockey.Mock(instantTransformRegistration.WaitTransformVisible).To(func(_ instantTransformRegistration, ctx context.Context, _ uint64) error {
 			close(entered)
 			<-ctx.Done()
 			return ctx.Err()
@@ -394,16 +394,33 @@ func TestSegmentResourceUsesViewIndexSelection(t *testing.T) {
 		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, c CollectionRuntime) (ResourceReservation, error) {
 			require.Len(t, info.IndexInfos, 1)
 			require.Equal(t, c.IndexInfos()[0].IndexID, info.IndexInfos[0].IndexID)
+			info.EstimatedBytesPerRow = 123
 			observed <- info.IndexInfos[0].IndexID
 			return nil, nil
+		}).Build()
+		f.prepareMock.UnPatch()
+		mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+			require.Len(t, snapshot.LoadInfo.IndexInfos, 1)
+			require.Equal(t, c.IndexInfos()[0].IndexID, snapshot.LoadInfo.IndexInfos[0].IndexID)
+			require.EqualValues(t, 123, snapshot.LoadInfo.EstimatedBytesPerRow)
+			return &resourceTestRead{}, nil
 		}).Build()
 		a := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		require.EqualValues(t, 300, <-observed)
+		f.manager.mu.Lock()
+		resource := f.manager.resources[1000]
+		cachedInfo := resource.snapshot.LoadInfo
+		baseInfo := resource.bases[0].snapshot.LoadInfo
+		f.manager.mu.Unlock()
+		require.Same(t, cachedInfo, baseInfo, "the base must retain the source snapshot, not the operation's filtered copy")
+		require.Len(t, baseInfo.IndexInfos, 2)
+		require.Zero(t, baseInfo.EstimatedBytesPerRow, "node-local preparation must not modify the retained snapshot")
 		b := f.acquire(2, 1, 2)
 		f.await(t, 1)
 		require.EqualValues(t, 301, <-observed)
 		require.Len(t, source.LoadInfo.IndexInfos, 2)
+		require.Zero(t, source.LoadInfo.EstimatedBytesPerRow)
 		require.EqualValues(t, 1, f.loads.Load(), "read bindings share compatible physical rows")
 		f.drop(t, a)
 		f.drop(t, b)

@@ -2053,7 +2053,7 @@ VortexColumn::VortexColumn(
     FieldId field_id,
     FieldMeta field_meta,
     std::string field_name,
-    std::shared_ptr<milvus_storage::api::Properties> properties,
+    std::shared_ptr<const milvus_storage::api::Properties> properties,
     std::shared_ptr<VortexColumnGroup> column_group,
     std::optional<size_t> data_byte_size)
     : field_id_(field_id),
@@ -2834,11 +2834,12 @@ VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
            BuildVortexPredicate(options).has_value();
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 VortexColumn::MakeVortexReaderProperties(
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
-    auto reader_properties = *properties;
-    reader_properties[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    auto reader_properties =
+        std::make_shared<milvus_storage::api::Properties>(*properties);
+    (*reader_properties)[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
         std::string("true");
     return reader_properties;
 }
@@ -2852,8 +2853,7 @@ VortexColumn::BuildFileReader(
         group_file.sparse_fs,
         projected_arrow_schema,
         group_file.sparse_path,
-        std::make_shared<const milvus_storage::api::Properties>(
-            local_format_properties_),
+        local_format_properties_,
         std::vector<std::string>{field_name_},
         group_file.footer_reader->file_size(),
         group_file.footer_reader->footer_size());

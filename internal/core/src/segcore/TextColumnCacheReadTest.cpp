@@ -216,14 +216,14 @@ class TextColumnCacheReadTest : public ::testing::TestWithParam<bool> {
          const std::vector<milvus_storage::lob_column::EncodedRef>& refs) {
         if (!GetParam()) {
             return cache.ReadBatch(
-                config.lob_base_path, fs, *config.properties, refs);
+                config.lob_base_path, fs, config.properties, refs);
         }
         google::protobuf::RepeatedPtrField<std::string> dst;
         for (size_t i = 0; i < refs.size(); ++i) {
             dst.Add();
         }
         cache.ReadBatchInto(
-            config.lob_base_path, fs, *config.properties, refs, &dst);
+            config.lob_base_path, fs, config.properties, refs, &dst);
         return {dst.begin(), dst.end()};
     }
 
