@@ -527,7 +527,7 @@ def create_udf(context):
             assert [hit["distance"] for hit in response["data"]] == pytest.approx([0, 0.0001, 0.0004])
             self._assert_ranked_response(self._search_once(payload))
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("operation", ["search", "add", "remove", "list"])
     def test_pyudf_unauthenticated_calls_are_rejected(self, operation):
         """
