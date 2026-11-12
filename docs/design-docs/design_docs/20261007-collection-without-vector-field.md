@@ -485,6 +485,26 @@ sparse vectors of short documents. A vector collection of the common
 dimensions is not affected: 1 GB is about 350 k rows at dim 768 and 2 M rows
 at dim 128.
 
+The 268 B is the byte limit of the collection divided by `maxRows`, so it
+moves with the byte limit:
+
+| Byte limit of the collection | Row width below which the row cap applies | `FLOAT_VECTOR` dimensions affected (vector alone) |
+|---|---|---|
+| 1 GB (`maxSize`, default) | 268 B | below about 67 |
+| 2 GB (`diskSegmentMaxSize`, used when every vector index of the collection is DiskANN) | 537 B | below about 134 |
+| 4 GB (`maxSize` raised) | 1,074 B | below about 268 |
+| 8 GB (`maxSize` raised) | 2,147 B | below about 537 |
+
+Two consequences. A collection indexed with DiskANN only is affected up to
+about dim 134 with the default configuration. And a deployment that raises
+`maxSize` moves common dimensions under the row cap: with `maxSize` at 8 GB
+a dim 128 collection held about 16 M rows per segment and is sealed and
+merged at 4 M rows after the upgrade, four times as many segments. Such a
+deployment should raise `maxRows` in proportion to `maxSize` (or set it to 0)
+when it upgrades; the description of the parameter says so. The effect of
+four times as many segments on search was not measured (Appendix B.7
+measures 2.3 times).
+
 An earlier revision applied the cap to collections without a vector field
 only, by reading the schema. It was changed for two reasons. A schema change
 does not change the data: adding a vector field to a collection without one
@@ -647,9 +667,12 @@ existing segments; they are cut when a compaction rewrites them.
   CDC (Change Data Capture) into an old cluster fails at `CreateCollection`
   with the old error.
 - The row cap applies to every collection. A collection whose rows are
-  wider than 268 B, which is a vector collection of the common dimensions,
-  reaches the byte limit first and is sealed, compacted and imported as
-  today. An existing collection of narrower rows, with or without a vector
+  wider than its byte limit divided by `maxRows` (268 B with the default
+  `maxSize`, 537 B with `diskSegmentMaxSize`, more when `maxSize` is
+  raised; Section 4.2), which with the default configuration is a vector
+  collection of the common dimensions, reaches the byte limit first and is
+  sealed, compacted and imported as today. A deployment that has raised
+  `maxSize` should raise `maxRows` in proportion when it upgrades. An existing collection of narrower rows, with or without a vector
   field (Section 4.2 lists the vector types), changes as follows after the
   upgrade: new segments are sealed and merged at `maxRows` rows; existing
   segments above `maxRows` are not rewritten, and are cut only when a
@@ -851,6 +874,35 @@ Collection property script (`dataCoord.segment.maxRows` is 400 k):
 | property lowered to 300 k | the segments above it are unchanged for 30 minutes; a manual compaction then gives seven segments of 300 k and one of 100 k |
 | property removed | a manual compaction packs up to the configured 400 k |
 | `-1`, `many`, `1.5` at create and at alter | rejected: 1100 `collection.segment.maxRows must be a non-negative integer` |
+
+**Rerun on the pushed commit.** The runs above used a binary built from the
+working tree before the commit. Everything was run again on `1fa020b44e`
+(2026-11-11 and 12), each part on a new instance:
+
+| Part | Result |
+|---|---|
+| Row cap, `maxRows` 400 k, standalone: the reproduction of the conversion problem, both conversion directions (11 checks), the collection property script (21 checks, with the 30 minute observation), the row cap script | pass; the row cap script is 7 of 8 as above. Reproduction: three segments of 400 k stay three after a vector field is added and no vector is written, and 1.2 M more narrow rows give six segments of 400 k |
+| Default configuration, standalone: four repository e2e files (conversion, collection without a vector field, alter collection properties, compaction) | 70 passed, 7 skipped by their own marks. The last two files are existing ones, run to see whether applying the rule to every collection breaks them |
+| Default configuration: conversion scripts (both batches, with restart recovery), import after a conversion, clustering compaction during a conversion, struct array vector, row cap script at 4 M | pass, except the two steps that add a BM25 function field on an instance without StorageV3, which the existing rule rejects and which failed the same way before the change |
+| StorageV3 instance: BM25 backfill script, its repository case, struct array vector | pass |
+| Cluster (two QueryNodes, two StreamingNodes, `maxRows` 400 k): reproduction, conversion (11 checks), collection property (21 checks), two-replica conversion, first conversion batch | pass |
+| Go unit tests of all of `internal/proxy`, `internal/streamingnode`, `internal/datacoord`, `internal/rootcoord` and the DataNode compactor | 102 packages pass; 5 packages (`copysegment`, `datacoord/segment`, `datacoord/session`, `streamingnode/client/manager`, `growingruntime`) have one case each that stops at a 5 s or 10 s timeout in the full run and passes 3 times out of 3 alone. They were not run on the code before the change under the same load |
+
+Scenarios added in the rerun (`maxRows` 400 k):
+
+| Scenario | Result |
+|---|---|
+| Property set to 150 k, then the server restarted | new segments are sealed at 150 k after the restart, not at 400 k; after the property is removed new segments return to 400 k; a collection with the property at 0 is still sealed on bytes (1 M in one segment). On the cluster both StreamingNodes were restarted, with the same result |
+| Property changed while a growing segment is open | the open segment is sealed at the old cap (400 k), later ones at the new one (150 k); a manual compaction then cuts everything to 150 k or less |
+| Several partitions | each partition is capped on its own: 400 k and 200 k per partition, none above the cap |
+| 300 k rows upserted and 100 k deleted, then a compaction | no segment above the cap; count 900 k; the upserted and the deleted rows read correctly |
+| Clustering compaction on a dim 8 vector collection | completes with 330 k, 330 k, 330 k and 10 k rows; a filter on the clustering key returns the right rows |
+| Import of 1.2 M rows with dim 8 vectors | three segments allocated (436 k, 382 k, 382 k); all at or below 400 k after a manual compaction; count correct |
+| The same data in a capped collection and in one with the property at 0 | different layouts (400 k, 372 k, 228 k against 1 M in one segment); 20 exact searches return identical distances and a filtered query returns the same rows |
+
+Not run: old and new versions of a role side by side during a rolling
+upgrade; recall under the two layouts; sparse vectors; a deployment with
+`maxSize` raised.
 
 ## 7. Alternatives
 
