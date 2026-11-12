@@ -331,9 +331,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
-	router.POST(EntityCategory+MultiSearchAction, h.multiSearchAdmission(restfulSizeMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+MultiSearchAction, h.multiSearchRoute(wrapperPost(func() any {
 		return &MultiSearchReqV2{}
-	}, wrapperTraceLog(h.multiSearch)), true)))
+	}, wrapperTraceLog(h.multiSearch))))
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{

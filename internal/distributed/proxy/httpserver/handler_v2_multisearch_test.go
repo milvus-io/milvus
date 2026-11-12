@@ -53,7 +53,7 @@ type multiSearchAdmissionProxy struct {
 
 func (p *multiSearchAdmissionProxy) CheckMultiSearchAdmission() error { return p.precheckErr }
 
-func (p *multiSearchAdmissionProxy) RunMultiSearch(context.Context, uint32, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+func (p *multiSearchAdmissionProxy) RunMultiSearch(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
 	return nil, p.enqueueErr
 }
 
@@ -89,7 +89,7 @@ func (p *multiSearchRESTProxy) GetMetaCache() proxy.Cache { return p.cache }
 
 func (p *multiSearchRESTProxy) GetRateLimiter() (types.Limiter, error) { return p.limiter, nil }
 
-func (p *multiSearchRESTProxy) RunMultiSearch(ctx context.Context, _ uint32, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+func (p *multiSearchRESTProxy) RunMultiSearch(ctx context.Context, _ proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
 	results := make([]*milvuspb.SearchResults, len(items))
 	for i, prepare := range items {
 		req, err := prepare(ctx)
@@ -376,6 +376,10 @@ func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {
 		`{"requests":[{}]}`,
 		`{"requests":[{"search":null}]}`,
 		`{"requests":[{"search":{}}]}invalid trailing bytes`,
+		`{"requests":[{"search":{}}],"timeoutMs":-1}`,
+		`{"requests":[{"search":{}}],"timeoutMs":9223372036855}`,
+		`{"requests":[{"search":{}}],"timeoutMs":9223372036854775808}`,
+		`{"requests":[{"search":{}}],"timeoutMs":0.5}`,
 	} {
 		response := postJSONBody(server, path, request)
 		require.Equal(t, http.StatusOK, response.Code, request)

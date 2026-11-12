@@ -17,8 +17,11 @@
 package proxy
 
 import (
+	"container/list"
 	"context"
+	"math"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -36,6 +39,26 @@ const (
 	multiSearchConcurrency   = 4
 )
 
+// MultiSearchOptions applies to the entire admitted batch. A zero deadline
+// leaves execution bounded only by the parent call and scheduler lifetime.
+type MultiSearchOptions struct {
+	MaxConcurrency    uint32
+	ExecutionDeadline time.Time
+}
+
+// MultiSearchExecutionDeadline validates the optional wire budget and anchors
+// it at receipt. An explicitly supplied zero expires at receipt.
+func MultiSearchExecutionDeadline(receivedAt time.Time, timeoutMs *int64) (time.Time, error) {
+	if timeoutMs == nil {
+		return time.Time{}, nil
+	}
+	const maxTimeoutMs = math.MaxInt64 / int64(time.Millisecond)
+	if *timeoutMs < 0 || *timeoutMs > maxTimeoutMs {
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("MultiSearch execution timeout must be between 0 and %d milliseconds", maxTimeoutMs)
+	}
+	return receivedAt.Add(time.Duration(*timeoutMs) * time.Millisecond), nil
+}
+
 // MultiSearchPrepare builds one recognized Search request after batch admission.
 type MultiSearchPrepare func(context.Context) (*milvuspb.SearchRequest, error)
 
@@ -45,31 +68,31 @@ type MultiSearchExecute func(context.Context, *milvuspb.SearchRequest) (*milvusp
 // multiSearchScheduler owns the queue and workers that orchestrate batches.
 // The searches themselves run through the existing DQL scheduler.
 type multiSearchScheduler struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	queue  chan func()
-
-	mu      sync.Mutex
-	stopped bool
-	workers sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	capacity int
+	mu       sync.Mutex
+	ready    *sync.Cond
+	queue    list.List
+	workers  sync.WaitGroup
 }
 
 func newMultiSearchScheduler(ctx context.Context, capacity int) *multiSearchScheduler {
 	ctx, cancel := context.WithCancel(ctx)
-	return &multiSearchScheduler{
-		ctx:    ctx,
-		cancel: cancel,
-		queue:  make(chan func(), capacity),
+	s := &multiSearchScheduler{
+		ctx:      ctx,
+		cancel:   cancel,
+		capacity: capacity,
 	}
+	s.ready = sync.NewCond(&s.mu)
+	return s
 }
 
 func (s *multiSearchScheduler) start(workers int) {
 	for range workers {
 		s.workers.Go(func() {
-			for run := range s.queue {
-				if s.ctx.Err() == nil {
-					run()
-				}
+			for run := s.dequeue(); run != nil; run = s.dequeue() {
+				run()
 			}
 		})
 	}
@@ -77,37 +100,59 @@ func (s *multiSearchScheduler) start(workers int) {
 
 func (s *multiSearchScheduler) stop() {
 	s.mu.Lock()
-	if !s.stopped {
-		s.stopped = true
-		s.cancel()
-		close(s.queue)
-	}
+	s.cancel()
+	s.ready.Broadcast()
 	s.mu.Unlock()
 	s.workers.Wait()
 }
 
 func (s *multiSearchScheduler) fullError() error {
-	return merr.WrapErrTooManyRequests(int32(cap(s.queue)), "MultiSearch queue is full")
+	return merr.WrapErrTooManyRequests(int32(s.capacity), "MultiSearch queue is full")
 }
 
-func (s *multiSearchScheduler) enqueue(run func()) error {
+func (s *multiSearchScheduler) isFull() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.queue.Len() == s.capacity
+}
+
+func (s *multiSearchScheduler) enqueue(run func()) (*list.Element, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ctx.Err() != nil {
-		return merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
+		return nil, merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
 	}
-	select {
-	case s.queue <- run:
+	if s.queue.Len() == s.capacity {
+		return nil, s.fullError()
+	}
+	entry := s.queue.PushBack(run)
+	s.ready.Signal()
+	return entry, nil
+}
+
+func (s *multiSearchScheduler) dequeue() func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.queue.Len() == 0 && s.ctx.Err() == nil {
+		s.ready.Wait()
+	}
+	if s.ctx.Err() != nil {
 		return nil
-	default:
-		return s.fullError()
 	}
+	return s.queue.Remove(s.queue.Front()).(func())
+}
+
+func (s *multiSearchScheduler) remove(entry *list.Element) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Removing an entry the worker already dequeued is a no-op.
+	s.queue.Remove(entry)
 }
 
 // CheckMultiSearchAdmission is a pre-decode probe. RunMultiSearch makes the
 // authoritative admission decision when it enqueues the batch.
 func (node *Proxy) CheckMultiSearchAdmission() error {
-	if s := node.multiSearch; s != nil && len(s.queue) == cap(s.queue) {
+	if s := node.multiSearch; s != nil && s.isFull() {
 		return s.fullError()
 	}
 	return nil
@@ -115,7 +160,7 @@ func (node *Proxy) CheckMultiSearchAdmission() error {
 
 // RunMultiSearch accepts a structurally validated list of Search operations.
 // A failure of an individual search is returned in its native SearchResults.
-func (node *Proxy) RunMultiSearch(ctx context.Context, maxConcurrency uint32, items []MultiSearchPrepare, execute MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOptions, items []MultiSearchPrepare, execute MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
 	if len(items) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search")
 	}
@@ -131,7 +176,7 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, maxConcurrency uint32, it
 	if s == nil || execute == nil {
 		return nil, merr.WrapErrServiceInternalMsg("MultiSearch scheduler or Search entry is unavailable")
 	}
-	if err := ctx.Err(); err != nil {
+	if err := multiSearchContextErr(ctx); err != nil {
 		return nil, err
 	}
 
@@ -140,49 +185,109 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, maxConcurrency uint32, it
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
 
-	done := make(chan []*milvuspb.SearchResults, 1)
-	if err := s.enqueue(func() {
-		if batchCtx.Err() == nil {
-			done <- runMultiSearchBatch(batchCtx, maxConcurrency, items, execute)
-		}
-	}); err != nil {
+	executionCtx := batchCtx
+	if !options.ExecutionDeadline.IsZero() {
+		var cancelExecution context.CancelFunc
+		executionCtx, cancelExecution = context.WithDeadline(batchCtx, options.ExecutionDeadline)
+		defer cancelExecution()
+	}
+	batch := &multiSearchBatch{
+		results:   make([]*milvuspb.SearchResults, len(items)),
+		remaining: len(items),
+		done:      make(chan struct{}),
+	}
+	entry, err := s.enqueue(func() {
+		batch.run(executionCtx, options.MaxConcurrency, items, execute)
+	})
+	if err != nil {
 		return nil, err
 	}
 	select {
-	case results := <-done:
-		if batchCtx.Err() == nil {
-			return results, nil
-		}
-	case <-batchCtx.Done():
+	case <-batch.done:
+	case <-executionCtx.Done():
 	}
-	if err := ctx.Err(); err != nil {
+	s.remove(entry)
+	if err := multiSearchContextErr(ctx); err != nil {
 		return nil, err
 	}
-	return nil, merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
+	if s.ctx.Err() != nil {
+		return nil, merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
+	}
+	results := batch.finish()
+	if err := multiSearchContextErr(ctx); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
-func runMultiSearchBatch(ctx context.Context, maxConcurrency uint32, items []MultiSearchPrepare, execute MultiSearchExecute) []*milvuspb.SearchResults {
-	concurrency := multiSearchConcurrency
+type multiSearchBatch struct {
+	mu        sync.Mutex
+	results   []*milvuspb.SearchResults
+	remaining int
+	done      chan struct{}
+}
+
+func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items []MultiSearchPrepare, execute MultiSearchExecute) {
+	concurrency := min(multiSearchConcurrency, len(items))
 	if maxConcurrency != 0 {
 		concurrency = int(min(uint64(maxConcurrency), uint64(len(items))))
 	}
 	var group errgroup.Group
 	group.SetLimit(concurrency)
-	results := make([]*milvuspb.SearchResults, len(items))
 	for i, prepare := range items {
-		if ctx.Err() != nil {
+		if multiSearchContextErr(ctx) != nil {
 			break
 		}
 		group.Go(func() error {
-			if ctx.Err() == nil {
+			if multiSearchContextErr(ctx) == nil {
 				itemCtx := metrics.WithIndependentRPCStats(ctx)
-				results[i] = runMultiSearchItem(itemCtx, prepare, execute)
+				b.complete(ctx, i, runMultiSearchItem(itemCtx, prepare, execute))
 			}
 			return nil
 		})
 	}
+	// Keep the scheduler worker occupied until canceled searches unwind so
+	// slow cancellation cannot create unbounded detached work.
 	_ = group.Wait()
+}
+
+func (b *multiSearchBatch) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.results == nil || multiSearchContextErr(ctx) != nil {
+		return
+	}
+	b.results[i] = result
+	b.remaining--
+	if b.remaining == 0 {
+		close(b.done)
+	}
+}
+
+func (b *multiSearchBatch) finish() []*milvuspb.SearchResults {
+	b.mu.Lock()
+	// Transfer ownership to the caller. Late searches can no longer write
+	// slots or retain completed Search data while they unwind.
+	results := b.results
+	b.results = nil
+	b.mu.Unlock()
+	for i, result := range results {
+		if result == nil {
+			results[i] = &milvuspb.SearchResults{Status: merr.Status(context.DeadlineExceeded)}
+		}
+	}
 	return results
+}
+
+func multiSearchContextErr(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Deadline timers may not have run yet when a result races with expiry.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
 
 func runMultiSearchItem(ctx context.Context, prepare MultiSearchPrepare, execute MultiSearchExecute) *milvuspb.SearchResults {
@@ -193,7 +298,7 @@ func runMultiSearchItem(ctx context.Context, prepare MultiSearchPrepare, execute
 	if request == nil {
 		return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("MultiSearch prepared no Search request"))}
 	}
-	if err := ctx.Err(); err != nil {
+	if err := multiSearchContextErr(ctx); err != nil {
 		return &milvuspb.SearchResults{Status: merr.Status(err)}
 	}
 	result, err := execute(ctx, request)
