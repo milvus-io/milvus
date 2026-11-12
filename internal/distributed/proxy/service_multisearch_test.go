@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -118,6 +119,7 @@ func (h *multiSearchTestHook) Before(ctx context.Context, _ any, method string) 
 
 func newMultiSearchTestClient(t *testing.T, server *grpc.Server) milvuspb.MilvusServiceClient {
 	t.Helper()
+	accesslog.InitAccessLogger(paramtable.Get())
 	listener := bufconn.Listen(1024 * 1024)
 	t.Cleanup(server.Stop)
 	go func() { _ = server.Serve(listener) }()
