@@ -303,6 +303,7 @@ class MigrationChecker:
         expected = self.expected(mutated, post_switch)
         candidates = [pk for pk in expected if pk < 257]
         control = client.search(**self.search_options(name))[0]
+        assert len(control) == len(candidates)
         assert {hit["id"] for hit in control} == set(candidates)
         query = np.asarray(self.rows[11]["vector"], dtype=np.float32)
         metric_failures = []
@@ -322,10 +323,16 @@ class MigrationChecker:
                         "expected": float(score),
                     }
                 )
+        scores = [float(hit["distance"]) for hit in control]
+        ordered = all(
+            left >= right if self.metric == "IP" else left <= right for left, right in zip(scores, scores[1:])
+        )
+        outcome = "FAIL" if metric_failures or not ordered else "PASS"
         return {
-            "outcome": "FAIL" if metric_failures else "PASS",
+            "outcome": outcome,
             "metric": self.metric,
-            "metric_control_outcome": "FAIL" if metric_failures else "PASS",
+            "metric_control_outcome": outcome,
+            "ordering_outcome": "PASS" if ordered else "FAIL",
             "metric_failures": metric_failures,
             "metric_tolerance": {"rtol": 1e-5, "atol": 1e-6},
             "control_candidates": len(control),

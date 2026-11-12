@@ -156,8 +156,7 @@ class PyUDFSearchChecker:
         distance_errors = []
         for number, query in enumerate(self.queries):
             hits = self.search(self.client, query)
-            ids = self.verify_fields(hits)
-            assert len(ids) == 100, len(ids)
+            ids = self.verify_control(hits, number)
             self.candidates.append(ids)
             if number < 10:
                 distances = np.sum((self.vectors - query) ** 2, axis=1)
@@ -168,7 +167,7 @@ class PyUDFSearchChecker:
         # Exhaustive small candidate search makes this check independent of ANN recall.
         query = self.queries[0]
         small = self.search(self.client, query, limit=257, filter_expr="id < 257")
-        assert set(self.verify_fields(small)) == set(range(257))
+        assert set(self.verify_control(small, 0, candidate_count=257)) == set(range(257))
         exact = self.search(self.client, query, self.chain(self.resources[0], 2, 5), limit=257, filter_expr="id < 257")
         self.verify_udf(exact, list(range(257)), 2, 5)
         return {
@@ -177,14 +176,17 @@ class PyUDFSearchChecker:
             "exact_subset_rows": 257,
         }
 
-    def verify_control(self, hits, query_index):
+    def verify_control(self, hits, query_index, candidate_count=100):
         ids = self.verify_fields(hits)
-        assert len(ids) == 100
+        assert len(ids) == candidate_count, (len(ids), candidate_count)
         for hit in hits:
             pk = hit["id"]
             assert np.isfinite(hit["distance"]) and hit["distance"] >= 0, hit
             distance = float(np.sum((self.vectors[pk] - self.queries[query_index]) ** 2))
             assert np.isclose(hit["distance"], distance, rtol=1e-5, atol=1e-6), hit
+        scores = [hit["distance"] for hit in hits]
+        assert all(left <= right for left, right in zip(scores, scores[1:])), scores
+        return ids
 
     def audit_all_rows(self):
         """Check every stored scalar and original vector against the retained input ledger."""
