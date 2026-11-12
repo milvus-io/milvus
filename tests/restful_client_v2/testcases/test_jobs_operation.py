@@ -3801,191 +3801,118 @@ class TestImportJobAdvance(RestImportTestBase):
         assert len(rsp["data"]) == 100
 
 
-@pytest.mark.tags(CaseLabel.L2)
 class TestCreateImportJobAdvance(RestImportTestBase):
-    def test_job_import_with_multi_task_and_datanode(self, release_name):
-        # create collection
+    @pytest.mark.tags(CaseLabel.L3, "bulk_import")
+    @pytest.mark.timeout(2400)
+    def test_job_import_with_multi_task_and_datanode(self, tmp_path):
+        """Import 4.8 million rows through 48 jobs and verify each job and visible data."""
+        self._run_parallel_import_jobs(tmp_path, task_num=48, file_nums=1, batch_size=100000)
+
+    @pytest.mark.tags(CaseLabel.L2, "bulk_import")
+    @pytest.mark.timeout(2400)
+    def test_job_import_with_extremely_large_task_num(self, tmp_path):
+        """Import two files per job through 1,000 jobs without primary-key collisions."""
+        self._run_parallel_import_jobs(tmp_path, task_num=1000, file_nums=2, batch_size=10)
+
+    def _run_parallel_import_jobs(self, tmp_path, task_num, file_nums, batch_size):
+        """Verify every completed job contributes distinct, query-visible source rows."""
         name = gen_collection_name()
         dim = 128
         payload = {
             "collectionName": name,
             "schema": {
+                # Reusing input files must still create distinct rows for every job.
+                "autoId": True,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                ]
+                ],
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        self.collection_client.collection_create(payload)
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
         self.wait_load_completed(name)
 
-        # upload file to storage
-        task_num = 48
-        file_nums = 1
-        batch_size = 100000
         file_names = []
+        rng = random.Random(0)
         for file_num in range(file_nums):
             data = [
                 {
-                    "book_id": i,
                     "word_count": i,
                     "book_describe": f"book_{i}",
-                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                    "book_intro": [np.float32(rng.random()) for _ in range(dim)],
                 }
                 for i in range(batch_size * file_num, batch_size * (file_num + 1))
             ]
-
-            # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
-            file_path = f"/tmp/{file_name}"
-            # create dir for file path
-            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w") as f:
+            file_path = tmp_path / file_name
+            with file_path.open("w") as f:
                 json.dump(data, f, cls=NumpyEncoder)
-            # upload file to minio storage
-            self.storage_client.upload_file(file_path, file_name)
+            self.storage_client.upload_file(str(file_path), file_name)
+            # The shared upload helper logs S3 errors; verify the fixture exists.
+            self.storage_client.client.stat_object(self.storage_client.bucket_name, file_name)
             file_names.append([file_name])
-        for i in range(task_num):
-            # create import job
-            payload = {
-                "collectionName": name,
-                "files": file_names,
-            }
-            rsp = self.import_job_client.create_import_jobs(payload)
+        del data
+
+        job_ids = set()
+        for _ in range(task_num):
+            rsp = self.import_job_client.create_import_jobs({"collectionName": name, "files": file_names})
+            assert rsp["code"] == 0, rsp
             job_id = rsp["data"]["jobId"]
-            # list import job
-            payload = {
-                "collectionName": name,
+            assert job_id not in job_ids, rsp
+            job_ids.add(job_id)
+
+        # Poll the batch on one deadline, instead of listing an expanding batch
+        # after every submission or granting a fresh timeout to each job.
+        deadline = time.monotonic() + 1800
+        pending = {}
+        while time.monotonic() < deadline:
+            rsp = self.import_job_client.list_import_jobs({"collectionName": name})
+            assert rsp["code"] == 0, rsp
+            records = {job["jobId"]: job for job in rsp["data"]["records"]}
+            assert set(records) == job_ids, {
+                "missing": job_ids - records.keys(),
+                "unexpected": records.keys() - job_ids,
             }
-            rsp = self.import_job_client.list_import_jobs(payload)
-            assert job_id in [job["jobId"] for job in rsp["data"]["records"]]
-        rsp = self.import_job_client.list_import_jobs(payload)
-        # get import job progress
-        for job in rsp["data"]["records"]:
-            job_id = job["jobId"]
-            finished = False
-            t0 = time.time()
+            failed = {job_id: job for job_id, job in records.items() if job["state"] in ("Failed", "FailedAndCleaned")}
+            assert not failed, failed
+            pending = {job_id: job["state"] for job_id, job in records.items() if job["state"] != "Completed"}
+            if not pending:
+                break
+            logger.info(f"Import jobs completed: {task_num - len(pending)}/{task_num}")
+            time.sleep(min(10, max(0, deadline - time.monotonic())))
+        else:
+            pytest.fail(f"Import batch timed out after 1800s; pending jobs: {pending}")
 
-            while not finished:
-                try:
-                    rsp = self.import_job_client.get_import_job_progress(job_id)
-                    if rsp["data"]["state"] == "Completed":
-                        finished = True
-                    time.sleep(5)
-                    if time.time() - t0 > IMPORT_TIMEOUT:
-                        assert False, "import job timeout"
-                except Exception as e:
-                    logger.error(f"get import job progress failed: {e}")
-                    time.sleep(5)
-        rsp = self.import_job_client.list_import_jobs(payload)
-        assert rsp["code"] == 0, rsp
-        # assert data count
-        self._wait_for_count(name, file_nums * batch_size * task_num)
-        # assert import data can be queried
-        payload = {
-            "collectionName": name,
-            "filter": f"book_id in {[i for i in range(1000)]}",
-            "limit": 100,
-            "offset": 0,
-            "outputFields": ["*"],
-        }
-        rsp = self.vector_client.vector_query(payload)
-        assert len(rsp["data"]) == 100
+        rows_per_job = file_nums * batch_size
+        for job_id in job_ids:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            assert rsp["code"] == 0, rsp
+            progress = rsp["data"]
+            assert progress["state"] == "Completed", rsp
+            assert int(progress["importedRows"]) == rows_per_job, rsp
+            assert int(progress["totalRows"]) == rows_per_job, rsp
+        self._wait_for_count(name, rows_per_job * task_num)
 
-    def test_job_import_with_extremely_large_task_num(self, release_name):
-        # create collection
-        name = gen_collection_name()
-        dim = 128
-        payload = {
-            "collectionName": name,
-            "schema": {
-                "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                ]
-            },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
-        }
-        self.collection_client.collection_create(payload)
-        self.wait_load_completed(name)
-
-        # upload file to storage
-        task_num = 1000
-        file_nums = 2
-        batch_size = 10
-        file_names = []
-        for file_num in range(file_nums):
-            data = [
-                {
-                    "book_id": i,
-                    "word_count": i,
-                    "book_describe": f"book_{i}",
-                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
-                }
-                for i in range(batch_size * file_num, batch_size * (file_num + 1))
-            ]
-
-            # dump data to file
-            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
-            file_path = f"/tmp/{file_name}"
-            # create dir for file path
-            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w") as f:
-                json.dump(data, f, cls=NumpyEncoder)
-            # upload file to minio storage
-            self.storage_client.upload_file(file_path, file_name)
-            file_names.append([file_name])
-        for i in range(task_num):
-            # create import job
-            payload = {
-                "collectionName": name,
-                "files": file_names,
-            }
-            rsp = self.import_job_client.create_import_jobs(payload)
-            job_id = rsp["data"]["jobId"]
-            # list import job
-            payload = {
-                "collectionName": name,
-            }
-            rsp = self.import_job_client.list_import_jobs(payload)
-            assert job_id in [job["jobId"] for job in rsp["data"]["records"]]
-        rsp = self.import_job_client.list_import_jobs(payload)
-        # get import job progress
-        for job in rsp["data"]["records"]:
-            job_id = job["jobId"]
-            finished = False
-            t0 = time.time()
-
-            while not finished:
-                try:
-                    rsp = self.import_job_client.get_import_job_progress(job_id)
-                    if rsp["data"]["state"] == "Completed":
-                        finished = True
-                    time.sleep(5)
-                    if time.time() - t0 > IMPORT_TIMEOUT:
-                        assert False, "import job timeout"
-                except Exception as e:
-                    logger.error(f"get import job progress failed: {e}")
-                    time.sleep(5)
-        rsp = self.import_job_client.list_import_jobs(payload)
-        assert rsp["code"] == 0, rsp
-        # assert data count
-        self._wait_for_count(name, file_nums * batch_size * task_num)
-        # assert import data can be queried
-        payload = {
-            "collectionName": name,
-            "filter": f"book_id in {[i for i in range(1000)]}",
-            "limit": 100,
-            "offset": 0,
-            "outputFields": ["*"],
-        }
-        rsp = self.vector_client.vector_query(payload)
-        assert len(rsp["data"]) == 100
+        # Query by a source field because the primary keys are generated per job.
+        rows = self._query_rows(
+            name,
+            f"word_count >= 0 and word_count < {min(1000, rows_per_job)}",
+            ["book_id", "word_count", "book_describe"],
+            expected_count=100,
+        )
+        assert len({row["book_id"] for row in rows}) == 100, rows
+        for row in rows:
+            assert 0 <= row["word_count"] < min(1000, rows_per_job), row
+            assert row["book_describe"] == f"book_{row['word_count']}", row
+        # Boundary source values prove that every input file is represented.
+        for word_count in (0, rows_per_job - 1):
+            assert self._query_count(name, f"word_count == {word_count}") == task_num
+        for (file_name,) in file_names:
+            self.storage_client.client.remove_object(self.storage_client.bucket_name, file_name)
 
 
 @pytest.mark.tags(CaseLabel.L1)
