@@ -847,8 +847,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     EXPECT_EQ(
         usage.resident,
         (use_mmap
-             ? cachinglayer::ResourceUsage{0, row_count * sizeof(int64_t)}
-             : cachinglayer::ResourceUsage{row_count * sizeof(int64_t), 0}));
+             ? cachinglayer::ResourceUsage(0, row_count * sizeof(int64_t))
+             : cachinglayer::ResourceUsage(row_count * sizeof(int64_t), 0)));
     EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
     EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
     const auto empty = translator->estimated_loading_usage({});
