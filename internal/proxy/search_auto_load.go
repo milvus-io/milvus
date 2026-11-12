@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,9 +58,11 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 
 // RetryRead implements taskmodel.QueryRunner.
 func (node *Proxy) RetryRead(ctx context.Context, dbName, collectionName string, read func(context.Context) error) error {
-	return node.retryDQL(ctx, dbName, collectionName, nil, func(ctx context.Context) (bool, error) {
-		return false, read(ctx)
-	})
+	return taskmodel.RunDMLReadRetry(ctx, func(ctx context.Context, read func(context.Context) error) error {
+		return node.retryDQL(ctx, dbName, collectionName, nil, func(ctx context.Context) (bool, error) {
+			return false, read(ctx)
+		})
+	}, read)
 }
 
 func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error), retryExecution func(error) bool) error {

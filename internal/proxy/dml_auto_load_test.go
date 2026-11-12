@@ -18,12 +18,18 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -31,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -66,9 +73,10 @@ func (w *dmlAutoLoadWAL) ResolvePChannelInfo(_ context.Context, vchannel string)
 }
 
 type dmlAutoLoadEnv struct {
-	node   *Proxy
-	client *dqlRetryClient
-	wal    *dmlAutoLoadWAL
+	pending sync.WaitGroup
+	node    *Proxy
+	client  *dqlRetryClient
+	wal     *dmlAutoLoadWAL
 }
 
 // Use the real public Proxy entries, DeleteRunner, scheduler, DeleteTask, upsert
@@ -286,4 +294,135 @@ func TestInvalidExpressionDeleteDoesNotLoad(t *testing.T) {
 	require.Error(t, merr.Error(resp.GetStatus()))
 	require.Zero(t, env.client.server.plans.Load())
 	require.Zero(t, env.wal.calls)
+}
+
+// addReadyDMLCollection adds an independent, non-AutoID collection, whose full
+// upsert needs no read. The actual DML queue and Upsert PreExecute remain in use.
+func addReadyDMLCollection(t *testing.T, env *dmlAutoLoadEnv) {
+	t.Helper()
+	cache := env.node.metaCache.(*MockCache)
+	original, err := cache.GetCollectionSchema(env.node.ctx, "db", "collection")
+	require.NoError(t, err)
+	collection := proto.Clone(original.CollectionSchema).(*schemapb.CollectionSchema)
+	collection.Name = "ready"
+	for _, field := range collection.Fields {
+		field.AutoID = false
+	}
+	schema, err := newSchemaInfo(collection)
+	require.NoError(t, err)
+	cache.EXPECT().GetCollectionID(mock.Anything, "db", "ready").Return(int64(200), nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "ready", mock.Anything).Return(&collectionInfo{
+		CollID: 200, VChannels: []string{"v1"}, Schema: schema,
+	}, nil).Maybe()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, "db", "ready").Return(schema, nil).Maybe()
+	cache.EXPECT().GetPartitionInfo(mock.Anything, "db", "ready", "").Return(&partitionInfo{Name: "_default", PartitionID: 21}, nil).Maybe()
+	cache.EXPECT().GetPartitionID(mock.Anything, "db", "ready", "_default").Return(int64(21), nil).Maybe()
+	chMgr := env.node.chMgr.(*channelmgr.MockChannelsMgr)
+	chMgr.EXPECT().GetVChannels(int64(200)).Return([]string{"v1"}, nil).Maybe()
+	chMgr.EXPECT().GetChannels(int64(200)).Return([]string{"p1"}, nil).Maybe()
+}
+
+func startDMLUpsert(ctx context.Context, env *dmlAutoLoadEnv, collection string, partial bool) <-chan *commonpb.Status {
+	done := make(chan *commonpb.Status, 1)
+	env.pending.Add(1)
+	go func() {
+		defer env.pending.Done()
+		resp, err := env.node.Upsert(ctx, &milvuspb.UpsertRequest{
+			DbName: "db", CollectionName: collection, NumRows: 1, PartialUpdate: partial, FieldsData: autoLoadTestRow(),
+		})
+		if err != nil {
+			done <- merr.Status(err)
+			return
+		}
+		done <- resp.GetStatus()
+	}()
+	return done
+}
+
+func TestDMLReadinessWaitDoesNotBlockOtherCollection(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		for _, phase := range []string{"initial", "query"} {
+			for _, outcome := range []string{"ready", "cancel", "deadline"} {
+				t.Run(fmt.Sprintf("partial=%t/%s/%s", partial, phase, outcome), func(t *testing.T) {
+					env := newDMLAutoLoadEnv(t, phase, !partial)
+					addReadyDMLCollection(t, env)
+					waiting, release := make(chan struct{}), make(chan struct{})
+					var once sync.Once
+					t.Cleanup(func() { once.Do(func() { close(release) }) })
+					calls := 0
+					env.client.coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
+						func(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+							calls++
+							require.EqualValues(t, 100, req.GetCollectionID())
+							if phase == "query" && calls == 1 {
+								return merr.Success(), nil
+							}
+							close(waiting)
+							select {
+							case <-release:
+								env.client.server.loaded.Store(true)
+								return merr.Success(), nil
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							}
+						})
+					ctx, cancel := context.WithCancel(env.node.ctx)
+					if outcome == "deadline" {
+						cancel()
+						ctx, cancel = context.WithTimeout(env.node.ctx, time.Second)
+					}
+					defer cancel()
+					t.Cleanup(func() {
+						cancel()
+						once.Do(func() { close(release) })
+						env.pending.Wait()
+						waitDMLQueueIdle(t, env.node)
+					})
+					cold := startDMLUpsert(ctx, env, "collection", partial)
+					awaitAutoLoadSchedulerResult(t, waiting)
+					// MaxTaskNum is one. B must reach its write while A is still
+					// waiting, including a release after A's first admitted read.
+					ready := startDMLUpsert(env.node.ctx, env, "ready", false)
+					require.NoError(t, merr.Error(awaitAutoLoadSchedulerResult(t, ready)))
+					require.Equal(t, 1, env.wal.calls)
+					switch outcome {
+					case "ready":
+						once.Do(func() { close(release) })
+					case "cancel":
+						cancel()
+					}
+					status := awaitAutoLoadSchedulerResult(t, cold)
+					// WaitToFinish may return on ctx.Done before the scheduler
+					// finishes cleanup. Check no write happened after task exit.
+					waitDMLQueueIdle(t, env.node)
+					if outcome == "ready" {
+						require.NoError(t, merr.Error(status))
+						require.Equal(t, 2, env.wal.calls)
+					} else {
+						want := context.Canceled
+						if outcome == "deadline" {
+							want = context.DeadlineExceeded
+						}
+						require.Equal(t, merr.Code(want), status.GetCode())
+						require.Equal(t, 1, env.wal.calls, "a canceled read must never reach the mutation")
+					}
+					if phase == "query" {
+						require.True(t, env.client.server.injected.Load())
+					}
+				})
+			}
+		}
+	}
+}
+
+func waitDMLQueueIdle(t *testing.T, node *Proxy) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		for _, queue := range node.sched.GetMetrics() {
+			if queue.Type == "dml" {
+				return queue.PendingCount == 0 && queue.ExecutingCount == 0
+			}
+		}
+		return false
+	}, time.Second, time.Millisecond)
 }

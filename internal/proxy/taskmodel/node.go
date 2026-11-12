@@ -53,6 +53,7 @@ type QueryRunner interface {
 	// RetryRead runs the read stage of a write under the policy of a complete DQL
 	// attempt: it waits for a ready collection, loading it if AutoLoad is enabled,
 	// and repeats read when its view retires. read must have no write side effects
-	// and must resolve again whatever a previous attempt bound.
+	// and must resolve again whatever a previous attempt bound. Scheduled DML
+	// releases its execution slot during readiness checks and retry backoff.
 	RetryRead(ctx context.Context, dbName, collectionName string, read func(context.Context) error) error
 }

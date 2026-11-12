@@ -212,8 +212,9 @@ func (it *UpsertTask) OnEnqueue() error {
 }
 
 // retrieveByPKs reads the rows an upsert replaces. An unloaded collection is loaded
-// first, and the read restarts when its view retires. The worker stays occupied
-// meanwhile, as it does for the read itself.
+// first, and the read restarts when its view retires. Readiness waits and retry
+// backoff release the DML slot; each read and the subsequent mutation reacquire
+// a slot while retaining the same task state.
 func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	queryRunner, ok := t.node.(taskmodel.QueryRunner)
 	if !ok {

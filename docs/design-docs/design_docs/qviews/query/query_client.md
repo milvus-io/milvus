@@ -164,7 +164,11 @@ channel snapshots. Partial upsert uses the successful read's snapshots for CAS.
 With AutoLoad enabled, the read waits until the collection is ready at its current
 load configuration. That includes a loaded collection during a load-requirement
 change, while its old Up view still serves. Delete waits on the request goroutine.
-Upsert waits on its DmQueue worker, so enough waiting upserts stall that Proxy's DML.
+Upsert releases its DML execution slot during readiness checks and retry backoff,
+then reacquires a slot for each read and before continuing the mutation. The same
+task retains its collection identity, allocated IDs and CAS state, including when
+a view is invalidated after admission or a CAS retry needs another read. Pending
+readiness waits therefore do not consume the slots needed by unrelated DML.
 
 The shared client error interceptors attach an independent `RPCRequestContext`
 protobuf in gRPC status details. It describes the request, not an error category;
