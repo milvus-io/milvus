@@ -206,6 +206,40 @@ def phase(endpoint, call, searches, mode, concurrency, offered_rate=None, mixed=
     return result
 
 
+def measure_batch_admission(endpoint, token, searches, concurrent_batches):
+    start = threading.Barrier(concurrent_batches)
+    payload = {"requests": [{"search": search} for search in searches]}
+    url = f"{endpoint}/v2/vectordb/entities/multi_search"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def submit(_):
+        start.wait(timeout=10)
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        body = response.json()
+        if response.status_code == 429:
+            return "queue_full"
+        if response.status_code == 200 and body.get("code") == 0:
+            items = body.get("data", [])
+            if len(items) == BATCH_SIZE and all(item["search"]["code"] == 0 for item in items):
+                return "complete"
+        return "failed"
+
+    with ThreadPoolExecutor(max_workers=concurrent_batches) as pool:
+        outcomes = list(pool.map(submit, range(concurrent_batches)))
+    print(
+        "MULTISEARCH_ADMISSION "
+        + json.dumps(
+            {
+                "concurrent_batches": concurrent_batches,
+                "complete": outcomes.count("complete"),
+                "queue_full": outcomes.count("queue_full"),
+                "failed": outcomes.count("failed"),
+            }
+        ),
+        flush=True,
+    )
+
+
 def test_multisearch_load(endpoint, token, request):
     searches = prepare_collections(endpoint, token, request)
     call = make_requests(endpoint, token)
@@ -219,3 +253,6 @@ def test_multisearch_load(endpoint, token, request):
     phase(endpoint, call, searches, "resident", 4, mixed=True)
     for mode in ["fanout", "batch", "batch", "fanout"]:
         phase(endpoint, call, searches, mode, 4, offered_rate=offered_rate, mixed=True)
+
+    for concurrent_batches in (8, 32, 80):
+        measure_batch_admission(endpoint, token, searches, concurrent_batches)
