@@ -15,6 +15,7 @@
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -2194,8 +2195,25 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
     OpContext cancelled_ctx(cancelled.getToken());
-    EXPECT_THROW(translator.get_cells(&cancelled_ctx, {0}), SegcoreError);
+    EXPECT_THROW(folly::coro::blockingWait(
+                     translator.get_cells_async(&cancelled_ctx, {0})),
+                 SegcoreError);
     EXPECT_EQ(fs->async_opens.load(), before_cancel);
+
+    // Coroutine cancellation is independent of the explicit operation context.
+    OpContext active_ctx;
+    for (auto* ctx : {static_cast<OpContext*>(nullptr), &active_ctx}) {
+        const auto before = fs->async_opens.load();
+        try {
+            folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancelled.getToken(), translator.get_cells_async(ctx, {0})));
+            FAIL() << "expected inherited cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(fs->async_opens.load(), before);
+    }
+    EXPECT_FALSE(active_ctx.cancellation_token.isCancellationRequested());
 
     if (use_async) {
         folly::CancellationSource during_open;
@@ -2203,7 +2221,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         fs->on_async_open = [&] { during_open.requestCancellation(); };
         auto clear_hook = folly::makeGuard([&] { fs->on_async_open = {}; });
         try {
-            translator.get_cells(&open_ctx, {0});
+            folly::coro::blockingWait(
+                translator.get_cells_async(&open_ctx, {0}));
             FAIL() << "expected cancellation during remote open";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -2229,7 +2248,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
             resumed.wait();
         };
         auto pending = std::async(std::launch::async, [&] {
-            return translator.get_cells(nullptr, {0});
+            return folly::coro::blockingWait(
+                translator.get_cells_async(nullptr, {0}));
         });
         auto drain = folly::makeGuard([&] {
             release();
@@ -2263,7 +2283,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
             [&] { std::filesystem::rename(missing, files.front()); });
         EXPECT_THROW(translator.get_cells(nullptr, {0}), SegcoreError);
     }
-    auto second = translator.get_cells(nullptr, {0});
+    auto second =
+        folly::coro::blockingWait(translator.get_cells_async(nullptr, {0}));
     first.clear();
     std::vector<std::pair<uint32_t, uint32_t>> hits;
     second.front().second->TermQuery(

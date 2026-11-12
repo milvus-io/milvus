@@ -1038,3 +1038,54 @@ func TestGetResourceGroupName(t *testing.T) {
 		assert.Equal(t, "my_rg", s.GetResourceGroupName())
 	})
 }
+
+func TestLiveSessionsFollowKeepAliveLoop(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("livetest", "testAddr", false)
+	s.Register()
+	_, live := liveSessions.Load(s)
+	require.True(t, live)
+
+	s.Stop()
+	_, live = liveSessions.Load(s)
+	require.False(t, live)
+}
+
+func TestRevokeLeasesBeforeExit(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	// Revoking the lease of a session with a running keepalive loop exits the
+	// process through checkKeepaliveTTL. Other tests leave such sessions behind,
+	// so track only a session registered without a loop.
+	liveSessions.Clear()
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("revoketest", "testAddr", false)
+	require.NoError(t, s.registerService())
+	liveSessions.Store(s, struct{}{})
+	defer liveSessions.Delete(s)
+	sessions, _, err := s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+
+	RevokeLeasesBeforeExit(time.Second)
+
+	// The session key goes with its lease at once, not after the TTL.
+	sessions, _, err = s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+	ttl, err := etcdCli.TimeToLive(ctx, *s.LeaseID)
+	require.NoError(t, err)
+	require.EqualValues(t, -1, ttl.TTL)
+}

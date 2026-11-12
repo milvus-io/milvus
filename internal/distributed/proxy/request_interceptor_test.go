@@ -20,13 +20,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -135,6 +140,91 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 			metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
 		})
 	}
+}
+
+type mockAnswerHook struct {
+	hookutil.DefaultHook
+	resp any
+}
+
+func (h mockAnswerHook) Mock(ctx context.Context, req any, fullMethod string) (bool, any, error) {
+	return true, h.resp, nil
+}
+
+type beforeRefusalHook struct {
+	hookutil.DefaultHook
+}
+
+func (h beforeRefusalHook) Before(ctx context.Context, req any, fullMethod string) (context.Context, error) {
+	return ctx, errors.New("refused by hook")
+}
+
+type afterRefusalHook struct {
+	hookutil.DefaultHook
+}
+
+func (h afterRefusalHook) After(ctx context.Context, resp any, err error, fullMethod string) error {
+	return errors.New("refused by hook")
+}
+
+// A request the hook answers or refuses is counted once, by this interceptor,
+// with the outcome the client sees.
+func (suite *StatsInterceptorSuite) TestHookVerdictCountedOnce() {
+	chain := grpc_middleware.ChainUnaryServer(UnaryRequestStatsInterceptor, proxy.UnaryServerHookInterceptor())
+	info := &grpc.UnaryServerInfo{FullMethod: milvuspb.MilvusService_GetVersion_FullMethodName}
+	handlerRuns := 0
+	handler := func(ctx context.Context, req any) (any, error) {
+		handlerRuns++
+		return &milvuspb.GetVersionResponse{Status: merr.Success(), Version: "real"}, nil
+	}
+	nodeID := paramtable.GetStringNodeID()
+	hookutil.InitOnceHook()
+	defer hookutil.SetTestHook(hookutil.DefaultHook{})
+
+	type testCase struct {
+		tag         string
+		hook        hook.Hook
+		handlerRuns int
+		outcome     [2]string
+	}
+	cases := []testCase{
+		{
+			tag:     "mock_answer",
+			hook:    mockAnswerHook{resp: &milvuspb.GetVersionResponse{Status: merr.Success(), Version: "mock"}},
+			outcome: [2]string{metrics.SuccessLabel, metrics.CauseNA},
+		},
+		{
+			// a classified refusal: the hook answers from Mock with a merr.Status
+			tag:     "mock_refusal_status",
+			hook:    mockAnswerHook{resp: &milvuspb.GetVersionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("refused by hook"))}},
+			outcome: [2]string{metrics.FailLabel, metrics.CauseUser},
+		},
+		{
+			tag:     "before_refusal",
+			hook:    beforeRefusalHook{},
+			outcome: [2]string{metrics.RejectedLabel, metrics.CauseUser},
+		},
+		{
+			tag:         "after_refusal",
+			hook:        afterRefusalHook{},
+			handlerRuns: 1,
+			outcome:     [2]string{metrics.RejectedLabel, metrics.CauseUser},
+		},
+	}
+	for _, tc := range cases {
+		suite.Run(tc.tag, func() {
+			metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
+			handlerRuns = 0
+			hookutil.SetTestHook(tc.hook)
+			_, _ = chain(context.Background(), &milvuspb.GetVersionRequest{}, info, handler)
+			suite.Equal(tc.handlerRuns, handlerRuns)
+			// one total and one outcome, under any labels; checked before WithLabelValues creates series
+			suite.CollectCntEqual(metrics.ProxyFunctionCall, 2)
+			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", metrics.TotalLabel, metrics.CauseNA, "", ""), 1)
+			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", tc.outcome[0], tc.outcome[1], "", ""), 1)
+		})
+	}
+	metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
 }
 
 func TestUnaryRequestStatsInterceptor(t *testing.T) {

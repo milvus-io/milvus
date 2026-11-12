@@ -90,8 +90,8 @@ const (
 // whenever the collection's own status is LoadStatus_Loaded. The status is
 // only ever set once the collection-wide AVERAGE reaches 100, so a group
 // finishing first does not arm it -- but nothing ever disarms it either:
-// UpdateLoadConfigJob spawns replicas for a newly added resource group
-// without touching the collection's status, so once a collection has been
+// Legacy replica updates could add a resource group without touching the
+// collection's status, so once a collection has been
 // Loaded even once, the short-circuit stays permanently armed and the gate
 // answers "ready" for every later resource group from the moment its
 // replicas exist. That is the same admission bug from a second direction. The gate here is

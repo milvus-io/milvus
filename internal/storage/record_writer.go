@@ -517,6 +517,11 @@ type packedTextBatchWriter struct {
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
 	columnGroupCompressed   map[typeutil.UniqueID]uint64
 	storageConfig           *indexpb.StorageConfig
+	// unflushedInput is the record bytes accepted since the last flush, measured
+	// here because only this writer still sees the raw TEXT payload: the writer
+	// below decides its own flush from the batch it receives, where a TEXT value
+	// is already a 16-24 B LOB reference.
+	unflushedInput uint64
 }
 
 func (pw *packedTextBatchWriter) Write(r Record) error {
@@ -529,6 +534,7 @@ func (pw *packedTextBatchWriter) Write(r Record) error {
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
 		pw.writtenUncompressed += size
+		pw.unflushedInput += size
 		for _, columnGroup := range pw.columnGroups {
 			if lo.Contains(columnGroup.Columns, col) {
 				pw.columnGroupUncompressed[columnGroup.GroupID] += size
@@ -536,7 +542,33 @@ func (pw *packedTextBatchWriter) Write(r Record) error {
 			}
 		}
 	}
-	return pw.writer.Write(rec)
+
+	if err := pw.writer.Write(rec); err != nil {
+		return err
+	}
+	// Cap the input the writer keeps unflushed at the writer's own buffer size,
+	// the cadence a plain writer gets from the storage writer's buffer
+	// accounting: import and compaction each pass the write buffer size they
+	// run with, and streaming flush passes 0 because every sync already closes
+	// its writer, which disables the bound.
+	if pw.bufferSize > 0 && pw.unflushedInput >= uint64(pw.bufferSize) {
+		return pw.SyncBuffered()
+	}
+	return nil
+}
+
+// SyncBuffered flushes the buffered column groups to storage without closing the
+// writer. That includes the TEXT LOB column writers, which also flush on their
+// own threshold between calls.
+func (pw *packedTextBatchWriter) SyncBuffered() error {
+	if pw.writer == nil {
+		return nil
+	}
+	if err := pw.writer.SyncBuffered(); err != nil {
+		return err
+	}
+	pw.unflushedInput = 0
+	return nil
 }
 
 func (pw *packedTextBatchWriter) GetWrittenUncompressed() uint64 {

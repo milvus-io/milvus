@@ -461,11 +461,10 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 // IdempotencyVChannels returns every vchannel the summary holds idempotency
 // records for, durable or not.
 //
-// It is what recovery iterates, rather than the recovered write path: the write
-// path's vchannels are collections and segments, a different question from
-// which channels have a dedup history. A pchannel can hold records for a
-// vchannel the write path knows nothing about yet, and the window would then be
-// rebuilt empty.
+// Summary history can include channels absent from the current write path.
+// Callers enumerating that history must use Summary membership rather than
+// collection/segment membership. Bounded WAL-open restoration reads the keyed
+// history directly through ReadIdempotencySnapshots without this enumeration.
 func (m *Manager) IdempotencyVChannels() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -504,8 +503,8 @@ func (m *Manager) IdempotencyVChannels() []string {
 // ReadIdempotencyEntries returns everything the summary knows about one
 // vchannel with timetick in (from, to]: the retained chunks in generation
 // order, then what is sealed but not yet durable, then what is still staged.
-// It is the one-time recovery path -- the interceptor's window is empty after a
-// restart and is rebuilt from this.
+// This general range API is uncapped. WAL-open idempotency restoration uses
+// ReadIdempotencySnapshots to bound its selected history before materialization.
 //
 // The in-memory tail is not an optimization, it is required for correctness. A
 // chunk is sealed on a byte threshold, so a low-volume pchannel can run for a
@@ -543,7 +542,7 @@ func (m *Manager) ReadIdempotencyEntries(
 }
 
 // ReadIdempotencyEntriesOfVChannels answers the same question for several
-// vchannels at once, and is what recovery uses.
+// vchannels at once. Unlike ReadIdempotencySnapshots, it returns the full range.
 //
 // The chunk loop is the OUTER one on purpose: a chunk is a pchannel-wide object
 // with no range read, so reading vchannel by vchannel would download the same
@@ -568,17 +567,28 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	m.mu.Lock()
 	inMemory := make(map[string][][]*stagedRecord, len(vchannels))
 	for _, vchannel := range vchannels {
-		tails := make([][]*stagedRecord, 0, len(m.pendingSealed)+1)
-		for _, sc := range m.pendingSealed {
-			tails = append(tails, sc.RecordsByVChannel[vchannel])
-		}
-		staged := make([]*stagedRecord, 0, len(m.pending))
-		for i := range m.pending {
-			if m.pending[i].vchannel == vchannel {
-				staged = append(staged, &m.pending[i])
+		inMemory[vchannel] = nil
+	}
+	// Keep only actual sealed sections, in chunk order. Reserving a slot for
+	// every (vchannel, chunk) pair amplifies even a sparse tail during recovery.
+	for _, sc := range m.pendingSealed {
+		for vchannel, records := range sc.RecordsByVChannel {
+			if _, requested := inMemory[vchannel]; requested {
+				inMemory[vchannel] = append(inMemory[vchannel], records)
 			}
 		}
-		inMemory[vchannel] = append(tails, staged)
+	}
+	// Partition the pending span once. Each record contributes one pointer,
+	// rather than reserving the whole pchannel's pending capacity per vchannel.
+	staged := make(map[string][]*stagedRecord)
+	for i := range m.pending {
+		record := &m.pending[i]
+		if _, requested := inMemory[record.vchannel]; requested {
+			staged[record.vchannel] = append(staged[record.vchannel], record)
+		}
+	}
+	for vchannel, records := range staged {
+		inMemory[vchannel] = append(inMemory[vchannel], records)
 	}
 	chunks := m.chunkIndex.snapshot(from, to)
 	m.mu.Unlock()

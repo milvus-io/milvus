@@ -47,6 +47,47 @@ func TestTrackerDerivesCheckpointFromMessage(t *testing.T) {
 	assert.Equal(t, uint64(200), point.TimeTick)
 }
 
+func TestTrackerCountsCompleteButUnpublishedMessages(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10, MessageID: walimplstest.NewTestMessageID(1)}, nil, nil)
+	tracker.Track(testMessage(t, 1, 10)).Release()
+	_, _, count, initial := tracker.LogicalState()
+	require.Zero(t, count, "replayed checkpoint boundary must not be counted")
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	tracker.Track(testMessage(t, 3, 30)).Release()
+	observed, completed, count, last := tracker.LogicalState()
+	require.Equal(t, uint64(2), count)
+	require.Equal(t, observed, completed)
+	require.Zero(t, tracker.Pending(), "completion does not erase the unpublished count")
+	require.Equal(t, initial, last, "TimeTick records do not refresh idle time")
+	point, offset, messages := tracker.CheckpointThroughWithCount(20)
+	require.Equal(t, uint64(20), point.TimeTick)
+	require.Equal(t, uint64(1), messages)
+	require.Less(t, offset, observed)
+	point, offset, messages = tracker.CheckpointThroughWithCount(30)
+	require.Equal(t, uint64(30), point.TimeTick)
+	require.Equal(t, uint64(2), messages)
+	require.Equal(t, observed, offset)
+	_, _, messages = tracker.CheckpointThroughWithCount(100)
+	require.Equal(t, uint64(2), messages, "consuming the same prefix twice keeps its count")
+}
+
+func TestTrackerIdleClockIgnoresTicksAndCheckpointReplay(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10}, nil, nil)
+	idle := time.Now().Add(-time.Hour)
+	tracker.lastMessageAt = idle
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	_, _, _, last := tracker.LogicalState()
+	require.Equal(t, idle, last)
+	tracker.Track(testBroadcastMessage(t, 3, 30)).Release()
+	_, _, count, last := tracker.LogicalState()
+	require.Equal(t, uint64(2), count)
+	require.True(t, last.After(idle), "a persisted non-TimeTick message refreshes idleness")
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	_, _, afterCount, after := tracker.LogicalState()
+	require.Equal(t, count, afterCount)
+	require.Equal(t, last, after, "replaying an already completed point cannot refresh the clock")
+}
+
 func TestTrackerPoisonPinsCompletedPrefixAfterPayloadRelease(t *testing.T) {
 	for _, ownerFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "consumer-first", true: "owner-first"}[ownerFirst], func(t *testing.T) {

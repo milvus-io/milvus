@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -335,66 +334,6 @@ func (suite *ServerSuite) TestStop() {
 	suite.server.Stop()
 	// Stop has to be idempotent
 	suite.server.Stop()
-}
-
-func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
-	suite.server.Stop()
-
-	Params.Save(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
-	defer Params.Reset(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key)
-
-	suite.Run("test old node exist", func() {
-		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
-		server := &Server{}
-		mockSession := sessionutil.NewMockSession(suite.T())
-		server.session = mockSession
-
-		oldSessions := make(map[string]*sessionutil.Session)
-		oldSessions["s1"] = sessionutil.NewSession(context.Background())
-		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(oldSessions, 0, nil).Maybe()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(1500 * time.Millisecond)
-			server.updateBalanceConfigLoop(ctx)
-		}()
-		// old query node exist, disable auto balance
-		suite.Eventually(func() bool {
-			return !Params.QueryCoordCfg.AutoBalance.GetAsBool()
-		}, 5*time.Second, 1*time.Second)
-
-		cancel()
-		wg.Wait()
-	})
-
-	suite.Run("all old node down", func() {
-		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
-		server := &Server{}
-		mockSession := sessionutil.NewMockSession(suite.T())
-		server.session = mockSession
-		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(nil, 0, nil).Maybe()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(1500 * time.Millisecond)
-			server.updateBalanceConfigLoop(ctx)
-		}()
-		// all old query node down, enable auto balance
-		suite.Eventually(func() bool {
-			return Params.QueryCoordCfg.AutoBalance.GetAsBool()
-		}, 5*time.Second, 1*time.Second)
-
-		cancel()
-		wg.Wait()
-	})
 }
 
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {

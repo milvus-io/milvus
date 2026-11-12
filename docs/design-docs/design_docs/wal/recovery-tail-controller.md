@@ -41,6 +41,7 @@ Derived pressure values are:
 recoveryTailBytes = observedOffset - publishedOffset
 blockingBytes     = observedOffset - completedOffset
 publishLagBytes   = completedOffset - publishedOffset
+recoveryTailMessages = observedMessageCount - publishedMessageCount
 ```
 
 The recovery tail uses `publishedOffset`, not `completedOffset`, because a
@@ -51,6 +52,20 @@ completed but unpublished message is replayed after a crash.
 Each tracked WAL point records the message's estimated logical encoded bytes
 and a monotonic cumulative end offset. The offset is runtime bookkeeping, not
 part of the durable checkpoint format.
+
+Each tracked point also carries a cumulative message count. It counts persisted
+messages that advance the observed prefix, including TimeTicks; an assembled
+committed transaction counts once, matching the existing logical-byte units.
+Completed ACKs do not remove this count. Summary-gated checkpoint selection
+freezes its byte offset and count from the same entry, and only successful
+catalog publication advances both published frontiers. Retries reuse the frozen
+pair, so newer observations cannot be accidentally subtracted from the tail.
+
+Idle time is local elapsed time since the last newly observed persisted
+non-TimeTick message. TimeTicks and volatile heartbeats do not refresh it, and
+checkpoint publication does not restart the timer. Replay reconstructs the
+relative counters and starts a new local idle clock; no clock or count is added
+to the durable checkpoint format.
 
 After restart, replay begins with offset zero at the persisted checkpoint and
 reconstructs the relative tail size while scanning. Thresholds include headroom
@@ -112,11 +127,58 @@ Components implement idempotency:
   Explicit blocker classification is not implemented; a VChannel persist
   request may still be issued without resolving an Ack or poisoned-message stall.
 
-## 5. Watermarks
+## 5. Independent Persistence And Append Admission
 
-Soft pressure starts persistence requests before the target is exceeded.
+Persistence triggers and append rate limiting use independent configurations.
+They share the observed-to-published tail counters. Once append pressure is
+active, persistence must continue until that pressure can enter recovery.
 
-The initial defaults are:
+### Persistence triggers
+
+The initial per-PChannel defaults are:
+
+```text
+streaming.walRecovery.flush.sizeThreshold = 6 GiB
+streaming.walRecovery.flush.messageThreshold = 6144
+streaming.walRecovery.flush.idleMinSize = 512 MiB
+streaming.walRecovery.flush.idleTimeout = 10 minutes
+```
+
+```text
+recoveryTailBytes >= flush.sizeThreshold
+  OR recoveryTailMessages >= flush.messageThreshold
+  OR (recoveryTailBytes > flush.idleMinSize AND idle time >= flush.idleTimeout)
+  -> request progress for the VChannel owning the oldest incomplete prefix
+  -> let Summary's independent worker seal its pending span
+```
+
+Append Slowdown or Reject also keeps this periodic persistence loop active until
+the tail reaches `tail.lowWatermark` and the controller sends
+`EnterRecoveryMode`. For example, draining 8 GiB to 5 GiB must not stop
+persistence just because it passed the 6 GiB flush threshold: admission still
+needs a tail of at most 4 GiB to recover. This also covers rejection reached by
+the adaptive limiter's delay rather than the immediate 16 GiB threshold.
+
+These thresholds are captured when a WAL opens. Nonpositive size or message
+thresholds disable the respective trigger; either nonpositive idle setting
+disables the size-and-idle trigger. The periodic Tracker and Summary workers
+check the predicate once per second, even without new WAL messages or incomplete
+ACKs. Summary has no separate idle/count policy. Requests enqueue asynchronous
+work; they neither close every growing Segment nor establish a full-tail drain
+barrier. Existing age-based Segment/L0 persistence remains independent.
+
+`ShouldFlush` is a read-only predicate. Reaching a persistence threshold does
+not enter slowdown, arm a rejection timer, or change the limiter's recovery
+condition. Disabling persistence triggers does not disable byte-based append
+admission or its required persistence-to-recovery loop. The thresholds need not
+be ordered against the limiter watermarks. When no recovery-tail pressure is
+active, including after requesting Recovery, only the independent flush triggers
+apply; starting persistence at 6 GiB does not itself put the limiter into
+Slowdown or Recovery.
+
+### Append admission watermarks
+
+Existing configuration keys and defaults remain:
 
 ```text
 streaming.walRecovery.tail.lowWatermark  = 4 GiB
@@ -125,23 +187,22 @@ streaming.walRecovery.tail.highWatermark = 16 GiB
 ```
 
 ```text
-recoveryTailBytes >= softWatermark
-  -> request progress for the VChannel owning the oldest incomplete prefix
-  -> increase publisher frequency while completed progress is unpublished
+recoveryTailBytes >= softWatermark -> enter adaptive append slowdown
+recoveryTailBytes >= highWatermark -> reject new DML append on this PChannel
+recoveryTailBytes <= lowWatermark  -> enter adaptive recovery
 ```
 
-A strict bound needs append admission control:
-
-```text
-recoveryTailBytes >= highWatermark
-  -> reject new DML append on this PChannel
-
-recoveryTailBytes <= lowWatermark
-  -> enter the existing adaptive-rate-limit recovery path
-```
+Only bytes affect this state machine and its slowdown checker. At the low
+watermark, rejection is released through `EnterRecoveryMode`, even if the count
+or idle persistence condition still holds. There is no Reject-to-Slowdown request.
+The existing adaptive limiter can also escalate sustained slowdown to rejection
+after its configured delay; 16 GiB is the immediate byte rejection threshold,
+not the only route to rejection. Persistence requests never start this delay.
 
 Without append backpressure, object storage, catalog, or Coordinator Ack failure
-can grow the tail without bound. A background trigger alone is best-effort.
+can grow the tail without bound. A background persistence trigger alone is
+best-effort. Increasing publisher frequency while completed progress is
+unpublished remains independent of these two predicates.
 
 ## 6. RTO Configuration
 

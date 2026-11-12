@@ -1605,6 +1605,11 @@ func matchCountRule(outputs []string) bool {
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
@@ -1614,7 +1619,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		PartitionNames: httpReq.PartitionNames,
 		QueryParams:    []*commonpb.KeyValuePair{},
 	}
-	var err error
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1661,7 +1665,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
 		if err == nil {
 			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
 		}
@@ -1695,6 +1699,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*CollectionIDReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -1733,7 +1742,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2127,6 +2136,11 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
@@ -2136,7 +2150,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2402,7 +2415,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
 			if err == nil {
 				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
 			}
@@ -2461,6 +2474,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
@@ -2469,7 +2487,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2594,7 +2611,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
 			if err == nil {
 				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
 			}

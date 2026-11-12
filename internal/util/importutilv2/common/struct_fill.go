@@ -71,7 +71,7 @@ func FillMissingStructSubFields(schema *schemapb.CollectionSchema, data *storage
 			}
 		}
 		for _, subField := range missing {
-			filled, err := storage.NewFieldData(subField.GetDataType(), subField, refData.RowNum())
+			filled, err := storage.NewFieldDataBuilder(subField.GetDataType(), subField).WithCapacity(refData.RowNum()).Build()
 			if err != nil {
 				return err
 			}

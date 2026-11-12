@@ -21,6 +21,7 @@ type VChannelPersistRequester interface {
 type trackedEntry struct {
 	point            utility.WALCheckpoint
 	logicalEndOffset uint64
+	messageCount     uint64
 	vchannel         string
 	message          message.ImmutableMessage
 	trackedAt        time.Time
@@ -43,11 +44,14 @@ type Tracker struct {
 	completedPoint         utility.WALCheckpoint
 	observedLogicalOffset  uint64
 	completedLogicalOffset uint64
+	observedMessageCount   uint64
+	lastMessageAt          time.Time
 	pending                []*trackedEntry
 	// Completed entries retain only position metadata until Summary confirms them.
 	checkpointPending       []*trackedEntry
 	checkpointPoint         utility.WALCheckpoint
 	checkpointLogicalOffset uint64
+	checkpointMessageCount  uint64
 	vchannels               map[string]*vchannelPending
 	onAdvance               func(utility.WALCheckpoint)
 	persistRequester        VChannelPersistRequester
@@ -64,6 +68,7 @@ func NewTracker(
 		vchannels:        make(map[string]*vchannelPending),
 		onAdvance:        onAdvance,
 		persistRequester: persistRequester,
+		lastMessageAt:    time.Now(),
 	}
 }
 
@@ -84,8 +89,14 @@ func (t *Tracker) Track(raw message.ImmutableMessage) message.OwnedImmutableMess
 	t.mu.Lock()
 	if shouldAdvance(t.completedPoint, entry.point) {
 		t.observedLogicalOffset = saturatingAdd(t.observedLogicalOffset, logicalMessageSize(raw))
+		t.observedMessageCount = saturatingAdd(t.observedMessageCount, 1)
+		// Confirmation-only ticks do not turn an idle writer into an active one.
+		if raw.MessageType() != message.MessageTypeTimeTick && entry.trackedAt.After(t.lastMessageAt) {
+			t.lastMessageAt = entry.trackedAt
+		}
 	}
 	entry.logicalEndOffset = t.observedLogicalOffset
+	entry.messageCount = t.observedMessageCount
 	t.pending = append(t.pending, entry)
 	if entry.vchannel != "" {
 		state := t.vchannels[entry.vchannel]
@@ -197,6 +208,13 @@ func (t *Tracker) Completed() (utility.WALCheckpoint, uint64) {
 // logical confirmation. The TimeTick, MessageID and byte offset always come
 // from the same tracked entry; payloads have already been released.
 func (t *Tracker) CheckpointThrough(through uint64) (utility.WALCheckpoint, uint64) {
+	point, offset, _ := t.CheckpointThroughWithCount(through)
+	return point, offset
+}
+
+// CheckpointThroughWithCount binds bytes and message count to the exact same
+// complete WAL point. Callers publish both frontiers only after catalog commit.
+func (t *Tracker) CheckpointThroughWithCount(through uint64) (utility.WALCheckpoint, uint64, uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	n := 0
@@ -205,12 +223,21 @@ func (t *Tracker) CheckpointThrough(through uint64) (utility.WALCheckpoint, uint
 		if shouldAdvance(t.checkpointPoint, entry.point) {
 			t.checkpointPoint = entry.point
 			t.checkpointLogicalOffset = entry.logicalEndOffset
+			t.checkpointMessageCount = entry.messageCount
 		}
 		n++
 	}
 	clear(t.checkpointPending[:n])
 	t.checkpointPending = t.checkpointPending[n:]
-	return *t.checkpointPoint.Clone(), t.checkpointLogicalOffset
+	return *t.checkpointPoint.Clone(), t.checkpointLogicalOffset, t.checkpointMessageCount
+}
+
+// LogicalState captures the tail counters and last non-TimeTick observation
+// atomically. Transactions count as one assembled committed message.
+func (t *Tracker) LogicalState() (observed, completed, messages uint64, lastMessageAt time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.observedLogicalOffset, t.completedLogicalOffset, t.observedMessageCount, t.lastMessageAt
 }
 
 // LogicalOffsets returns the observed and continuous completed runtime byte

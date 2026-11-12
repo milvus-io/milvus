@@ -130,10 +130,11 @@ func TestChunkLoadLastWaiterCancelsAndJoins(t *testing.T) {
 	defer cancelA()
 	bCtx, cancelB := context.WithCancel(ctx)
 	defer cancelB()
-	canceled, cleanup := make(chan struct{}), make(chan struct{})
+	entered, canceled, cleanup := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
 	patch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, loadCtx context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry, _ *chunkValidation) (*chunkPayload, error) {
 		if calls.Add(1) == 1 {
+			close(entered)
 			<-loadCtx.Done()
 			close(canceled)
 			<-cleanup // Model storage cleanup that finishes after cancellation.
@@ -154,6 +155,9 @@ func TestChunkLoadLastWaiterCancelsAndJoins(t *testing.T) {
 	awaitChunkWaiters(t, &m.chunkIndex.cache, chunk, 1)
 	b := start(bCtx)
 	old := awaitChunkWaiters(t, &m.chunkIndex.cache, chunk, 2)
+	// Registered waiters do not imply storage has started. Wait for the mock
+	// before cancellation, or the loader can correctly exit without entering it.
+	awaitChunkSignal(t, entered)
 	cancelA()
 	require.ErrorIs(t, awaitChunkRead(t, a).err, context.Canceled)
 	cancelB()
