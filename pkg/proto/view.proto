@@ -37,9 +37,6 @@ message CollectionLoadConfig {
     repeated LoadReplicaConfig replicas = 7;
     // True for an explicitly chosen replica configuration; false follows cluster defaults.
     bool user_specified_replica_mode = 8;
-    // Warmup is request-local, never durable load configuration.
-    reserved 9;
-    reserved "warmup_epoch";
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.
@@ -139,9 +136,6 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
-    // Prewarm is an independent RPC, not QueryView state.
-    reserved 10;
-    reserved "warmup_epoch";
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

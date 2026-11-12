@@ -37,7 +37,7 @@ The request lifetime is owned by Proxy, independent of completion/cancellation o
 
 ## 4. Persistence, recovery and CDC
 
-No epoch or hint is stored in `LoadConfig`, `CollectionLoadConfig`, `QueryViewMeta` or `AlterLoadConfig` messages. Legacy epoch field numbers and names are reserved. Recovery and configuration conversion ignore legacy unknown fields. Ordinary automatic/manual placement, View synchronization and recovery contain no prewarm producer.
+No epoch or hint is stored in `LoadConfig`, `CollectionLoadConfig`, `QueryViewMeta` or `AlterLoadConfig` messages. Ordinary automatic/manual placement, View synchronization and recovery contain no prewarm producer.
 
 Prewarming is local ephemeral cache work. It is not written to the WAL or replicated by CDC. Ordinary load requirements retain their existing WAL and replication path. Restart or promotion cannot recreate this request; another explicit hint is required.
 

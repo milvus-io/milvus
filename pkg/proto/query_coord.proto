@@ -273,8 +273,6 @@ message LoadCollectionRequest {
     // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
-    reserved 11, 12, 13;
-    reserved "load_all_fields", "skip_load_dynamic_field", "warmup_hint";
 }
 
 message ReleaseCollectionRequest {

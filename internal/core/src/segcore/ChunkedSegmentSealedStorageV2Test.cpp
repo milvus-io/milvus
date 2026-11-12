@@ -1372,6 +1372,102 @@ TEST_P(TestLazyManifest, PrewarmLoadsLazyColumnsAndPkIndex) {
     EXPECT_TRUE(runtime->timestamp_index_slot->IsCached(0));
 }
 
+TEST_P(TestLazyManifest, PrewarmCancellationDuringColdMetadataOpen) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    const auto previous_async =
+        storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore_async = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+    });
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        auto path = UniqueManifestTestPath("prewarm_cancel_cold_metadata");
+        auto fs = GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, path);
+        milvus::test::V3SegmentTestData data(
+            schema_,
+            1,
+            64,
+            128,
+            TestLocalPath,
+            path,
+            PerFieldManifestTestGroupPattern(schema_));
+        auto segment = CreateV3ManifestSegment(data, 3195);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        auto reader =
+            std::make_shared<BlockingMetadataReader>(current->runtime->reader);
+        auto groups = reader->get_column_groups();
+        const auto field = fields.at("int64");
+        const auto name = schema_->get_storage_column_name(field);
+        size_t index = 0;
+        for (; index < groups->size(); ++index) {
+            const auto& columns = groups->at(index)->columns;
+            if (std::find(columns.begin(), columns.end(), name) !=
+                columns.end()) {
+                break;
+            }
+        }
+        ASSERT_LT(index, groups->size());
+        auto staging_segment = CreateSealedSegment(schema_);
+        auto* staging =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(staging_segment.get());
+        ASSERT_NE(staging, nullptr);
+        auto column =
+            staging
+                ->TestStageLoadColumnGroupsWithReader(
+                    groups,
+                    storage::LoonFFIPropertiesSingleton::GetInstance()
+                        .GetProperties(),
+                    /*eager_cg_field_ids=*/{},
+                    /*lazy_cg_field_ids=*/{{static_cast<int>(index), {field}}},
+                    *current->load_info,
+                    schema_,
+                    reader)
+                .front();
+        auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+        ASSERT_NE(proxy, nullptr);
+        ASSERT_TRUE(proxy->IsLazy());
+        ASSERT_FALSE(proxy->IsMaterialized());
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        runtime->fields.insert_or_assign(field, column);
+        sealed->TestPublishRuntimeResourceState(std::move(runtime));
+
+        folly::CancellationSource cancellation;
+        OpContext ctx(cancellation.getToken());
+        reader->Arm();
+        auto started = reader->Started();
+        auto warming = std::async(std::launch::async,
+                                  [&] { sealed->Prewarm(&ctx, {field}); });
+        auto release = folly::makeGuard([&] { reader->Release(); });
+        ASSERT_EQ(started.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        cancellation.requestCancellation();
+        reader->Release();
+        try {
+            warming.get();
+            FAIL() << "expected cancellation during cold metadata open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_FALSE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->async_calls, async_enabled ? 1 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 1);
+
+        OpContext fresh_ctx;
+        sealed->Prewarm(&fresh_ctx, {field});
+        EXPECT_TRUE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->async_calls, async_enabled ? 2 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 2);
+    }
+}
+
 TEST_P(TestLazyManifest, LazyManifestDefersTextMatchAfterIndexCreation) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto warmup_policies =

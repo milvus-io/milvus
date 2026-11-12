@@ -3763,6 +3763,7 @@ ChunkedSegmentSealedImpl::prewarm_chunks(milvus::OpContext* op_ctx,
         std::max<int64_t>(1,
                           FieldDataLoadBatchSplitTargetBytes() /
                               storagev2translator::GetCellTargetSizeBytes());
+    column->Prepare(op_ctx);
     const auto num_chunks = column->num_chunks();
     for (int64_t begin = 0; begin < num_chunks; begin += chunks_per_run) {
         CheckCancellation(op_ctx, id_, field_id.get(), "Prewarm");
