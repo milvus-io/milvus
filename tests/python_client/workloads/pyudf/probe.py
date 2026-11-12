@@ -65,13 +65,14 @@ def create_udf(context):
 
 
 class PyUDFProbe:
-    def __init__(self, client, name, resource, string_pk=False, query=None, metric="L2"):
+    def __init__(self, client, name, resource, string_pk=False, query=None, metric="L2", *, distances):
         self.client = client
         self.name = name
         self.resource = resource
         self.ids = ["甲", "乙", "丙"] if string_pk else [1, 2, 3]
         self.query = [0.0, 0.0] if query is None else query
         self.metric = metric
+        self.distances = dict(zip(self.ids, distances, strict=True))
 
     def chain(self, mode="normal"):
         return (
@@ -99,14 +100,21 @@ class PyUDFProbe:
 
     def check(self, with_udf=True, nq=1):
         results = self.search(with_udf=with_udf, nq=nq)
-        order = [2, 1, 0] if with_udf else [0, 1, 2]
         assert len(results) == nq
         for hits in results:
-            assert [hit["id"] for hit in hits] == [self.ids[index] for index in order], hits
+            ids = [hit["id"] for hit in hits]
+            assert len(ids) == len(self.ids) and set(ids) == set(self.ids), hits
+            order = [self.ids.index(pk) for pk in ids]
             assert [hit["entity"]["ts"] for hit in hits] == [(index + 1) * 10 for index in order], hits
             assert [hit["entity"]["text"] for hit in hits] == [f"你好_{index}" for index in order], hits
             if with_udf:
+                assert ids == list(reversed(self.ids)), hits
                 assert [hit["distance"] for hit in hits] == [60, 40, 20], hits
+            else:
+                scores = [hit["distance"] for hit in hits]
+                assert all(np.isfinite(score) for score in scores), hits
+                assert np.allclose(scores, [self.distances[pk] for pk in ids], rtol=1e-5, atol=1e-6), hits
+                assert scores == sorted(scores, reverse=self.metric in ("IP", "COSINE")), hits
         return results
 
 
@@ -126,6 +134,38 @@ def vector_fixture(kind):
     else:
         values = [v.tolist() for v in vectors]
     return values, values[0], "HNSW", {"dim": 16}
+
+
+def expected_distances(vectors, query, kind, metric):
+    """Compute recovery scores from retained inputs, independent of Search results."""
+    if kind == DataType.BINARY_VECTOR:
+        query_bits = np.unpackbits(np.frombuffer(query, dtype=np.uint8))
+        bits = [np.unpackbits(np.frombuffer(vector, dtype=np.uint8)) for vector in vectors]
+        if metric == "HAMMING":
+            return [float(np.count_nonzero(vector != query_bits)) for vector in bits]
+        assert metric == "JACCARD", metric
+        return [1 - np.count_nonzero(vector & query_bits) / np.count_nonzero(vector | query_bits) for vector in bits]
+    if kind == DataType.SPARSE_FLOAT_VECTOR:
+        assert metric == "IP", metric
+        return [sum(value * vector.get(key, 0) for key, value in query.items()) for vector in vectors]
+
+    def decode(vector):
+        if kind == DataType.FLOAT16_VECTOR:
+            return np.frombuffer(vector, dtype=np.float16).astype(np.float32)
+        if kind == DataType.BFLOAT16_VECTOR:
+            return (np.frombuffer(vector, dtype=np.uint16).astype(np.uint32) << 16).view(np.float32)
+        if kind == DataType.INT8_VECTOR:
+            return np.frombuffer(vector, dtype=np.int8).astype(np.float32)
+        return np.asarray(vector, dtype=np.float32)
+
+    query = decode(query)
+    values = [decode(vector) for vector in vectors]
+    if metric == "L2":
+        return [float(np.sum((vector - query) ** 2)) for vector in values]
+    if metric == "IP":
+        return [float(np.dot(vector, query)) for vector in values]
+    assert metric == "COSINE", metric
+    return [float(np.dot(vector, query) / (np.linalg.norm(vector) * np.linalg.norm(query))) for vector in values]
 
 
 @contextmanager
@@ -162,7 +202,15 @@ def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metr
         # Record ownership before each write: a timeout may hide a successful RPC.
         collection_owned = True
         client.create_collection(name, schema=schema, index_params=index, consistency_level="Strong")
-        probe = PyUDFProbe(client, name, resource, string_pk, query=query, metric=metric)
+        probe = PyUDFProbe(
+            client,
+            name,
+            resource,
+            string_pk,
+            query=query,
+            metric=metric,
+            distances=expected_distances(vectors, query, vector_kind, metric),
+        )
         client.insert(
             name,
             [

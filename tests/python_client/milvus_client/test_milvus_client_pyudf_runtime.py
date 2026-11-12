@@ -115,12 +115,11 @@ def test_pyudf_exception_origin_and_recovery(owned_probe, mode, code):
 def test_pyudf_vector_recall_types_preserve_scalar_rerank(probe_connection, kind, metric, record_property):
     """All candidates are retained; vector encoding must not alter scalar/ID alignment."""
     with pyudf_probe(*probe_connection, vector_kind=kind, metric=metric) as probe:
-        ordinary = probe.search(with_udf=False, nq=2)
-        for hits in ordinary:
-            assert sorted((hit["id"], hit["entity"]["ts"]) for hit in hits) == [(1, 10), (2, 20), (3, 30)]
+        probe.check(with_udf=False, nq=2)
         probe.check(nq=2)
         probe.client.release_collection(probe.name)
         probe.client.load_collection(probe.name)
+        probe.check(with_udf=False, nq=2)
         probe.check(nq=2)
         record_property("vector_tuple", f"{kind.name}/{metric}/3 exhaustive candidates/reload")
 
