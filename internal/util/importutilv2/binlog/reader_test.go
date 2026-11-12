@@ -2084,16 +2084,24 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 				cfg, &packed.ManifestUpdates{NewFiles: output})
 			require.NoError(t, err)
 
-			for _, mode := range []string{"required_default", "nullable_default", "nullable_no_default", "required_no_default"} {
-				t.Run(mode, func(t *testing.T) {
+			defaultValue := &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
+			for _, tc := range []struct {
+				name         string
+				nullable     bool
+				defaultValue *schemapb.ValueField
+				wantFirst    any
+				wantErr      bool
+			}{
+				{name: "required_default", defaultValue: defaultValue, wantFirst: int64(42)},
+				{name: "nullable_default", nullable: true, defaultValue: defaultValue, wantFirst: int64(42)},
+				{name: "nullable_no_default", nullable: true},
+				{name: "required_no_default", wantErr: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
 					target := typeutil.Clone(source)
 					field := typeutil.GetField(target, 101)
-					field.Nullable = strings.HasPrefix(mode, "nullable")
-					var first any
-					if mode == "required_default" || mode == "nullable_default" {
-						field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
-						first = int64(42)
-					}
+					field.Nullable = tc.nullable
+					field.DefaultValue = tc.defaultValue
 					before := typeutil.Clone(target)
 					r, err := NewStorageV3ManifestReader(ctx, storage.NewLocalChunkManager(), target, cfg,
 						manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, nil)
@@ -2105,7 +2113,7 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 					var got []any
 					for {
 						data, err := r.Read()
-						if mode == "required_no_default" {
+						if tc.wantErr {
 							require.Error(t, err, "stored NULL cannot satisfy a required field without a default")
 							require.NotErrorIs(t, err, io.EOF)
 							require.Nil(t, data)
@@ -2120,7 +2128,7 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 							got = append(got, data.Data[101].GetRow(i))
 						}
 					}
-					require.Equal(t, []any{first, int64(0), int64(5)}, got)
+					require.Equal(t, []any{tc.wantFirst, int64(0), int64(5)}, got)
 				})
 			}
 		})
@@ -2134,6 +2142,7 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 		value      any
 		defaultVal string
 		maxLength  string
+		initErr    string
 		wantErr    string
 	}{
 		{name: "empty", value: ""},
@@ -2143,8 +2152,7 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 		{name: "utf8_oversized", value: "中文a", wantErr: "exceeds max_length(6)"},
 		{name: "nullable"},
 		{name: "default", defaultVal: "中文"},
-		{name: "multiple_batches", value: "abcdef"},
-		{name: "invalid_limit", value: "a", maxLength: "invalid", wantErr: "invalid max length"},
+		{name: "invalid_limit", value: "a", maxLength: "invalid", initErr: "invalid max length"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -2187,32 +2195,14 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 				return owner, nil
 			}).Build()
 			defer open.UnPatch()
-			limitCalls := 0
-			if tc.name == "multiple_batches" {
-				limit := mockey.Mock(parameterutil.GetMaxLength).To(func(field *schemapb.FieldSchema) (int64, error) {
-					require.Equal(t, int64(101), field.GetFieldID())
-					limitCalls++
-					return 6, nil
-				}).Build()
-				defer limit.UnPatch()
-				batches := 0
-				next := mockey.Mock((*storageV3DeltaRecordReader).Next).To(func(r *storageV3DeltaRecordReader) (storage.Record, error) {
-					if batches == 2 {
-						return nil, io.EOF
-					}
-					batches++
-					return r.record, nil
-				}).Build()
-				defer next.UnPatch()
-			}
 			manifest := packed.MarshalManifestPath("snapshot/segment/10", 7)
 			r, err := NewStorageV3ManifestReader(context.Background(), nil, target, &indexpb.StorageConfig{},
 				manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, nil)
-			if tc.maxLength != "" {
+			if tc.initErr != "" {
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
 				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 				require.ErrorContains(t, err, "renamed_text")
-				require.ErrorContains(t, err, tc.wantErr)
+				require.ErrorContains(t, err, tc.initErr)
 				require.Nil(t, r)
 				return
 			}
@@ -2233,11 +2223,6 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			if tc.name == "multiple_batches" {
-				require.Equal(t, 4, data.GetRowNum())
-				require.Equal(t, 1, limitCalls, "parse target length once across record batches")
-				return
-			}
 			require.Equal(t, 2, data.GetRowNum())
 			want := tc.value
 			if tc.defaultVal != "" {
@@ -2246,6 +2231,36 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 			require.Equal(t, want, data.Data[101].GetRow(1))
 		})
 	}
+}
+
+func TestStorageV3Reader_VarcharLimitAcrossBatches(t *testing.T) {
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{
+			FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "6"}},
+		},
+	}})
+	limitCalls := 0
+	limit := mockey.Mock(parameterutil.GetMaxLength).To(func(field *schemapb.FieldSchema) (int64, error) {
+		require.Equal(t, int64(101), field.GetFieldID())
+		limitCalls++
+		return 6, nil
+	}).Build()
+	defer limit.UnPatch()
+
+	deserialize, err := newStorageV3Deserializer(schema)
+	require.NoError(t, err)
+	require.Equal(t, 1, limitCalls)
+	for _, value := range []string{"abcdef", "中文"} {
+		record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{0: int64(1), 1: int64(100), 100: int64(1), 101: value}}}, schema)
+		require.NoError(t, err)
+		defer record.Release()
+		values := make([]*storage.Value, 1)
+		require.NoError(t, deserialize(record, values))
+		require.Equal(t, value, values[0].Value.(map[int64]any)[101])
+	}
+	require.Equal(t, 1, limitCalls, "parse target length once across record batches")
 }
 
 func TestStorageV3Reader_ManifestFieldSelectionErrors(t *testing.T) {
