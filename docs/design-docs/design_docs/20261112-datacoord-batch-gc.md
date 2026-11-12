@@ -37,7 +37,11 @@ batches acquire BuildID locks in order and skip records whose identity, version,
 state or file keys changed. Publication retains the master lock order:
 manifest locks, BuildID locks, segment writer locks, then MetaStore shards.
 Pause acknowledgements occur outside deletion batches; queued candidates are
-filtered again before deletion starts.
+filtered again before deletion starts. Segment-index GC rechecks both global
+and collection pauses at record-only and manifest deletion boundaries, including
+an empty record-only batch before manifest cleanup. A pause received during
+manifest file deletion waits for its metadata transaction to finish before it
+is acknowledged; a resumed sweep can retry candidates skipped while paused.
 
 ## Object storage
 

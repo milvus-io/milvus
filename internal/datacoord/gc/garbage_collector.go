@@ -2307,7 +2307,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 			continue
 		}
 		gc.ackSignal(signal)
-		if gc.collectionGCPaused(segIdx.CollectionID) {
+		if gc.IsPaused(segIdx.CollectionID) {
 			continue
 		}
 
@@ -2425,7 +2425,7 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndexes(ctx context.Context,
 	active := make([]segmentIndexGCItem, 0, len(items))
 	filePaths := make([]string, 0, len(items))
 	for _, item := range items {
-		if gc.collectionGCPaused(item.segIdx.CollectionID) {
+		if gc.IsPaused(item.segIdx.CollectionID) {
 			continue
 		}
 		// A concurrent backfill may have published the files selected for removal.
@@ -2466,7 +2466,11 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndexes(ctx context.Context,
 }
 
 func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, items []segmentIndexGCItem) {
-	if len(items) == 0 {
+	// All items belong to one segment. Candidate selection and the record-only
+	// batch may have acknowledged a pause since these items were admitted.
+	// Recheck before starting deletion; do not acknowledge again until the
+	// manifest files and metadata have finished retiring.
+	if len(items) == 0 || ctx.Err() != nil || gc.IsPaused(items[0].segIdx.CollectionID) {
 		return
 	}
 	var manifestUpdates []*meta.SegmentInfo

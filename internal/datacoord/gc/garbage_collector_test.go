@@ -4356,6 +4356,204 @@ func addV3GCFinishedIndex(t *testing.T, im *index.IndexMeta, indexID, buildID in
 	}))
 }
 
+// A pause queued after candidate selection must protect manifest entries as
+// well as record-only siblings, even when the record-only batch is empty.
+func TestGarbageCollector_recycleUnusedSegIndexes_ManifestPauseBarrier(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		for _, pausedCollection := range []int64{100, -1, 200} {
+			t.Run(fmt.Sprintf("mixed=%t/pausedCollection=%d", mixed, pausedCollection), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				m, dm, newManifest, _ := setupV3SegIndexGC(t)
+				if mixed {
+					addV3GCFinishedIndex(t, dm.IndexMeta, 401, 4200)
+				}
+				originalManifest := m.GetSegment(ctx, 4001).GetManifestPath()
+				var removed atomic.Int32
+				cm := mocks.NewChunkManager(t)
+				cm.EXPECT().RootPath().Return("root").Maybe()
+				cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) error {
+					removed.Inc()
+					return nil
+				}).Maybe()
+				gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{Cli: cm, Enabled: true}))
+				controlDone := make(chan struct{})
+				go func() {
+					defer close(controlDone)
+					gc.startControlLoop(ctx)
+				}()
+				defer func() {
+					cancel()
+					gc.Close()
+					<-controlDone
+				}()
+
+				// Relay the real pause command into the worker's signal channel.
+				// Receiving it proves pause() has recorded the ticket; buffering it
+				// makes the next acknowledgement deterministic without a sleep.
+				signal := make(chan gcCmd, 1)
+				pauseDone := make(chan error, 1)
+				var pauseOnce sync.Once
+				defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+					func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+						var pauseErr error
+						pauseOnce.Do(func() {
+							go func() {
+								pauseDone <- gc.Pause(ctx, pausedCollection, "manifest-gc", time.Minute)
+							}()
+							select {
+							case cmd := <-gc.controlChannels["meta"]:
+								signal <- cmd
+							case <-ctx.Done():
+								pauseErr = ctx.Err()
+							}
+						})
+						return []packed.ManifestIndexInfo{v3GCManifestIndex(400, 4100)}, pauseErr
+					}).Build().UnPatch()
+				defer mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).
+					Return(meta.MockManifestUpdateResult(newManifest, nil), nil).Build().UnPatch()
+				defer mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build().UnPatch()
+
+				gc.RecycleUnusedSegIndexes(ctx, signal)
+				select {
+				case err := <-pauseDone:
+					require.NoError(t, err)
+				case <-ctx.Done():
+					t.Fatal("GC did not acknowledge the pause")
+				}
+				if pausedCollection != 200 {
+					assert.Zero(t, removed.Load(), "no files may be deleted after acknowledging this collection's pause")
+					assert.Equal(t, originalManifest, m.GetSegment(ctx, 4001).GetManifestPath())
+					_, exists := dm.IndexMeta.SegmentBuildInfo.Get(4100)
+					assert.True(t, exists, "the manifest index record must remain for retry")
+					if mixed {
+						_, exists = dm.IndexMeta.SegmentBuildInfo.Get(4200)
+						assert.True(t, exists, "the record-only sibling must remain for retry")
+					}
+				} else {
+					assert.Positive(t, removed.Load(), "pausing another collection must not prevent this collection's GC")
+				}
+
+				require.NoError(t, gc.Resume(ctx, pausedCollection, "manifest-gc"))
+				gc.RecycleUnusedSegIndexes(ctx, nil)
+				assert.Positive(t, removed.Load(), "resuming must allow deferred files to be deleted")
+				assert.Equal(t, newManifest, m.GetSegment(ctx, 4001).GetManifestPath())
+				_, exists := dm.IndexMeta.SegmentBuildInfo.Get(4100)
+				assert.False(t, exists)
+				if mixed {
+					_, exists = dm.IndexMeta.SegmentBuildInfo.Get(4200)
+					assert.False(t, exists)
+				}
+			})
+		}
+	}
+}
+
+func TestGarbageCollector_recycleUnusedSegIndexes_ManifestPauseDrainsDeletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	m, dm, newManifest, _ := setupV3SegIndexGC(t)
+	mockV3ManifestIndexEntry(t, newManifest)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce, releaseOnce sync.Once
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) error {
+		startedOnce.Do(func() { close(started) })
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{Cli: cm, Enabled: true}))
+	controlDone := make(chan struct{})
+	go func() {
+		defer close(controlDone)
+		gc.startControlLoop(ctx)
+	}()
+	signal := make(chan gcCmd, 1)
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		gc.RecycleUnusedSegIndexes(ctx, signal)
+	}()
+	defer func() {
+		cancel()
+		releaseOnce.Do(func() { close(release) })
+		<-gcDone
+		gc.Close()
+		<-controlDone
+	}()
+
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("manifest file deletion did not start")
+	}
+	pauseDone := make(chan error, 1)
+	go func() {
+		pauseDone <- gc.Pause(ctx, 100, "manifest-gc", time.Minute)
+	}()
+	var cmd gcCmd
+	select {
+	case cmd = <-gc.controlChannels["meta"]:
+		signal <- cmd
+	case <-ctx.Done():
+		t.Fatal("pause was not delivered")
+	}
+	select {
+	case <-cmd.done:
+		t.Fatal("pause was acknowledged while manifest deletion was in flight")
+	default:
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-pauseDone:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("pause was not acknowledged after manifest deletion")
+	}
+	assert.Equal(t, newManifest, m.GetSegment(ctx, 4001).GetManifestPath(),
+		"the in-flight manifest transaction must complete before acknowledging pause")
+	_, exists := dm.IndexMeta.SegmentBuildInfo.Get(4100)
+	assert.False(t, exists)
+	<-gcDone
+}
+
+func TestGarbageCollector_recycleUnusedSegIndexes_ManifestCancellationBeforeDeletion(t *testing.T) {
+	m, dm, _, _ := setupV3SegIndexGC(t)
+	originalManifest := m.GetSegment(context.Background(), 4001).GetManifestPath()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).To(
+		func(*meta.Meta, context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			cancel()
+			return []packed.ManifestIndexInfo{v3GCManifestIndex(400, 4100)}, nil
+		}).Build().UnPatch()
+	defer mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build().UnPatch()
+
+	var removed atomic.Int32
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) error {
+		removed.Inc()
+		return nil
+	}).Maybe()
+	gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+	defer gc.Close()
+	gc.RecycleUnusedSegIndexes(ctx, nil)
+
+	assert.Zero(t, removed.Load(), "canceled selection must not start deleting manifest files")
+	assert.Equal(t, originalManifest, m.GetSegment(context.Background(), 4001).GetManifestPath())
+	_, exists := dm.IndexMeta.SegmentBuildInfo.Get(4100)
+	assert.True(t, exists)
+}
+
 func TestGarbageCollector_recycleUnusedSegIndexes_BatchesSameSegmentManifestRetractions(t *testing.T) {
 	m, dm, newManifest, _ := setupV3SegIndexGC(t)
 	addV3GCFinishedIndex(t, dm.IndexMeta, 401, 4200)
