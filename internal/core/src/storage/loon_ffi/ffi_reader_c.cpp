@@ -65,7 +65,7 @@ GetLoonReader(
     struct ArrowSchema* schema,
     char** needed_columns,
     int64_t needed_columns_size,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     CPluginContext* c_plugin_context) {
     auto result = arrow::ImportSchema(schema);
     if (!result.ok()) {

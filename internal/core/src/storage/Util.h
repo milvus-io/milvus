@@ -446,7 +446,8 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
 VisitOutcome
 VisitFieldDataFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
@@ -465,14 +466,16 @@ VisitFieldDataFromManifest(
 VisitOutcome
 VisitTextFieldDataFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        loon_ffi_properties,
     const FieldDataMeta& field_meta,
     const FieldDataVisitor& visitor);
 
 void
 IterateFieldDataFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
@@ -486,7 +489,8 @@ IterateFieldDataFromManifest(
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
@@ -498,7 +502,8 @@ GetFieldDatasFromManifest(
 std::vector<FieldDataPtr>
 GetTextFieldDatasFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        loon_ffi_properties,
     const FieldDataMeta& field_meta);
 
 std::map<std::string, int64_t>
