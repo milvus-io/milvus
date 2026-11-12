@@ -1316,7 +1316,7 @@ common:
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
-  gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
+  gracefulTime: 60000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: true # whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. Storage v2 segments only; manifest-based (v3) segments do not build this index yet.
