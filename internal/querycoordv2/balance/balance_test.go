@@ -467,5 +467,6 @@ func (suite *BalanceTestSuite) TestBalanceReplica_SkipRedundantSegments() {
 }
 
 func TestBalanceSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(BalanceTestSuite))
 }

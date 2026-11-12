@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -357,8 +356,6 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_WithRONodes(t *testing.T) {
 	mockGetID := mockey.Mock((*meta.Replica).GetID).Return(mockey.Sequence(101).Times(1).Then(102)).Build()
 	defer mockGetID.UnPatch()
 
-	// Skip streaming service mock for simplicity
-
 	result := checker.getReplicaForStoppingBalance(ctx, collectionID)
 	// Should return replica1 ID since it has RO nodes
 	assert.Contains(t, result, int64(101))
@@ -383,8 +380,6 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_NoRONodes(t *testing.T) {
 
 	mockROSQNodesCount := mockey.Mock((*meta.Replica).ROSQNodesCount).Return(0).Build()
 	defer mockROSQNodesCount.UnPatch()
-
-	// Skip streaming service mock for simplicity
 
 	result := checker.getReplicaForStoppingBalance(ctx, collectionID)
 	assert.Empty(t, result)
@@ -1382,8 +1377,6 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_WithStreamingService(t *tes
 	defer mockGetID.UnPatch()
 
 	// streaming service mocks for simplicity
-	mockIsStreamingServiceEnabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer mockIsStreamingServiceEnabled.UnPatch()
 	mockGetChannelRWAndRONodesFor260 := mockey.Mock(utils.GetChannelRWAndRONodesFor260).Return([]int64{}, []int64{1}).Build()
 	defer mockGetChannelRWAndRONodesFor260.UnPatch()
 

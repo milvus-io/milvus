@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -224,9 +223,6 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 // to be selected for movement. This optimization reduces unnecessary channel migrations when
 // a channel is already at its optimal location for streaming.
 func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
-	if !streamingutil.IsStreamingServiceEnabled() {
-		return channels
-	}
 	weighter := func(ch *meta.DmChannel) int {
 		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
 		if ch.Node == nodeID {

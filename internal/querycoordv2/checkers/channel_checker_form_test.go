@@ -18,7 +18,6 @@ package checkers
 
 import (
 	"context"
-	"os"
 
 	"github.com/stretchr/testify/mock"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -42,8 +40,6 @@ import (
 // holds a regular query node and a streaming query node, with the WAL on a
 // third node, and answers which node the delegator is grown on.
 func (suite *ChannelCheckerTestSuite) channelOnAQueryCluster(regular, streamingQuery, walNode int64) int64 {
-	streamingutil.SetStreamingServiceEnabled()
-	suite.T().Cleanup(func() { os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled) })
 
 	// Feed the pchannel's WAL assignment, otherwise GetWALLocated blocks forever.
 	snmanager.ResetStreamingNodeManager()

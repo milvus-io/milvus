@@ -1033,6 +1033,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
 }
 
 func TestScoreBasedBalancerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(ScoreBasedBalancerTestSuite))
 }
 

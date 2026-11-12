@@ -599,5 +599,6 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 }
 
 func TestLeaderCheckerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(LeaderCheckerTestSuite))
 }

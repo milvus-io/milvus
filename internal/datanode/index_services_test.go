@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
@@ -395,7 +394,6 @@ func TestIndexServiceSuite(t *testing.T) {
 }
 
 func (s *IndexServiceSuite) SetupTest() {
-	streamingutil.SetStreamingServiceEnabled()
 	s.collID = 1
 	s.partID = 2
 	s.segID = 3

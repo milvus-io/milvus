@@ -212,5 +212,6 @@ func (suite *CheckerControllerSuite) TestBasic() {
 }
 
 func TestCheckControllerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(CheckerControllerSuite))
 }

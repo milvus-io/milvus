@@ -272,6 +272,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_SingleNode(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution tests channel distribution
 func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
+	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
@@ -321,6 +322,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels tests with empty channel list
 func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
+	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
@@ -346,6 +348,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom tests that From field is correctly set
 func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
+	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 

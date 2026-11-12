@@ -20,12 +20,10 @@ import (
 	"testing"
 
 	"github.com/blang/semver/v4"
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -36,8 +34,6 @@ import (
 // nodes, RO ones included, so a query node leaving its cluster is drained of
 // its delegator exactly as it was before the streaming service existed.
 func TestChannelBalanceNodesFollowWhereDelegatorsLive(t *testing.T) {
-	streaming := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer streaming.UnPatch()
 
 	replica := meta.NewReplica(&querypb.Replica{
 		ID: 1, CollectionID: 1, ResourceGroup: "cluster_a",

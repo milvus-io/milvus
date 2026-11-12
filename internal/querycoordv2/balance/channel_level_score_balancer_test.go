@@ -1007,5 +1007,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 }
 
 func TestChannelLevelScoreBalancerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(ChannelLevelScoreBalancerTestSuite))
 }

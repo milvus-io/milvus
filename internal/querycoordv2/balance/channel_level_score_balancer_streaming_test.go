@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -234,8 +233,6 @@ func newStreamingChannelLevelBalancer(t *testing.T, replica *meta.Replica) (*Cha
 	t.Helper()
 	paramtable.Init()
 
-	streamingutil.SetStreamingServiceEnabled()
-	t.Cleanup(streamingutil.UnsetStreamingServiceEnabled)
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 	t.Cleanup(assign.ResetGlobalAssignPolicyFactoryForTest)
 
