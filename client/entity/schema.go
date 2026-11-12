@@ -40,7 +40,7 @@ const (
 
 	// ClStrong strong consistency level
 	ClStrong ConsistencyLevel = ConsistencyLevel(commonpb.ConsistencyLevel_Strong)
-	// ClBounded bounded consistency level with default tolerance of 5 seconds
+	// ClBounded bounded consistency level; the staleness tolerance is set on the server by common.gracefulTime
 	ClBounded ConsistencyLevel = ConsistencyLevel(commonpb.ConsistencyLevel_Bounded)
 	// ClSession session consistency level
 	ClSession ConsistencyLevel = ConsistencyLevel(commonpb.ConsistencyLevel_Session)
