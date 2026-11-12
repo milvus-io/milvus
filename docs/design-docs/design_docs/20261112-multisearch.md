@@ -86,14 +86,17 @@ Permission, invalid parameter, and force-deny failures end the item immediately.
 
 ## Execution budget
 
-Omitting the timeout leaves execution governed by the parent request. An
-explicit timeout starts at batch receipt. It covers preparation, both queues,
-execution and retries. An explicit zero exhausts the budget immediately.
+Omitting `timeoutMs` leaves REST execution governed by the parent request.
+An explicit timeout starts at batch receipt, before REST decodes the request
+body. It covers preparation, both queues, execution and retries. The budget
+accepts whole milliseconds from 0 to 9,223,372,036,854. Zero exhausts the
+budget immediately.
 When time runs out, the Proxy stops dispatching and cancels outstanding work.
 It returns recorded results and reports timeouts for the remaining positions
-while the parent call can still receive a response. The parent transport
-deadline is independent of this budget. A parent cancellation ends the call
-and propagates to the searches.
+while the parent call can still receive a response. REST applies an explicit
+`Request-Timeout` header in seconds as a separate transport deadline through
+response delivery. The endpoint has no default HTTP request deadline. A parent
+cancellation ends the call and propagates to the searches.
 
 Completed results are retained until the response is serialized. Per-Search
 limits and the concurrency setting bound individual work. Retained result

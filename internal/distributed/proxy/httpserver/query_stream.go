@@ -19,11 +19,13 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -53,9 +55,11 @@ func DQLStreamingHTTPHandler(next http.Handler) http.Handler {
 // the worker finishes. Single-batch and non-row responses use the recorder.
 type dqlResponseWriter struct {
 	*timeoutResponseRecorder
-	ctx       context.Context
-	result    gin.H // Read by the HTTP handler only after worker completion.
-	renderErr error // Likewise, only read after worker completion.
+	ctx            context.Context
+	encodeComplete bool
+	result         gin.H  // Read by the HTTP handler only after worker completion.
+	encoded        []byte // Likewise, only read after worker completion.
+	renderErr      error  // Likewise, only read after worker completion.
 }
 
 func newDQLResponseWriter(ctx context.Context, buffer *bytes.Buffer) *dqlResponseWriter {
@@ -68,6 +72,10 @@ func newDQLResponseWriter(ctx context.Context, buffer *bytes.Buffer) *dqlRespons
 func (w *dqlResponseWriter) renderDQLResult(data any) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
+	}
+	if w.encodeComplete {
+		w.encoded, w.renderErr = json.Marshal(data)
+		return w.renderErr
 	}
 	if result, ok := data.(gin.H); ok {
 		if rows, ok := result[HTTPReturnData].([]map[string]interface{}); ok && len(rows) > dqlJSONBatchRows {
@@ -82,24 +90,37 @@ func (w *dqlResponseWriter) renderDQLResult(data any) error {
 }
 
 func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
+	return dqlResponseMiddleware(handler, dqlPreparationTimeout)
+}
+
+type dqlTimeoutScope int
+
+const (
+	dqlPreparationTimeout dqlTimeoutScope = iota
+	dqlExplicitTransportTimeout
+)
+
+func dqlResponseMiddleware(handler gin.HandlerFunc, scope dqlTimeoutScope) gin.HandlerFunc {
 	bufPool := &BufferPool{}
 	return func(c *gin.Context) {
 		// DQLStreamingHTTPHandler is required to abort partial responses past Gin Recovery.
 		state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
-		timeout, ok := requestTimeout(c)
-		if !ok {
-			return
-		}
 		parentCtx := c.Request.Context()
-		ctx, cancel := context.WithTimeout(parentCtx, timeout)
+		ctx := parentCtx
+		cancel := func() {}
+		if scope == dqlPreparationTimeout || c.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout) != "" {
+			timeout, ok := requestTimeout(c)
+			if !ok {
+				return
+			}
+			ctx, cancel = context.WithTimeout(parentCtx, timeout)
+		}
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
-		deadline, _ := ctx.Deadline()
-		// Request-Timeout bounds result preparation; socket deadlines remain
-		// owned by net/http's server configuration.
 		buffer := bufPool.Get()
 		buffer.Reset()
 		writer := newDQLResponseWriter(ctx, buffer)
+		writer.encodeComplete = scope == dqlExplicitTransportTimeout
 		defer func() {
 			writer.Close() // Detach under the recorder lock before reuse by another request.
 			bufPool.Put(buffer)
@@ -159,11 +180,7 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			}
 		}
 		// Resolve completion/deadline races before leaving the preparation phase.
-		err := ctx.Err()
-		if err == nil && !time.Now().Before(deadline) {
-			err = context.DeadlineExceeded
-		}
-		if err != nil {
+		if err := dqlContextErr(ctx); err != nil {
 			stopRequest(err)
 			return
 		}
@@ -171,9 +188,14 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			fail(http.StatusInternalServerError)
 			return
 		}
-		cancel()
-		c.Request = c.Request.WithContext(parentCtx)
-		if writer.result == nil {
+		responseCtx := ctx
+		if scope == dqlPreparationTimeout {
+			// Search and Query stream outside their preparation timeout.
+			cancel()
+			responseCtx = parentCtx
+			c.Request = c.Request.WithContext(parentCtx)
+		}
+		if writer.result == nil && writer.encoded == nil {
 			if err := writer.CommitTo(c.Writer); err != nil {
 				abort()
 			}
@@ -183,14 +205,50 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			c.Writer.Header()[key] = values
 		}
 		c.Writer.WriteHeader(writer.Status())
-		// Encoding and sending are outside Request-Timeout, but still observe
-		// parent cancellation/deadlines at batch boundaries (not within Sonic).
-		err = writeDQLJSON(parentCtx, c.Writer, writer.result, dqlJSONBatchRows)
-		if ctxErr := parentCtx.Err(); ctxErr != nil {
+		var err error
+		if writer.encoded != nil {
+			err = writeDQLTransportResponse(responseCtx, c.Writer, writer.encoded)
+		} else {
+			err = writeDQLJSON(responseCtx, c.Writer, writer.result, dqlJSONBatchRows)
+		}
+		if ctxErr := dqlContextErr(responseCtx); ctxErr != nil {
 			stopRequest(ctxErr)
 		} else if err != nil {
-			mlog.Warn(parentCtx, "failed to encode or write DQL response", mlog.Err(err))
+			mlog.Warn(responseCtx, "failed to encode or write DQL response", mlog.Err(err))
 			fail(http.StatusInternalServerError)
 		}
 	}
+}
+
+func dqlContextErr(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func writeDQLTransportResponse(ctx context.Context, w http.ResponseWriter, body []byte) error {
+	if err := dqlContextErr(ctx); err != nil {
+		return err
+	}
+	// Interrupt a blocked write when the transport context ends. Waiting for
+	// the callback keeps it inside the ResponseWriter's request lifetime.
+	interrupted := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(interrupted)
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+	})
+	defer func() {
+		if !stop() {
+			<-interrupted
+		}
+	}()
+	n, err := w.Write(body)
+	if err == nil && n != len(body) {
+		return io.ErrShortWrite
+	}
+	return err
 }

@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -46,11 +47,12 @@ import (
 type MultiSearchReqV2 struct {
 	Requests       []stdjson.RawMessage `json:"requests"`
 	MaxConcurrency uint32               `json:"maxConcurrency"`
+	TimeoutMs      *int64               `json:"timeoutMs"`
 }
 
 type multiSearchProxy interface {
 	CheckMultiSearchAdmission() error
-	RunMultiSearch(context.Context, uint32, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error)
+	RunMultiSearch(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error)
 }
 
 var _ multiSearchProxy = (*proxy.Proxy)(nil)
@@ -66,15 +68,25 @@ func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
 	return stdjson.Unmarshal(body, req)
 }
 
-func (h *HandlersV2) multiSearchAdmission(next gin.HandlerFunc) gin.HandlerFunc {
+type multiSearchReceivedAtKey struct{}
+
+func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
+	handle := dqlResponseMiddleware(next, dqlExplicitTransportTimeout)
+	handleWithMetrics := restfulSizeMiddleware(func(c *gin.Context) {
+		metrics.GetStats(c.Request.Context()).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("MultiSearch")
+		handle(c)
+	}, true)
 	return func(c *gin.Context) {
+		receivedAt := time.Now()
 		if p, ok := h.proxy.(multiSearchProxy); ok {
 			if err := p.CheckMultiSearchAdmission(); err != nil {
 				rejectQueueFullBeforeDecode(c, err)
 				return
 			}
 		}
-		next(c)
+		ctx := context.WithValue(c.Request.Context(), multiSearchReceivedAtKey{}, receivedAt)
+		c.Request = c.Request.WithContext(ctx)
+		handleWithMetrics(c)
 	}
 }
 
@@ -103,11 +115,14 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	if !ok {
 		return fail(merr.Wrap(merr.ErrServiceUnimplemented, "MultiSearch is unavailable"))
 	}
-	metrics.GetStats(ctx).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("MultiSearch")
-
 	req := anyReq.(*MultiSearchReqV2)
 	if len(req.Requests) == 0 {
 		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
+	}
+	receivedAt := ctx.Value(multiSearchReceivedAtKey{}).(time.Time)
+	deadline, err := proxy.MultiSearchExecutionDeadline(receivedAt, req.TimeoutMs)
+	if err != nil {
+		return fail(err)
 	}
 	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
 	if err != nil {
@@ -134,7 +149,8 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 		}
 	}
 
-	results, err := p.RunMultiSearch(ctx, req.MaxConcurrency, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	options := proxy.MultiSearchOptions{MaxConcurrency: req.MaxConcurrency, ExecutionDeadline: deadline}
+	results, err := p.RunMultiSearch(ctx, options, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		return h.executeMultiSearchItem(ctx, search, username, token)
 	})
 	if err != nil {
@@ -142,9 +158,14 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	}
 	data := make([]gin.H, len(results))
 	for i, result := range results {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		status := result.GetStatus()
 		var search gin.H
 		if merr.Ok(status) {
+			// Publishing a successful result also publishes its preparer's
+			// schema. An unfinished preparer only belongs to a failed slot.
 			search, _ = buildRESTSearchResponse(ctx, result, allowJS, schemas[i], vectorEncoding)
 		} else {
 			search = gin.H{HTTPReturnCode: merr.Code(merr.Error(status)), HTTPReturnMessage: status.GetReason()}
