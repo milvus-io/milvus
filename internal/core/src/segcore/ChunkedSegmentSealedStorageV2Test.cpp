@@ -802,12 +802,12 @@ class TestLazyManifest : public TestChunkSegmentStorageV2 {
 
 INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
 
-IndexInventory::RootSlot
-LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
+index::IndexPtr
+LazyTestIndexOwner(const IndexInventory& inventory, FieldId field) {
     for (const auto& entry : inventory.Entries(field)) {
         if (entry.kind == IndexKind::Vector) {
             auto copy = inventory;
-            return copy.Drop(entry.key);
+            return copy.Drop(entry.key)->Peek();
         }
     }
     return nullptr;
@@ -892,35 +892,32 @@ TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
             ASSERT_TRUE(column->IsLazy());
             if (num_rows == 1) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
-                           nullptr),
+                EXPECT_EQ((LazyTestIndexOwner(snapshot->runtime->indexes,
+                                              vec) != nullptr),
                           0);
                 EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
                                                            START_USER_FIELDID]);
                 continue;
             }
 
-            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+            ASSERT_TRUE((LazyTestIndexOwner(snapshot->runtime->indexes, vec) !=
                          nullptr));
             EXPECT_TRUE(
                 snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
-            auto slot = LazyTestIndexSlot(snapshot->runtime->indexes, vec);
+            auto slot = LazyTestIndexOwner(snapshot->runtime->indexes, vec);
             ASSERT_NE(slot, nullptr);
             if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_FALSE(slot->IsCached(0));
             } else if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
                 EXPECT_TRUE(column->IsMaterialized());
-                EXPECT_TRUE(slot->IsCached(0));
             }
 
-            auto first =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            auto first = slot->CreateReader(&op_ctx);
+            EXPECT_EQ(first->Count(), num_rows);
             EXPECT_TRUE(column->IsMaterialized());
-            EXPECT_EQ(first->get_cell_of(0)->Count(), num_rows);
-            auto second =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
-            EXPECT_EQ(first->get_cell_of(0), second->get_cell_of(0));
+            auto second = slot->CreateReader(&op_ctx);
+            EXPECT_NE(first.get(), second.get());
+            EXPECT_EQ(second->Count(), num_rows);
         }
     }
 }

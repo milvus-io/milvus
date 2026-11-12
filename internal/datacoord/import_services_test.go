@@ -31,11 +31,9 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -48,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -230,15 +229,22 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocation() {
 	paramtable.Init()
-	for _, backup := range []bool{false, true} {
+	for _, tc := range []struct {
+		name    string
+		options []*commonpb.KeyValuePair
+		// kind is the import kind named in the rejection of a native-list
+		// target; empty means the import reads native-list sub-fields.
+		kind string
+	}{
+		{"file", nil, ""},
+		{"backup", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, "binlog import (backup restore)"},
+		{"snapshot", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}, "snapshot-source import"},
+	} {
 		for _, elementNullable := range []bool{false, true} {
-			s.Run(fmt.Sprintf("backup=%t/element_nullable=%t", backup, elementNullable), func() {
+			s.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func() {
 				server := &Server{}
 				server.stateCode.Store(commonpb.StateCode_Healthy)
-				options := []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}
-				if backup {
-					options = append(options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
-				}
+				options := append([]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}, tc.options...)
 				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
 					Schema: &schemapb.CollectionSchema{
 						Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
@@ -250,14 +256,14 @@ func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocatio
 					Options: options,
 				})
 				s.Require().NoError(err)
-				if !elementNullable {
+				if !elementNullable || tc.kind == "" {
 					s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
 					s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 					return
 				}
 				s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
-				s.Contains(resp.GetStatus().GetReason(), "not supported yet")
-				s.Contains(resp.GetStatus().GetReason(), "s.arr")
+				s.Contains(resp.GetStatus().GetReason(),
+					tc.kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
 			})
 		}
 	}
@@ -312,12 +318,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in StartBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -326,11 +327,10 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -395,23 +395,15 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Times(2)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -507,23 +499,15 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta bulkimp
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
 
-	mockBroker := broker.NewMockBroker(s.T())
-	// Maybe rather than Times(2): a request rejected by ValidateImportRequest -- the
-	// job-count limit, say -- returns before either describe call.
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Maybe()
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: importMeta,
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -704,18 +688,13 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in StartBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
-	}, nil)
+	// Empty database name in the view - should use default
+	coll := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -762,6 +741,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"allocator_failure", merr.ErrServiceUnavailable},
 		{"collection_not_found", merr.ErrCollectionNotFound},
 		{"collection_nil", merr.ErrCollectionNotFound},
+		{"collection_dropping", merr.ErrCollectionNotFound},
 		{"collection_unavailable", merr.ErrServiceNotReady},
 		{"save_job_failure", merr.ErrServiceUnavailable},
 		{"provided_job_id", nil},
@@ -774,6 +754,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
 		{"native_list_array", nil},
 		{"native_list_array_backup", nil},
+		{"native_list_array_snapshot", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -795,6 +776,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				coll, collectionErr = nil, tc.wantErr
 			case "collection_nil":
 				coll = nil
+			case "collection_dropping":
+				coll.State = etcdpb.CollectionState_CollectionDropping
 			case "save_job_failure":
 				saveErr = tc.wantErr
 			case "allocated_job_id":
@@ -811,16 +794,21 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Version = 99
 			case "unsupported_version_no_job_id":
 				body.Version, body.JobID = 99, 0
-			case "native_list_array", "native_list_array_backup":
+			case "native_list_array", "native_list_array_backup", "native_list_array_snapshot":
 				body.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
 					Name: "s", Fields: []*schemapb.FieldSchema{{
 						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 						ElementNullable: true,
 					}},
 				}}
-				if tc.name == "native_list_array_backup" {
+				switch tc.name {
+				case "native_list_array_backup":
 					// The job fails before binlog listing: server.meta is nil here.
 					body.Options["backup"] = "true"
+				case "native_list_array_snapshot":
+					body.Options["backup"] = "true"
+					body.Options["source_type"] = "snapshot"
+					body.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
 				}
 			}
 			params := paramtable.Get()
@@ -922,16 +910,23 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				s.Equal(int64(1001+i), file.Id)
 				s.Equal(body.Files[i].Paths, file.Paths)
 			}
-			if tc.name == "l0_disabled" {
+			switch tc.name {
+			case "l0_disabled":
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
 				s.Contains(saved.Reason, "l0 import is disabled")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else if strings.HasPrefix(tc.name, "native_list_array") {
+			case "native_list_array_backup", "native_list_array_snapshot":
+				// Only binlog-sourced imports reject a native-list target; the
+				// rejection is persisted as a terminal job because ACK callbacks
+				// retry forever.
+				kind := "binlog import (backup restore)"
+				if tc.name == "native_list_array_snapshot" {
+					kind = "snapshot-source import"
+				}
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
-				s.Contains(saved.Reason, "not supported yet")
-				s.Contains(saved.Reason, "s.arr")
+				s.Contains(saved.Reason, kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else {
+			default:
 				s.Equal(internalpb.ImportJobState_Pending, saved.State)
 			}
 		})

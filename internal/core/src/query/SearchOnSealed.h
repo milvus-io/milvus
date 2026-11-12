@@ -35,7 +35,6 @@ SearchOnSealedIndex(const FieldMeta& field,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& view,
-                    milvus::OpContext* op_context,
                     SearchResult& search_result);
 
 void
@@ -59,17 +58,9 @@ SearchOnSealedIndex(const Schema& schema,
                     const size_t* offsets,
                     int64_t nq,
                     const BitsetView& bits,
-                    milvus::OpContext* ctx,
                     SearchResult& result) {
-    SearchOnSealedIndex(schema[info.field_id_],
-                        reader,
-                        info,
-                        data,
-                        offsets,
-                        nq,
-                        bits,
-                        ctx,
-                        result);
+    SearchOnSealedIndex(
+        schema[info.field_id_], reader, info, data, offsets, nq, bits, result);
 }
 
 inline void

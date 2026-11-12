@@ -19,6 +19,7 @@ package gc
 import (
 	"context"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	dctask "github.com/milvus-io/milvus/internal/datacoord/task"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -231,8 +233,86 @@ func retireRejectedCopyTargets(t *testing.T, m *meta.Meta, task copysegment.Copy
 	for _, mapping := range task.GetIdMappings() {
 		id := mapping.GetTargetSegmentId()
 		if segment := m.GetSegment(context.Background(), id); segment != nil {
-			gc.RecycleDroppedSegment(context.Background(), NewGCManifestReadIO(t), id, segment)
+			gc.RecycleDroppedSegment(context.Background(), NewGCManifestReadIO(t), id)
 		}
 		require.Nil(t, m.GetSegment(context.Background(), id))
 	}
+}
+
+func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
+	meta.MockManifestIndexSubmissions(t)
+	ctx := context.Background()
+	task := copysegment.CreateTestCopyTask(100, 2001).(*copysegment.Task)
+	copies, m := copysegment.NewCopySegmentTaskTestMeta(t, task)
+	task.Meta, task.CopyMeta = m, copies
+	root := t.TempDir()
+	m.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	segment := copysegment.NewTestCopySegment(2001)
+	segment.StorageVersion = storage.StorageV3
+	segment.IsImporting = true
+	require.NoError(t, m.AddSegment(ctx, segment))
+	req := &datapb.CopySegmentRequest{
+		StorageConfig: &indexpb.StorageConfig{RootPath: root},
+		Sources:       []*datapb.CopySegmentSource{{StorageVersion: storage.StorageV3}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 100, PartitionId: 10, SegmentId: 2001}},
+	}
+	require.NoError(t, task.PrepareCopyCleanup(ctx, req))
+	for _, prefix := range task.GetCleanupPrefixes() {
+		require.NoError(t, m.ChunkManager.Write(ctx, prefix+"owned", []byte("owned")))
+	}
+	base := path.Join(root, "insert_log/100/10/2001")
+	dataFile := path.Join(base, "_data/data.parquet")
+	require.NoError(t, m.ChunkManager.Write(ctx, dataFile, []byte("completed worker output")))
+	originalManifest := m.GetSegment(ctx, 2001).GetManifestPath()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		close(entered)
+		<-release
+		return nil, nil
+	}).Build()
+	defer patch.UnPatch()
+	finished := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		finished <- copysegment.SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
+		}, copies, m, nil)
+	}()
+	defer func() { unblock(); <-done }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("verification did not start")
+	}
+	require.True(t, task.GetCleanupRequired())
+	checker := &copysegment.Checker{Ctx: ctx, Meta: m, CopyMeta: copies}
+	checker.CheckFailedJob(copysegment.NewTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed))
+	inspector := &copysegment.Inspector{Ctx: ctx, Meta: m, CopyMeta: copies}
+	inspector.ProcessFailed(task)
+	require.NoError(t, copysegment.CleanupRejectedCopy(ctx, task, m, copies))
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
+	exists, err := m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.True(t, exists, "cleanup must skip an in-flight publication")
+	unblock()
+	require.ErrorIs(t, <-finished, merr.ErrSegmentNotFound)
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
+	require.Equal(t, originalManifest, m.GetSegment(ctx, 2001).GetManifestPath())
+	require.NoError(t, copysegment.CleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.True(t, task.GetCleanupRequired())
+	retireRejectedCopyTargets(t, m, task)
+	require.NoError(t, copysegment.CleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.False(t, task.GetCleanupRequired())
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
 }

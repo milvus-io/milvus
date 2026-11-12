@@ -196,106 +196,15 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     segcore::storagev2translator::GroupCTMeta meta_;
 };
 
-class TestIndexTranslator : public Translator<milvus::index::IIndexReaderBase> {
- public:
-    TestIndexTranslator(
-        std::string key,
-        std::unique_ptr<milvus::index::IIndexReaderBase>&& index)
-        : TestIndexTranslator(std::move(key), std::move(index), nullptr) {
+inline index::IndexPtr
+CreateTestIndex(std::string,
+                BuiltTestIndex built,
+                OpContext** observed = nullptr) {
+    if (observed != nullptr) {
+        return std::make_shared<ContextObservingIndex>(std::move(built.index),
+                                                       observed);
     }
-
-    TestIndexTranslator(
-        std::string key,
-        std::unique_ptr<milvus::index::IIndexReaderBase>&& index,
-        milvus::OpContext** observed_ctx)
-        : Translator<milvus::index::IIndexReaderBase>(),
-          key_(key),
-          index_(std::move(index)),
-          observed_ctx_(observed_ctx),
-          meta_(milvus::cachinglayer::Meta(
-              StorageType::MEMORY,
-              CellIdMappingMode::IDENTICAL,
-              CellDataType::OTHER,
-              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
-              false)) {
-    }
-    ~TestIndexTranslator() override = default;
-
-    size_t
-    num_cells() const override {
-        return 1;
-    }
-
-    cid_t
-    cell_id_of(uid_t uid) const override {
-        return uid;
-    }
-
-    LoadingResourceUsage
-    estimated_loading_usage(const std::vector<cid_t>& cids) const override {
-        return {};
-    }
-
-    int64_t
-    cells_storage_bytes(const std::vector<cid_t>& cids) const override {
-        return 0;
-    }
-
-    const std::string&
-    key() const override {
-        return key_;
-    }
-
-    Meta*
-    meta() override {
-        return &meta_;
-    }
-
-    std::vector<
-        std::pair<cid_t, std::unique_ptr<milvus::index::IIndexReaderBase>>>
-    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
-        if (observed_ctx_ != nullptr) {
-            *observed_ctx_ = ctx;
-        }
-        std::vector<
-            std::pair<cid_t, std::unique_ptr<milvus::index::IIndexReaderBase>>>
-            res;
-        res.reserve(cids.size());
-        for (auto cid : cids) {
-            AssertInfo(cid == 0, "TestIndexTranslator assumes only one cell.");
-            res.emplace_back(cid, std::move(index_));
-        }
-        return res;
-    }
-
- private:
-    std::string key_;
-    std::unique_ptr<milvus::index::IIndexReaderBase> index_;
-    milvus::OpContext** observed_ctx_{nullptr};
-    milvus::cachinglayer::Meta meta_;
-};
-
-inline std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-CreateTestCacheIndex(std::string key,
-                     std::unique_ptr<milvus::index::IIndexReaderBase>&& index) {
-    std::unique_ptr<
-        milvus::cachinglayer::Translator<milvus::index::IIndexReaderBase>>
-        translator = std::make_unique<TestIndexTranslator>(std::move(key),
-                                                           std::move(index));
-    return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
-}
-
-inline std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-CreateTestCacheIndex(std::string key,
-                     std::unique_ptr<milvus::index::IIndexReaderBase>&& index,
-                     milvus::OpContext** observed_ctx) {
-    std::unique_ptr<
-        milvus::cachinglayer::Translator<milvus::index::IIndexReaderBase>>
-        translator = std::make_unique<TestIndexTranslator>(
-            std::move(key), std::move(index), observed_ctx);
-    return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
+    return std::move(built.index);
 }
 
 inline std::map<std::string, std::string>

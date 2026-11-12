@@ -19,12 +19,16 @@ func TestWriteSchemaAdmissionAndRecovery(t *testing.T) {
 	m := &shardManagerImpl{mu: sync.RWMutex{}, collections: newCollectionInfosFromWritePathRecovery(map[string]moduleapi.VChannelWritePathRecoveryState{
 		"p_1v0": {CollectionID: 1, Schema: &schemapb.CollectionSchema{Version: 0, Name: "original"}, SchemaTimeTick: 10},
 	})}
+	initialSchema := m.GetCollectionSchemaSnapshot(1)
 	for _, version := range []int32{0, 2} {
 		if version != 0 {
 			m.collections[1].setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: version, Name: "original"}, CheckpointTimeTick: 20})
 		}
 		got, err := m.GetWriteSchema(1, "p_1v0")
 		require.NoError(t, err)
+		shared := m.GetCollectionSchemaSnapshot(1)
+		require.Same(t, m.collections[1].Schema.GetSchema(), shared)
+		require.Same(t, shared, m.GetAllCollectionSchemaInfos()[1].Schema)
 		require.Equal(t, version, got.Schema.Version)
 		require.Equal(t, uint64(10+version*5), got.CheckpointTimeTick)
 		admitted, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(version)})
@@ -37,6 +41,7 @@ func TestWriteSchemaAdmissionAndRecovery(t *testing.T) {
 		require.Equal(t, "original", again.Schema.Name)
 		require.NotEqualValues(t, 99, again.CheckpointTimeTick)
 	}
+	require.Zero(t, initialSchema.GetVersion())
 	for _, identity := range []struct {
 		id      int64
 		channel string
@@ -45,10 +50,13 @@ func TestWriteSchemaAdmissionAndRecovery(t *testing.T) {
 		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 	}
 	m.collections[1].Schema = nil
+	require.Nil(t, m.GetCollectionSchemaSnapshot(1))
+	require.NotContains(t, m.GetAllCollectionSchemaInfos(), int64(1))
 	_, err := m.GetWriteSchema(1, "p_1v0")
 	require.Error(t, err)
 	require.False(t, status.AsStreamingError(err).IsUnrecoverable())
 	delete(m.collections, 1)
+	require.Nil(t, m.GetCollectionSchemaSnapshot(1))
 	_, err = m.GetWriteSchema(1, "p_1v0")
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }

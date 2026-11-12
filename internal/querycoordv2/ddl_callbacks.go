@@ -52,13 +52,13 @@ func (c *DDLCallbacks) registerResourceGroupCallbacks() {
 
 // startBroadcastWithCollectionIDLock starts a broadcast with collection id lock.
 func (c *Server) startBroadcastWithCollectionIDLock(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := c.broker.DescribeCollection(ctx, collectionID)
+	coll, err := c.meta.GetCollectionInfo(collectionID)
 	if err != nil {
 		return nil, err
 	}
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
+		message.NewSharedDBNameResourceKey(coll.DatabaseName),
+		message.NewExclusiveCollectionNameResourceKey(coll.DatabaseName, coll.Schema.GetName()),
 	)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to start broadcast with collection lock")

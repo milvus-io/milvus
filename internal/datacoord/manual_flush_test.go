@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -33,10 +32,8 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 			coll := &meta.CollectionInfo{ID: 100, DatabaseName: "db", Schema: &schemapb.CollectionSchema{Name: "coll"}, VChannelNames: []string{"v1", "v2"}}
 			bc := &embeddedBroadcastAPI{}
 			server := &Server{handler: &embeddedHandler{}, meta: &meta.Meta{}}
-			// No allocator is installed: streaming Flush must not allocate a separate TSO.
+			// No allocator is installed: Flush must not allocate a separate TSO.
 			server.stateCode.Store(commonpb.StateCode_Healthy)
-			patch := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-			defer patch.UnPatch()
 			patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).To(func(_ *ddl.Callbacks, _ context.Context, id int64) (broadcaster.BroadcastAPI, error) {
 				require.Equal(t, coll.ID, id)
 				return bc, nil

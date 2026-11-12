@@ -3861,6 +3861,113 @@ func TestExpr_ElementFilter(t *testing.T) {
 	}
 }
 
+// newElementFilterPredicateSchema extends newTestSchema with the sub-field
+// kinds element_filter predicates can reference: a Bool sub-field, an
+// element-nullable sub-field, a nested Array sub-field, and a second struct.
+func newElementFilterPredicateSchema(t *testing.T) *typeutil.SchemaHelper {
+	schema := newTestSchema(true)
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType}}
+	}
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element}}
+	}
+	structField := schema.StructArrayFields[0]
+	structField.Fields = append(structField.Fields,
+		&schemapb.FieldSchema{
+			FieldID: 10101, Name: "struct_array[sub_bool]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Bool,
+		},
+		&schemapb.FieldSchema{
+			FieldID: 10102, Name: "struct_array[en]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64, ElementNullable: true,
+		},
+		&schemapb.FieldSchema{
+			FieldID: 10103, Name: "struct_array[nested]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, TypeSchema: array(array(leaf(schemapb.DataType_Int64))),
+		},
+	)
+	schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+		FieldID: 10104, Name: "other_struct", Fields: []*schemapb.FieldSchema{{
+			FieldID: 10105, Name: "other_struct[score]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		}},
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+// element_filter predicates follow the MATCH_* element-level rules: the parser
+// rejects every predicate segcore cannot evaluate per element, with a
+// QueryPlan input error, instead of failing or misreading rows in segcore.
+func TestExpr_ElementFilterPredicateValidation(t *testing.T) {
+	helper := newElementFilterPredicateSchema(t)
+	int64Value := func(v int64) *schemapb.TemplateValue {
+		return &schemapb.TemplateValue{Val: &schemapb.TemplateValue_Int64Val{Int64Val: v}}
+	}
+
+	for _, expr := range []string{
+		`element_filter(struct_array, $[sub_bool] == true)`,
+		`element_filter(struct_array, $[sub_bool] != false && $[sub_int] > 1)`,
+		`element_filter(struct_array, not ($[sub_bool] == true))`,
+		`element_filter(struct_array, $[en] IS NULL)`,
+		`element_filter(struct_array, $[en] IS NOT NULL && $[en] > 3)`,
+		`element_filter(struct_array, $[en] != 1 || $[en] IS NULL)`,
+		`element_filter(struct_array, array_contains($[nested], 7))`,
+		`element_filter(struct_array, array_length($[nested]) == 2)`,
+		`element_filter(struct_array, $[sub_str] like "ab%")`,
+		`element_filter(struct_array, $[sub_str] =~ "^a.*")`,
+		`element_filter(struct_array, 1 < $[sub_int] < 10)`,
+		`element_filter(struct_array, $[sub_int] + 2 == 12)`,
+		`element_filter(struct_array, $[sub_int] in [1, 2, 3])`,
+		`Int64Field > 5 && element_filter(struct_array, $[sub_int] > 1)`,
+		`Int64Field > 5 && other_struct[0][score] > 1 && element_filter(struct_array, $[sub_int] > 1)`,
+	} {
+		_, err := ParseExpr(helper, expr, nil)
+		assert.NoError(t, err, expr)
+	}
+	_, err := ParseExpr(helper, `element_filter(struct_array, $[sub_int] > {low} && $[en] < {high})`,
+		map[string]*schemapb.TemplateValue{"low": int64Value(1), "high": int64Value(9)})
+	assert.NoError(t, err)
+
+	rowLevel := "element_filter predicate can only use $[sub_field] of struct struct_array; " +
+		"row-level fields (top-level fields, struct_array[i][sub_field], fields of another struct) must be filtered outside element_filter " +
+		"and combined with AND, e.g. top_level_field > 5 && element_filter(struct_array, $[sub_field] > 1)"
+	for _, test := range []struct {
+		expr   string
+		values map[string]*schemapb.TemplateValue
+		want   string
+	}{
+		{expr: `element_filter(struct_array, $[sub_bool])`, want: "element_filter predicate $[sub_bool] is a bare Bool sub-field; write it as a comparison, e.g. $[sub_bool] == true"},
+		// A bare sub-field below a logical operator, and a comparison of two
+		// columns, were already rejected while parsing the operands.
+		{expr: `element_filter(struct_array, not $[sub_bool])`, want: "not op can only be applied on boolean expression"},
+		{expr: `element_filter(struct_array, $[sub_bool] && $[sub_int] > 1)`, want: "'and' can only be used between boolean expressions"},
+		{expr: `element_filter(struct_array, $[sub_int] > Int64Field)`, want: "field-to-field comparison involving ARRAY fields is not supported"},
+		{expr: `element_filter(struct_array, $[sub_int] == $[en])`, want: "field-to-field comparison involving ARRAY fields is not supported"},
+		{expr: `element_filter(struct_array, $[sub_int] + 1)`, want: "element_filter predicate must be a boolean expression, got $[sub_int]+1 of type Int64"},
+		{expr: `element_filter(struct_array, $[sub_str])`, want: "element_filter predicate must be a boolean expression, got $[sub_str] of type VarChar"},
+		{expr: `element_filter(struct_array, {flag})`, values: map[string]*schemapb.TemplateValue{"flag": {Val: &schemapb.TemplateValue_BoolVal{BoolVal: true}}}, want: "element_filter predicate must be a boolean expression, got {flag} of type None"},
+		{expr: `element_filter(struct_array, Int64Field > 5)`, want: rowLevel},
+		{expr: `element_filter(struct_array, BoolField)`, want: rowLevel},
+		{expr: `element_filter(struct_array, $[sub_int] > 1 && Int64Field > 5)`, want: rowLevel},
+		{expr: `element_filter(struct_array, $[sub_int] > 1 || Int64Field in [1, 2])`, want: rowLevel},
+		{expr: `element_filter(struct_array, $[sub_int] > 1 && other_struct[0][score] > 1)`, want: rowLevel},
+		{expr: `element_filter(struct_array, $[sub_int] > 1 && struct_array[0][sub_int] > 1)`, want: rowLevel},
+		{expr: `element_filter(struct_array, array_contains(StringArrayField, "a"))`, want: rowLevel},
+		{expr: `element_filter(struct_array, JSONField["a"] > 1)`, want: rowLevel},
+		{expr: `element_filter(struct_array, $[sub_int] > {low} && Int64Field > {high})`, values: map[string]*schemapb.TemplateValue{"low": int64Value(1), "high": int64Value(9)}, want: rowLevel},
+		{expr: `element_filter(struct_array, empty($[sub_str]))`, want: "function calls are not supported inside element_filter predicate"},
+	} {
+		_, err := ParseExpr(helper, test.expr, test.values)
+		require.Error(t, err, test.expr)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan, test.expr)
+		assert.Equal(t, merr.InputError, merr.GetErrorType(err), test.expr)
+		assert.Contains(t, err.Error(), test.want, test.expr)
+	}
+}
+
 func TestExpr_Match(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

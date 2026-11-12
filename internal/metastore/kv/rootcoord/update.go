@@ -53,8 +53,8 @@ func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ..
 			// the collection key as the visibility point, so children are
 			// persisted before the collection key on the ordered fallback
 			// path.
-			if coll.State != pb.CollectionState_CollectionCreated {
-				return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+			if coll.State != pb.CollectionState_CollectionCreated && coll.State != pb.CollectionState_CollectionRestoring {
+				return merr.WrapErrServiceInternalMsg("collection state should be created or restoring, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 			}
 
 			k1, v1, err := buildCollectionKV(coll)

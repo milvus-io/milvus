@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -131,11 +133,14 @@ TEST_P(ScalarArtifactRoundTripTest,
         index::LoaderRegistry::Instance().Lookup(GetParam());
     ASSERT_TRUE(static_cast<bool>(loader_entry));
     const auto derived_caps = loader_entry.derive_caps(options.params);
-    auto reader = loader_entry.Load(
-        {index::OpenedIndexSource{index::LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             false}},
-         options});
+    auto reader = loader_entry
+                      .Load({index::OpenedIndexSource{index::LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 false}},
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
 
     EXPECT_EQ(reader->Count(), 8);
@@ -290,7 +295,7 @@ TEST(GrowingVectorPublicationAcceptance,
                            .valid = first_valid.data(),
                        });
 
-        old_pin = indexes.PinSnapshot(field_id);
+        old_pin = indexes.PinSnapshot(nullptr, field_id);
         ASSERT_TRUE(static_cast<bool>(old_pin));
         EXPECT_EQ(old_pin.CoveredRowEnd(), 4);
         const auto* old_reader =
@@ -322,7 +327,7 @@ TEST(GrowingVectorPublicationAcceptance,
                            .valid = second_valid.data(),
                        });
 
-        new_pin = indexes.PinSnapshot(field_id);
+        new_pin = indexes.PinSnapshot(nullptr, field_id);
         ASSERT_TRUE(static_cast<bool>(new_pin));
         EXPECT_EQ(new_pin.CoveredRowEnd(), 7);
         const auto* new_reader =
@@ -405,14 +410,26 @@ class TrackingReader final : public index::IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
+ private:
+    int64_t count_;
+    std::shared_ptr<int> lifetime_;
+};
 
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {};
+class TrackingIndex final : public index::IIndex {
+ public:
+    TrackingIndex(int64_t count, std::shared_ptr<int> lifetime)
+        : count_(count), lifetime_(std::move(lifetime)) {
+    }
+    index::IndexMetadata
+    Metadata() const override {
+        return {{}, index::Domain::Row, DataType::INT64, count_};
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(milvus::OpContext*) const override {
+        return std::make_unique<TrackingReader>(count_, lifetime_);
+    }
+    void
+    CancelWarmup() const override {
     }
 
  private:
@@ -423,9 +440,8 @@ class TrackingReader final : public index::IIndexReaderBase {
 class TestGrowingIndex final : public index::IGrowingIndex {
  public:
     void
-    Publish(std::unique_ptr<const index::IIndexReaderBase> reader,
-            int64_t covered_row_end) {
-        PublishSnapshot(std::move(reader), covered_row_end);
+    Publish(index::IndexPtr index, int64_t covered_row_end) {
+        PublishSnapshot(std::move(index), covered_row_end);
     }
 
     void
@@ -451,7 +467,7 @@ TEST(GrowingPublicationContractAcceptance,
         auto owner = std::make_unique<TestGrowingIndex>();
         auto current = std::make_shared<int>(1);
         current_lifetime = current;
-        owner->Publish(std::make_unique<TrackingReader>(4, current), 4);
+        owner->Publish(std::make_shared<TrackingIndex>(4, current), 4);
         current.reset();
 
         held = owner->PinSnapshot();
@@ -462,7 +478,7 @@ TEST(GrowingPublicationContractAcceptance,
         auto rejected = std::make_shared<int>(2);
         std::weak_ptr<int> rejected_lifetime = rejected;
         EXPECT_ANY_THROW(
-            owner->Publish(std::make_unique<TrackingReader>(3, rejected), 3));
+            owner->Publish(std::make_shared<TrackingIndex>(3, rejected), 3));
         rejected.reset();
         EXPECT_TRUE(rejected_lifetime.expired());
 

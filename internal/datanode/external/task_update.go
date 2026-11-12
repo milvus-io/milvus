@@ -304,7 +304,7 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 // fragmentKey identifies the L1 data fragment. Delete overlays are handled as
 // manifest-only updates so L0 changes do not force a new target segment ID.
 // Existing file ranges are immutable by the external-table contract; overwrite
-// is unsupported. Properties are therefore not hashed to trigger segment rebuilds.
+// is unsupported. Paimon additionally keys on its snapshot/delete descriptor.
 func fragmentKey(f packed.Fragment) string {
 	return packed.FragmentIdentity(f)
 }
@@ -420,14 +420,40 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
-		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
+		missingColumns, err := t.missingExternalColumns(seg)
+		if err != nil {
+			return nil, err
+		}
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
 			return nil, err
 		}
 		var patchedSegment *datapb.SegmentInfo
 		if shouldRefreshDeltalogs {
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			if len(outputColumns) > 0 {
+				// ChildFields is sufficient for unchanged segments, but older refreshes
+				// could leave advertised Function outputs absent from the manifest.
+				// Check the pinned manifest before translating deletes or carrying its
+				// outputs. Only confirmed absence triggers a rebuild; read errors must
+				// fail the task rather than turn a storage fault into recomputation.
+				hasOutputs, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+				if err != nil {
+					return nil, merr.Wrapf(err, "check retained function output columns for segment %d", seg.GetID())
+				}
+				if !hasOutputs {
+					missingFunctionOutputSegments++
+					taskLog.Info(ctx, "Segment invalidated due to missing retained function output columns",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.String("updateReason", "missing_function_output_columns"),
+						mlog.String("manifestPath", seg.GetManifestPath()))
+					// Nothing has marked these fragments used or retained this segment.
+					// Rebuild from the latest orphan fragments below, with new segment
+					// IDs and freshly computed Function outputs. Publication of the
+					// replacement remains the existing job-level atomic update.
+					continue
+				}
+			}
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -457,6 +483,16 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				mlog.FieldSegmentID(seg.GetID()),
 				mlog.String("updateReason", "missing_external_columns"),
 				mlog.Strings("missingColumns", missingColumns))
+		}
+
+		if patchedSegment != nil && len(patchedSegment.GetBinlogs()) == 0 {
+			// Catalog recovery omits V3 fake binlogs. Even when every physical
+			// column exists, DataCoord requires them on a same-ID manifest patch.
+			// Restore metadata from the final manifest without appending columns.
+			patchedSegment, err = t.rebuildSegmentFakeBinlogs(ctx, patchedSegment, patchedSegment.GetManifestPath())
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		for _, f := range fragments {
@@ -540,6 +576,9 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	if len(outputColumns) == 0 {
 		return true, nil
 	}
+	// Trust published ChildFields on the unchanged-segment fast path. Before
+	// rebuilding a delete set, organizeSegments checks the actual output columns
+	// so historical output loss can fall back to segment creation.
 	if segmentChildFieldsContainColumns(seg, outputColumns) {
 		return true, nil
 	}
@@ -586,20 +625,6 @@ func functionOutputColumnNames(schema *schemapb.CollectionSchema) ([]string, err
 	return columns, nil
 }
 
-func targetExternalFields(schema *schemapb.CollectionSchema) map[int64]string {
-	result := make(map[int64]string)
-	if schema == nil {
-		return result
-	}
-	for _, field := range schema.GetFields() {
-		if field.GetExternalField() == "" {
-			continue
-		}
-		result[field.GetFieldID()] = field.GetExternalField()
-	}
-	return result
-}
-
 func coveredFieldsFromChildFields(seg *datapb.SegmentInfo) map[int64]struct{} {
 	result := make(map[int64]struct{})
 	for _, fieldBinlog := range seg.GetBinlogs() {
@@ -615,23 +640,42 @@ func coveredFieldsFromChildFields(seg *datapb.SegmentInfo) map[int64]struct{} {
 	return result
 }
 
-func missingExternalColumns(seg *datapb.SegmentInfo, schema *schemapb.CollectionSchema) []string {
-	if schema == nil {
-		return nil
-	}
-	targetFields := targetExternalFields(schema)
+func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.SegmentInfo) ([]string, error) {
+	schema := t.req.GetSchema()
+	resolver := typeutil.NewStorageColumnResolver(schema,
+		typeutil.WithStorageColumnExternalSpec(t.req.GetExternalSpec()))
 	coveredFields := coveredFieldsFromChildFields(seg)
-	var missingColumns []string
+	var columns []string
+	externalNames := make(map[string]string)
 	for _, field := range schema.GetFields() {
-		externalField, ok := targetFields[field.GetFieldID()]
-		if !ok {
+		if field.GetExternalField() == "" {
 			continue
 		}
-		if _, ok := coveredFields[field.GetFieldID()]; !ok {
-			missingColumns = append(missingColumns, externalField)
+		if _, ok := coveredFields[field.GetFieldID()]; ok {
+			continue
+		}
+		if column, ok := resolver.ManifestStoredColumnName(field); ok {
+			columns = append(columns, column)
+			externalNames[column] = field.GetExternalField()
 		}
 	}
-	return missingColumns
+	missing := columns
+	if len(columns) > 0 && seg.GetManifestPath() != "" {
+		// V3 fake binlogs (and ChildFields) are not persisted by the catalog.
+		// Their absence after restart cannot prove data is missing. Check only
+		// unadvertised physical columns; milvus-table stores numeric field IDs,
+		// not external_field names. Keep the metadata-only fast path otherwise.
+		var err error
+		missing, err = packed.ManifestMissingColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), columns)
+		if err != nil {
+			return nil, merr.Wrapf(err, "check external columns for segment %d", seg.GetID())
+		}
+	}
+	var missingColumns []string
+	for _, column := range missing {
+		missingColumns = append(missingColumns, externalNames[column])
+	}
+	return missingColumns, nil
 }
 
 func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
@@ -640,7 +684,6 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	fragments []packed.Fragment,
 	missingColumns []string,
 ) (*datapb.SegmentInfo, error) {
-	schema := t.req.GetSchema()
 	newManifestPath, err := packed.AppendSegmentManifestColumns(
 		ctx,
 		seg.GetManifestPath(),
@@ -652,13 +695,26 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	if err != nil {
 		return nil, merr.Wrapf(err, "failed to append manifest columns for segment %d", seg.GetID())
 	}
+	return t.rebuildSegmentFakeBinlogs(ctx, seg, newManifestPath)
+}
 
+// rebuildSegmentFakeBinlogs restores load-size and field-coverage metadata from
+// an existing manifest. It never changes column groups or recomputes Functions.
+func (t *RefreshExternalCollectionTask) rebuildSegmentFakeBinlogs(
+	ctx context.Context,
+	seg *datapb.SegmentInfo,
+	manifestPath string,
+) (*datapb.SegmentInfo, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	schema := t.req.GetSchema()
 	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
 	if int64(sampleRows) > seg.GetNumOfRows() {
 		sampleRows = int(seg.GetNumOfRows())
 	}
 	fieldSizes, err := packed.SampleExternalFieldSizes(
-		newManifestPath,
+		manifestPath,
 		sampleRows,
 		t.req.GetCollectionID(),
 		t.req.GetExternalSource(),
@@ -668,6 +724,9 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	)
 	if err != nil {
 		return nil, merr.Wrapf(err, "failed to sample external field sizes for segment %d", seg.GetID())
+	}
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
 	}
 	externalAvgBytes := sumFieldSizes(fieldSizes, schema)
 	if externalAvgBytes <= 0 {
@@ -685,7 +744,7 @@ func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
 	}
 
 	patched := proto.Clone(seg).(*datapb.SegmentInfo)
-	patched.ManifestPath = newManifestPath
+	patched.ManifestPath = manifestPath
 	patched.SchemaVersion = schema.GetVersion()
 	patched.StorageVersion = storage.StorageV3
 	patched.Binlogs = buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), memorySize, schema, t.parsedSpec.Format)
@@ -776,62 +835,117 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			}
 		}
 	} else {
+		// DataCoord derives this target from the configured segment sizing policy
+		// and passes it with the refresh request.
 		targetRowsPerSegment := t.req.GetTargetRowsPerSegment()
+		if targetRowsPerSegment <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("external collection target rows per segment must be positive")
+		}
 		if totalRows < targetRowsPerSegment {
 			targetRowsPerSegment = totalRows
 		}
 
-		numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
-		if numSegments == 0 {
-			numSegments = 1
-		}
-
-		avgRowsPerSegment := totalRows / numSegments
-
-		taskLog.Info(ctx, "Balancing fragments to segments",
-			mlog.Int("numFragments", len(fragments)),
-			mlog.Int64("totalRows", totalRows),
-			mlog.Int64("numSegments", numSegments),
-			mlog.Int64("avgRowsPerSegment", avgRowsPerSegment))
-
-		// Sort fragments by row count descending for better bin-packing
-		sortedFragments := make([]packed.Fragment, len(fragments))
-		copy(sortedFragments, fragments)
-		sort.Slice(sortedFragments, func(i, j int) bool {
-			return sortedFragments[i].RowCount > sortedFragments[j].RowCount
-		})
-
-		// Initialize segment bins
-		type segmentBin struct {
-			fragments []packed.Fragment
-			rowCount  int64
-		}
-		bins := make([]segmentBin, numSegments)
-
-		// Greedy bin-packing: assign each fragment to the bin with lowest current row count
-		for _, f := range sortedFragments {
-			if err := ensureContext(ctx); err != nil {
-				return nil, err
+		isPaimonTask := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatPaimonTable
+		maxDataSplitsPerSegment := int64(len(fragments))
+		if isPaimonTask {
+			maxDataSplitsPerSegment = paramtable.Get().DataNodeCfg.ExternalCollectionPaimonMaxDataSplitsPerSegment.GetAsInt64()
+			if maxDataSplitsPerSegment <= 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("Paimon max DataSplits per segment must be positive")
 			}
-			// Find bin with minimum row count
-			minIdx := 0
-			for i := 1; i < len(bins); i++ {
-				if bins[i].rowCount < bins[minIdx].rowCount {
-					minIdx = i
+		}
+
+		// Native Paimon DataSplits are independent merge domains. Preserve their
+		// bucket boundary while allowing several immutable DataSplits from one
+		// bucket to share a Milvus segment. Direct files keep the same global
+		// packing behavior as Iceberg and other file-based formats.
+		packingGroups := make(map[string][]packed.Fragment)
+		for _, fragment := range fragments {
+			group := ""
+			if isPaimonTask {
+				readPath, bucket, err := packed.PaimonRoutingMeta(fragment.Properties)
+				if err != nil {
+					return nil, err
+				}
+				if readPath == packed.PaimonDataSplitReadPath {
+					group = "paimon-bucket:" + strconv.FormatInt(int64(bucket), 10)
 				}
 			}
-			bins[minIdx].fragments = append(bins[minIdx].fragments, f)
-			bins[minIdx].rowCount += f.RowCount
+			packingGroups[group] = append(packingGroups[group], fragment)
+		}
+		groupNames := make([]string, 0, len(packingGroups))
+		for group := range packingGroups {
+			groupNames = append(groupNames, group)
+		}
+		sort.Strings(groupNames)
+
+		type segmentBin struct {
+			fragments  []packed.Fragment
+			rowCount   int64
+			dataSplits int64
+		}
+		for _, group := range groupNames {
+			groupFragments := packingGroups[group]
+			var groupRows int64
+			for _, fragment := range groupFragments {
+				groupRows += fragment.RowCount
+			}
+
+			numSegments := (groupRows + targetRowsPerSegment - 1) / targetRowsPerSegment
+			isDataSplitGroup := isPaimonTask && group != ""
+			if isDataSplitGroup {
+				dataSplits := int64(len(groupFragments))
+				bySplitLimit := (dataSplits + maxDataSplitsPerSegment - 1) / maxDataSplitsPerSegment
+				if bySplitLimit > numSegments {
+					numSegments = bySplitLimit
+				}
+			}
+			if numSegments == 0 {
+				numSegments = 1
+			}
+
+			sortedFragments := append([]packed.Fragment(nil), groupFragments...)
+			sort.SliceStable(sortedFragments, func(i, j int) bool {
+				return sortedFragments[i].RowCount > sortedFragments[j].RowCount
+			})
+			bins := make([]segmentBin, numSegments)
+			for _, fragment := range sortedFragments {
+				if err := ensureContext(ctx); err != nil {
+					return nil, err
+				}
+				minIdx := -1
+				for index := range bins {
+					if isDataSplitGroup && bins[index].dataSplits >= maxDataSplitsPerSegment {
+						continue
+					}
+					if minIdx < 0 || bins[index].rowCount < bins[minIdx].rowCount {
+						minIdx = index
+					}
+				}
+				if minIdx < 0 {
+					return nil, merr.WrapErrParameterInvalidMsg("cannot place Paimon DataSplit within per-segment limit %d", maxDataSplitsPerSegment)
+				}
+				bins[minIdx].fragments = append(bins[minIdx].fragments, fragment)
+				bins[minIdx].rowCount += fragment.RowCount
+				if isDataSplitGroup {
+					bins[minIdx].dataSplits++
+				}
+			}
+
+			for _, bin := range bins {
+				if len(bin.fragments) == 0 {
+					continue
+				}
+				if err := appendWork(bin.rowCount, bin.fragments); err != nil {
+					return nil, err
+				}
+			}
 		}
 
-		for _, bin := range bins {
-			if len(bin.fragments) == 0 {
-				continue
-			}
-			if err := appendWork(bin.rowCount, bin.fragments); err != nil {
-				return nil, err
-			}
-		}
+		taskLog.Info(ctx, "Balanced fragments to segments",
+			mlog.Int("numFragments", len(fragments)),
+			mlog.Int64("totalRows", totalRows),
+			mlog.Int("packingGroups", len(packingGroups)),
+			mlog.Int("numSegments", len(works)))
 	}
 
 	taskLog.Info(ctx, "Allocated segment IDs, starting manifest creation",

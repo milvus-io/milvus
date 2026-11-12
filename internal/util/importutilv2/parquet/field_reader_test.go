@@ -1475,34 +1475,52 @@ func TestArrayNullElement(t *testing.T) {
 	}
 }
 
-func TestStructFieldReader_toScalarField_TypeMismatch(t *testing.T) {
+func TestStructFieldReader_appendArrowScalar_TypeMismatch(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	newArray := func(b array.Builder) arrow.Array {
+		defer b.Release()
+		return b.NewArray()
+	}
+	stringBuilder := array.NewStringBuilder(mem)
+	stringBuilder.Append("not_a_number")
+	stringValues := newArray(stringBuilder)
+	defer stringValues.Release()
+	floatBuilder := array.NewFloat64Builder(mem)
+	floatBuilder.Append(3.14)
+	floatValues := newArray(floatBuilder)
+	defer floatValues.Release()
+	int32Builder := array.NewInt32Builder(mem)
+	int32Builder.Append(1)
+	int32Values := newArray(int32Builder)
+	defer int32Values.Release()
+
 	tests := []struct {
 		name        string
 		elementType schemapb.DataType
-		data        []interface{}
+		values      arrow.Array
 	}{
-		{"Bool_wrong_type", schemapb.DataType_Bool, []interface{}{"not_a_bool"}},
-		{"Int8_wrong_type", schemapb.DataType_Int8, []interface{}{"not_an_int8"}},
-		{"Int16_wrong_type", schemapb.DataType_Int16, []interface{}{3.14}},
-		{"Int32_wrong_type", schemapb.DataType_Int32, []interface{}{true}},
-		{"Int64_wrong_type", schemapb.DataType_Int64, []interface{}{"not_an_int64"}},
-		{"Float_wrong_type", schemapb.DataType_Float, []interface{}{int32(1)}},
-		{"Double_wrong_type", schemapb.DataType_Double, []interface{}{int64(1)}},
-		{"VarChar_wrong_type", schemapb.DataType_VarChar, []interface{}{123}},
+		{"Bool_wrong_type", schemapb.DataType_Bool, stringValues},
+		{"Int8_wrong_type", schemapb.DataType_Int8, stringValues},
+		{"Int16_wrong_type", schemapb.DataType_Int16, floatValues},
+		{"Int32_wrong_type", schemapb.DataType_Int32, floatValues},
+		{"Int64_wrong_type", schemapb.DataType_Int64, stringValues},
+		{"Float_wrong_type", schemapb.DataType_Float, stringValues},
+		{"Double_wrong_type", schemapb.DataType_Double, stringValues},
+		{"VarChar_wrong_type", schemapb.DataType_VarChar, int32Values},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &StructFieldReader{
-				field: &schemapb.FieldSchema{
-					Name:        "test_field",
-					DataType:    schemapb.DataType_Array,
-					ElementType: tt.elementType,
-				},
+			field := &schemapb.FieldSchema{
+				Name:        "test_field",
+				DataType:    schemapb.DataType_Array,
+				ElementType: tt.elementType,
 			}
-			_, err := reader.toScalarField(tt.data)
+			row, err := emptyScalarField(tt.elementType)
+			assert.NoError(t, err)
+			err = appendArrowScalar(row, field, tt.elementType, 100, tt.values, 0)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "expected")
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
 		})
 	}
 }
@@ -1613,4 +1631,26 @@ func TestWrapParquetErr(t *testing.T) {
 
 	alreadyInput := merr.WrapErrImportFailedMsg("bad value")
 	require.Same(t, alreadyInput, wrapParquetErr(alreadyInput), "an existing classification is not rewritten")
+}
+
+// TestValidateJSONRow pins the per-row JSON check: every row must be valid JSON,
+// and a dynamic row must additionally be a JSON object. The dynamic case is
+// parsed once, and that one parse still rejects malformed input.
+func TestValidateJSONRow(t *testing.T) {
+	jsonField := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}
+	dynamicField := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON, IsDynamic: true}
+
+	for _, valid := range []string{`{"a": 1}`, `[1, 2]`, `"str"`, `123`, `null`} {
+		assert.NoError(t, validateJSONRow(jsonField, valid), valid)
+	}
+	for _, invalid := range []string{``, `{"a": 1,}`, `{"a": 1}{"b": 2}`, `1e999`} {
+		assert.Error(t, validateJSONRow(jsonField, invalid), invalid)
+	}
+
+	for _, valid := range []string{`{"a": 1}`, `{}`, `null`} {
+		assert.NoError(t, validateJSONRow(dynamicField, valid), valid)
+	}
+	for _, invalid := range []string{`[1, 2]`, `"str"`, `123`, `{"a": 1,}`} {
+		assert.Error(t, validateJSONRow(dynamicField, invalid), invalid)
+	}
 }

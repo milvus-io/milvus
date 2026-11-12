@@ -860,6 +860,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
               9. search with expressions related with the json paths
         expected: Search successfully
         """
+        # Keep scalar equality independent of JsonFlat array-element matching.
+        scalar_only_value = 10001
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
@@ -940,7 +942,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                 default_primary_key_field_name: i,
                 default_vector_field_name: vectors[i],
                 default_string_field_name: str(i),
-                json_field_name: {"a": 1},
+                json_field_name: {"a": scalar_only_value},
             }
             for i in range(default_nb + 50, default_nb + 60)
         ]
@@ -1072,7 +1074,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                 "limit": default_limit,
             },
         )
-        expr = f"{json_field_name}['a'] == 1"
+        expr = f"{json_field_name}['a'] == {scalar_only_value}"
         insert_ids = [i for i in range(default_nb + 50, default_nb + 60)]
         self.search(
             client,

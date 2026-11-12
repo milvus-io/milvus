@@ -445,7 +445,8 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
         auto [loading, private_overhead, shared_overhead] =
-            translator->estimated_loading_usage({i});
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
         const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
@@ -550,7 +551,8 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
         auto [loading, private_overhead, shared_overhead] =
-            translator->estimated_loading_usage({i});
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
         const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
@@ -1329,7 +1331,8 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
         EXPECT_EQ(mmap_files_before_async, mmap_files_before_sync);
     }
     storage::LocalFileIOPool::GetInstance().Configure(1);
-    auto async_cells = async_translator->get_cells(nullptr, cids);
+    auto async_cells = folly::coro::blockingWait(
+        async_translator->get_cells_async(nullptr, cids));
     auto mmap_files_after_async = count_mmap_files();
     if (use_mmap) {
         EXPECT_GT(mmap_files_after_async, mmap_files_before_async);
@@ -1470,6 +1473,7 @@ TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
     std::vector<cachinglayer::cid_t> cids{0};
     using CellResult =
         std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>;
+    folly::CPUThreadPoolExecutor caller(1);
     std::future<std::vector<CellResult>> load;
     bool blocker_released = false;
     auto release_guard = folly::makeGuard([&]() {
@@ -1477,8 +1481,9 @@ TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
             release_blocker_promise->set_value();
         }
     });
-    load = std::async(std::launch::async, [&translator, &cids]() {
-        return translator->get_cells(nullptr, cids);
+    load = std::async(std::launch::async, [&translator, &cids, &caller]() {
+        return folly::coro::blockingWait(folly::coro::co_withExecutor(
+            &caller, translator->get_cells_async(nullptr, cids)));
     });
 
     if (use_mmap) {
@@ -1491,6 +1496,12 @@ TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         EXPECT_GT(worker_executor->getPendingTaskCount(), 0);
+        auto progress = std::make_shared<std::promise<void>>();
+        auto progressed = progress->get_future();
+        caller.add([progress] { progress->set_value(); });
+        EXPECT_EQ(progressed.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready)
+            << "the translator must release its caller while local I/O waits";
         EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
                   std::future_status::timeout);
     } else {

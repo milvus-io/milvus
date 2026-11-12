@@ -19,6 +19,7 @@
 #include <algorithm>
 #include "yaml-cpp/yaml.h"
 #include "index/vector/VectorDiskLoader.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/KnowhereEngine.h"
 #include <cstring>
 #include <limits>
@@ -618,8 +619,9 @@ LegacyScalarIndexLoadResourceAsync(
                 .value_or(false)) {
             resident = SaturatingAdd(
                 resident,
-                SaturatingMultiply(uint64_t{std::max<int64_t>(0, rows)},
-                                   sizeof(void*)));
+                SaturatingMultiply(
+                    static_cast<uint64_t>(std::max<int64_t>(0, rows)),
+                    sizeof(void*)));
         }
         request.final_memory_cost =
             std::max(request.final_memory_cost,
@@ -674,7 +676,23 @@ LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
     const auto names = disk_family
                            ? VectorDiskLoader::AsyncEntryNames(source, options)
                            : source.EntryNames();
-    const auto bytes = co_await source.InspectLoadBytesAsync(names);
+    auto bytes = co_await source.InspectLoadBytesAsync(names);
+    if (disk_family && source.HasEntry(VALID_DATA_KEY) &&
+        std::find(names.begin(), names.end(), VALID_DATA_KEY) == names.end()) {
+        const auto rows = ParseInt64Param(options.params.at(INDEX_NUM_ROWS_KEY),
+                                          INDEX_NUM_ROWS_KEY,
+                                          "vector row count");
+        const auto payload =
+            SaturatingAdd(uint64_t{sizeof(uint64_t)}, BitsetBytes(rows));
+        bytes.payload = SaturatingAdd(bytes.payload, payload);
+        // Reserve the sidecar even if the backend later skips it. Allow for
+        // wire/decode buffers (legacy INT8 can expand to INT32), descriptor
+        // parsing and aligned reads; this does not allocate or fetch data.
+        bytes.transient = SaturatingAdd(
+            bytes.transient,
+            SaturatingAdd(SaturatingMultiply(payload, uint64_t{20}),
+                          uint64_t{64 * 1024}));
+    }
     // BinarySet payloads coexist with native Deserialize state. For native
     // stream backends, names contains only eagerly prepared sidecars.
     const bool memory_mmap =

@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -204,7 +205,10 @@ func openFFIPackedReader(
 	cNeededColumnArray, cNumColumns, cleanupNeededColumns := newCNeededColumns(neededColumns)
 	defer cleanupNeededColumns()
 
-	cExternalSource, cExternalSpec, cleanupExternalContext := newCExternalContext(extfs.Source, extfs.Spec)
+	cExternalSource, cExternalSpec, cleanupExternalContext, err := newCExternalContext(extfs.Source, extfs.Spec)
+	if err != nil {
+		return nil, err
+	}
 	defer cleanupExternalContext()
 
 	status := open(
@@ -322,21 +326,25 @@ func newCNeededColumns(neededColumns []string) (**C.char, C.int64_t, func()) {
 	return (**C.char)(unsafe.Pointer(&cNeededColumn[0])), C.int64_t(len(cNeededColumn)), cleanup
 }
 
-func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func()) {
+func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func(), error) {
 	if externalSource == "" {
-		return nil, nil, func() {}
+		return nil, nil, func() {}, nil
+	}
+	normalizedSpec, err := specutil.NormalizeExternalSpec(externalSpec)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	cExternalSource := C.CString(externalSource)
 	var cExternalSpec *C.char
 	if externalSpec != "" {
-		cExternalSpec = C.CString(externalSpec)
+		cExternalSpec = C.CString(normalizedSpec)
 	}
 	return cExternalSource, cExternalSpec, func() {
 		C.free(unsafe.Pointer(cExternalSource))
 		if cExternalSpec != nil {
 			C.free(unsafe.Pointer(cExternalSpec))
 		}
-	}
+	}, nil
 }
 
 func resolveFFIReaderFragments(

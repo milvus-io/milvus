@@ -164,7 +164,7 @@ NestedArrayElementAt(const ArrayValueView& row, int index) {
 struct ElementValidityOnly {};
 
 // IndexPathSelection.h owns ExprExecPath and metadata-only path selection.
-// Capability inspection must not pin a cold reader to choose an execution path.
+// Path selection uses index metadata before creating a request reader.
 
 inline bool
 IsCompareOp(proto::plan::OpType op) {
@@ -1464,7 +1464,7 @@ class SegmentExpr : public Expr {
                    "selected index does not expose typed value lookup");
         if (cached_index_chunk_id_ != 0) {
             AssertInfo(selected_reader_ != nullptr,
-                       "selected value index has no root reader");
+                       "selected value index has no request reader");
             const auto value_count = selected_reader_->Count();
             AssertInfo(value_count >= 0,
                        "selected value index has negative coordinate count");
@@ -3747,7 +3747,7 @@ class SegmentExpr : public Expr {
         ngram_reader_ = nullptr;
         spatial_reader_ = nullptr;
         growing_index_pin_ = {};
-        selected_root_pin_ = {};
+        selected_index_reader_ = {};
         selected_index_entry_.reset();
         selected_element_level_result_ = false;
         selected_covered_row_end_ = 0;
@@ -3755,7 +3755,7 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    SelectAndPinIndex(const ExprIndexRequirement& req) {
+    SelectAndCreateIndexReader(const ExprIndexRequirement& req) {
         auto capabilities =
             segment_->ResolveIndexCapability(op_ctx_, field_id_);
         auto decision = exec::DetermineExecPath(req, capabilities);
@@ -3769,7 +3769,7 @@ class SegmentExpr : public Expr {
                    "selected index key is absent from field {} metadata",
                    field_id_.get());
         if (segment_->type() == SegmentType::Growing) {
-            growing_index_pin_ = segment_->PinGrowingIndex(field_id_);
+            growing_index_pin_ = segment_->PinGrowingIndex(op_ctx_, field_id_);
             if (!growing_index_pin_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;
@@ -3781,13 +3781,14 @@ class SegmentExpr : public Expr {
             AssertInfo(segcore::SameCaps(entry->caps, selected_reader_->Caps()),
                        "growing index metadata does not match reader caps");
         } else {
-            selected_root_pin_ = segment_->PinIndex(op_ctx_, *decision.key);
-            if (!selected_root_pin_) {
+            selected_index_reader_ =
+                segment_->CreateIndexReader(op_ctx_, *decision.key);
+            if (!selected_index_reader_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;
                 return false;
             }
-            selected_reader_ = selected_root_pin_.get();
+            selected_reader_ = selected_index_reader_.get();
             selected_covered_row_end_ = active_count_;
         }
         selected_index_entry_ = *entry;
@@ -3965,13 +3966,13 @@ class SegmentExpr : public Expr {
     bool
     CanUseNestedIndex() const override {
         EnsureExecPathDetermined();
-        return PinnedIndexIsNested();
+        return SelectedIndexIsNested();
     }
 
-    // Ask whether this pinned index should serve the concrete operator/literal.
+    // Ask whether this selected reader should serve the concrete operator/literal.
     // FM's count-first guard can decline costly high-hit patterns.
-    // TODO: separate metadata-only family support, checked before pinning through
-    // ReaderCaps, from literal-dependent checks on the pinned query interface.
+    // TODO: separate metadata-only family support, checked before reader creation through
+    // ReaderCaps, from literal-dependent checks on the selected query interface.
     // INgramReader::CanHandle and IPatternMatchReader::ShouldUseForOp express the
     // latter; neither requires casting to a concrete index implementation.
     template <typename T>
@@ -4019,6 +4020,29 @@ class SegmentExpr : public Expr {
                !nested_path_.empty() && !PathContainsInteger(nested_path_);
     }
 
+    // Whether Eval() implements ExprExecPath::JsonStats for this expression.
+    // Only the expressions that override this may be switched to JsonStats by
+    // FallbackToJsonStatsIfEligible().
+    virtual bool
+    SupportsJsonStatsExecPath() const {
+        return false;
+    }
+
+    // JSON shredding is a typed column scan, not an index lookup: it still
+    // visits every row of the segment on every query. A JSON path index that
+    // serves this expression is preferred; the shredded columns are the
+    // fallback for JSON paths without a usable index. Subclasses therefore
+    // decide index paths in DetermineExecPath() and leave RawData for the
+    // paths they could not serve; this hook upgrades that RawData to
+    // JsonStats when the segment has stats for the field.
+    void
+    FallbackToJsonStatsIfEligible() {
+        if (exec_path_ == ExprExecPath::RawData &&
+            SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+        }
+    }
+
     virtual bool
     CanUseNgramIndex() const {
         return false;
@@ -4055,6 +4079,7 @@ class SegmentExpr : public Expr {
             try {
                 auto self = const_cast<SegmentExpr*>(this);
                 self->DetermineExecPath();
+                self->FallbackToJsonStatsIfEligible();
                 self->RecordExecPath();
             } catch (...) {
                 determine_exec_path_error_ = std::current_exception();
@@ -4115,7 +4140,7 @@ class SegmentExpr : public Expr {
             case ExprExecPath::RawData:
                 recorder->Mark(FeatureBit::FilterPathBruteForce);
                 // The field has an index this expression could have used:
-                // selection pinned one and the operator or literal refined
+                // selection created a reader and the operator or literal refined
                 // it away, or no reader interface fit the expression.
                 if (ReportsIndexDecline() && HasIndexForThisPath()) {
                     recorder->Mark(FeatureBit::FilterIndexDeclined);
@@ -4177,12 +4202,12 @@ class SegmentExpr : public Expr {
     // Determine the path during prefetch or lazily before evaluation. Metadata-only
     // JSON path checks and short-circuit paths must leave unused index cells cold.
     // TODO: consolidate family-support decisions in exec::DetermineExecPath using
-    // ExprIndexRequirement and FieldIndexCapability, then pin the selected interface.
-    // Literal-dependent cost/eligibility guards remain on the pinned interface;
+    // ExprIndexRequirement and FieldIndexCapability, then create the selected reader.
+    // Literal-dependent cost/eligibility guards remain on the selected interface;
     // they cannot be replaced by load-time capability bits.
     virtual void
     DetermineExecPath() {
-        SelectAndPinIndex(MakeIndexRequirement());
+        SelectAndCreateIndexReader(MakeIndexRequirement());
     }
 
     // Slice cached result bitmap for the current batch.
@@ -4287,6 +4312,10 @@ class SegmentExpr : public Expr {
             return;
         }
         EnsureExecPathDetermined();
+        if (exec_path_ != ExprExecPath::RawData &&
+            selected_reader_ != nullptr) {
+            selected_reader_->Prefetch();
+        }
         if (exec_path_ == ExprExecPath::RawData) {
             auto column = CaptureDataScanResources().first;
             if (!UsesLegacyChunkPrefetch(column.get())) {
@@ -4405,7 +4434,7 @@ class SegmentExpr : public Expr {
     // DetermineExecPath(). Do not call CanUseNestedIndex() from there because
     // it re-enters EnsureExecPathDetermined()'s std::call_once.
     bool
-    PinnedIndexIsNested() const {
+    SelectedIndexIsNested() const {
         return exec_path_ == ExprExecPath::ScalarIndex &&
                selected_element_level_result_;
     }
@@ -4459,11 +4488,11 @@ class SegmentExpr : public Expr {
     // request; iterative readers that never requested prefetch stay lazy.
     bool raw_data_prefetch_deferred_{false};
     size_t raw_data_prefetch_start_chunk_{0};
-    // Owning pins are declared before the optional JSON view so the view is
+    // Reader and snapshot owners precede the optional JSON view so the view is
     // destroyed first. Every pointer below borrows from selected_reader_ after
-    // the exact metadata-selected entry is pinned and validated.
+    // the exact metadata-selected reader is created and validated.
     index::GrowingIndexSnapshotPin growing_index_pin_;
-    segcore::IndexPin selected_root_pin_;
+    index::IIndexReaderBasePtr selected_index_reader_;
     index::JsonResolvedReader selected_json_view_;
     const index::IIndexReaderBase* selected_reader_{nullptr};
     std::optional<segcore::IndexCapabilityEntry> selected_index_entry_;

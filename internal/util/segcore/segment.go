@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -52,7 +53,7 @@ type CreateCSegmentRequest struct {
 	IsSorted          bool
 	LoadInfo          *querypb.SegmentLoadInfo
 	LoadFields        []int64 // independent sealed load scope; never mutates CCollection
-	FieldHints        []int64 // preload only; empty follows the bound scope
+	FieldHints        []int64 // explicit preloads within the bound scope; empty means none
 	ExplicitLoadScope bool    // QN scope distinguishes empty from legacy all-fields
 }
 
@@ -411,7 +412,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 			))
 		}, cgo.WithName("segment-reopen"))
 	} else {
-		schemaBlob, marshalErr := proto.Marshal(req.Schema)
+		schemaBlob, marshalErr := externalspec.MarshalCollectionSchema(req.Schema)
 		if marshalErr != nil {
 			return marshalErr
 		}

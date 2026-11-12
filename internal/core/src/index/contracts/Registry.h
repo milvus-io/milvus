@@ -27,7 +27,7 @@
 #include "index/IndexLoader.h"
 #include "index/IndexLoadInput.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/ReaderCaps.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
@@ -55,7 +55,7 @@ struct LoaderEntry {
         OpenedIndexSource, storage::LoadOptions);
 
     DeriveCapsFn derive_caps{nullptr};
-    // Create parses family metadata into reusable state without retaining an
+    // Create parses family metadata into prepared state without retaining an
     // operation context; IndexLoader::Load supplies its own context.
     CreateFn create{nullptr};
 
@@ -65,12 +65,12 @@ struct LoaderEntry {
 
     /**
      * @brief Open the requested source, create family state and return a fully
-     * initialized reader.
+     * initialized index owner.
      * @note The call blocks at the cache boundary. When the request selects
      * asynchronous transport, storage I/O still runs through the async loading
      * executor.
      */
-    IIndexReaderBasePtr
+    IndexPtr
     Load(IndexLoadRequest request) const;
 };
 
@@ -91,7 +91,7 @@ concept StaticLoaderProvider =
 /**
  * @brief Select complete family factories and metadata-only capability
  * inspectors.
- * @note Stores stateless function pointers, not opened sources or reader state.
+ * @note Stores stateless function pointers, not opened sources or index state.
  * The top-level load pipeline owns storage opening and source-context cleanup
  * before it invokes the selected family constructor.
  */

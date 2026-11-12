@@ -188,19 +188,7 @@ func (s *importTestBase) run() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		// Storage V2 segments reference insert/stats binlogs; Storage V3 (LOON)
-		// segments, as written by Import V3 with common.storage.useLoonFFI, keep
-		// their data in the manifest instead. Either way a segment must carry
-		// its data and no delete logs.
-		if segment.GetManifestPath() == "" {
-			s.True(len(segment.GetBinlogs()) > 0)
-			s.NoError(CheckLogID(segment.GetBinlogs()))
-			s.True(len(segment.GetStatslogs()) > 0)
-			s.NoError(CheckLogID(segment.GetStatslogs()))
-		} else {
-			s.NotEmpty(segment.GetManifestPath())
-		}
-		s.True(len(segment.GetDeltalogs()) == 0)
+		s.assertImportedSegmentMetadata(segment, fieldSchema1.GetFieldID())
 	}
 
 	// create index
@@ -430,10 +418,7 @@ func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		s.NotEmpty(segment.GetBinlogs())
-		s.NoError(CheckLogID(segment.GetBinlogs()))
-		s.NotEmpty(segment.GetStatslogs())
-		s.NoError(CheckLogID(segment.GetStatslogs()))
+		s.assertImportedSegmentMetadata(segment, schema.GetFields()[0].GetFieldID())
 	}
 
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{

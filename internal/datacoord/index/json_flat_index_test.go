@@ -32,9 +32,11 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func jsonFlatTestSchema() *schemapb.CollectionSchema {
@@ -129,4 +131,158 @@ func TestJSONFlatIndexUsesBoundCollectionSchemaCache(t *testing.T) {
 	mt.AddCollection(&meta.CollectionInfo{ID: 1, Schema: jsonFlatTestSchema()})
 	assert.Empty(t, im.GetPhysicalIndexesForCollection(1))
 	assert.Len(t, im.GetIndexesForCollection(1, "json_flat"), 1)
+}
+
+func TestJSONFlatIndexExcludedFromManifestMigration(t *testing.T) {
+	paramtable.Init()
+	for _, published := range []bool{false, true} {
+		name := "backfill"
+		if published {
+			name = "rollback"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			im := NewSegmentIndexMeta(nil)
+			im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() })
+			flat := jsonFlatDefinition()
+			typed := model.CloneIndex(flat)
+			typed.IndexID, typed.IndexName = 11, "typed"
+			typed.IndexParams[1].Value = "DOUBLE"
+			scalar := model.CloneIndex(flat)
+			scalar.IndexID, scalar.FieldID, scalar.IndexName = 12, 102, "scalar"
+			for _, definition := range []*model.Index{flat, typed, scalar} {
+				im.updateCollectionIndex(definition)
+				// Historical records must remain available to ordinary GC.
+				im.updateSegmentIndex(&model.SegmentIndex{
+					CollectionID: 1, SegmentID: 100, IndexID: definition.IndexID,
+					BuildID: definition.IndexID + 1000, IndexState: commonpb.IndexState_Finished,
+					IndexFileKeys: []string{"old-file"}, ManifestPublished: published,
+				})
+			}
+			store := metacache.NewMetaStore(nil)
+			mt := &meta.Meta{IndexCatalog: im, MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
+			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+			}})
+			mutation := meta.SegmentIndexMutation{Type: meta.SegmentIndexBackfill, BuildID: 1010}
+			wantErr := meta.ErrSegmentIndexBackfillSkipped
+			if published {
+				work, pending := NewManifestIndexRollbackInspector(ctx, mt, im).scan(ctx)
+				require.Len(t, work, 1)
+				assert.Equal(t, 2, pending)
+				assert.ElementsMatch(t, []int64{1011, 1012}, work[0].buildIDs)
+				mutation.Type = meta.SegmentIndexRollback
+				wantErr = meta.ErrSegmentIndexRollbackSkipped
+			} else {
+				work, pending := NewManifestIndexBackfillInspector(ctx, mt, im).scan(ctx)
+				require.Len(t, work, 1)
+				assert.Equal(t, 2, pending)
+				require.Len(t, work[0].records, 2)
+				assert.EqualValues(t, 11, work[0].records[0].IndexID)
+				assert.EqualValues(t, 12, work[0].records[1].IndexID)
+			}
+			// A stale selection must be rejected under the publication lock too.
+			im.LockBuildIDs([]int64{1010})
+			_, err := im.StageSegmentIndexMutation(mutation)
+			im.UnlockBuildIDs([]int64{1010})
+			assert.ErrorIs(t, err, wantErr)
+			assert.Len(t, im.GetAllSegmentIndexes(100), 3)
+			assert.Len(t, im.GetIndexesForCollection(1, ""), 3)
+			// Ordinary typed and scalar indexes still have a migratable artifact.
+			for _, buildID := range []int64{1011, 1012} {
+				mutation.BuildID = buildID
+				im.LockBuildIDs([]int64{buildID})
+				_, err = im.StageSegmentIndexMutation(mutation)
+				im.UnlockBuildIDs([]int64{buildID})
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestJSONFlatIndexManifestMigrationRetriesColdSchema(t *testing.T) {
+	paramtable.Init()
+	for _, published := range []bool{false, true} {
+		name := "backfill"
+		if published {
+			name = "rollback"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			im := NewSegmentIndexMeta(catalog)
+			var schema *schemapb.CollectionSchema
+			im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
+			scalar := jsonFlatDefinition()
+			scalar.IndexID, scalar.FieldID, scalar.IndexName = 11, 102, "scalar"
+			for _, definition := range []*model.Index{jsonFlatDefinition(), scalar} {
+				im.updateCollectionIndex(definition)
+				im.updateSegmentIndex(&model.SegmentIndex{
+					CollectionID: 1, SegmentID: 100, IndexID: definition.IndexID,
+					BuildID: definition.IndexID + 1000, IndexState: commonpb.IndexState_Finished,
+					IndexFileKeys: []string{"old-file"}, ManifestPublished: published,
+				})
+			}
+			store := metacache.NewMetaStore(nil)
+			mt := &meta.Meta{IndexCatalog: im, MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
+			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			}})
+			WithManifestIndexRollback(t, published)
+			meta.WithSegmentIndexManifestWrites(t, !published)
+			WithManifestIndexBackfillEnabled(t, !published)
+			backfill := NewManifestIndexBackfillInspector(ctx, mt, im)
+			rollback := NewManifestIndexRollbackInspector(ctx, mt, im)
+			if published {
+				work, pending := rollback.scan(ctx)
+				assert.Empty(t, work)
+				assert.Equal(t, 2, pending)
+				assert.True(t, rollback.runOnce(ctx), "unresolved records must stay on the retry loop")
+			} else {
+				work, pending := backfill.scan(ctx)
+				assert.Empty(t, work)
+				assert.Equal(t, 2, pending)
+				assert.True(t, backfill.runOnce(ctx), "unresolved records must stay on the retry loop")
+			}
+			assert.Len(t, im.GetAllSegmentIndexes(100), 2)
+			schema = jsonFlatTestSchema()
+			if published {
+				work, pending := rollback.scan(ctx)
+				require.Len(t, work, 1)
+				assert.Equal(t, []int64{1011}, work[0].buildIDs)
+				assert.Equal(t, 1, pending)
+			} else {
+				work, pending := backfill.scan(ctx)
+				require.Len(t, work, 1)
+				require.Len(t, work[0].records, 1)
+				assert.EqualValues(t, 1011, work[0].records[0].BuildID)
+				assert.Equal(t, 1, pending)
+			}
+			mutation := meta.SegmentIndexMutation{Type: meta.SegmentIndexBackfill, BuildID: 1011}
+			if published {
+				mutation.Type = meta.SegmentIndexRollback
+			}
+			im.LockBuildIDs([]int64{1011})
+			_, err := im.StageSegmentIndexMutation(mutation)
+			im.UnlockBuildIDs([]int64{1011})
+			assert.NoError(t, err, "an ordinary scalar with JSON extras resumes migration")
+			// Explicit GC retirement also removes a schema-less record from the backlog.
+			schema = nil
+			require.NoError(t, im.RemoveSegmentIndex(ctx, 1010))
+			require.NoError(t, im.RemoveSegmentIndex(ctx, 1011))
+			if published {
+				work, pending := rollback.scan(ctx)
+				assert.Empty(t, work)
+				assert.Zero(t, pending)
+				assert.False(t, rollback.runOnce(ctx))
+			} else {
+				work, pending := backfill.scan(ctx)
+				assert.Empty(t, work)
+				assert.Zero(t, pending)
+				assert.False(t, backfill.runOnce(ctx))
+			}
+		})
+	}
 }

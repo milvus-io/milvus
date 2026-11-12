@@ -67,13 +67,15 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 	defer meta.DrainStatsBuildChForTest()
 	meta.MockManifestIndexSubmissions(s.T())
 	for _, scenario := range []struct {
-		name         string
-		acknowledged bool
-		admitted     bool
+		name               string
+		acknowledged       bool
+		admitted           bool
+		artifactProperties bool
 	}{
 		{name: "legacy result"},
 		{name: "acknowledged result", acknowledged: true},
-		{name: "restart after partial publication", acknowledged: true, admitted: true},
+		{name: "artifact properties", acknowledged: true, artifactProperties: true},
+		{name: "restart after target finalization", acknowledged: true, admitted: true},
 	} {
 		s.Run(scenario.name, func() {
 			ctx := context.Background()
@@ -83,7 +85,13 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 				result.ManifestIndexRewritten = proto.Bool(true)
 				result.ManifestIndexBuildIds = []int64{9001, 9002}
 			}
+			if scenario.artifactProperties {
+				// Artifact properties are independent of collection index parameters.
+				entries[1].Properties = map[string]string{common.JSONCastTypeKey: "DOUBLE"}
+			}
 			if scenario.admitted {
+				// Finalization follows index installation; replay must retain that state.
+				s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, im, copies, map[int64]int64{9001: 300}))
 				s.Require().NoError(copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskCleanup(true)))
 				s.Require().NoError(m.UpdateSegmentsInfo(ctx,
 					meta.UpdateStatusOperator(2001, commonpb.SegmentState_Flushed),
@@ -110,7 +118,7 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestJSONFlatKeepsOwnershipChecks() {
-	for _, scenario := range []string{"foreign definition", "changed parameters", "wrong files", "unacknowledged build"} {
+	for _, scenario := range []string{"foreign definition", "changed index type", "wrong files", "unacknowledged build"} {
 		s.Run(scenario, func() {
 			task, _, m, im, resp, entries := s.newCopiedJSONFlatManifestFixture()
 			result := resp.GetSegmentResults()[0]
@@ -119,8 +127,8 @@ func (s *CopySegmentTaskSuite) TestCopyManifestJSONFlatKeepsOwnershipChecks() {
 			switch scenario {
 			case "foreign definition":
 				entries[1].IndexID = 999
-			case "changed parameters":
-				entries[1].Properties[common.JSONCastTypeKey] = "DOUBLE"
+			case "changed index type":
+				entries[1].IndexType = "STL_SORT"
 			case "wrong files":
 				entries[1].IndexFileKeys = []string{"other.bin"}
 			case "unacknowledged build":

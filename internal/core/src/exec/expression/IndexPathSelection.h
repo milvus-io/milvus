@@ -36,7 +36,7 @@
 // not compare cold-index fetch cost with an already-resident column scan.
 // TODO: add such cost modeling separately if needed. Metadata-only literal/type
 // constraints live in ExprIndexRequirement; reader-specific guards are queried
-// on the chosen pinned interface after metadata selection.
+// on the chosen reader interface after metadata selection.
 
 namespace milvus::exec {
 
@@ -48,7 +48,7 @@ namespace milvus::exec {
 // to include the expression kernels.
 enum class ExprExecPath {
     RawData,      // brute-force scan of the raw column
-    ScalarIndex,  // a pinned index reader interface
+    ScalarIndex,  // a selected index reader interface
     PkIndex,      // segment_->pk_range / search_ids
     TextIndex,    // the text-match interface
     // Shredded JSON column scan, not an index lookup. Kept distinct while execution
@@ -96,9 +96,10 @@ struct ExprIndexRequirement {
     // caps.exact == false is unusable and selection must fall back to RawData.
     bool accepts_candidates{true};
 
-    // Short-circuit paths bypass the inventory; do not pin unrelated scalar cells.
+    // Short-circuit path that bypasses the inventory; do not pin unrelated
+    // scalar cells. JSON shredding is not selected here: it is the fallback
+    // SegmentExpr applies when this selector returns RawData for a JSON path.
     bool is_pk_compare{false};
-    bool json_stats_eligible{false};
 
     // The upstream operator already handed down candidate offsets
     // (`has_offset_input_`). Some paths are unavailable then — e.g. today's
@@ -109,9 +110,9 @@ struct ExprIndexRequirement {
 struct ExecPathDecision {
     ExprExecPath path{ExprExecPath::RawData};
 
-    // Which inventory entry to pin. Present exactly when the selected path is
+    // Which inventory entry to create a reader from. Present exactly when the selected path is
     // index-backed. The caller passes this straight to
-    // `segcore::SegmentInterface::PinIndex` — ONCE, for the whole expression node.
+    // `segcore::SegmentInterface::CreateIndexReader` — ONCE, for the whole expression node.
     std::optional<segcore::IndexKey> key;
 };
 
@@ -120,7 +121,7 @@ struct ExecPathDecision {
 // UnaryExpr, TermExpr, BinaryRangeExpr, NullExpr, ExistsExpr, JsonContainsExpr,
 // GIS expressions, BloomFilterExpr, and RoaringFilterExpr. Family support is a
 // caps read; expression literal/type checks populate ExprIndexRequirement.
-// Runtime literal-dependent guards still belong on the selected pinned reader.
+// Runtime literal-dependent guards still belong on the selected reader.
 namespace index_path_detail {
 
 inline DataType
@@ -224,9 +225,6 @@ DetermineExecPath(const ExprIndexRequirement& req,
     if (req.is_pk_compare) {
         return {.path = ExprExecPath::PkIndex};
     }
-    if (req.json_stats_eligible) {
-        return {.path = ExprExecPath::JsonStats};
-    }
 
     const segcore::IndexCapabilityEntry* selected = nullptr;
     int selected_score = -1;
@@ -273,7 +271,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
 
 // Per-call eligibility cannot live in ReaderCaps. Ngram min-length checks and
 // FM count-first cost guards depend on the concrete literal, so ask the chosen
-// pinned query interface after metadata-only selection. A false answer requests
+// selected query interface after metadata-only selection. A false answer requests
 // a fallback; it is not an unsupported-operation exception.
 
 }  // namespace milvus::exec

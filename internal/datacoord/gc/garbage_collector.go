@@ -33,11 +33,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -65,9 +66,9 @@ type GcOption struct {
 	DropTolerance    time.Duration        // dropped segment related key tolerance time
 	ScanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
-	Broker           broker.Broker
-	RemoveObjectPool *conc.Pool[struct{}]
-	DataViewGC       DataViewGarbageCollector
+	StreamingNodeCatalog metastore.StreamingNodeCataLog
+	RemoveObjectPool     *conc.Pool[struct{}]
+	DataViewGC           DataViewGarbageCollector
 
 	// importJobAlive reports whether an ImportJob still exists for jobID. It is
 	// wired by the server from ImportMeta so the orphan scan never deletes an
@@ -84,7 +85,7 @@ type DataViewGarbageCollector interface {
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
-// garbageCollector handles garbage files in object storage
+// GarbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type GarbageCollector struct {
 	ctx    context.Context
@@ -443,7 +444,7 @@ func (gc *GarbageCollector) ackSignal(signal <-chan gcCmd) {
 	}
 }
 
-// startControlLoop start a control loop for garbageCollector.
+// startControlLoop start a control loop for GarbageCollector.
 func (gc *GarbageCollector) startControlLoop(_ context.Context) {
 	hardware.RegisterSystemMetricsListener(gc.systemMetricsListener)
 	defer hardware.UnregisterSystemMetricsListener(gc.systemMetricsListener)
@@ -997,7 +998,7 @@ func (gc *GarbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 	logger.Info(ctx, "start recycleDataViews")
 	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
-	for _, collection := range gc.Meta.GetCollections() {
+	for _, collection := range gc.Meta.GetAllCollections() {
 		if ctx.Err() != nil {
 			return
 		}
@@ -1021,6 +1022,11 @@ func (gc *GarbageCollector) checkDroppedSegmentGC(segment *meta.SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if segment.GetIsImporting() && segment.GetCompacted() {
+		// Restore owns retired L0 inputs until its publication finishes. They
+		// also prove an applied mutation after a crash before task-state save.
+		return false
+	}
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
@@ -1042,23 +1048,9 @@ func (gc *GarbageCollector) checkDroppedSegmentGC(segment *meta.SegmentInfo,
 		return true
 	}
 
-	// A removed channel no longer needs checkpoint protection. Its checkpoint
-	// may stop advancing, while collection cleanup waits for segment GC.
-	segInsertChannel := segment.GetInsertChannel()
-	channelExists, err := gc.Meta.MetaStore.ChannelExists(gc.ctx, segInsertChannel)
-	if err != nil {
-		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
-			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
-		return false
-	}
-	if channelExists {
-		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", dmlTs),
-			mlog.Uint64("channelCpTs", cpTimestamp),
-		)
-		return false
-	}
-	return true
+	log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after physical checkpoint, skip meta gc",
+		mlog.Uint64("dmlPosTs", dmlTs), mlog.Uint64("checkpointTs", cpTimestamp))
+	return false
 }
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
@@ -1077,7 +1069,7 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 	for _, segment := range all {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
-			channels.Insert(segment.GetInsertChannel())
+			channels.Insert(funcutil.ToPhysicalChannel(segment.GetInsertChannel()))
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
@@ -1085,6 +1077,11 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			compactTo[from] = segment
 		}
 	}
+
+	// A Dropped parent can still be the published QueryView frontier. Keep
+	// its descendants too: intermediate lineage is needed to flatten a later
+	// sort/merge before replacing that frontier. Snapshot once per sweep.
+	protected := gc.dataViewCompactionProtection(all)
 
 	droppedCompactTo := make(map[int64]*meta.SegmentInfo)
 	for id := range drops {
@@ -1101,10 +1098,25 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		indexedSet.Insert(segment.GetID())
 	}
 
-	channelCPs := make(map[string]uint64)
+	// Capture each PChannel's durable replay frontier once per sweep, shared by
+	// every VChannel/segment on it. Never fall back to historical DataCoord
+	// checkpoints or the potentially newer control checkpoint.
+	channelCPs := make(map[string]uint64, len(channels))
 	for channel := range channels {
-		pos := gc.Meta.GetChannelCheckpoint(channel)
-		channelCPs[channel] = pos.GetTimestamp()
+		if ctx.Err() != nil {
+			return
+		}
+		checkpoint, err := gc.Option.StreamingNodeCatalog.GetConsumeCheckpoint(ctx, channel)
+		if err != nil {
+			log.Warn(ctx, "failed to read physical checkpoint, skip channel GC",
+				mlog.String("pchannel", channel), mlog.Err(err))
+			continue
+		}
+		if checkpoint == nil {
+			log.Info(ctx, "physical checkpoint is missing, skip channel GC", mlog.String("pchannel", channel))
+			continue
+		}
+		channelCPs[channel] = checkpoint.GetTimeTick()
 	}
 
 	// try to get loaded segments
@@ -1128,6 +1140,10 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		}
 
 		gc.ackSignal(signal)
+
+		if _, referenced := protected[segmentID]; referenced {
+			continue
+		}
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
 			log.Info(ctx, "skip GC segment since collection is paused", mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
@@ -1155,12 +1171,45 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			}
 		}
 
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+		checkpoint, ok := channelCPs[funcutil.ToPhysicalChannel(segInsertChannel)]
+		if !ok || !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, checkpoint) {
 			continue
 		}
 
-		gc.RecycleDroppedSegment(ctx, io, segmentID, segment)
+		gc.RecycleDroppedSegment(ctx, io, segmentID)
 	}
+}
+
+// dataViewCompactionProtection retains both the published bases and the
+// intermediate metadata needed to relate current leaves to those bases. Once
+// the latest and all retained Views move past a base, its old ancestry is no
+// longer protected. This is O(segments + lineage edges), once per GC sweep.
+func (gc *GarbageCollector) dataViewCompactionProtection(segments []*meta.SegmentInfo) map[int64]struct{} {
+	if gc.Meta.DataViewManager == nil {
+		return nil
+	}
+	protected := gc.Meta.DataViewManager.ReferencedSegments()
+	children := make(map[int64][]int64)
+	for _, segment := range segments {
+		for _, parent := range segment.GetCompactionFrom() {
+			children[parent] = append(children[parent], segment.GetID())
+		}
+	}
+	queue := make([]int64, 0, len(protected))
+	for id := range protected {
+		queue = append(queue, id)
+	}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, child := range children[id] {
+			if _, seen := protected[child]; !seen {
+				protected[child] = struct{}{}
+				queue = append(queue, child)
+			}
+		}
+	}
+	return protected
 }
 
 // recycleDroppedSegment marks its index tasks deleted before removing a
@@ -1188,7 +1237,16 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 // surface NotFound, or batching RemoveSegmentIndex past the per-buildID
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
-func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, segment *meta.SegmentInfo) {
+func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) {
+	// Rollback may advance a retained Dropped segment's manifest while keeping
+	// its files. Serialize prefix deletion with that metadata transfer.
+	locks := gc.Meta.GetSegmentManifestLocks()
+	locks.Lock(segmentID)
+	defer locks.Unlock(segmentID)
+	segment := gc.Meta.GetSegment(ctx, segmentID)
+	if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped {
+		return
+	}
 	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
@@ -1264,7 +1322,7 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 	}
 	indexFiles := make(map[string]struct{}, len(segIndexes))
 	for _, segIdx := range segIndexes {
-		for key := range gc.GetAllIndexFilesOfIndex(segIdx) {
+		for key := range gc.getRetainedIndexFilesOfIndex(segIdx) {
 			indexFiles[key] = struct{}{}
 		}
 	}
@@ -1525,7 +1583,6 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		return
 	}
 
-	availability, _ := gc.Option.Broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 	// The checkpoints of collections that may be dropped, by collection: a
 	// dropped collection's checkpoints go together, after the rest of its meta.
@@ -1550,9 +1607,9 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		if ctx.Err() != nil {
 			return
 		}
-		// A positive resident lookup avoids schema conversion, task scheduling,
-		// per-collection timeouts and retaining live IDs for the entire sweep.
-		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+		// A Dropping collection counts as dropped here: its checkpoints go as
+		// soon as GcConfirm sees its segment meta removed.
+		if gc.Meta.GetCollection(collectionID).IsCreated() {
 			skippedCnt++
 			continue
 		}
@@ -1580,34 +1637,23 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
 }
 
-// collectionRecyclable reports whether RootCoord has dropped the collection and
-// all its segments are recycled, the condition RootCoord uses to remove the
+// collectionRecyclable reports whether all segments of a collection that is
+// no longer Created are recycled, the condition RootCoord uses to remove the
 // collection meta.
 func (gc *GarbageCollector) collectionRecyclable(ctx context.Context, collectionID int64) bool {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-	cancel()
-	if err != nil || has {
-		// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
-		mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Bool("exists", has), mlog.Err(err))
-		return false
-	}
-	// Skip to GC if all segments meta of the corresponding collection are not removed
 	return gc.Meta.MetaStore.GcConfirm(ctx, collectionID, -1)
 }
 
 // recycleDroppedCollection drops what DataCoord still keeps for a collection
 // that RootCoord has dropped and whose segments are all recycled: its segment
-// change groups, its cached collection info and metrics, and the checkpoints
-// of its vChannels. The checkpoints go last: they are what brings GC back to
-// the collection if an earlier step fails.
+// change groups and the checkpoints of its vChannels. The checkpoints go last:
+// they are what brings GC back to the collection if an earlier step fails.
+// RootCoord removes the collection itself, and DataCoord cleans up its
+// metrics on OnCollectionRemoved.
 func (gc *GarbageCollector) recycleDroppedCollection(ctx context.Context, collectionID int64, vChannels []string) error {
 	if err := gc.Meta.DropSegmentChangeGroupsOfCollection(ctx, collectionID); err != nil {
 		return err
 	}
-	gc.Meta.DropCollection(collectionID)
 	var errs []error
 	for _, vChannel := range vChannels {
 		if err := gc.Meta.DropChannelCheckpoint(vChannel); err != nil {
@@ -1913,7 +1959,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.Int64("buildID", segIdx.BuildID))
 			continue
 		}
-		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.GetAllIndexFilesOfIndex(segIdx)})
+		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getRetainedIndexFilesOfIndex(segIdx)})
 	}
 	if len(items) == 0 {
 		return
@@ -1969,12 +2015,27 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	}
 
 	for _, item := range legacyItems {
-		gc.recycleRecordOnlySegmentIndex(ctx, item)
+		gc.recycleRecordOnlySegmentIndex(ctx, segment, item)
 	}
 	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
 }
 
-func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, item segmentIndexGCItem) {
+func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, observed *meta.SegmentInfo, item segmentIndexGCItem) {
+	// Keep record-only cleanup ordered with publication. Selection may have
+	// read an index-free revision just before backfill installed this build.
+	// Recheck that observation under the manifest lock before deleting bytes
+	// or the record that drives manifest retraction on the next GC cycle.
+	locks := gc.Meta.GetSegmentManifestLocks()
+	locks.Lock(item.segIdx.SegmentID)
+	defer locks.Unlock(item.segIdx.SegmentID)
+	current := gc.Meta.GetSegment(ctx, item.segIdx.SegmentID)
+	if current != nil && (meta.IsSegmentHealthy(current) || meta.IsSegmentIndexRollbackRetained(current)) &&
+		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
+			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
+		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
+			mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+		return
+	}
 	log := segmentIndexGCLog(item)
 	log.Info(ctx, "GC Segment Index file start...")
 	if err := gc.RemoveObjectFiles(ctx, item.files); err != nil {
@@ -1992,6 +2053,12 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 	if len(items) == 0 {
 		return
 	}
+	var manifestUpdates []*meta.SegmentInfo
+	defer func() { gc.Meta.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
+	locks := gc.Meta.GetSegmentManifestLocks()
+	locks.Lock(items[0].segIdx.SegmentID)
+	defer locks.Unlock(items[0].segIdx.SegmentID)
+	// Serialize file retirement with migration copies and publication.
 	// One segment pointer PUT shares the atomic transaction with every
 	// defensive SegmentIndex DELETE. Keep each chunk within the configured
 	// etcd bound; stores with a larger native limit are conservatively split.
@@ -2017,7 +2084,8 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 			continue
 		}
 
-		retracted, err := gc.commitManifestIndexRetractions(ctx, ready)
+		retracted, updates, err := gc.commitManifestIndexRetractionsLocked(ctx, ready)
+		manifestUpdates = append(manifestUpdates, updates...)
 		if err != nil {
 			mlog.Warn(ctx, "failed to retract segment indexes from manifest, wait to retry",
 				mlog.Int64("segmentID", ready[0].segIdx.SegmentID),
@@ -2068,13 +2136,25 @@ func (gc *GarbageCollector) commitManifestIndexRetractions(ctx context.Context, 
 	if len(items) == 0 {
 		return true, nil
 	}
+	var manifestUpdates []*meta.SegmentInfo
+	defer func() { gc.Meta.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
+	locks := gc.Meta.GetSegmentManifestLocks()
+	locks.Lock(items[0].segIdx.SegmentID)
+	defer locks.Unlock(items[0].segIdx.SegmentID)
+	retracted, manifestUpdates, err := gc.commitManifestIndexRetractionsLocked(ctx, items)
+	return retracted, err
+}
+
+// Caller holds the segment manifest lock through deletion and publication.
+// Returned updates must be notified after that lock is released.
+func (gc *GarbageCollector) commitManifestIndexRetractionsLocked(ctx context.Context, items []segmentIndexGCItem) (bool, []*meta.SegmentInfo, error) {
 	drops := make([]packed.DropIndexEntry, 0, len(items))
 	mutations := make([]meta.SegmentIndexMutation, 0, len(items))
 	for _, item := range items {
 		drops = append(drops, packed.DropIndexEntry{IndexID: item.segIdx.IndexID, ExpectedBuildID: item.segIdx.BuildID})
 		mutations = append(mutations, meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: item.segIdx.BuildID})
 	}
-	if err := gc.Meta.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+	manifestUpdates, err := gc.Meta.CommitSegmentManifestLocked(ctx, meta.SegmentManifestCommit{
 		SegmentID:     items[0].segIdx.SegmentID,
 		StorageConfig: meta.CreateStorageConfig(),
 		Mutation: meta.ManifestMutation{
@@ -2086,15 +2166,16 @@ func (gc *GarbageCollector) commitManifestIndexRetractions(ctx context.Context, 
 		CatalogMutation: meta.SegmentCatalogMutation{
 			SegmentIndexes: mutations,
 		},
-	}); err != nil {
+	}, 0)
+	if err != nil {
 		// Retired between resolution and this commit: the whole manifest goes
 		// away with the segment, so there is nothing left to retract.
 		if errors.Is(err, merr.ErrSegmentNotFound) {
-			return false, nil
+			return false, nil, nil
 		}
-		return false, merr.Wrap(err, "failed to publish segment manifest without the recycled index")
+		return false, nil, merr.Wrap(err, "failed to publish segment manifest without the recycled index")
 	}
-	return true, nil
+	return true, manifestUpdates, nil
 }
 
 // getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
@@ -2178,7 +2259,7 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			}
 		}
 
-		filesMap := gc.GetAllIndexFilesOfIndex(segIdx)
+		filesMap := gc.getRetainedIndexFilesOfIndex(segIdx)
 
 		logger.Info(ctx, "recycle index files", mlog.Int("meta files num", len(filesMap)))
 		deletedFilesNum := atomic.NewInt32(0)
@@ -2244,6 +2325,30 @@ func (gc *GarbageCollector) GetAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 	for _, fileID := range segmentIndex.IndexFileKeys {
 		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
 	}
+
+	return filesMap
+}
+
+// getRetainedIndexFilesOfIndex protects both sides of migration, including
+// copies not yet published and source paths held by existing readers. Retain
+// these bounded aliases until the build itself is retired; snapshot guards
+// still run before retirement. Keeping them independent of placement also
+// makes the orphan scanner's cached decision safe during long copies/retries.
+func (gc *GarbageCollector) getRetainedIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
+	filesMap := gc.GetAllIndexFilesOfIndex(segmentIndex)
+	if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
+		for _, version := range []indexpb.IndexStorePathVersion{
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		} {
+			retained := model.CloneSegmentIndex(segmentIndex)
+			retained.IndexStorePathVersion = version
+			for _, file := range meta.MigrationIndexPaths(gc.Option.Cli.RootPath(), segment.GetManifestPath(), retained) {
+				filesMap[file] = struct{}{}
+			}
+		}
+	}
 	return filesMap
 }
 
@@ -2294,26 +2399,30 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 			// Keep everything; nil decision fields mean "reclaim nothing".
 			return d
 		}
+		// Read import protection before looking up the build. Finalization
+		// clears it only after installing every record: a missing-record read
+		// before finalization must not be combined with a segment read after it.
+		segment := gc.Meta.GetSegment(ctx, segmentID)
+		if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
+			return d
+		}
 		canRecycle, segIdx := gc.Option.IndexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			return d
 		}
 		if segIdx == nil {
-			segment := gc.Meta.GetSegment(ctx, segmentID)
 			switch {
 			case segment == nil:
 				d.reclaimAll = true
 			case !meta.IsSegmentHealthy(segment):
 				// Dropped-segment GC and rejected-copy cleanup own these files
 				// for as long as the segment row exists.
-			case segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting():
-				// Snapshot restore still copying into this segment.
 			default:
 				d.reclaimAll = true
 			}
 			return d
 		}
-		d.recorded = gc.GetAllIndexFilesOfIndex(segIdx)
+		d.recorded = gc.getRetainedIndexFilesOfIndex(segIdx)
 		return d
 	}
 
@@ -2623,7 +2732,6 @@ func (gc *GarbageCollector) RecycleUnusedJSONStatsFiles(ctx context.Context, sig
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
 			if fieldStats.GetJsonKeyStatsDataFormat() > maxJSONStatsDataFormat {
 				maxJSONStatsDataFormat = fieldStats.GetJsonKeyStatsDataFormat()
 			}
@@ -2656,11 +2764,17 @@ func (gc *GarbageCollector) RecycleUnusedJSONStatsFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+					mlog.Warn(ctx, "some task failure in remove object pool",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json stats files recycle failed when walk with prefix", mlog.Err(err))
+					mlog.Warn(ctx, "json stats files recycle failed when walk with prefix",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 					return
 				}
 			}
@@ -2751,7 +2865,6 @@ func (gc *GarbageCollector) RecycleUnusedJSONIndexFiles(ctx context.Context, sig
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.Option.Cli.RootPath(), common.JSONIndexPath,
@@ -2781,11 +2894,17 @@ func (gc *GarbageCollector) RecycleUnusedJSONIndexFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+					mlog.Warn(ctx, "some task failure in remove object pool",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json index files recycle failed when walk with prefix", mlog.Err(err))
+					mlog.Warn(ctx, "json index files recycle failed when walk with prefix",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 					return
 				}
 			}
@@ -2972,17 +3091,9 @@ func (gc *GarbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 				copysegment.SetSnapshotActivePinsGauge(r.CollectionID, r.SnapshotName, r.ActivePins)
 			}
 
-			// Step 2: if the collection was dropped, cascade-delete orphan snapshots.
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-			cancel()
-			if err != nil {
-				log.Warn(ctx, "failed to check collection existence for orphan snapshot cleanup",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Err(err))
-				continue
-			}
-			if has {
+			// Step 2: if the collection was dropped, cascade-delete orphan
+			// snapshots. A Dropping collection counts as dropped.
+			if gc.Meta.GetCollection(collectionID).IsCreated() {
 				// Collection still exists, not an orphan — expired pins already reaped above.
 				continue
 			}

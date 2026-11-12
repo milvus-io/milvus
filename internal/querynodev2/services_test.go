@@ -16,16 +16,20 @@
 package querynodev2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"path"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/ipc"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -43,11 +47,14 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/materialize"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -58,6 +65,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -67,6 +75,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -269,7 +278,20 @@ func (suite *ServiceSuite) TestGetStatistics_Failed() {
 
 func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	ctx := context.Background()
+	req := suite.newInt64WatchDmChannelsRequest()
 
+	// watchDmChannels
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+
+	// watch channel exist
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+}
+
+func (suite *ServiceSuite) newInt64WatchDmChannelsRequest() *querypb.WatchDmChannelsRequest {
 	// data
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
@@ -317,16 +339,7 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 		},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
 	}
-
-	// watchDmChannels
-	status, err := suite.node.WatchDmChannels(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-
-	// watch channel exist
-	status, err = suite.node.WatchDmChannels(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+	return req
 }
 
 func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
@@ -485,12 +498,15 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		IndexInfoList: indexInfos,
 	}
 
-	// test channel is unsubscribing
-	suite.node.unsubscribingChannels.Insert(suite.vchannel)
-	status, err := suite.node.WatchDmChannels(ctx, req)
+	// A canceled watch waiting behind an unsubscribe must leave no subscription.
+	release, err := suite.node.channelOperations.acquire(ctx, suite.vchannel)
+	suite.Require().NoError(err)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	status, err := suite.node.WatchDmChannels(canceled, req)
+	release()
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
-	suite.node.unsubscribingChannels.Remove(suite.vchannel)
+	suite.Equal(merr.CanceledCode, status.GetCode())
 
 	// load growing failed
 	badSegmentReq := typeutil.Clone(req)
@@ -1748,6 +1764,261 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestMaterialize_Failed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	creq.Limit = typeutil.Unlimited
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		DmlChannels:              []string{suite.vchannel},
+		MaterializeFormatVersion: materialize.FormatVersion,
+	}
+
+	// collection not loaded
+	resp, err := suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
+
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, nil)
+	defer suite.node.manager.Collection.Unref(suite.collectionID, 1)
+
+	// delegator not found
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
+
+	// node not healthy
+	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_RejectsOutOfScope() {
+	unlimited := func() *internalpb.RetrieveRequest {
+		return &internalpb.RetrieveRequest{CollectionID: suite.collectionID, Limit: typeutil.Unlimited}
+	}
+	cases := []struct {
+		name    string
+		version int32
+		mutate  func(*internalpb.RetrieveRequest)
+	}{
+		{"limited", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Limit = 10 }},
+		{"aggregate", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Aggregates = []*planpb.Aggregate{{}} }},
+		{"group by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.GroupByFieldIds = []int64{101} }},
+		{"order by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.OrderByFields = []*planpb.OrderByField{{}} }},
+		{"no format version", 0, func(*internalpb.RetrieveRequest) {}},
+		{"newer format version", materialize.FormatVersion + 1, func(*internalpb.RetrieveRequest) {}},
+	}
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			r := unlimited()
+			c.mutate(r)
+			res, err := suite.node.MaterializeSegments(context.Background(), &querypb.QueryRequest{
+				Req:                      r,
+				DmlChannels:              []string{suite.vchannel},
+				MaterializeFormatVersion: c.version,
+			})
+			suite.NoError(err)
+			// Out of scope, not broken: the proxy falls back to Query.
+			suite.ErrorIs(merr.Error(res.GetStatus()), merr.ErrServiceUnimplemented)
+			// The reply names this node's version, so a mismatch is told apart.
+			suite.Equal(materialize.FormatVersion, res.GetHeader().GetFormatVersion())
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestMaterialize_Normal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+
+	res, err := suite.node.Materialize(ctx, &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(res.GetStatus()))
+	suite.Greater(res.GetHeader().GetBodyRawSize(), int64(0))
+	// The delegator relays the body through the side table, not res.Body.
+	body := resource.TakeMaterializeBody(res)
+	defer body.Release()
+	suite.Greater(body.Len(), 0)
+	// The request named no schema, so the reply carries the bytes.
+	suite.NotEmpty(res.GetHeader().GetBodySchema())
+	suite.Equal(materialize.SchemaFingerprint(res.GetHeader().GetBodySchema()), res.GetHeader().GetSchemaFingerprint())
+	suite.Equal(typeutil.MaxTimestamp, res.GetHeader().GetMvccTimestamp())
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_MatchesQuerySegments() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	// Like the real proxy, request the timestamp in both the request and the
+	// serialized plan; otherwise segcore force-retains the pk in the header.
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	// Match every row, so the comparison covers many rows across segments.
+	planNode.Node = &planpb.PlanNode_Predicates{Predicates: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 109, DataType: schemapb.DataType_Int64},
+		Op:         planpb.OpType_GreaterEqual,
+		Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+	}}}}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+		SegmentIDs:               suite.validSegmentIDs,
+		Scope:                    querypb.DataScope_Historical,
+	}
+
+	qres, err := suite.node.QuerySegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(qres.GetStatus()))
+	wantRows := int64(typeutil.GetSizeOfIDs(qres.GetIds()))
+	suite.Require().Greater(wantRows, int64(0))
+
+	mreq := proto.Clone(req).(*querypb.QueryRequest)
+	mres, err := suite.node.MaterializeSegments(ctx, mreq)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(mres.GetStatus()))
+
+	suite.Greater(mres.GetHeader().GetBodyRawSize(), int64(0))
+	// Without a fingerprint in the request the reply carries the schema bytes;
+	// with the matching one it omits them; with another it carries them.
+	schemaMsg := mres.GetHeader().GetBodySchema()
+	fp := mres.GetHeader().GetSchemaFingerprint()
+	suite.Require().NotEmpty(schemaMsg)
+	suite.Equal(materialize.SchemaFingerprint(schemaMsg), fp)
+	for _, c := range []struct {
+		name      string
+		requestFP uint64
+		wantBytes bool
+	}{
+		{"matching fingerprint", fp, false},
+		{"other fingerprint", fp + 1, true},
+	} {
+		freq := proto.Clone(mreq).(*querypb.QueryRequest)
+		freq.MaterializeSchemaFingerprint = c.requestFP
+		fres, err := suite.node.MaterializeSegments(ctx, freq)
+		suite.Require().NoError(err, c.name)
+		suite.Require().NoError(merr.Error(fres.GetStatus()), c.name)
+		suite.NotEmpty(fres.GetBody(), c.name)
+		suite.Equal(fp, fres.GetHeader().GetSchemaFingerprint(), c.name)
+		if c.wantBytes {
+			suite.Equal(schemaMsg, fres.GetHeader().GetBodySchema(), c.name)
+		} else {
+			suite.Empty(fres.GetHeader().GetBodySchema(), c.name)
+		}
+		// arrow-go's stock reader is the oracle.
+		rd, err := ipc.NewReader(io.MultiReader(bytes.NewReader(schemaMsg), bytes.NewReader(bytes.Join(fres.GetBody(), nil))))
+		suite.Require().NoError(err, c.name)
+		n := int64(0)
+		for rd.Next() {
+			n += rd.Record().NumRows()
+		}
+		suite.Require().NoError(rd.Err(), c.name)
+		rd.Release()
+		suite.Equal(wantRows, n, c.name)
+	}
+	// Turn the batches back into FieldData the way the proxy does
+	// (materialize.Schema.ReadEntry, then Gather), then compare pk values and
+	// every column with Query's, both ordered by pk.
+	ms, err := materialize.ParseSchema(mres.GetHeader().GetBodySchema())
+	suite.Require().NoError(err)
+	var (
+		batches []*materialize.Batch
+		rows    []materialize.RowRef
+	)
+	for i, e := range mres.GetBody() {
+		b, err := ms.ReadEntry([][]byte{e}, i, 0)
+		suite.Require().NoError(err)
+		// The timestamp is the batch's system column.
+		suite.Require().Len(b.Sys, 1)
+		suite.Require().Len(b.Timestamps(ms), b.Rows)
+		batches = append(batches, b)
+		for j := 0; j < b.Rows; j++ {
+			rows = append(rows, materialize.RowRef{Batch: int32(i), Row: int32(j)})
+		}
+	}
+	suite.Equal(wantRows, int64(len(rows)))
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	suite.Require().NoError(err)
+	ids, fields, err := ms.Gather(batches, rows, helper)
+	suite.Require().NoError(err)
+	mseg := &segcorepb.RetrieveResults{Ids: ids, FieldsData: fields}
+
+	sortByPK := func(ids []int64, fields []*schemapb.FieldData) ([]int64, map[int64]*schemapb.FieldData) {
+		order := make([]int, len(ids))
+		for i := range order {
+			order[i] = i
+		}
+		sort.Slice(order, func(a, b int) bool { return ids[order[a]] < ids[order[b]] })
+		sortedIDs := make([]int64, len(ids))
+		dst := typeutil.PrepareResultFieldData(fields, int64(len(ids)))
+		for i, o := range order {
+			sortedIDs[i] = ids[o]
+			typeutil.AppendFieldData(dst, fields, int64(o))
+		}
+		byID := make(map[int64]*schemapb.FieldData, len(dst))
+		for _, fd := range dst {
+			byID[fd.GetFieldId()] = fd
+		}
+		return sortedIDs, byID
+	}
+	wantPKs, wantCols := sortByPK(qres.GetIds().GetIntId().GetData(), qres.GetFieldsData())
+	gotPKs, gotCols := sortByPK(mseg.GetIds().GetIntId().GetData(), mseg.GetFieldsData())
+	suite.Equal(wantPKs, gotPKs)
+	suite.Require().NotEmpty(wantCols)
+	suite.Equal(len(wantCols), len(gotCols))
+	for id, want := range wantCols {
+		got, ok := gotCols[id]
+		suite.Require().True(ok, "field %d missing from Materialize", id)
+		suite.Equal(want.GetType(), got.GetType(), "field %d", id)
+		suite.True(proto.Equal(want.GetScalars(), got.GetScalars()), "field %d scalars differ", id)
+		suite.True(proto.Equal(want.GetVectors(), got.GetVectors()), "field %d vectors differ", id)
+		suite.Equal(want.GetValidData(), got.GetValidData(), "field %d valid data", id)
+	}
+
+	// A collection that is not loaded surfaces as a header status, not an error.
+	mreq.Req.CollectionID = -1
+	mres, err = suite.node.MaterializeSegments(ctx, mreq)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(mres.GetStatus()), merr.ErrCollectionNotLoaded)
+}
+
 func (suite *ServiceSuite) TestQuerySegments_Failed() {
 	ctx := context.Background()
 
@@ -2368,6 +2639,24 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	suite.Require().True(deltaResp.GetIsDelta())
 	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
 	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
+func TestLeaderViewCatchingUpStreamingData(t *testing.T) {
+	t.Run("legacy querynode preserves catchup state", func(t *testing.T) {
+		assert.True(t, leaderViewCatchingUpStreamingData(nil, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(nil, false))
+	})
+
+	t.Run("embedded querynode does not report legacy catchup", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, false))
+	})
+
+	t.Run("legacy embedded querynode label is honored", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+	})
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {
@@ -3195,4 +3484,453 @@ func TestQueryNodeService(t *testing.T) {
 	defer streaming.RecoverWALForTest()
 
 	suite.Run(t, new(ServiceSuite))
+}
+
+// Reusing a channel after replica reassignment must acknowledge the new watch
+// generation without replacing its query view or recreating the delegator.
+func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	sd, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	initialQueryView := sd.GetChannelQueryView()
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(full.GetChannels(), 1)
+	suite.Equal(int64(0), full.GetChannels()[0].GetVersion())
+	// Same replica and partitions: the delegator is reused.
+	req := suite.newInt64WatchDmChannelsRequest()
+	req.Version = 100
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+	suite.Equal(int64(100), sd.Version())
+	delta := suite.getDataDistributionWithDeltaSupport(ctx, full.GetLastModifyTs())
+	suite.Require().True(delta.GetIsDelta())
+	suite.Require().Len(delta.GetChannels(), 1)
+	suite.Equal(int64(100), delta.GetChannels()[0].GetVersion())
+	suite.Same(initialQueryView, sd.GetChannelQueryView())
+	for _, version := range []int64{100, 50, 0} {
+		req.Version = version
+		status, err = suite.node.WatchDmChannels(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().True(merr.Ok(status))
+		suite.Equal(int64(100), sd.Version())
+	}
+	req.Version = 200
+	// A queued watch applies its generation after the previous operation ends.
+	release, err := suite.node.channelOperations.acquire(ctx, suite.vchannel)
+	suite.Require().NoError(err)
+	release = sync.OnceFunc(release)
+	defer release()
+	done := make(chan error, 1)
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, req)
+		done <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	suite.Equal(int64(100), sd.Version())
+	release()
+	suite.requireChannelOperationDone(done)
+	suite.Equal(int64(200), sd.Version())
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	req.Version = 300
+	status, err = suite.node.WatchDmChannels(canceled, req)
+	suite.Require().NoError(err)
+	suite.False(merr.Ok(status))
+	suite.Equal(int64(200), sd.Version())
+	reported := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(reported.GetChannels(), 1)
+	suite.Equal(int64(200), reported.GetChannels()[0].GetVersion())
+
+	// A different replica adopts the same subscription without replacing live state.
+	req.ReplicaID = 9876
+	req.Version = 300
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+	adopted, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Same(sd, adopted)
+	suite.Equal(int64(300), adopted.Version())
+	suite.Same(initialQueryView, adopted.GetChannelQueryView())
+
+	// A different partition set also only advances the
+	// generation. The query view is left for the next target sync to replace.
+	adoptedQueryView := adopted.GetChannelQueryView()
+	req.PartitionIDs = append(slices.Clone(suite.partitionIDs), 333)
+	req.Version = 400
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+	reused, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Same(adopted, reused)
+	suite.Same(adoptedQueryView, reused.GetChannelQueryView())
+	suite.Equal(int64(400), reused.Version())
+	// Dropping the original partition and adding another is reused as well.
+	req.PartitionIDs = []int64{333}
+	req.Version = 500
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+	reused, ok = suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Same(adopted, reused)
+	suite.Equal(int64(500), reused.Version())
+	reported = suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(reported.GetChannels(), 1)
+	suite.Equal(int64(500), reported.GetChannels()[0].GetVersion())
+}
+
+func (suite *ServiceSuite) TestWatchDmChannelsReplicaReuseIsMonotonic() {
+	ctx := context.Background()
+	req := suite.newInt64WatchDmChannelsRequest()
+	req.Version = 200
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+
+	existing, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Require().True(existing.Serviceable())
+	queryView := existing.GetChannelQueryView()
+	pipeline := suite.node.pipelineManager.Get(suite.vchannel)
+	suite.Require().NotNil(pipeline)
+
+	// Keep a real growing segment to catch accidental teardown of live state.
+	growing, err := segments.NewSegment(ctx, suite.node.manager.Collection.Get(suite.collectionID),
+		suite.node.manager.Segment, segments.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.validSegmentIDs[0],
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionIDs[0],
+			InsertChannel: suite.vchannel,
+			Level:         datapb.SegmentLevel_Legacy,
+		})
+	suite.Require().NoError(err)
+	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, growing)
+
+	req.ReplicaID++
+	expectedVersion := int64(200)
+	for _, version := range []int64{100, 200, 0, 300, 200, 100} {
+		suite.Run(fmt.Sprintf("version_%d", version), func() {
+			full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+			suite.Require().Len(full.GetChannels(), 1)
+			suite.Equal(expectedVersion, full.GetChannels()[0].GetVersion())
+			req.Version = version
+			status, err := suite.node.WatchDmChannels(ctx, req)
+			suite.Require().NoError(err)
+			suite.Require().True(merr.Ok(status))
+			if version > expectedVersion {
+				expectedVersion = version
+			}
+			current, ok := suite.node.delegators.Get(suite.vchannel)
+			suite.Require().True(ok)
+			suite.Same(existing, current)
+			suite.Equal(expectedVersion, current.Version())
+			suite.True(current.Serviceable())
+			suite.Same(queryView, current.GetChannelQueryView())
+			suite.Same(pipeline, suite.node.pipelineManager.Get(suite.vchannel))
+			suite.Same(growing, suite.node.manager.Segment.GetGrowing(growing.ID()))
+			delta := suite.getDataDistributionWithDeltaSupport(ctx, full.GetLastModifyTs())
+			suite.Require().True(delta.GetIsDelta())
+			suite.NotContains(delta.GetRemovedChannelNames(), suite.vchannel)
+			for _, channel := range delta.GetChannels() {
+				if channel.GetChannel() == suite.vchannel {
+					suite.Equal(expectedVersion, channel.GetVersion())
+				}
+			}
+			reported := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+			suite.Require().Len(reported.GetChannels(), 1)
+			suite.Equal(expectedVersion, reported.GetChannels()[0].GetVersion())
+		})
+	}
+}
+
+// This wrapper pauses real delegator operations at deterministic points; it does
+// not replace the Watch/Unwatch handlers or their distribution bookkeeping.
+type gatedChannelDelegator struct {
+	delegator.ShardDelegator
+	beforeUpdate func()
+	beforeClose  func()
+}
+
+func (d *gatedChannelDelegator) UpdateVersion(version int64) bool {
+	if d.beforeUpdate != nil {
+		d.beforeUpdate()
+	}
+	return d.ShardDelegator.UpdateVersion(version)
+}
+
+func (d *gatedChannelDelegator) Close() {
+	if d.beforeClose != nil {
+		d.beforeClose()
+	}
+	d.ShardDelegator.Close()
+}
+
+func (suite *ServiceSuite) TestWatchBlocksConcurrentUnwatch() {
+	suite.testChannelOperationGate(true)
+}
+
+func (suite *ServiceSuite) TestUnwatchBlocksConcurrentWatch() {
+	suite.testChannelOperationGate(false)
+}
+
+func (suite *ServiceSuite) testChannelOperationGate(watchFirst bool) {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	original, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	pause := func() { close(entered); <-release }
+	wrapped := &gatedChannelDelegator{ShardDelegator: original}
+	if watchFirst {
+		wrapped.beforeUpdate = pause
+	} else {
+		wrapped.beforeClose = pause
+	}
+	suite.node.delegators.Insert(suite.vchannel, wrapped)
+	watch := suite.channelWatchRequest(300)
+	unwatch := &querypb.UnsubDmChannelRequest{CollectionID: suite.collectionID, ChannelName: suite.vchannel}
+	done := make(chan error, 1)
+	go func() {
+		var status *commonpb.Status
+		var err error
+		if watchFirst {
+			status, err = suite.node.WatchDmChannels(ctx, watch)
+		} else {
+			status, err = suite.node.UnsubDmChannel(ctx, unwatch)
+		}
+		done <- merr.CheckRPCCall(status, err)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("channel operation did not reach the barrier")
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		var status *commonpb.Status
+		var err error
+		if watchFirst {
+			status, err = suite.node.UnsubDmChannel(ctx, unwatch)
+		} else {
+			status, err = suite.node.WatchDmChannels(ctx, watch)
+		}
+		secondDone <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	select {
+	case err := <-secondDone:
+		suite.T().Fatalf("queued channel operation returned before its predecessor: %v", err)
+	default:
+	}
+	unblock()
+	suite.requireChannelOperationDone(done)
+	suite.requireChannelOperationDone(secondDone)
+	delta := suite.getDataDistributionWithDeltaSupport(ctx, full.GetLastModifyTs())
+	suite.Require().True(delta.GetIsDelta())
+	current, found := suite.node.delegators.Get(suite.vchannel)
+	if watchFirst {
+		suite.Equal(int64(300), original.Version())
+		// The later unsubscribe must retain its tombstone after the watch upsert.
+		suite.Contains(delta.GetRemovedChannelNames(), suite.vchannel)
+		suite.Empty(delta.GetChannels())
+		suite.False(found)
+	} else {
+		suite.Require().True(found)
+		suite.NotSame(original, current)
+		suite.Equal(int64(300), current.Version())
+		suite.True(current.Serviceable())
+		suite.NotContains(delta.GetRemovedChannelNames(), suite.vchannel)
+		suite.Require().Len(delta.GetChannels(), 1)
+		suite.Equal(int64(300), delta.GetChannels()[0].GetVersion())
+	}
+}
+
+// Wait until the second handler has actually entered the per-channel queue.
+func (suite *ServiceSuite) waitForChannelOperationWaiter() {
+	suite.Require().Eventually(func() bool {
+		operations := suite.node.channelOperations
+		operations.mu.Lock()
+		defer operations.mu.Unlock()
+		operation := operations.channels[suite.vchannel]
+		return operation != nil && operation.refs >= 2
+	}, 10*time.Second, time.Millisecond)
+}
+
+func (suite *ServiceSuite) requireChannelOperationDone(done <-chan error) {
+	select {
+	case err := <-done:
+		suite.Require().NoError(err)
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("channel operation did not finish")
+	}
+}
+
+func (suite *ServiceSuite) channelWatchRequest(version int64) *querypb.WatchDmChannelsRequest {
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	return &querypb.WatchDmChannelsRequest{
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		Version:      version,
+		Infos: []*datapb.VchannelInfo{{
+			CollectionID: suite.collectionID,
+			ChannelName:  suite.vchannel,
+			SeekPosition: suite.position,
+		}},
+		Schema: schema,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+			MetricType:   defaultMetricType,
+		},
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
+	}
+}
+
+// Add runs after the initial delegator is visible in the map but before it is
+// serviceable, letting these tests exercise the real initialization/rollback.
+type gatedChannelPipelineManager struct {
+	pipeline.Manager
+	beforeAdd func() error
+}
+
+func (m *gatedChannelPipelineManager) Add(collectionID int64, channel string) (pipeline.Pipeline, error) {
+	if err := m.beforeAdd(); err != nil {
+		return nil, err
+	}
+	return m.Manager.Add(collectionID, channel)
+}
+
+func (suite *ServiceSuite) TestWatchWaitsForInitialWatchSuccess() {
+	suite.testWatchWaitsForInitialization(false)
+}
+
+func (suite *ServiceSuite) TestWatchWaitsForInitialWatchFailure() {
+	suite.testWatchWaitsForInitialization(true)
+}
+
+func (suite *ServiceSuite) testWatchWaitsForInitialization(failFirst bool) {
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var first sync.Once
+	suite.node.pipelineManager = &gatedChannelPipelineManager{
+		Manager: suite.node.pipelineManager,
+		beforeAdd: func() error {
+			var err error
+			first.Do(func() {
+				close(entered)
+				<-release
+				if failFirst {
+					err = errors.New("initial pipeline creation failed")
+				}
+			})
+			return err
+		},
+	}
+	firstReq, secondReq := suite.channelWatchRequest(100), suite.channelWatchRequest(200)
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, firstReq)
+		firstDone <- merr.CheckRPCCall(status, err)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("initial watch did not reach pipeline creation")
+	}
+	initial, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	suite.False(initial.Serviceable())
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, secondReq)
+		secondDone <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	suite.Equal(int64(100), initial.Version())
+	select {
+	case err := <-secondDone:
+		suite.T().Fatalf("watch acknowledged an uninitialized subscription: %v", err)
+	default:
+	}
+	unblock()
+	select {
+	case err := <-firstDone:
+		if failFirst {
+			suite.Require().Error(err)
+		} else {
+			suite.Require().NoError(err)
+		}
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("initial watch did not finish")
+	}
+	suite.requireChannelOperationDone(secondDone)
+	current, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	suite.True(current.Serviceable())
+	suite.Equal(int64(200), current.Version())
+	if failFirst {
+		suite.NotSame(initial, current)
+	} else {
+		suite.Same(initial, current)
+	}
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(full.GetChannels(), 1)
+	suite.Equal(int64(200), full.GetChannels()[0].GetVersion())
+}
+
+func (suite *ServiceSuite) TestChannelOperationWaitCancellation() {
+	suite.TestWatchDmChannelsInt64()
+	original, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	for _, watch := range []bool{true, false} {
+		release, err := suite.node.channelOperations.acquire(context.Background(), suite.vchannel)
+		suite.Require().NoError(err)
+		release = sync.OnceFunc(release)
+		defer release()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			var status *commonpb.Status
+			var err error
+			if watch {
+				status, err = suite.node.WatchDmChannels(ctx, &querypb.WatchDmChannelsRequest{
+					CollectionID: suite.collectionID, Version: 300,
+					Infos:         []*datapb.VchannelInfo{{ChannelName: suite.vchannel}},
+					IndexInfoList: []*indexpb.IndexInfo{{}},
+				})
+			} else {
+				status, err = suite.node.UnsubDmChannel(ctx, &querypb.UnsubDmChannelRequest{
+					CollectionID: suite.collectionID, ChannelName: suite.vchannel,
+				})
+			}
+			done <- merr.CheckRPCCall(status, err)
+		}()
+		suite.waitForChannelOperationWaiter()
+		cancel()
+		select {
+		case err := <-done:
+			suite.Equal(merr.CanceledCode, merr.Code(err))
+		case <-time.After(10 * time.Second):
+			suite.T().Error("canceled operation did not stop waiting")
+		}
+		release()
+		current, found := suite.node.delegators.Get(suite.vchannel)
+		suite.Require().True(found)
+		suite.Same(original, current)
+		suite.Equal(int64(0), current.Version())
+		suite.True(current.Serviceable())
+	}
 }

@@ -48,6 +48,7 @@ func (*resourceTestMetadata) GetQueryViewSegmentLoadInfo(context.Context, int64,
 type resourceTestFixture struct {
 	dependencyMock *mockey.Mocker
 	loadMock       *mockey.Mocker
+	prepareMock    *mockey.Mocker
 	releaseMock    *mockey.Mocker
 	registerMock   *mockey.Mocker
 	manager        *SegmentResourceManager
@@ -68,7 +69,7 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 		f.loads.Add(1)
 		return &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID}, nil
 	}).Build()
-	mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, _ SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+	f.prepareMock = mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, _ SegmentLoadInfoSnapshot) (segments.ReadState, error) {
 		f.prepares.Add(1)
 		if prepare != nil {
 			if err := prepare(c); err != nil {
@@ -395,4 +396,20 @@ func TestPrunedResourceSlicesReleaseBackingReferences(t *testing.T) {
 	require.Equal(t, []*segmentBase{first}, r.pruneBasesLocked())
 	require.Equal(t, []*segmentBase{second}, r.bases)
 	require.Nil(t, baseBacking[1])
+}
+
+func TestSegmentResourceManagerListsQueryViewCollections(t *testing.T) {
+	mockey.PatchConvey("collections are listed while a QueryView holds them", t, func() {
+		f := setupResourceTest(t, nil)
+		require.Empty(t, f.manager.CollectionIDs())
+		first := f.acquire(1, 1, 1)
+		second := f.acquire(2, 1, 1)
+		require.Equal(t, []int64{testCollectionID}, f.manager.CollectionIDs())
+		f.await(t, 1)
+		f.await(t, 1)
+		f.drop(t, first)
+		require.Equal(t, []int64{testCollectionID}, f.manager.CollectionIDs())
+		f.drop(t, second)
+		require.Empty(t, f.manager.CollectionIDs())
+	})
 }

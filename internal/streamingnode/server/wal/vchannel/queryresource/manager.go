@@ -205,17 +205,17 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 			if req.OnDropped != nil {
 				req.OnDropped()
 			}
-		}})
+		}}, nodescheduler.WithPriority(5))
 	} else if hasAdvance && advanceRuntime != nil {
-		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped})
+		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped}, nodescheduler.WithPriority(5))
 	} else {
 		m.submitCallback(req.OnDropped)
 	}
 }
 
 // Reject completes an acquisition that cannot be reconstructed without
-// registering a QueryView reference. The callback is submitted to the node
-// scheduler to preserve the asynchronous ResourceManager contract.
+// registering a QueryView reference. Notify asynchronously to avoid reentering
+// the caller's shard/owner locks.
 func (m *Manager) Reject(req snview.AcquireResource) {
 	m.submitCallback(req.OnUnrecoverable)
 }
@@ -399,7 +399,7 @@ func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALV
 	// snapshot retains the legacy unrestricted scope.
 	view.PartitionIDs = append([]int64{}, loadInfo.PartitionIDs...)
 	view.LoadFields = loadInfo.LoadFields
-	view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, loadInfo.RequiredFields)
+	view.RequiredFields = loadInfo.RequiredFields
 	view.IndexInfos = loadInfo.IndexInfos
 	return view, nil
 }
@@ -475,7 +475,7 @@ func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
 		manager: m,
 		key:     key,
 		onReady: ref.onReady,
-	})
+	}, nodescheduler.WithPriority(0))
 }
 
 func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {
@@ -577,13 +577,9 @@ func (m *Manager) submitCallback(callback func()) {
 	if callback == nil {
 		return
 	}
-	m.mu.Lock()
-	if m.scheduler == nil {
-		m.scheduler = nodescheduler.Get()
-	}
-	scheduler := m.scheduler
-	m.mu.Unlock()
-	scheduler.Submit(resourceCallbackTask(callback))
+	// Callers may hold shard/owner locks acquired again by the callback. Keep
+	// notifications asynchronous without waiting for resource-loading workers.
+	go callback()
 }
 
 func (m *Manager) takeRuntimeLocked() (*QueryRuntime, *scheduledBuild) {

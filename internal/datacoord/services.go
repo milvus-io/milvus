@@ -33,13 +33,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
-	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -54,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -101,19 +98,15 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	var bc broadcaster.BroadcastAPI
-	if streamingutil.IsStreamingServiceEnabled() {
-		var err error
-		bc, err = s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
-		if err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		defer bc.Close()
+	bc, err := s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
+	if err != nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
+	defer bc.Close()
 
-	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), req.GetSegmentIDs(), bc)
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), bc)
 	if err != nil {
 		return &datapb.FlushResponse{Status: merr.Status(err)}, nil
 	}
@@ -142,7 +135,7 @@ func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.Broadc
 	return err
 }
 
-func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toFlushSegments []UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
@@ -158,31 +151,13 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 		channelCPs[vchannel] = cp
 	}
 
-	var flushTs uint64
 	timeOfSeal := time.Now()
-	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
-	if bc != nil {
-		// AckSyncUp proves completion directly; zero tells GetFlushState that
-		// no independently reported channel checkpoint needs to be checked.
-		if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
-			return nil, err
-		}
-	} else {
-		flushTs, err = s.allocator.AllocTimestamp(ctx)
-		if err != nil {
-			return nil, err
-		}
-		timeOfSeal, _ = tsoutil.ParseTS(flushTs)
-		for _, channel := range coll.VChannelNames {
-			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
-			}
-			for _, sealedSegmentID := range sealedSegmentIDs {
-				sealedSegmentsIDDict[sealedSegmentID] = true
-			}
-		}
+	// AckSyncUp proves completion directly. The response therefore carries no
+	// flush timestamp: zero tells GetFlushState that no independently reported
+	// channel checkpoint needs to be checked.
+	if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
+		return nil, err
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -190,26 +165,20 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 	for _, seg := range segments {
 		if seg != nil &&
 			meta.IsFlushState(seg.GetState()) &&
-			seg.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
-			!sealedSegmentsIDDict[seg.GetID()] {
+			seg.GetLevel() != datapb.SegmentLevel_L0 { // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			flushSegmentIDs = append(flushSegmentIDs, seg.GetID())
 		}
 	}
 
 	mlog.Info(ctx, "flush response with segments",
 		mlog.Int64("collectionID", collectionID),
-		mlog.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		mlog.Int("flushedSegmentsCount", len(flushSegmentIDs)),
-		mlog.Time("timeOfSeal", timeOfSeal),
-		mlog.Uint64("flushTs", flushTs),
-		mlog.Time("flushTs in time", tsoutil.PhysicalTime(flushTs)))
+		mlog.Time("timeOfSeal", timeOfSeal))
 
 	return &datapb.FlushResult{
 		CollectionID:    collectionID,
-		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
-		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
 		DbName:          coll.DatabaseName,
 		CollectionName:  coll.Schema.GetName(),
@@ -275,63 +244,17 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}, nil
 }
 
-// AssignSegmentID applies for segment ids and make allocation for records.
+// AssignSegmentID was the row-quota allocation of the pre-streaming write
+// path. Growing segments are allocated by the streaming node through
+// AllocSegment now; the RPC is kept in the service definition only.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AssignSegmentIDResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
-
-	for _, r := range req.SegmentIDRequests {
-		mlog.Info(context.TODO(), "handle assign segment request",
-			mlog.Int64("collectionID", r.GetCollectionID()),
-			mlog.Int64("partitionID", r.GetPartitionID()),
-			mlog.String("channelName", r.GetChannelName()),
-			mlog.Uint32("count", r.GetCount()),
-		)
-
-		// Load the collection info from Root Coordinator, if it is not found in server meta.
-		// Note: this request wouldn't be received if collection didn't exist.
-		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
-		if err != nil {
-			mlog.Warn(context.TODO(), "cannot get collection schema", mlog.Err(err))
-		}
-
-		// Have segment manager allocate and return the segment allocation info.
-		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to alloc segment", mlog.Any("request", r), mlog.Err(err))
-			assigns = append(assigns, &datapb.SegmentIDAssignment{
-				ChannelName:  r.ChannelName,
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				Status:       merr.Status(err),
-			})
-			continue
-		}
-
-		mlog.Info(context.TODO(), "success to assign segments", mlog.Int64("collectionID", r.GetCollectionID()), mlog.Any("assignments", segmentAllocations))
-
-		for _, allocation := range segmentAllocations {
-			result := &datapb.SegmentIDAssignment{
-				SegID:        allocation.SegmentID,
-				ChannelName:  r.ChannelName,
-				Count:        uint32(allocation.NumOfRows),
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				ExpireTime:   allocation.ExpireTime,
-				Status:       merr.Success(),
-			}
-			assigns = append(assigns, result)
-		}
-	}
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Success(),
-		SegIDAssignments: assigns,
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "AssignSegmentID is removed, growing segments are allocated by the streaming node")),
 	}, nil
 }
 
@@ -730,11 +653,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		// Set segment state
 		if req.GetDropped() {
-			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, meta.UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// keep the original SegmentMeta persistence semantics: when sort
 			// compaction is enabled, a flushed non-L0 Segment stays invisible
 			// until its sorted output replaces it (see data_view.md TODO).
@@ -781,10 +701,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// with SegmentMeta in one catalog txn (flush atomicity): the snapshot is
 	// prepared under the DataView Collection lock, composed into the same
 	// Update, and loaded into the manager memory only after the txn commits.
-	// Lock order is DataView Collection lock -> segMu (inside
-	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes the
-	// same order (DataView lock -> segMu.RLock via loadableProjection), so no
-	// deadlock. On failure the lock is aborted and the StreamingNode retries
+	// Lock order is DataView Collection lock -> segment writer lock (inside
+	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes only
+	// the DataView lock (loadableProjection reads without a segment lock), so
+	// no deadlock. On failure the lock is aborted and the StreamingNode retries
 	// the whole SaveBinlogPaths until the DataView version is durably
 	// published (the syncmgr meta writer retries indefinitely).
 	//
@@ -849,14 +769,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				}
 			}
 			flushView, commitView, abortView, err := s.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
-				CollectionID: seg.GetCollectionID(),
+				CollectionID:           seg.GetCollectionID(),
+				GrowingTransformStarts: map[string]uint64{seg.GetInsertChannel(): req.GetGrowingTransformStartAfterTimetick()},
 				Segments: []dataview.LoadableSegment{{
-					SegmentID:       seg.GetID(),
-					VChannel:        seg.GetInsertChannel(),
-					PartitionID:     seg.GetPartitionID(),
-					ManifestVersion: manifestVersion,
-					RowNum:          rowNum,
-					Size:            req.GetStats().GetInsertBinlogSize(),
+					SegmentID:                   seg.GetID(),
+					VChannel:                    seg.GetInsertChannel(),
+					PartitionID:                 seg.GetPartitionID(),
+					ManifestVersion:             manifestVersion,
+					TransformStartAfterTimetick: meta.SegmentTransformStart(seg),
+					RowNum:                      rowNum,
+					Size:                        req.GetStats().GetInsertBinlogSize(),
 				}},
 			})
 			if err != nil {
@@ -1031,7 +953,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.RemoveTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
@@ -1109,14 +1030,14 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}, nil
 	}
 
-	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
+	coll, err := s.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
-		mlog.Error(context.TODO(), "get collection info from rootcoord failed",
+		mlog.Error(ctx, "get collection info failed",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	channels := dresp.GetVirtualChannelNames()
+	channels := coll.VChannelNames
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, c := range channels {
@@ -1786,18 +1707,13 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 // getChannelsByCollectionID gets the channels of the collection.
 func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]meta.RWChannel, error) {
-	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
-		CollectionID: collectionID,
-	})
+	coll, err := s.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	channels := make([]meta.RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
-	for _, channel := range describeRsp.GetVirtualChannelNames() {
-		startPos := meta.ToMsgPosition(channel, describeRsp.GetStartPositions())
+	channels := make([]meta.RWChannel, 0, len(coll.VChannelNames))
+	for _, channel := range coll.VChannelNames {
+		startPos := meta.ToMsgPosition(channel, coll.StartPositions)
 		channels = append(channels, &meta.ChannelMeta{
 			Name:          channel,
 			CollectionID:  collectionID,
@@ -1867,13 +1783,6 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
-	for _, pos := range checkpoints {
-		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
-			continue
-		}
-		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
-	}
-
 	return merr.Success(), nil
 }
 
@@ -1903,43 +1812,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Status(err), nil
 	}
 
-	properties := make(map[string]string)
-	for _, pair := range req.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
-	}
-
-	// RootCoord builds this request from its authoritative meta and populates
-	// every field (broker.go BroadcastAlteredCollection), so the request wins
-	// throughout. Taking Partitions/DatabaseName/DatabaseID from the existing
-	// entry instead -- as the pre-metacache code did -- pinned them to whatever
-	// the initial load saw: create/drop partition never refreshed Partitions,
-	// and a cross-database rename left DatabaseName stale for the resource-key
-	// locks built from it. CreatedAt is the one field the request lacks, so it
-	// is carried over.
-	info := &meta.CollectionInfo{
-		ID:             req.GetCollectionID(),
-		Schema:         req.GetSchema(),
-		Partitions:     req.GetPartitionIDs(),
-		StartPositions: req.GetStartPositions(),
-		Properties:     properties,
-		DatabaseID:     req.GetDbID(),
-		DatabaseName:   req.GetSchema().GetDbName(),
-		VChannelNames:  req.GetVChannels(),
-	}
-	var oldSchema *schemapb.CollectionSchema
-	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
-		info.CreatedAt = existing.CreatedAt
-		oldSchema = existing.Schema
-	}
-	s.meta.AddCollection(info)
-	// A refresh that rebinds an external collection applies its segments before
-	// publishing the new source/spec, so their index builds are enqueued here.
-	if externalrefresh.ExternalSourceChanged(oldSchema, req.GetSchema()) {
-		meta.NotifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
-	}
-	// An added field may need text or JSON key stats on existing segments, and a
-	// published external source/spec makes refreshed segments ready for them.
-	meta.NotifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
+	// DataCoord reads collections straight from RootCoord's meta through the
+	// shared CollectionSource, so there is no copy to refresh. RootCoord no
+	// longer calls this; it stays until the RPC is removed.
 	return merr.Success(), nil
 }
 
@@ -1949,10 +1824,6 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 			Status:  merr.Status(err),
 			Reasons: []string{err.Error()},
 		}, nil
-	}
-
-	if err := meta.CheckCheckPointsHealth(s.meta); err != nil {
-		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
 	return componentutil.CheckHealthRespWithErr(nil), nil
@@ -2052,7 +1923,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
-	if err := importutilv2.ValidateImportSchema(in.GetSchema()); err != nil {
+	if err := importutilv2.ValidateImportSchema(in.GetSchema(), in.GetOptions()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -2120,7 +1991,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	// Broadcast the import message
-	// dbName is retrieved inside BroadcastImport via broker.DescribeCollectionInternal
+	// dbName is read inside BroadcastImport from the collection view
 	duplicatedJobID, duplicated, err := s.ddl.BroadcastImport(
 		ctx,
 		in.GetCollectionID(),
@@ -2289,7 +2160,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema())
+	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema(), options)
 
 	isBackup := importutilv2.IsBackup(options)
 	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && unsupportedSchemaErr == nil {
@@ -2319,7 +2190,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		resp.Status = merr.Status(merr.Wrap(err, "get collection failed"))
 		return resp, nil
 	}
-	if importCollectionInfo == nil {
+	// A Dropping collection stays visible until RootCoord removes it; an
+	// import ack replayed for it must not start a job.
+	if !importCollectionInfo.IsCreated() {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(body.GetCollectionID()))
 		return resp, nil
 	}
@@ -2479,7 +2352,6 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, collec
 		mlog.String("channelname", channel),
 		mlog.FieldCollectionID(collectionID),
 		mlog.Any("partitionID", partitionIDs))
-	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	if err := s.meta.DropSegmentsOfPartition(ctx, partitionIDs); err != nil {
 		return err
@@ -2548,10 +2420,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Resolve collection identity for the broadcast lock set (also validates
-	// collection existence). Read from the datacoord-local meta cache via
-	// handler.GetCollection — avoids a cross-component RPC to MixCoord on every
-	// CreateSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// collection existence). Read from RootCoord's collection view via
+	// handler.GetCollection, which retries a miss for a bounded time.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
@@ -2579,12 +2449,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// resolution above and lock acquisition; in that case this request must
 	// terminate before broadcasting a CreateSnapshot message whose ack callback
 	// can no longer generate a valid snapshot.
-	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if !hasCollection {
+	if !s.meta.GetCollection(req.GetCollectionId()).IsCreated() {
 		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
@@ -2630,13 +2495,13 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 
 	mlog.Info(context.TODO(), "receive BatchUpdateManifest request", mlog.Int("itemCount", len(req.GetItems())))
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	coll, err := s.meta.GetCollectionOrNotFound(req.GetCollectionId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "BatchUpdateManifest failed to describe collection", mlog.Err(err))
+		mlog.Warn(ctx, "BatchUpdateManifest failed to get collection", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
@@ -2696,10 +2561,9 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// Dropping a snapshot must serialize against concurrent DropCollection / AlterCollection
 	// on the owning collection, otherwise DropSnapshot can race with a cascade drop path.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every DropSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Read from the collection view RootCoord publishes. This avoids a
+	// cross-component RPC to MixCoord on every DropSnapshot; handler.GetCollection
+	// retries a miss briefly in case RootCoord has not applied the collection.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "DropSnapshot failed to resolve collection", mlog.Err(err))
@@ -3110,10 +2974,9 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 	// collection to exist before we can acquire the locks that serialize Pin
 	// against DropSnapshot / DropCollection.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every PinSnapshotData, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Read from the collection view RootCoord publishes. This avoids a
+	// cross-component RPC to MixCoord on every PinSnapshotData; handler.GetCollection
+	// retries a miss briefly in case RootCoord has not applied the collection.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "PinSnapshotData failed to resolve collection", mlog.Err(err))
@@ -3245,7 +3108,12 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 	mlog.Info(context.TODO(), "pre-allocated job ID for refresh", mlog.Int64("jobID", allocatedJobID))
 
-	// Build and broadcast the message
+	collection, err := s.handler.GetCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Advance the target shards' Transform MVCC before publishing refreshed data.
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
 		WithHeader(&message.RefreshExternalCollectionMessageHeader{
 			CollectionId:   req.GetCollectionId(),
@@ -3256,7 +3124,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}).
 		WithBody(&message.RefreshExternalCollectionMessageBody{}).
 		WithUnreplicable().
-		WithControlChannelBroadcast().
+		WithBroadcast(collection.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 
 	if _, err := b.Broadcast(ctx, msg); err != nil {
@@ -3358,6 +3226,13 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	}
 	defer broadcaster.Close()
 
+	var opts []message.OptBuildBroadcast
+	if job.GetCommitByCoordinator() {
+		// Consumer ACK follows query MVCC publication, so the callback cannot
+		// expose imported segments before their commit timestamp is queryable.
+		opts = append(opts, message.OptBuildBroadcastAckSyncUp())
+	}
+
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
 			CollectionId:        job.GetCollectionID(),
@@ -3365,7 +3240,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 			CommitByCoordinator: job.GetCommitByCoordinator(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(vchannels).
+		WithBroadcast(vchannels, opts...).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)

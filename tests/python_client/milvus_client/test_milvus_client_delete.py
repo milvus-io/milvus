@@ -1,5 +1,8 @@
 # ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
 # fmt: off
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
@@ -236,6 +239,60 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                                 "with_vec": True,
                                 "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_concurrent_reads_after_delete(self):
+        """
+        target: verify delete visibility in concurrent search and query
+        method: delete half the rows, then issue concurrent search and query
+        expected: both readers return exactly the retained IDs after delete
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client, collection_name, default_dim, metric_type="L2",
+            consistency_level="Strong", shards_num=1,
+        )
+        row_count = 20
+        deleted_count = row_count // 2
+        all_ids = set(range(row_count))
+        retained_ids = set(range(deleted_count, row_count))
+        zero_vector = [0.0] * default_dim
+        rows = [
+            {"id": i, "vector": [float(i)] + zero_vector[1:]}
+            for i in range(row_count)
+        ]
+        assert client.insert(collection_name, rows, timeout=20)["insert_count"] == row_count
+
+        def search_ids():
+            hits = client.search(
+                collection_name, [zero_vector], limit=row_count,
+                consistency_level="Strong", timeout=10,
+            )[0]
+            return {hit["id"] for hit in hits}
+
+        def query_ids():
+            results = client.query(
+                collection_name, filter="id >= 0", output_fields=["id"],
+                consistency_level="Strong", timeout=10,
+            )
+            return {row["id"] for row in results}
+
+        assert search_ids() == all_ids
+        assert query_ids() == all_ids
+        client.delete(collection_name, filter=f"id < {deleted_count}", timeout=20)
+
+        read_gate = Barrier(2, timeout=10)
+
+        def read_after_delete(read_ids):
+            read_gate.wait()
+            return read_ids()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            search = executor.submit(read_after_delete, search_ids)
+            query = executor.submit(read_after_delete, query_ids)
+            assert search.result(timeout=25) == retained_ids
+            assert query.result(timeout=25) == retained_ids
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_delete_with_filters_nullable_vector_field(self):

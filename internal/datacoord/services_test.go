@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
-	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -62,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -84,6 +84,20 @@ type ServerSuite struct {
 
 	testServer   *Server
 	mockMixCoord *mocks2.MixCoord
+}
+
+func TestPackQueryViewCollectionIndexInfosUsesDeterministicOrder(t *testing.T) {
+	indexes := []*model.Index{
+		{CollectionID: 1, FieldID: 103, IndexID: 30, IndexName: "third"},
+		{CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "first"},
+		{CollectionID: 1, FieldID: 102, IndexID: 20, IndexName: "second"},
+	}
+
+	infos := packQueryViewCollectionIndexInfos(indexes)
+
+	require.Equal(t, []int64{10, 20, 30}, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 {
+		return info.GetIndexID()
+	}))
 }
 
 func (s *ServerSuite) SetupSuite() {
@@ -115,19 +129,8 @@ func TestServerSuite(t *testing.T) {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		if req.CollectionID == 0 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        0,
-				VirtualChannelNames: []string{"ch1"},
-			}, nil
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil
-	})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 1})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -164,11 +167,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		CollectionID:        0,
-		VirtualChannelNames: []string{"missing-cp-channel"},
-	}, nil)
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"missing-cp-channel"}})
 
 	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
 	s.NoError(err)
@@ -364,7 +363,7 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
-	// The DataView stats RowNum must match the SegmentInfo row count this txn
+	// The DataView stats RowNum must match the meta.SegmentInfo row count this txn
 	// commits: the meta value was 50 (stale growing-side count), the
 	// checkpoint commits 100, so Stats must surface 100 - not the stale
 	// pre-txn meta value.
@@ -448,7 +447,7 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
 
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
@@ -461,11 +460,12 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			numOfRows = 0
 		}
 		info := &datapb.SegmentInfo{
-			ID:            segID,
-			InsertChannel: "ch1",
-			State:         state,
-			Level:         datapb.SegmentLevel_L1,
-			NumOfRows:     numOfRows,
+			TransformStartAfterTimetick: 10,
+			ID:                          segID,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   numOfRows,
 		}
 		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		s.Require().NoError(err)
@@ -492,6 +492,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		s.Run(test.description, func() {
 			ctx := context.Background()
 			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				GrowingTransformStartAfterTimetick: 10,
 				Base: &commonpb.MsgBase{
 					Timestamp: uint64(time.Now().Unix()),
 				},
@@ -515,7 +516,8 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.testServer.meta.AddCollection(&meta.CollectionInfo{
-		ID: 0,
+		ID:            0,
+		VChannelNames: []string{"ch1"},
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -526,29 +528,31 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 
 	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
 		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             segmentID,
-			CollectionID:   0,
-			PartitionID:    1,
-			InsertChannel:  "ch1",
-			State:          state,
-			Level:          datapb.SegmentLevel_L1,
-			NumOfRows:      1,
-			StorageVersion: storageVersion,
+			TransformStartAfterTimetick: 10,
+			ID:                          segmentID,
+			CollectionID:                0,
+			PartitionID:                 1,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   1,
+			StorageVersion:              storageVersion,
 		}))
 		s.Require().NoError(err)
 	}
 
 	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
 		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-			SegmentID:         segmentID,
-			CollectionID:      0,
-			PartitionID:       1,
-			Channel:           "ch1",
-			SegLevel:          datapb.SegmentLevel_L1,
-			Flushed:           flushed,
-			StorageVersion:    storageVersion,
-			Field2BinlogPaths: binlogs,
+			GrowingTransformStartAfterTimetick: 10,
+			Base:                               &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:                          segmentID,
+			CollectionID:                       0,
+			PartitionID:                        1,
+			Channel:                            "ch1",
+			SegLevel:                           datapb.SegmentLevel_L1,
+			Flushed:                            flushed,
+			StorageVersion:                     storageVersion,
+			Field2BinlogPaths:                  binlogs,
 		})
 		s.NoError(err)
 		return resp
@@ -1006,23 +1010,25 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 	})
 
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
 	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  100,
-		PartitionID:   20,
-		InsertChannel: "ch-1",
-		State:         commonpb.SegmentState_Growing,
-		Level:         datapb.SegmentLevel_L1,
+		TransformStartAfterTimetick: 10,
+		ID:                          10,
+		CollectionID:                100,
+		PartitionID:                 20,
+		InsertChannel:               "ch-1",
+		State:                       commonpb.SegmentState_Growing,
+		Level:                       datapb.SegmentLevel_L1,
 	})
 	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), seg))
 
 	status, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		SegmentID:    10,
-		CollectionID: 100,
-		PartitionID:  20,
-		Channel:      "ch-1",
-		SegLevel:     datapb.SegmentLevel_L1,
+		GrowingTransformStartAfterTimetick: 10,
+		SegmentID:                          10,
+		CollectionID:                       100,
+		PartitionID:                        20,
+		Channel:                            "ch-1",
+		SegLevel:                           datapb.SegmentLevel_L1,
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{
@@ -1127,48 +1133,6 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	s.Equal(ref.Version().String(), ref2.Version().String())
 }
 
-func (s *ServerSuite) TestFlush_NormalCase() {
-	req := &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Flush,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  0,
-		},
-		DbID:         0,
-		CollectionID: 0,
-	}
-
-	schema := meta.NewTestSchema()
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
-	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1, storage.StorageV1)
-	s.NoError(err)
-	s.EqualValues(1, len(allocations))
-	expireTs := allocations[0].ExpireTime
-	segID := allocations[0].SegmentID
-
-	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), segment.AllocNewGrowingSegmentRequest{
-		CollectionID:         0,
-		PartitionID:          1,
-		SegmentID:            1,
-		ChannelName:          "channel1-1",
-		StorageVersion:       storage.StorageV1,
-		IsCreatedByStreaming: true,
-	})
-	s.NoError(err)
-	s.NotNil(info)
-
-	resp, err := s.testServer.Flush(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
-	segment.SetTestRowCount(s.testServer.meta, segID, 1)
-	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
-	s.NoError(err)
-	s.EqualValues(1, len(ids))
-	s.EqualValues(segID, ids[0])
-}
-
 func (s *ServerSuite) TestFlush_CollectionNotExist() {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -1180,6 +1144,14 @@ func (s *ServerSuite) TestFlush_CollectionNotExist() {
 		DbID:         0,
 		CollectionID: 0,
 	}
+
+	// Flush always goes through the local flush broadcast; the collection
+	// lookup happens after the broadcaster is acquired.
+	bc := &embeddedBroadcastAPI{}
+	patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).Return(bc, nil).Build()
+	defer patchLock.UnPatch()
+	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer patchClose.UnPatch()
 
 	resp, err := s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
@@ -1244,88 +1216,45 @@ func (s *ServerSuite) TestGetSegmentInfo() {
 	s.EqualValues(2, len(resp.Infos[0].Deltalogs))
 }
 
+func (s *ServerSuite) TestFlush_StartBroadcastFailed() {
+	patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).
+		Return(nil, merr.WrapErrServiceUnavailable("mock")).Build()
+	defer patchLock.UnPatch()
+
+	resp, err := s.testServer.Flush(context.TODO(), &datapb.FlushRequest{CollectionID: 0})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+}
+
+// AssignSegmentID belonged to the pre-streaming write path. The RPC is still
+// registered, and reports that it is no longer implemented.
 func (s *ServerSuite) TestAssignSegmentID() {
-	s.TearDownTest()
-	const collID = 100
-	const collIDInvalid = 101
-	const partID = 0
-	const channel0 = "channel0"
-
-	s.Run("assign segment normally", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		schema := meta.NewTestSchema()
-		s.testServer.meta.AddCollection(&meta.CollectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
+	req := &datapb.AssignSegmentIDRequest{
+		SegmentIDRequests: []*datapb.SegmentIDRequest{{
 			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collID,
-			PartitionID:  partID,
-		}
+			ChannelName:  "channel0",
+			CollectionID: 100,
+			PartitionID:  0,
+		}},
+	}
 
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
+	s.Run("unimplemented", func() {
+		s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, Schema: meta.NewTestSchema()})
+
+		resp, err := s.testServer.AssignSegmentID(context.TODO(), req)
 		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
-		assign := resp.SegIDAssignments[0]
-		s.EqualValues(commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
-		s.EqualValues(collID, assign.CollectionID)
-		s.EqualValues(partID, assign.PartitionID)
-		s.EqualValues(channel0, assign.ChannelName)
-		s.EqualValues(1000, assign.Count)
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnimplemented)
+		s.Empty(resp.GetSegIDAssignments())
+		// No segment is allocated for the request.
+		s.Empty(s.testServer.meta.GetSegmentsOfCollection(context.TODO(), 100))
 	})
 
 	s.Run("with closed server", func() {
-		s.SetupTest()
 		s.TearDownTest()
 
-		req := &datapb.SegmentIDRequest{
-			Count:        100,
-			ChannelName:  channel0,
-			CollectionID: collID,
-			PartitionID:  partID,
-		}
-		resp, err := s.testServer.AssignSegmentID(context.Background(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
+		resp, err := s.testServer.AssignSegmentID(context.Background(), req)
 		s.NoError(err)
 		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	s.Run("assign segment with invalid collection", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		schema := meta.NewTestSchema()
-		s.testServer.meta.AddCollection(&meta.CollectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
-			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collIDInvalid,
-			PartitionID:  partID,
-		}
-
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
-		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
 	})
 }
 
@@ -1339,112 +1268,25 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: meta.NewEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.ListCollections()))
-		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
-	})
-
-	t.Run("test update meta", func(t *testing.T) {
+	// Collections are read from RootCoord's meta, so the RPC has nothing to
+	// refresh and must not write the collection it names.
+	t.Run("does not touch collections", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&meta.CollectionInfo{ID: 1})
-		s := &Server{meta: &meta.Meta{MetaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-
-		coll := s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.Nil(t, coll.Properties)
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		coll = s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.NotNil(t, coll.Properties)
-		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
-	})
-
-	t.Run("published external source notifies index build", func(t *testing.T) {
-		spec := `{"format":"parquet"}`
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&meta.CollectionInfo{ID: 100, Schema: externalrefresh.ExternalRefreshIndexSchema("s3://bucket/a", spec)})
-		notifyIndexChan := make(chan UniqueID, 1)
-		s := &Server{meta: &meta.Meta{MetaStore: ms}, notifyIndexChan: notifyIndexChan}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-
-		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalrefresh.ExternalRefreshIndexSchema("s3://bucket/a", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.Empty(t, notifyIndexChan)
-
-		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalrefresh.ExternalRefreshIndexSchema("s3://bucket/b", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		require.Len(t, notifyIndexChan, 1)
-		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
-	})
-
-	// RootCoord rebuilds this request from its authoritative meta on every
-	// alter, so an update must adopt the request's view wholesale. The previous
-	// code kept Partitions/StartPositions/DatabaseName/DatabaseID from the
-	// cached entry, which pinned them to whatever the initial load saw: create
-	// and drop partition never refreshed the partition list, and a rename that
-	// moves a collection to another database left the stale database on the
-	// entry that resource-key locks are built from.
-	t.Run("update adopts the request's partitions and database", func(t *testing.T) {
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&meta.CollectionInfo{
-			ID:             1,
-			Partitions:     []int64{10},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-0", Data: []byte{1}}},
-			DatabaseName:   "old_db",
-			DatabaseID:     100,
-			VChannelNames:  []string{"ch-0"},
-			CreatedAt:      42,
-		})
+		existing := &meta.CollectionInfo{ID: 1, Partitions: []int64{10}}
+		ms.PutCollection(existing)
 		s := &Server{meta: &meta.Meta{MetaStore: ms}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
-		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
-			CollectionID:   1,
-			Schema:         &schemapb.CollectionSchema{Name: "coll", DbName: "new_db"},
-			PartitionIDs:   []int64{10, 11},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-1", Data: []byte{2}}},
-			DbID:           200,
-			VChannels:      []string{"ch-1"},
-			Properties:     []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-
-		coll := s.meta.GetCollection(1)
-		assert.Equal(t, []int64{10, 11}, coll.Partitions, "a newly created partition must show up")
-		assert.Equal(t, "new_db", coll.DatabaseName, "a cross-database rename must move the entry")
-		assert.Equal(t, int64(200), coll.DatabaseID)
-		assert.Equal(t, []string{"ch-1"}, coll.VChannelNames)
-		assert.Equal(t, "ch-1", coll.StartPositions[0].GetKey())
-		// The request carries no creation timestamp, so it is the one field the
-		// cached entry still owns.
-		assert.Equal(t, uint64(42), coll.CreatedAt)
+		for _, id := range []int64{1, 2} {
+			resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+				CollectionID: id,
+				PartitionIDs: []int64{10, 11},
+				Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+			})
+			assert.NoError(t, merr.CheckRPCCall(resp, err))
+		}
+		assert.Same(t, existing, s.meta.GetCollection(1))
+		assert.Nil(t, s.meta.GetCollection(2))
 	})
 }
 
@@ -1487,6 +1329,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
+		})
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return meta.NewMockMixCoord(), nil
 		}
@@ -1533,7 +1380,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1633,8 +1481,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1704,7 +1553,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1752,6 +1602,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Flushed: true,
 		}
 		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		// Native Flush carries the WAL-proven frontier.
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
+
 		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
@@ -1798,7 +1652,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		const expectedDataVersion int32 = 7
@@ -1819,6 +1674,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		seg.DataVersion = expectedDataVersion
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
 		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
@@ -1870,8 +1727,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1910,8 +1768,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1949,8 +1808,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1989,8 +1849,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -3827,7 +3688,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, snapshot.NewRestoreAbsentTargetBroker(t), nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(snapshot.NewRestoreAbsentTargetMeta(), nil, nil, nil, nil, snapshot.NewRestoreBrokerTarget(), nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		server.ddl = newDDLCallbacks(server)
@@ -3945,8 +3806,6 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 		VChannelNames: []string{"p1_100v0", "p2_100v1"},
 	}, nil).Build()
 	defer patchCollection.UnPatch()
-	patchExists := mockey.Mock((*meta.EmbeddedBroker).HasCollection).Return(true, nil).Build()
-	defer patchExists.UnPatch()
 	patchStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(&embeddedBroadcastAPI{}, nil).Build()
 	defer patchStart.UnPatch()
 	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
@@ -3964,7 +3823,8 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	defer patchBroadcast.UnPatch()
 	server := &Server{
 		snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-		handler:         &embeddedHandler{}, broker: &meta.EmbeddedBroker{},
+		handler:         &embeddedHandler{},
+		meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
@@ -4136,14 +3996,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		fakeBroker := &meta.EmbeddedBroker{}
-		mockHasCollection := mockey.Mock((*meta.EmbeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
-
 		server := &Server{
 			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4193,20 +4049,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockStartBroadcast.UnPatch()
 
-		hasCollectionCalled := false
-		fakeBroker := &meta.EmbeddedBroker{}
-		mockHasCollection := mockey.Mock((*meta.EmbeddedBroker).HasCollection).To(
-			func(_ *meta.EmbeddedBroker, _ context.Context, collectionID int64) (bool, error) {
-				hasCollectionCalled = true
-				assert.Equal(t, int64(100), collectionID)
-				return false, nil
-			}).Build()
-		defer mockHasCollection.UnPatch()
-
+		// The handler still resolved the collection before the lock; the view
+		// now shows it Dropping.
 		server := &Server{
 			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+				ID: 100, State: etcdpb.CollectionState_CollectionDropping,
+			}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4218,66 +4068,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp))
 		assert.True(t, errors.Is(merr.Error(resp), merr.ErrCollectionNotFound))
-		assert.True(t, hasCollectionCalled, "collection availability must be checked under the resource lock")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast after DropCollection wins the lock race")
-	})
-
-	t.Run("collection_recheck_error_after_lock", func(t *testing.T) {
-		ctx := context.Background()
-
-		mockGet := mockey.Mock((*snapshot.Manager).GetSnapshot).Return(
-			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
-		).Build()
-		defer mockGet.UnPatch()
-
-		fakeHandler := &embeddedHandler{}
-		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&meta.CollectionInfo{
-				ID:           100,
-				DatabaseName: "default",
-				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
-			}, nil,
-		).Build()
-		defer mockGetColl.UnPatch()
-
-		broadcastCalled := false
-		mockBroadcaster := &embeddedBroadcastAPI{}
-		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
-		defer mockClose.UnPatch()
-		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
-			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				broadcastCalled = true
-				return &types2.BroadcastAppendResult{}, nil
-			}).Build()
-		defer mockDoBroadcast.UnPatch()
-		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return mockBroadcaster, nil
-			}).Build()
-		defer mockStartBroadcast.UnPatch()
-
-		fakeBroker := &meta.EmbeddedBroker{}
-		mockHasCollection := mockey.Mock((*meta.EmbeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
-		).Build()
-		defer mockHasCollection.UnPatch()
-
-		server := &Server{
-			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-			handler:         fakeHandler,
-			broker:          fakeBroker,
-		}
-		server.stateCode.Store(commonpb.StateCode_Healthy)
-
-		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
-			Name:         "race_snapshot",
-			CollectionId: 100,
-		})
-
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
-		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
 	})
 }
 
@@ -4482,15 +4273,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(len(jsonBytes)), nil).Maybe()
 		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(jsonBytes, nil).Maybe()
 		m.ChunkManager = cm
-		if b == nil {
-			// CommitBackfillResult describes the collection before classification;
-			// a nil broker stands in for tests that do not exercise the broker.
-			mockBroker := broker.NewMockBroker(t)
-			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil).Maybe()
-			b = mockBroker
+		if m.GetCollection(100) == nil {
+			// CommitBackfillResult reads the collection before classification;
+			// tests that do not set up the view get collection 100 without a
+			// schema, which skips field validation.
+			m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default"})
 		}
 		s := &Server{
 			meta:   m,
@@ -4498,6 +4285,20 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		return s
+	}
+
+	// onCollectionRead runs fn with the 1-based count of each collection read
+	// CommitBackfillResult makes (the fast-fail read, then the re-check before
+	// each commit batch), so a test can interleave a change between them.
+	onCollectionRead := func(fn func(call int)) func() {
+		calls := 0
+		patch := mockey.Mock((*meta.Meta).GetCollectionOrNotFound).To(
+			func(m *meta.Meta, collectionID UniqueID) (*meta.CollectionInfo, error) {
+				calls++
+				fn(calls)
+				return m.GetCollection(collectionID), nil
+			}).Build()
+		return func() { patch.UnPatch() }
 	}
 
 	// captureManifestCommits intercepts meta.CommitSegmentManifests so tests can
@@ -4568,12 +4369,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
         }`
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
@@ -4634,10 +4430,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		var recomputeCalls int
@@ -4683,10 +4475,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		var recomputeCalls int
@@ -4727,13 +4515,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4772,13 +4554,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -4824,21 +4600,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// before the batch commit) sees version 6, as if an alter/drop-function
 		// committed between the two.
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Once()
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 6},
-			}, nil).Once()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 2 {
+				m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 6}})
+			}
+		})
+		defer unpatchRead()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/result.json",
@@ -4874,13 +4644,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 9},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 9}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -4978,12 +4742,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5033,10 +4791,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5063,9 +4817,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	})
 
 	// A large V2 result is dispatched in bounded UpdateSegmentsInfo batches
-	// (each holding segMu for at most maxBackfillCommitBatch records) instead of
-	// one unbounded call, so a big result cannot block flush/compaction meta
-	// writes for the whole commit.
+	// (each holding the writer locks of at most maxBackfillCommitBatch
+	// segments) instead of one unbounded call, so a big result cannot block
+	// flush/compaction meta writes for the whole commit.
 	t.Run("v2_batched_update_segments_info", func(t *testing.T) {
 		ctx := context.Background()
 		m, _, err := index.NewMemoryMetaWithIndex(t)
@@ -5088,10 +4842,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		}
 		b.WriteString(`}}`)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
 		var updateCalls int
@@ -5172,10 +4922,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5402,10 +5148,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5463,10 +5205,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureSingleManifestCommit(t)
@@ -5521,10 +5259,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureSingleManifestCommit(t)
@@ -5618,10 +5352,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5702,10 +5432,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, addPath)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		// First submission commits the real manifest revision.
@@ -5822,10 +5548,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5882,10 +5604,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		// The framework's own stale error, as produced when the pointer moved
@@ -5929,10 +5647,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		first, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5976,10 +5690,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 				ManifestPath:   packed.MarshalManifestPath("/seg/801", 10),
 			}})
 			b := broker.NewMockBroker(t)
-			b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil).Maybe()
 			return newServerForCommit(t, mm, b, []byte(jsonStr))
 		}
 
@@ -6034,10 +5744,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		b.WriteString(`}}`)
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
@@ -6174,26 +5880,21 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker describe runs before classification, which reads no index
+		// The collection read runs before classification, which reads no index
 		// state: interleave the late build (create + finish build 500 against
 		// the still-current old column) there, so the commit's under-lock
 		// re-enumeration must retract a record that classification could never
 		// have snapshotted.
-		created := false
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				if !created {
-					created = true
-					require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
-						CollectionID: 100, SegmentID: 812, IndexID: 10, BuildID: 500,
-						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
-					}))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil
-			}).Maybe()
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 1 {
+				require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					CollectionID: 100, SegmentID: 812, IndexID: 10, BuildID: 500,
+					IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
+				}))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6260,29 +5961,24 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker describe runs before classification, which reads no index
+		// The collection read runs before classification, which reads no index
 		// state: create the index definition AND finish a build against the
 		// still-current old column there, so the commit resolves the removal
 		// set under the manifest lock against a definition that did not exist
 		// when the result was classified.
-		created := false
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				if !created {
-					created = true
-					require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
-						CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
-					}))
-					require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
-						CollectionID: 100, SegmentID: 814, IndexID: 10, BuildID: 500,
-						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
-					}))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil
-			}).Maybe()
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 1 {
+				require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
+					CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
+				}))
+				require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					CollectionID: 100, SegmentID: 814, IndexID: 10, BuildID: 500,
+					IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
+				}))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6347,19 +6043,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		b.WriteString(`}}`)
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
-						{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
-						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
-					},
-				},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
+				{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
+			},
+		}})
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -6431,17 +6123,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64},
-						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
-					},
-				},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64},
+				{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
+			},
+		}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6585,49 +6273,44 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, aPath, bPath)
 
-		// The broker is consulted twice: the first describe runs before
-		// classification (it supplies the schema the op-column validation reads);
-		// the schema re-check immediately before the batch commit is the second.
-		// Replace field 100 with a different group on that second consult, so
-		// classification still reads manifest v1 (where add(100->a) is an
-		// already-applied replay and is omitted), then the commit sees an
+		// The collection is read twice: the first read runs before
+		// classification (it supplies the schema the op-column validation
+		// reads); the schema re-check immediately before the batch commit is
+		// the second. Replace field 100 with a different group on that second
+		// read, so classification still reads manifest v1 (where add(100->a)
+		// is an already-applied replay and is omitted), then the commit sees an
 		// inspected pointer that has moved and must abort as stale instead of
 		// silently dropping the omitted add(100->a) and committing add(101->b)
 		// against the replacement.
-		brokerCalls := 0
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, Name: "f101", DataType: schemapb.DataType_VarChar},
+			},
+		}})
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				brokerCalls++
-				if brokerCalls > 1 {
-					replace := &meta.SegmentManifestCommit{
-						SegmentID:     813,
-						StorageConfig: cfg,
-						Mutation: meta.ManifestMutation{
-							Type: meta.ManifestMutationCommitUpdates,
-							Updates: &packed.ManifestUpdates{
-								DropColumns: []string{"100"},
-								ColumnGroups: []packed.ColumnGroupEntry{{
-									Columns: []string{"100"},
-									Format:  "parquet",
-									Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
-								}},
-							},
-						},
-					}
-					require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-					Schema: &schemapb.CollectionSchema{
-						Version: 1,
-						Fields: []*schemapb.FieldSchema{
-							{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
-							{FieldID: 101, Name: "f101", DataType: schemapb.DataType_VarChar},
+		unpatchRead := onCollectionRead(func(call int) {
+			if call > 1 {
+				replace := &meta.SegmentManifestCommit{
+					SegmentID:     813,
+					StorageConfig: cfg,
+					Mutation: meta.ManifestMutation{
+						Type: meta.ManifestMutationCommitUpdates,
+						Updates: &packed.ManifestUpdates{
+							DropColumns: []string{"100"},
+							ColumnGroups: []packed.ColumnGroupEntry{{
+								Columns: []string{"100"},
+								Format:  "parquet",
+								Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
+							}},
 						},
 					},
-				}, nil
-			}).Maybe()
+				}
+				require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6678,12 +6361,10 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("collection not found"))
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6701,12 +6382,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -6714,9 +6389,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6734,12 +6409,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -6757,9 +6426,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6777,12 +6446,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -6809,9 +6472,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -7001,7 +6664,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		// Two operators dispatched: one V3 UpdateManifestVersion, one V2
+		// Two operators dispatched: one V3 meta.UpdateManifestVersion, one V2
 		// UpdateSegmentColumnGroupsOperator. Both flow through the single
 		// UpdateSegmentsInfo batch call.
 		assert.Equal(t, 2, capturedOps)
@@ -8009,7 +7672,8 @@ func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
 
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	ctx := context.Background()
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
+	store := metacache.NewMetaStore(nil)
+	segments := meta.NewSegmentsInfo(store)
 	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
 		segments.SetSegment(id, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            id,
@@ -8030,8 +7694,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
 	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
 
-	mt := &meta.Meta{Ctx: ctx, Segments: segments}
-	actual, err := mt.LoadableProjection(ctx, 100)
+	mt := &meta.Meta{Ctx: ctx, MetaStore: store, Segments: segments}
+	actual, err := mt.LoadableProjection(ctx, 100, nil)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
 		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
@@ -8193,11 +7857,10 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 			defer start.UnPatch()
 			close := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 			defer close.UnPatch()
-			exists := mockey.Mock((*meta.EmbeddedBroker).HasCollection).Return(true, nil).Build()
-			defer exists.UnPatch()
 			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
 			defer publish.UnPatch()
-			server := &Server{snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &meta.EmbeddedBroker{}}
+			server := seedCollections(&Server{snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &meta.EmbeddedBroker{}},
+				&meta.CollectionInfo{ID: 100})
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: "daily"})
 			require.NoError(t, err)

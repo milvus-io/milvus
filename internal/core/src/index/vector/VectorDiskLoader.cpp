@@ -18,6 +18,9 @@
 #include "storage/LocalFileIOPool.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
+#include "knowhere/index/index_factory.h"
 #include "index/vector/VectorLoadUtils.h"
 
 #include <cstdint>
@@ -287,15 +290,14 @@ PrepareCommonLoadConfig(Config& config,
     config[DISK_ANN_THREADS_NUM] = *open_options.load_threads;
 }
 
-// Create the backend mmap prefix, reporting filesystem failures before
-// deserialization.
+// Stream backends may create local disk files even when mmap is disabled.
 void
-EnsureMmapDirectory(const std::string& path) {
+EnsureLocalIndexDirectory(const std::string& path) {
     std::error_code error;
     std::filesystem::create_directories(path, error);
     if (error) {
         ThrowInfo(FileCreateFailed,
-                  "failed to create disk vector mmap directory {}: {}",
+                  "failed to create disk vector index directory {}: {}",
                   path,
                   error.message());
     }
@@ -329,13 +331,13 @@ MakeEngine(const RuntimeParams& params,
 
 // Select streaming or materialized engine input, restore sidecars and
 // deserialize one reader.
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-OpenIndex(bool use_async,
-          storage::FileSource& source,
-          const RuntimeParams& params,
-          const DiskOpenOptions& open_options,
-          const EntryPlan& plan,
-          const storage::LoadOptions& opts) {
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+OpenEngine(bool use_async,
+           storage::FileSource& source,
+           const RuntimeParams& params,
+           const DiskOpenOptions& open_options,
+           const EntryPlan& plan,
+           const storage::LoadOptions& opts) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -377,8 +379,11 @@ OpenIndex(bool use_async,
     const auto prefix = selected_handle->LocalPrefix();
     // Keep the decoded payload alive until Knowhere consumes the load input.
     std::vector<uint8_t> validity_bytes;
-    const auto input = co_await ReadValidity(
-        use_async, source, plan, params, prefix, validity_bytes);
+    knowhere::LoadOptions input;
+    if (plan.state != ArtifactState::Normal) {
+        input = co_await ReadValidity(
+            use_async, source, plan, params, prefix, validity_bytes);
+    }
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = co_await DecodeEmptyEmbeddingList(use_async, source);
@@ -456,9 +461,9 @@ OpenIndex(bool use_async,
                               paths[i]);
                 }
             }
-        } else if (enable_mmap) {
+        } else {
             {
-                auto local_io = [&] { EnsureMmapDirectory(prefix); };
+                auto local_io = [&] { EnsureLocalIndexDirectory(prefix); };
                 if (use_async) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
                 } else {
@@ -470,6 +475,29 @@ OpenIndex(bool use_async,
         auto config = params.knowhere_config;
         PrepareCommonLoadConfig(
             config, params, open_options, prefix, stream_backend, enable_mmap);
+        if (plan.has_validity) {
+            bool needs_external_validity = true;
+            auto inspect = [&] {
+                const auto requirements =
+                    engine.native_index.InspectLoadRequirements(
+                        knowhere::BinarySet{}, config);
+                selected_handle->RethrowFirstFailure();
+                if (!requirements.has_value()) {
+                    ThrowDeserializeError(requirements.error());
+                }
+                needs_external_validity =
+                    requirements.value().needs_external_validity;
+            };
+            if (use_async) {
+                co_await storage::RunLocalFileIOAsync(inspect, priority);
+            } else {
+                inspect();
+            }
+            if (needs_external_validity) {
+                input = co_await ReadValidity(
+                    use_async, source, plan, params, prefix, validity_bytes);
+            }
+        }
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
@@ -498,8 +526,7 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
-                                                  std::move(engine));
+    co_return std::make_unique<KnowhereEngine>(std::move(engine));
 }
 
 }  // namespace
@@ -515,13 +542,42 @@ VectorDiskLoader::Create(OpenedIndexSource source,
         std::get<LegacyIndexSource>(std::move(source)), std::move(options)));
     const auto runtime = ParseRuntimeParams(loader->options_.params);
     (void)ParseOpenOptions(loader->options_.params, runtime);
-    (void)PlanEntries(*loader->source_.source, runtime);
+    (void)PlanEntries(*loader->source_->source, runtime);
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-VectorDiskLoader::Load(milvus::OpContext* context) {
-    return RunLegacyLoad(source_, options_, &LoadLegacy, context);
+IndexPtr
+VectorDiskLoader::Load(milvus::OpContext* context,
+                       const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached vector construction consumed this loader");
+    const auto params = ParseRuntimeParams(options_.params);
+
+    auto cache_config = cache;
+    // Native lazy engines still need admission and resident metadata accounting.
+    if (knowhere::IndexFactory::Instance().FeatureCheck(
+            params.index_type, knowhere::feature::LAZY_LOAD)) {
+        cache_config.meta.support_eviction = false;
+    }
+    const auto open_options = ParseOpenOptions(options_.params, params);
+    const bool use_async = source_->use_async;
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunLegacyLoad<std::unique_ptr<KnowhereEngine>>(
+            source, options, &LoadEngine, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                std::move(cache_config), use_async, std::move(load)),
+            context);
+    return std::make_shared<VectorIndex>(std::move(slot),
+                                         params.physical_type,
+                                         params.index_type,
+                                         params.metric_type,
+                                         open_options.beamwidth);
 }
 
 ReaderCaps
@@ -532,8 +588,8 @@ VectorDiskLoader::DeriveCaps(const Config& index_meta) {
     return {};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-VectorDiskLoader::LoadLegacy(storage::FileSource& source,
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+VectorDiskLoader::LoadEngine(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
     auto params = ParseDiskLoadMetadata(opts.params);
@@ -544,7 +600,7 @@ VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                   "disk vector indexes have no V3 persisted format");
     }
     const auto plan = PlanEntries(source, params);
-    co_return co_await OpenIndex(
+    co_return co_await OpenEngine(
         use_async, source, params, open_options, plan, opts);
 }
 
@@ -562,7 +618,11 @@ VectorDiskLoader::AsyncEntryNames(storage::FileSource& source,
         }
     }
     std::vector<std::string> names;
-    if (plan.has_validity) {
+    // Ordinary-vector validity can be estimated from the row count without
+    // opening either the sidecar or the native index. Array validity may use
+    // the element domain, so retain its file inspection.
+    if (plan.has_validity &&
+        (params.elem_type != DataType::NONE || !params.num_rows.has_value())) {
         names.emplace_back(VALID_DATA_KEY);
     }
     if (plan.has_empty_offsets) {

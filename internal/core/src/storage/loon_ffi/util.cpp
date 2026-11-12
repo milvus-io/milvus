@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <mutex>
+#include <regex>
+#include <cctype>
+#include <arpa/inet.h>
+#include "arrow/util/uri.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
@@ -49,6 +54,150 @@
 #include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
+
+namespace {
+std::mutex broker_policy_mutex;
+std::optional<std::unordered_set<std::string>> broker_allowed_endpoints;
+}  // namespace
+
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw) {
+    for (unsigned char c : raw) {
+        if (c <= 32 || c >= 127 || c == '\\') {
+            return arrow::Status::Invalid(
+                "Invalid credential broker URL characters");
+        }
+    }
+    // Match Go specutil.NormalizeBrokerEndpoint without decoding the path.
+    static const std::regex pattern(
+        R"(^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(/[^?#]*)?(\?[^#]*)?$)");
+    std::smatch match;
+    if (!std::regex_match(raw, match, pattern)) {
+        return arrow::Status::Invalid("Invalid credential broker URL");
+    }
+    auto lower = [](std::string value) {
+        std::transform(
+            value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                return std::tolower(c);
+            });
+        return value;
+    };
+    auto scheme = lower(match[1]);
+    auto authority = lower(match[2]);
+    if ((scheme != "http" && scheme != "https") ||
+        authority.find_first_of("@%*") != std::string::npos) {
+        return arrow::Status::Invalid("Invalid credential broker authority");
+    }
+    std::string host, port;
+    if (authority.front() == '[') {
+        auto end = authority.find(']');
+        if (end == std::string::npos || end == 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+        host = authority.substr(0, end + 1);
+        if (end + 1 < authority.size()) {
+            if (authority[end + 1] != ':') {
+                return arrow::Status::Invalid("Invalid broker port");
+            }
+            port = authority.substr(end + 2);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    } else {
+        auto colon = authority.find(':');
+        host = authority.substr(0, colon);
+        if (colon != std::string::npos) {
+            port = authority.substr(colon + 1);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    }
+    if (!host.empty() && host.front() == '[') {
+        in6_addr parsed_address;
+        auto literal = host.substr(1, host.size() - 2);
+        if (inet_pton(AF_INET6, literal.c_str(), &parsed_address) != 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+    } else if (host.find_first_not_of(
+                   "abcdefghijklmnopqrstuvwxyz0123456789.-_") !=
+               std::string::npos) {
+        return arrow::Status::Invalid("Invalid broker hostname");
+    }
+    if (host.empty())
+        return arrow::Status::Invalid("Empty broker host");
+    if (!port.empty()) {
+        if (port.size() > 5 ||
+            port.find_first_not_of("0123456789") != std::string::npos) {
+            return arrow::Status::Invalid("Invalid broker port");
+        }
+        int value = std::stoi(port);
+        if (value < 1 || value > 65535)
+            return arrow::Status::Invalid("Invalid broker port");
+        port = (scheme == "http" && value == 80) ||
+                       (scheme == "https" && value == 443)
+                   ? ""
+                   : ":" + std::to_string(value);
+    }
+    // Arrow validates escapes and IPv6 syntax; its decoded path is never used.
+    arrow::util::Uri uri;
+    ARROW_RETURN_NOT_OK(uri.Parse(raw));
+    auto path = match[3].str();
+    if (path.empty())
+        path = "/";
+    if (path.find("//") != std::string::npos || path == "/." || path == "/.." ||
+        path.find("/./") != std::string::npos ||
+        path.find("/../") != std::string::npos ||
+        (path.size() >= 2 && path.compare(path.size() - 2, 2, "/.") == 0) ||
+        (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0) ||
+        path.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU"
+                               "VWXYZ0123456789-._~/") != std::string::npos) {
+        return arrow::Status::Invalid(
+            "Credential broker path must use unescaped unreserved characters, "
+            "without repeated separators or dot segments");
+    }
+    return scheme + "://" + host + port + path + match[4].str();
+}
+
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json) {
+    std::unordered_set<std::string> endpoints;
+    try {
+        for (const auto& value :
+             json::parse(endpoints_json).get<std::vector<std::string>>()) {
+            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                  NormalizeBrokerEndpoint(value));
+            endpoints.insert(std::move(endpoint));
+        }
+    } catch (const json::exception&) {
+        return arrow::Status::Invalid(
+            "Invalid credential broker allowlist JSON");
+    }
+    std::lock_guard lock(broker_policy_mutex);
+    if (broker_allowed_endpoints.has_value() &&
+        *broker_allowed_endpoints != endpoints) {
+        return arrow::Status::Invalid(
+            "Credential broker policy is immutable; restart required");
+    }
+    broker_allowed_endpoints = std::move(endpoints);
+    return arrow::Status::OK();
+}
+
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint) {
+    std::lock_guard lock(broker_policy_mutex);
+    if (!broker_allowed_endpoints.has_value() ||
+        broker_allowed_endpoints->count(endpoint) == 0) {
+        return arrow::Status::IOError(
+            "Credential broker endpoint denied by server policy");
+    }
+    return arrow::Status::OK();
+}
+
+bool
+IsCredentialBrokerEndpoint(const std::string& endpoint) {
+    auto normalized = NormalizeBrokerEndpoint(endpoint);
+    return normalized.ok() && CheckCredentialBrokerEndpoint(*normalized).ok();
+}
 
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
@@ -135,6 +284,9 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_USE_CUSTOM_PART_UPLOAD,
         c_storage_config.use_custom_part_upload ? "true" : "false");
+
+    // Preserve SDK I/O until CRT honors the configured TLS minimum.
+    (*properties_map)[PROPERTY_FS_S3_USE_CRT] = false;
 
     // Add integer fields
     milvus_storage::api::SetValue(
@@ -244,6 +396,7 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "azure_client_id",
     "azure_tenant_id",
     "azure_credential_endpoint",
+    "credential_endpoint",
 };
 
 // kExtfsFields is the contract with Go extfsFields in
@@ -461,6 +614,9 @@ InjectExternalSpecProperties(
     std::string extfs_prefix = std::string(PROPERTY_EXTFS_PREFIX) +
                                std::to_string(collection_id) + ".";
 
+    // External origin filesystems retain the same SDK backend as internal I/O.
+    properties[extfs_prefix + "s3.use_crt"] = std::string("false");
+
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).
     //
@@ -583,6 +739,8 @@ InjectExternalSpecProperties(
     std::string spec_region;
     std::string spec_endpoint_url;
     bool has_spec_endpoint_url = false;
+    std::string broker_endpoint;
+    bool legacy_broker = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
@@ -613,6 +771,20 @@ InjectExternalSpecProperties(
                         if (val.empty()) {
                             continue;
                         }
+                        if (key == "credential_endpoint" ||
+                            key == "azure_credential_endpoint") {
+                            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                                  NormalizeBrokerEndpoint(val));
+                            if (!broker_endpoint.empty() &&
+                                broker_endpoint != endpoint) {
+                                return arrow::Status::Invalid(
+                                    "Conflicting credential broker endpoints");
+                            }
+                            broker_endpoint = std::move(endpoint);
+                            legacy_broker = legacy_broker ||
+                                            key == "azure_credential_endpoint";
+                            continue;
+                        }
                         if (key == "cloud_provider") {
                             spec_cloud_provider = val;
                         } else if (key == "region") {
@@ -627,15 +799,10 @@ InjectExternalSpecProperties(
                         if (key == "cloud_provider" && val == "minio") {
                             continue;
                         }
-                        // Keep the legacy spec key compatible with storage's shared Broker property.
-                        const auto property =
-                            key == "azure_credential_endpoint"
-                                ? ExternalFsPropertyKey(
-                                      extfs_prefix,
-                                      PROPERTY_FS_CREDENTIAL_ENDPOINT)
-                                : extfs_prefix + key;
                         milvus_storage::api::SetValue(
-                            properties, property.c_str(), val.c_str());
+                            properties,
+                            (extfs_prefix + key).c_str(),
+                            val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
                         LOG_WARN(
                             "extfs field parse failed, skipping "
@@ -657,6 +824,49 @@ InjectExternalSpecProperties(
                       collection_id,
                       e.what());
         }
+    }
+
+    if (!broker_endpoint.empty()) {
+        if (legacy_broker && spec_cloud_provider != "azure") {
+            return arrow::Status::Invalid(
+                "azure_credential_endpoint requires cloud_provider=azure");
+        }
+        if (spec_cloud_provider != "aws" && spec_cloud_provider != "aliyun" &&
+            spec_cloud_provider != "tencent" &&
+            spec_cloud_provider != "azure") {
+            return arrow::Status::Invalid(
+                "Unsupported credential broker cloud provider");
+        }
+        const auto value = [&](const char* key) {
+            return PropertyValueAsString(properties,
+                                         (extfs_prefix + key).c_str())
+                .value_or("");
+        };
+        if (spec_cloud_provider == "azure" && value("use_iam") == "true") {
+            return arrow::Status::Invalid(
+                "Azure SAS broker cannot use native IAM");
+        }
+        if (spec_cloud_provider != "azure" && value("use_iam") == "true") {
+            for (const auto* key : {"role_arn",
+                                    "external_id",
+                                    "session_name",
+                                    "access_key_id",
+                                    "access_key_value",
+                                    "gcp_target_service_account",
+                                    "azure_client_id",
+                                    "azure_tenant_id"}) {
+                if (!value(key).empty()) {
+                    return arrow::Status::Invalid(
+                        "Inactive credential field in broker IAM: ", key);
+                }
+            }
+        }
+        ARROW_RETURN_NOT_OK(CheckCredentialBrokerEndpoint(broker_endpoint));
+        properties.erase(extfs_prefix + "azure_credential_endpoint");
+        milvus_storage::api::SetValue(
+            properties,
+            (extfs_prefix + "credential_endpoint").c_str(),
+            broker_endpoint.c_str());
     }
 
     // Layer 3: resolve the effective endpoint.
@@ -757,13 +967,15 @@ InjectExternalSpecProperties(
     // `options.blob_storage_authority = ".blob." + config_.address`, so the
     // address must be a bare authority (e.g. "core.windows.net"); prepending
     // a scheme would break the concatenation.
+    auto final_properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
     auto final_cp = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "cloud_provider").c_str());
+        final_properties, (extfs_prefix + "cloud_provider").c_str());
     bool is_azure = final_cp.ok() && *final_cp == "azure";
     auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "use_ssl").c_str());
+        final_properties, (extfs_prefix + "use_ssl").c_str());
     auto final_address = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "address").c_str());
+        final_properties, (extfs_prefix + "address").c_str());
     if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
         final_address->find("://") == std::string::npos) {
         const char* scheme =
@@ -788,7 +1000,13 @@ InjectExternalSpecProperties(
                                      : key;
         const auto value = PropertyValueAsString(properties, source_key);
         const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
-        if (external_is_local) {
+        // Keep Broker credential acquisition and refresh on the origin filesystem.
+        if (!broker_endpoint.empty()) {
+            properties.erase(extfs_key);
+            if (std::string_view(key) == PROPERTY_FS_TALON_MODE) {
+                properties[extfs_key] = std::string("0");
+            }
+        } else if (external_is_local) {
             properties.erase(extfs_key);
         } else if (value.has_value()) {
             properties[extfs_key] = *value;
@@ -796,7 +1014,7 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
+    // Iceberg and Paimon use reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
         return arrow::Status::OK();
@@ -809,7 +1027,7 @@ InjectExternalSpecProperties(
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
+            if (format == "iceberg-table" || format == "paimon-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
@@ -824,8 +1042,9 @@ InjectExternalSpecProperties(
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
-                                "iceberg snapshot_id parse failed "
+                                "{} parse failed "
                                 "(collection_id={}): {}",
+                                PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                                 collection_id,
                                 e.what());
                         }
@@ -841,6 +1060,29 @@ InjectExternalSpecProperties(
                         return arrow::Status::Invalid(
                             PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
                     }
+                }
+            }
+            if (format == "paimon-table") {
+                auto scan_mode = doc.find_field_unordered("scan_mode");
+                if (scan_mode.error() == simdjson::NO_SUCH_FIELD) {
+                    return arrow::Status::OK();
+                }
+                bool is_null = false;
+                std::string_view mode;
+                if (scan_mode.is_null().get(is_null) != simdjson::SUCCESS ||
+                    (!is_null &&
+                     scan_mode.get_string().get(mode) != simdjson::SUCCESS)) {
+                    return arrow::Status::Invalid(
+                        "Paimon scan_mode must be a string");
+                }
+                // Missing leaves reader defaults intact; null/empty means auto.
+                const auto error = milvus_storage::api::SetValue(
+                    properties,
+                    PROPERTY_PAIMON_SCAN_MODE,
+                    mode.empty() ? "auto" : std::string(mode).c_str());
+                if (error.has_value()) {
+                    return arrow::Status::Invalid(
+                        PROPERTY_PAIMON_SCAN_MODE, ": ", *error);
                 }
             }
         }
@@ -954,7 +1196,7 @@ ReadLoonManifest(const LoonManifestPath& manifest_path,
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
     auto manifest_path = ParseLoonManifestPath(path);
     if (!manifest_path.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,
@@ -963,7 +1205,7 @@ GetLoonManifest(
     }
 
     auto fs_result =
-        milvus_storage::FilesystemCache::getInstance().get(*properties);
+        milvus_storage::FilesystemCache::getInstance().get(properties);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),

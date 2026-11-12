@@ -49,6 +49,8 @@ func (h *copyCleanupLoadedHandler) ListLoadedSegments(context.Context) ([]int64,
 }
 
 func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	for _, protection := range []string{"snapshot", "loaded reader", "paused collection", "retention"} {
 		t.Run(protection, func(t *testing.T) {
 			ctx := context.Background()
@@ -80,7 +82,7 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 			require.False(t, m.GetSegment(ctx, 2001).GetIsImporting())
 			// This is the same visible-segment shape selected by GenSnapshot.
 			handler := &copyCleanupLoadedHandler{MockHandler: meta.NewMockHandler()}
-			gc := NewGarbageCollector(m, handler, GcOption{Cli: m.ChunkManager, IndexMeta: dm.IndexMeta, AnalyzeMeta: dm.AnalyzeMeta, SnapshotMeta: dm.SnapshotMeta})
+			gc := NewGarbageCollector(m, handler, GcOption{StreamingNodeCatalog: checkpointCatalog, Cli: m.ChunkManager, IndexMeta: dm.IndexMeta, AnalyzeMeta: dm.AnalyzeMeta, SnapshotMeta: dm.SnapshotMeta})
 			defer gc.Option.RemoveObjectPool.Release()
 			release := func() {}
 			switch protection {
@@ -131,6 +133,8 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 }
 
 func TestRejectedCopyCleanupNeverCreatedManifestBase(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	for _, failure := range []string{"absent root", "missing child", "permission", "remote failure"} {
 		t.Run(failure, func(t *testing.T) {
 			ctx := context.Background()
@@ -142,7 +146,7 @@ func TestRejectedCopyCleanupNeverCreatedManifestBase(t *testing.T) {
 			require.Zero(t, version)
 			sibling := base + "0/_data/sibling.parquet"
 			require.NoError(t, m.ChunkManager.Write(ctx, sibling, []byte("another segment")))
-			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: m.ChunkManager, IndexMeta: dm.IndexMeta, AnalyzeMeta: dm.AnalyzeMeta, SnapshotMeta: dm.SnapshotMeta})
+			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{StreamingNodeCatalog: checkpointCatalog, Cli: m.ChunkManager, IndexMeta: dm.IndexMeta, AnalyzeMeta: dm.AnalyzeMeta, SnapshotMeta: dm.SnapshotMeta})
 			defer gc.Option.RemoveObjectPool.Release()
 			if failure != "absent root" {
 				var failureErr error

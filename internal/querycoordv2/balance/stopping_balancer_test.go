@@ -201,7 +201,6 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 		segments[1].SegmentInfo,
 	}, nil).Maybe()
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{10}, nil).Maybe()
 
 	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, 10))
 	suite.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)

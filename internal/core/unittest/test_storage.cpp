@@ -1008,7 +1008,7 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
         milvus_storage::ArrowFileSystemConfig expected;
         ASSERT_TRUE(
             milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-                *properties, expected)
+                properties, expected)
                 .ok());
 
         // Filesystem creation precedes schema import. An invalid schema stops
@@ -1063,7 +1063,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         milvus_storage::ArrowFileSystemConfig config;
         const auto status =
             milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-                *properties, config);
+                properties, config);
         ASSERT_TRUE(status.ok()) << status.ToString();
         EXPECT_EQ(static_cast<uint32_t>(config.talon_mode),
                   expected.talon_mode);
@@ -1086,7 +1086,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                 milvus_storage::ArrowFileSystemConfig internal_config;
                 ASSERT_TRUE(
                     milvus_storage::ArrowFileSystemConfig::
-                        create_file_system_config(*properties, internal_config)
+                        create_file_system_config(properties, internal_config)
                             .ok());
                 EXPECT_EQ(static_cast<uint32_t>(internal_config.talon_mode),
                           input.storage_type == "local" ? 0 : mode);
@@ -1097,7 +1097,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                           std::to_string(external ? mode : 0));
                 const auto resolved =
                     milvus_storage::FilesystemCache::getInstance()
-                        .resolve_config(*properties,
+                        .resolve_config(properties,
                                         "s3://s3.amazonaws.com/bucket/data/");
                 ASSERT_TRUE(resolved.ok()) << resolved.status().ToString();
                 EXPECT_EQ(static_cast<uint32_t>(resolved->talon_mode),
@@ -1129,7 +1129,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     milvus_storage::ArrowFileSystemConfig defaults;
     ASSERT_TRUE(
         milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-            *old_properties, defaults)
+            old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
     EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
@@ -1144,14 +1144,14 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         auto properties = MakeInternalPropertiesFromStorageConfig(config);
         auto internal =
             milvus_storage::FilesystemCache::getInstance().resolve_config(
-                *properties, "");
+                properties, "");
         ASSERT_TRUE(internal.ok()) << internal.status().ToString();
         EXPECT_EQ(internal->talon_small_read_threshold, expected_threshold);
         ::InjectExternalSpecProperties(
             *properties, 42, "s3://s3.amazonaws.com/bucket/data/", "");
         const auto external =
             milvus_storage::FilesystemCache::getInstance().resolve_config(
-                *properties, "s3://s3.amazonaws.com/bucket/data/");
+                properties, "s3://s3.amazonaws.com/bucket/data/");
         ASSERT_TRUE(external.ok()) << external.status().ToString();
         EXPECT_EQ(external->talon_small_read_threshold, expected_threshold);
     }
@@ -1203,17 +1203,31 @@ TEST_F(StorageTest, InitArrowReaderConfig) {
     ASSERT_NE(properties, nullptr);
 
     auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
 
     auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
 
     status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto updated_properties =
+        LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    EXPECT_NE(properties, updated_properties);
+    EXPECT_EQ(updated_properties,
+              LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+    auto old_hole = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(old_hole.ok()) << old_hole.status();
+    EXPECT_EQ(old_hole.ValueOrDie(), hole_size_limit.ValueOrDie());
+    auto old_range = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(old_range.ok()) << old_range.status();
+    EXPECT_EQ(old_range.ValueOrDie(), range_size_limit.ValueOrDie());
+
     cache_options = GetArrowReaderProperties().cache_options();
     EXPECT_EQ(cache_options.hole_size_limit,
               default_cache_options.hole_size_limit);
@@ -1237,12 +1251,12 @@ TEST_F(StorageTest, ArrowReaderConfigAppliesToFreshLoonProperties) {
     ASSERT_NE(properties, nullptr);
 
     auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
 
     auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
 
@@ -1256,12 +1270,12 @@ TEST_F(StorageTest, ArrowReaderConfigAppliesToFreshLoonProperties) {
     ASSERT_NE(properties, nullptr);
 
     hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 0);
 
     range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 0);
 }
@@ -1312,7 +1326,8 @@ TEST_F(StorageTest, InitIndexBuildReadWindow) {
     milvus_storage::api::Properties props;
     LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(props);
     auto window = milvus_storage::api::GetValue<int64_t>(
-        props, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
     ASSERT_TRUE(window.ok()) << window.status().ToString();
     EXPECT_EQ(window.ValueOrDie(), 512LL * 1024 * 1024);
 
@@ -1322,7 +1337,8 @@ TEST_F(StorageTest, InitIndexBuildReadWindow) {
     milvus_storage::api::Properties fresh;
     LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(fresh);
     window = milvus_storage::api::GetValue<int64_t>(
-        fresh, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+        std::make_shared<const milvus_storage::api::Properties>(fresh),
+        PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
     ASSERT_TRUE(window.ok()) << window.status().ToString();
     EXPECT_EQ(window.ValueOrDie(), 32LL * 1024 * 1024);
 }
@@ -1369,10 +1385,10 @@ TEST_F(StorageTest, ArrowReaderConfigSnapshotIsAtomicUnderHotReload) {
                 auto properties = MakeInternalPropertiesFromStorageConfig(
                     get_azure_storage_config());
                 auto hole = milvus_storage::api::GetValue<int64_t>(
-                    *properties,
+                    properties,
                     PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
                 auto range = milvus_storage::api::GetValue<int64_t>(
-                    *properties,
+                    properties,
                     PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
                 if (!hole.ok() || !range.ok()) {
                     torn.fetch_add(1);

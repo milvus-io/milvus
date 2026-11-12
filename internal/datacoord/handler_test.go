@@ -3,21 +3,19 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
-	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -49,7 +47,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -68,7 +66,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -87,7 +85,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -105,7 +103,7 @@ func TestRetrieveSegment(t *testing.T) {
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -124,7 +122,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -143,7 +141,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 3, 4),
 			typeutil.NewUniqueSet(2),
@@ -162,7 +160,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 3),
 		}
-		flushed, _ := retrieveSegment(
+		flushed, _ := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -184,7 +182,7 @@ func TestRetrieveSegment(t *testing.T) {
 		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
 		// Recursive deduplication must remove 5 without selecting unready 3.
 		indexed := typeutil.NewUniqueSet(1, 2, 5)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 5),
 			typeutil.NewUniqueSet(1, 2, 3),
@@ -201,7 +199,7 @@ func TestRetrieveSegment(t *testing.T) {
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -223,7 +221,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -245,7 +243,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -1974,23 +1972,6 @@ func TestGenSnapshot(t *testing.T) {
 
 	// Create mock mixCoord
 	mockMixCoord := mocks2.NewMixCoord(t)
-	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		Schema:              schema,
-		ShardsNum:           2,
-		NumPartitions:       1,
-		ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
-		Properties:          []*commonpb.KeyValuePair{},
-		CollectionID:        200,
-		VirtualChannelNames: []string{"dml_0_200v0", "dml_1_200v1"},
-	}, nil).Maybe()
-
-	mockMixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-		Status:         merr.Success(),
-		PartitionIDs:   []int64{0, 1},
-		PartitionNames: []string{"_default", "partition1"},
-	}, nil).Maybe()
-
 	// Create handler with mock broker
 	mockBroker := broker.NewCoordinatorBroker(mockMixCoord)
 	handler := &ServerHandler{
@@ -2000,6 +1981,11 @@ func TestGenSnapshot(t *testing.T) {
 			domainMetas: domainMetas{indexMeta: mockIndexMeta},
 		},
 	}
+	seedCollections(handler.s, &meta.CollectionInfo{
+		ID: 200, Schema: schema, ShardsNum: 2, ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		VChannelNames: []string{"dml_0_200v0", "dml_1_200v1"},
+		Partitions:    []int64{0, 1}, PartitionIDsByName: map[string]int64{"_default": 0, "partition1": 1},
+	})
 
 	// Setup mocks for other methods
 	positions := []*msgpb.MsgPosition{
@@ -2086,7 +2072,7 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 	assert.NotNil(t, snapshotData.Segments[0].ManifestHasIndex)
 	assert.True(t, snapshotData.Segments[0].GetManifestHasIndex())
-	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
+	// Verify VirtualChannelNames is populated from the collection view
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
 
@@ -2110,30 +2096,17 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		},
 	}
 
-	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
-		func(_ *meta.MockMixCoord, _ context.Context, _ *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				Schema:              schema,
-				ShardsNum:           1,
-				NumPartitions:       1,
-				ConsistencyLevel:    commonpb.ConsistencyLevel_Bounded,
-				Properties:          properties,
-				CollectionID:        200,
-				VirtualChannelNames: []string{"ch-1"},
-			}, nil
-		}).Build()
-	defer mockDescribe.UnPatch()
-
-	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
-		func(_ *meta.MockMixCoord, _ context.Context, _ *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-			return &milvuspb.ShowPartitionsResponse{
-				Status:         merr.Success(),
-				PartitionIDs:   []int64{0},
-				PartitionNames: []string{"_default"},
-			}, nil
-		}).Build()
-	defer mockShowPartitions.UnPatch()
+	seedCollections(handler.s, &meta.CollectionInfo{
+		ID:                 200,
+		Schema:             schema,
+		ShardsNum:          1,
+		ConsistencyLevel:   commonpb.ConsistencyLevel_Bounded,
+		VChannelNames:      []string{"ch-1"},
+		Partitions:         []int64{0},
+		PartitionIDsByName: map[string]int64{"_default": 0},
+		Properties:         funcutil.KeyValuePair2Map(properties),
+		PropertyPairs:      properties,
+	})
 
 	positions := []*msgpb.MsgPosition{
 		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
@@ -2194,29 +2167,15 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		},
 	}
 
-	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				Schema:              schema,
-				ShardsNum:           2,
-				NumPartitions:       1,
-				ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
-				CollectionID:        200,
-				VirtualChannelNames: []string{"ch-1", "ch-2"},
-			}, nil
-		}).Build()
-	defer mockDescribe.UnPatch()
-
-	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-			return &milvuspb.ShowPartitionsResponse{
-				Status:         merr.Success(),
-				PartitionIDs:   []int64{0},
-				PartitionNames: []string{"_default"},
-			}, nil
-		}).Build()
-	defer mockShowPartitions.UnPatch()
+	seedCollections(handler.s, &meta.CollectionInfo{
+		ID:                 200,
+		Schema:             schema,
+		ShardsNum:          2,
+		ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+		VChannelNames:      []string{"ch-1", "ch-2"},
+		Partitions:         []int64{0},
+		PartitionIDsByName: map[string]int64{"_default": 0},
+	})
 
 	positions := []*msgpb.MsgPosition{
 		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
@@ -2330,7 +2289,7 @@ func TestHasCommittedManifest(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual, err := hasCommittedManifest(test.segment)
+			actual, err := meta.HasCommittedManifest(test.segment)
 			if test.expectedErr != nil {
 				require.ErrorIs(t, err, test.expectedErr)
 				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
@@ -2394,29 +2353,15 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		},
 	}
 
-	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				Schema:              schema,
-				ShardsNum:           1,
-				NumPartitions:       1,
-				ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
-				CollectionID:        200,
-				VirtualChannelNames: []string{"ch-1"},
-			}, nil
-		}).Build()
-	defer mockDescribe.UnPatch()
-
-	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-			return &milvuspb.ShowPartitionsResponse{
-				Status:         merr.Success(),
-				PartitionIDs:   []int64{0},
-				PartitionNames: []string{"_default"},
-			}, nil
-		}).Build()
-	defer mockShowPartitions.UnPatch()
+	seedCollections(handler.s, &meta.CollectionInfo{
+		ID:                 200,
+		Schema:             schema,
+		ShardsNum:          1,
+		ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+		VChannelNames:      []string{"ch-1"},
+		Partitions:         []int64{0},
+		PartitionIDsByName: map[string]int64{"_default": 0},
+	})
 
 	positions := []*msgpb.MsgPosition{
 		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
@@ -2485,9 +2430,12 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 
 func TestGenSnapshotDependencyErrors(t *testing.T) {
 	type snapshotBroker struct{ broker.Broker }
-	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
+	for _, stage := range []string{"collection_missing", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
 		t.Run(stage, func(t *testing.T) {
 			wantErr := merr.ErrServiceNotReady
+			if stage == "collection_missing" {
+				wantErr = merr.ErrCollectionNotFound
+			}
 			errFor := func(name string) error {
 				if stage == name {
 					return wantErr
@@ -2497,12 +2445,12 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta.Meta{
 				ChunkManager: storage.NewLocalChunkManager(),
 			}, domainMetas: domainMetas{indexMeta: &index.IndexMeta{}}}}
-			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
-				&milvuspb.DescribeCollectionResponse{Schema: meta.NewTestSchema()}, errFor("describe")).Build()
-			defer describe.UnPatch()
-			partitions := mockey.Mock((*snapshotBroker).ShowPartitions).Return(
-				&milvuspb.ShowPartitionsResponse{PartitionNames: []string{"_default"}, PartitionIDs: []int64{10}}, errFor("partitions")).Build()
-			defer partitions.UnPatch()
+			seedCollections(handler.s)
+			if stage != "collection_missing" {
+				handler.s.meta.AddCollection(&meta.CollectionInfo{
+					ID: 2, Schema: meta.NewTestSchema(), Partitions: []int64{10}, PartitionIDsByName: map[string]int64{"_default": 10},
+				})
+			}
 			position := &msgpb.MsgPosition{ChannelName: "v1", Timestamp: 100}
 			if stage == "empty_channel" {
 				position.ChannelName = ""
@@ -2558,29 +2506,15 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		},
 	}
 
-	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				Schema:              schema,
-				ShardsNum:           1,
-				NumPartitions:       1,
-				ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
-				CollectionID:        200,
-				VirtualChannelNames: []string{"ch-1"},
-			}, nil
-		}).Build()
-	defer mockDescribe.UnPatch()
-
-	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
-		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-			return &milvuspb.ShowPartitionsResponse{
-				Status:         merr.Success(),
-				PartitionIDs:   []int64{0},
-				PartitionNames: []string{"_default"},
-			}, nil
-		}).Build()
-	defer mockShowPartitions.UnPatch()
+	seedCollections(handler.s, &meta.CollectionInfo{
+		ID:                 200,
+		Schema:             schema,
+		ShardsNum:          1,
+		ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+		VChannelNames:      []string{"ch-1"},
+		Partitions:         []int64{0},
+		PartitionIDsByName: map[string]int64{"_default": 0},
+	})
 
 	positions := []*msgpb.MsgPosition{
 		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
@@ -2633,6 +2567,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	indexType := "HNSW_SQ"
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
@@ -2650,6 +2585,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				PartitionID:           20,
 				SegmentID:             segmentID,
 				IndexID:               10,
+				IndexType:             indexType,
 				BuildID:               30,
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
@@ -2666,7 +2602,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockIndexName := mockey.Mock((*index.IndexMeta).GetIndexNameByID).Return("vec_idx").Build()
 	defer mockIndexName.UnPatch()
 
-	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).Return(nil).Build()
+	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).To(func(*index.IndexMeta, UniqueID, UniqueID) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	}).Build()
 	defer mockIndexParams.UnPatch()
 
 	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
@@ -2676,6 +2614,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
@@ -2690,9 +2631,19 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	indexFiles, err = uncompressIndexFiles(handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
 	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	indexType = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Empty(t, indexFiles[0].GetIndexType())
+	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 
 	segment.ManifestPath = ""
 	indexFiles, err = uncompressIndexFiles(handler, segment)
@@ -2779,26 +2730,15 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		mockMeta := &meta.Meta{IndexCatalog: mockIndexMeta}
 
 		mockMixCoord := mocks2.NewMixCoord(t)
-		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			Schema:              schema,
-			ShardsNum:           2,
-			NumPartitions:       1,
-			ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
-			Properties:          []*commonpb.KeyValuePair{},
-			CollectionID:        200,
-			VirtualChannelNames: []string{"dml_0_200v0"},
-		}, nil).Maybe()
-		mockMixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status:         merr.Success(),
-			PartitionIDs:   []int64{0},
-			PartitionNames: []string{"_default"},
-		}, nil).Maybe()
-
 		mockBroker := broker.NewCoordinatorBroker(mockMixCoord)
 		handler := &ServerHandler{
 			s: &Server{broker: mockBroker, meta: mockMeta, domainMetas: domainMetas{indexMeta: mockIndexMeta}},
 		}
+		seedCollections(handler.s, &meta.CollectionInfo{
+			ID: 200, Schema: schema, ShardsNum: 2, ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			VChannelNames: []string{"dml_0_200v0"},
+			Partitions:    []int64{0}, PartitionIDsByName: map[string]int64{"_default": 0},
+		})
 
 		var mockers []*mockey.Mocker
 
@@ -2872,53 +2812,23 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+		assert.Equal(t, uint64(5000), snapshotData.Segments[0].GetCommitTimestamp())
 	})
 }
 
-func TestServerHandler_GetCollectionRetry(t *testing.T) {
-	newHandler := func(b broker.Broker) *ServerHandler {
-		m := &meta.Meta{MetaStore: metacache.NewMetaStore(nil)}
-		return newServerHandler(&Server{broker: b, meta: m})
-	}
+func TestServerHandler_GetCollectionWaitsForApply(t *testing.T) {
+	s := seedCollections(&Server{})
+	h := newServerHandler(s)
 
-	t.Run("dropped collection is not retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
+	// RootCoord applies the collection while the lookup waits.
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		s.meta.AddCollection(&meta.CollectionInfo{ID: 1})
+	}()
+	coll, err := h.GetCollection(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), coll.ID)
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
-		assert.Nil(t, coll)
-	})
-
-	t.Run("transient error is retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
-
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1), coll.ID)
-	})
-
-	t.Run("collection gone from the cache after load", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
-		// GC drops the collection between the load and the read.
-		dropAfterAdd := mockey.Mock((*meta.Meta).AddCollection).Return().Build()
-		defer dropAfterAdd.UnPatch()
-
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
-		assert.Nil(t, coll)
-	})
+	_, err = h.GetCollection(context.Background(), 2)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 }

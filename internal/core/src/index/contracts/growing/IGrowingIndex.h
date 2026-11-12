@@ -25,11 +25,11 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 
 namespace milvus::index {
 
-// An opaque lifetime pin on ONE published reader record and its coverage.
+// An opaque lifetime pin on ONE published Index version and its coverage.
 // Count, validity/offset mapping and dependency lifetimes belong to that record;
 // the family decides whether the query engine itself is immutable. Copies retain
 // the record; moves leave the source empty. Reader references and query-interface
@@ -46,7 +46,7 @@ class GrowingIndexSnapshotPin {
     Reader() const {
         AssertInfo(snapshot_ != nullptr,
                    "reader access through an empty snapshot pin");
-        return *snapshot_->reader;
+        return *reader_;
     }
 
     // Segment row prefix [0, end), NOT the reader's local ID cardinality.
@@ -60,21 +60,25 @@ class GrowingIndexSnapshotPin {
     friend class IGrowingIndex;
 
     struct Snapshot {
-        Snapshot(std::unique_ptr<const IIndexReaderBase> value, int64_t end)
-            : reader(std::move(value)), covered_row_end(end) {
+        Snapshot(IndexPtr value, int64_t end)
+            : index(std::move(value)), covered_row_end(end) {
         }
 
-        const std::unique_ptr<const IIndexReaderBase> reader;
+        const IndexPtr index;
         const int64_t covered_row_end;
     };
 
-    explicit GrowingIndexSnapshotPin(std::shared_ptr<const Snapshot> snapshot)
-        : snapshot_(std::move(snapshot)) {
+    GrowingIndexSnapshotPin(std::shared_ptr<const Snapshot> snapshot,
+                            milvus::OpContext* op_ctx)
+        : snapshot_(std::move(snapshot)),
+          reader_(snapshot_ ? snapshot_->index->CreateReader(op_ctx)
+                            : nullptr) {
     }
 
-    // Shared only inside the pin protocol. The record uniquely owns its
-    // reader; consumers cannot extract or replace that owning pointer.
+    // Copies of this pin share its request reader; separate pins create their
+    // own readers while retaining the same published Index version.
     std::shared_ptr<const Snapshot> snapshot_;
+    std::shared_ptr<const IIndexReaderBase> reader_;
 };
 
 // Segment uniquely owns this long-lived publisher. Append input and query
@@ -101,16 +105,21 @@ class IGrowingIndex {
     // above the threshold, but only while no engine was ever published and the
     // complete raw source remains available for query fallback and a later
     // Build attempt. Flush must not turn either safe raw fallback into a
-    // partially published reader. Once an engine is built, Add failure is
+    // partially published Index. Once an engine is built, Add failure is
     // terminal and propagates; it cannot be treated as raw fallback.
     virtual void
     Flush() = 0;
 
-    // Fixed read-side protocol: this only pins an already published record.
+    // Pin a published version and create a request reader without index I/O.
+    // op_ctx is borrowed until this pin and all its copies are released.
     GrowingIndexSnapshotPin
-    PinSnapshot() const {
-        std::lock_guard<std::mutex> lock(snapshot_mutex_);
-        return GrowingIndexSnapshotPin(snapshot_);
+    PinSnapshot(milvus::OpContext* op_ctx = nullptr) const {
+        std::shared_ptr<const GrowingIndexSnapshotPin::Snapshot> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(snapshot_mutex_);
+            snapshot = snapshot_;
+        }
+        return GrowingIndexSnapshotPin(std::move(snapshot), op_ctx);
     }
 
     virtual DataType
@@ -119,7 +128,7 @@ class IGrowingIndex {
     Family() const = 0;
 
  protected:
-    // The writer must serialize append/publication work and supply a reader
+    // The writer must serialize append/publication work and supply an Index
     // record whose Count, validity/offset mapping, dependency lifetime and
     // Segment coverage are fixed together. Completing a higher reserved range
     // does not close an earlier hole. Null rows count toward coverage; element
@@ -133,13 +142,12 @@ class IGrowingIndex {
     // fails, the current record remains intact; a retry publishes the already
     // accepted engine state and must not repeat Add.
     void
-    PublishSnapshot(std::unique_ptr<const IIndexReaderBase> reader,
-                    int64_t covered_row_end) {
-        AssertInfo(reader != nullptr && covered_row_end >= 0,
+    PublishSnapshot(IndexPtr index, int64_t covered_row_end) {
+        AssertInfo(index != nullptr && covered_row_end >= 0,
                    "invalid growing snapshot publication");
         std::shared_ptr<const GrowingIndexSnapshotPin::Snapshot> next =
             std::make_shared<const GrowingIndexSnapshotPin::Snapshot>(
-                std::move(reader), covered_row_end);
+                std::move(index), covered_row_end);
         {
             std::lock_guard<std::mutex> lock(snapshot_mutex_);
             AssertInfo(

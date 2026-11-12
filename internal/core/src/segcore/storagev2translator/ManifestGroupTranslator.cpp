@@ -635,11 +635,17 @@ std::vector<
 ManifestGroupTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    return folly::coro::blockingWait(get_cells_async(ctx, cids));
+}
+
+folly::coro::Task<ManifestGroupTranslator::CellResults>
+ManifestGroupTranslator::get_cells_async(
+    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
 
     if (cids.empty()) {
-        return {};
+        co_return CellResults{};
     }
 
     const auto max_cid = *std::max_element(cids.begin(), cids.end());
@@ -667,9 +673,10 @@ ManifestGroupTranslator::get_cells(
     }
 
     if (enable_async_load_) {
-        return get_cells_via_async_pipeline(ctx, std::move(cell_specs));
+        co_return co_await get_cells_via_async_pipeline(ctx,
+                                                        std::move(cell_specs));
     }
-    return get_cells_legacy(ctx, cids, std::move(cell_specs));
+    co_return get_cells_legacy(ctx, cids, std::move(cell_specs));
 }
 
 std::vector<ManifestGroupTranslator::CellResult>
@@ -758,7 +765,7 @@ ManifestGroupTranslator::get_cells_legacy(
     return cells;
 }
 
-std::vector<ManifestGroupTranslator::CellResult>
+folly::coro::Task<ManifestGroupTranslator::CellResults>
 ManifestGroupTranslator::get_cells_via_async_pipeline(
     milvus::OpContext* ctx,
     std::vector<milvus::segcore::CellSpec> cell_specs) const {
@@ -778,7 +785,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
             return storage::LocalFileIOPool::GetInstance().GetExecutor();
         };
     }
-    return folly::coro::blockingWait(LoadCellsAsync(
+    return LoadCellsAsync(
         ctx,
         segment_id_,
         std::move(cell_specs),
@@ -791,7 +798,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
                 static_cast<milvus::cachinglayer::cid_t>(cid),
                 priority);
         },
-        std::move(options)));
+        std::move(options));
 }
 
 std::unique_ptr<milvus::GroupChunk>

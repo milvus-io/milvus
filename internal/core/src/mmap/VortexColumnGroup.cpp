@@ -62,7 +62,7 @@ ThrowVortexStatus(const arrow::Status& status,
 
 VortexColumnGroup::VortexColumnGroup(
     const std::vector<VortexColumnFileInfo>& files,
-    std::shared_ptr<milvus_storage::api::Properties> properties,
+    std::shared_ptr<const milvus_storage::api::Properties> properties,
     const std::vector<std::string>& field_names,
     size_t logical_field_count,
     CacheWarmupPolicy cache_warmup_policy,
@@ -98,7 +98,7 @@ VortexColumnGroup::VortexColumnGroup(
 
     for (const auto& file : files) {
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-            *properties, file.path);
+            properties, file.path);
         if (!fs_result.ok()) {
             ThrowVortexStatus(fs_result.status(),
                               ErrorCode::FileOpenFailed,

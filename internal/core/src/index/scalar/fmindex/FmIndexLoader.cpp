@@ -18,6 +18,8 @@
 #include "common/OpContext.h"
 #include "index/scalar/fmindex/FmIndexLoader.h"
 #include "index/PackedIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <algorithm>
 #include <bit>
@@ -296,16 +298,39 @@ FmIndexLoader::Create(OpenedIndexSource source, storage::LoadOptions options) {
         std::get<PackedIndexSource>(std::move(source)), std::move(options)));
     PackedFmState metadata;
     ValidatePackedMetadata(metadata,
-                           loader->source_.Directory(),
-                           loader->source_.Metadata(),
+                           loader->source_->Directory(),
+                           loader->source_->Metadata(),
                            loader->options_);
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-FmIndexLoader::Load(milvus::OpContext* context) {
-    return RunPackedIndexLoad(
-        source_, options_, &PlanPacked, &FinishPacked, context);
+IndexPtr
+FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached FM-index construction consumed this loader");
+    PackedFmState metadata;
+    ValidatePackedMetadata(
+        metadata, source_->Directory(), source_->Metadata(), options_);
+    const bool use_async =
+        std::holds_alternative<std::shared_ptr<storage::AsyncIndexEntryReader>>(
+            source_->reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunPackedIndexLoad<std::unique_ptr<FmIndexStorage>>(
+            source, options, &PlanPacked, &FinishPackedStorage, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<FmIndexStorage>(
+            std::make_unique<SingleCellIndexStorageTranslator<FmIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
+    return std::make_shared<FmIndex>(
+        std::move(slot),
+        metadata.runtime.value_type,
+        metadata.total_rows,
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }
 
 ReaderCaps
@@ -354,10 +379,10 @@ FmIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                            const storage::LoadOptions& opts,
-                            bool use_async) {
+folly::coro::Task<std::unique_ptr<FmIndexStorage>>
+FmIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                   const storage::LoadOptions& opts,
+                                   bool use_async) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -429,16 +454,13 @@ FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
         std::make_shared<const fmindex::FMIndex>(std::move(engine));
     auto nulls = state->nulls ? std::move(*state->nulls)
                               : TargetBitmap(state->total_rows, false);
-    auto storage = FmIndexStorage::Create(mapping,
-                                          shared_engine,
-                                          std::move(nulls),
-                                          state->total_rows,
-                                          state->runtime.value_type,
-                                          state->nullable,
-                                          FmIndexStateOrigin::Persisted);
-    co_return std::make_unique<FmIndexReader>(
-        std::move(storage),
-        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
+    co_return FmIndexStorage::Create(mapping,
+                                     shared_engine,
+                                     std::move(nulls),
+                                     state->total_rows,
+                                     state->runtime.value_type,
+                                     state->nullable,
+                                     FmIndexStateOrigin::Persisted);
 }
 
 namespace {

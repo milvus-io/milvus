@@ -40,9 +40,6 @@ func Dependencies(t testing.TB) loadmgr.LoadConfigStoreDependencies {
 	return loadmgr.LoadConfigStoreDependencies{
 		Catalog:         catalogkv.NewCollectionLoadInfoCatalog(storage),
 		AllocateVersion: func(context.Context) (uint64, error) { return ids.Add(1), nil },
-		Schema: func(context.Context, int64) (*schemapb.CollectionSchema, error) {
-			return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 200}}}, nil
-		},
 	}
 }
 
@@ -87,8 +84,7 @@ func FromLegacyCatalog(t testing.TB, catalog metastore.QueryCoordCatalog) loadmg
 			}
 		}
 		if len(info.RequiredFields) == 0 {
-			schema, err := deps.Schema(ctx, info.CollectionID)
-			require.NoError(t, err)
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 200}}}
 			info.RequiredFields = loadmgr.RequiredFieldsForSchema(schema)
 		}
 		require.NoError(t, deps.Catalog.Save(ctx, info))

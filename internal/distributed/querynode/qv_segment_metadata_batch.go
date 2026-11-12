@@ -63,7 +63,7 @@ func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewSegmentLoadInfo(ctx cont
 	if info == nil || info.GetSegmentID() != segmentID || info.GetCollectionID() != collectionID {
 		return qnview.SegmentLoadInfoSnapshot{}, merr.WrapErrServiceInternalMsg("mismatched metadata snapshot for segment %d", segmentID)
 	}
-	return qnview.SegmentLoadInfoSnapshot{CollectionID: collectionID, SegmentID: segmentID, LoadInfo: info, IndexInfos: b.response.GetIndexInfoList()}, nil
+	return qnview.SegmentLoadInfoSnapshot{CollectionID: collectionID, SegmentID: segmentID, LoadInfo: info}, nil
 }
 
 func (p *lazyQueryViewLoadMetadataProvider) enqueueSegmentMetadata(ctx context.Context, collectionID, segmentID int64) *queryViewMetadataBatch {

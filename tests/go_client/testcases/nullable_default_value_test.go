@@ -3268,7 +3268,7 @@ func TestNullableVectorCompaction(t *testing.T) {
 			err = flushTask.Await(ctx)
 			common.CheckErr(t, err, true)
 
-			// wait for rate limiter reset before next flush (rate=0.1 means 1 flush per 10s)
+			// Allow time for the deployment's per-collection flush quota to replenish.
 			time.Sleep(10 * time.Second)
 
 			testData2 := GenerateNullableVectorTestData(t, vt, nb, nullPercent, "vector")
@@ -3441,7 +3441,7 @@ func TestNullableVectorAddField(t *testing.T) {
 			err = flushTask.Await(ctx)
 			common.CheckErr(t, err, true)
 
-			// wait for rate limiter reset before next flush (rate=0.1 means 1 flush per 10s)
+			// Allow time for the deployment's per-collection flush quota to replenish.
 			time.Sleep(10 * time.Second)
 
 			// SparseVector does not need dim, but other vectors do

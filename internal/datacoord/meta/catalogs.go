@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // SegmentIndexCatalog is what the manifest commit path and the segment
@@ -30,6 +31,7 @@ type SegmentIndexCatalog interface {
 	// SetCollectionSchemaGetter binds the local schema cache before recovery.
 	SetCollectionSchemaGetter(func(UniqueID) *schemapb.CollectionSchema)
 
+	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
 	// GetTypeParams returns the type params of the index.
@@ -41,10 +43,12 @@ type SegmentIndexCatalog interface {
 
 	// HasBuildInfo reports whether a SegmentIndex record for the build ID is in memory.
 	HasBuildInfo(buildID int64) bool
+	GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool)
+	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
 	// after removing duplicates, so overlapping callers cannot deadlock.
-	// Callers must not hold segMu. Lock order: segment manifest lock, then
-	// build-ID locks, then segMu.
+	// Callers must not hold a segment writer lock. Lock order: segment manifest
+	// lock, then build-ID locks, then segment writer locks.
 	LockBuildIDs(buildIDs []int64)
 	// UnlockBuildIDs releases the locks taken by LockBuildIDs. buildIDs must
 	// not contain duplicates.
@@ -53,23 +57,23 @@ type SegmentIndexCatalog interface {
 	// take the build-ID lock; the only caller today is the startup reload from
 	// manifests, which does not hold it.
 	UpdateSegmentIndex(segIdx *model.SegmentIndex)
-	// AddStoredIndexSizeMetric adds delta to the stored index size gauge of the
-	// index. It reads the index definition without taking fieldIndexLock or the
-	// build-ID lock, so it is safe only when no index DDL can run at the same
-	// time. The only caller today is the startup reload from manifests.
-	AddStoredIndexSizeMetric(collID, indexID UniqueID, delta float64)
+	// PublishStoredIndexSizes writes the stored index size of every collection
+	// whose size changed to the gauge. A write can wait for a Prometheus scrape,
+	// so callers must not hold a segment writer lock or fieldIndexLock.
+	PublishStoredIndexSizes()
 	// StageSegmentIndexMutation projects mut against the SegmentIndex record
 	// for mut.BuildID, and returns the catalog action to compose into the
 	// caller's transaction. The caller must hold LockBuildIDs for mut.BuildID
 	// from this call until the metric closure has run. The returned install
 	// updates memory only and takes no fieldIndexLock, so the caller runs it
-	// after the catalog write succeeds, inside its segMu critical section.
-	// install returns a metric closure that takes fieldIndexLock; the caller
-	// runs it after releasing segMu and before releasing the build-ID lock.
+	// after the catalog write succeeds, under the segment writer lock.
+	// install returns an observability closure that can wait for a Prometheus
+	// scrape; the caller runs it after releasing the writer lock and before
+	// releasing the build-ID lock.
 	StageSegmentIndexMutation(mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
 
 	// RLockFieldIndexes takes the read side of fieldIndexLock, whose write side
-	// index DDL holds. Callers must not hold segMu.
+	// index DDL holds. Callers must not hold a segment writer lock.
 	RLockFieldIndexes()
 	// RUnlockFieldIndexes releases the read side taken by RLockFieldIndexes.
 	RUnlockFieldIndexes()

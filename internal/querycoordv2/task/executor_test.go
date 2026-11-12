@@ -22,14 +22,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -63,105 +65,6 @@ type testSource string
 
 func (s testSource) String() string {
 	return string(s)
-}
-
-func TestExecutorGetCollectionInfoDoesNotCacheResult(t *testing.T) {
-	ctx := context.Background()
-	collectionID := int64(1000)
-	broker := meta.NewMockBroker(t)
-	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
-
-	describeCalls := 0
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			describeCalls++
-			return &milvuspb.DescribeCollectionResponse{
-				CollectionID: collectionID,
-				Schema: &schemapb.CollectionSchema{
-					Name: fmt.Sprintf("collection-info-call-%d", describeCalls),
-				},
-			}, nil
-		}).Twice()
-
-	collectionInfo, err := ex.getCollectionInfo(ctx, collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, "collection-info-call-1", collectionInfo.GetSchema().GetName())
-
-	collectionInfo, err = ex.getCollectionInfo(ctx, collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, "collection-info-call-2", collectionInfo.GetSchema().GetName())
-	assert.Equal(t, 2, describeCalls)
-}
-
-func TestExecutorGetCollectionInfoDoesNotCancelLookupWithCallerContext(t *testing.T) {
-	ctx := context.Background()
-	collectionID := int64(1001)
-	broker := meta.NewMockBroker(t)
-	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
-
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	brokerErrs := make(chan error, 1)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			close(entered)
-			select {
-			case <-ctx.Done():
-				brokerErrs <- ctx.Err()
-				return nil, ctx.Err()
-			case <-release:
-				brokerErrs <- nil
-				return &milvuspb.DescribeCollectionResponse{
-					CollectionID: collectionID,
-					Schema: &schemapb.CollectionSchema{
-						Name: "TestExecutorGetCollectionInfoDoesNotCancelLookupWithCallerContext",
-					},
-				}, nil
-			}
-		}).Once()
-
-	callerCtx, callerCancel := context.WithCancel(ctx)
-	callerErrs := make(chan error, 1)
-	go func() {
-		_, err := ex.getCollectionInfo(callerCtx, collectionID)
-		callerErrs <- err
-	}()
-
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("DescribeCollection was not called")
-	}
-
-	callerCancel()
-	select {
-	case err := <-callerErrs:
-		assert.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		t.Fatal("caller did not observe its cancellation")
-	}
-
-	close(release)
-	select {
-	case err := <-brokerErrs:
-		assert.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("DescribeCollection did not finish")
-	}
-}
-
-func TestExecutorGetCollectionInfoReturnsCallerContextErrorBeforeLookup(t *testing.T) {
-	collectionID := int64(1002)
-	broker := meta.NewMockBroker(t)
-	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	collectionInfo, err := ex.getCollectionInfo(ctx, collectionID)
-	assert.Nil(t, collectionInfo)
-	assert.ErrorIs(t, err, context.Canceled)
-	broker.AssertNotCalled(t, "DescribeCollection", mock.Anything, collectionID)
 }
 
 func TestExecutorCapacity(t *testing.T) {
@@ -415,4 +318,37 @@ func TestExecutorDeadlockReproduction(t *testing.T) {
 	chOverflowTask.SetID(999)
 	ok = ex.Execute(chOverflowTask, 0)
 	assert.False(t, ok, "overflow channel task should be rejected")
+}
+
+// A load whose replica has gone must fail the task with the real reason. The
+// replica-not-found branch of loadSegment used to declare its own err, so the
+// deferred task.Fail never saw it: the task stayed Started with rpcReturned set
+// and no RPC sent, waiting on a distribution that never arrives until the task
+// timed out.
+func TestExecutorLoadSegmentFailsTaskWhenReplicaIsGone(t *testing.T) {
+	paramtable.Init()
+
+	metaInfo := mockey.Mock((*Executor).getMetaInfo).
+		Return(&metacache.CollectionInfo{}, &querypb.LoadMetaInfo{}, &meta.DmChannel{}, nil).Build()
+	defer metaInfo.UnPatch()
+	loadInfo := mockey.Mock((*Executor).getLoadInfo).
+		Return(&querypb.SegmentLoadInfo{}, []*indexpb.IndexInfo(nil), nil).Build()
+	defer loadInfo.UnPatch()
+	packRequest := mockey.Mock(packLoadSegmentRequest).Return(&querypb.LoadSegmentsRequest{}).Build()
+	defer packRequest.UnPatch()
+	getReplica := mockey.Mock((*meta.ReplicaManager).Get).Return((*meta.Replica)(nil)).Build()
+	defer getReplica.UnPatch()
+
+	ex := newTestExecutor(1)
+	ex.meta = &meta.Meta{ReplicaManager: &meta.ReplicaManager{}}
+
+	action := NewSegmentAction(1, ActionTypeGrow, "shard-0", 10)
+	task, err := NewSegmentTask(context.Background(), 10*time.Second, testSource("test"), 1000, newTestReplica(1000, 1), commonpb.LoadPriority_LOW, action)
+	assert.NoError(t, err)
+
+	err = ex.loadSegment(task, 0)
+	assert.ErrorIs(t, err, merr.ErrNodeNotAvailable)
+	assert.Equal(t, TaskStatusFailed, task.Status())
+	assert.ErrorIs(t, task.Err(), merr.ErrNodeNotAvailable)
+	assert.True(t, action.rpcReturned.Load())
 }

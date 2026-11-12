@@ -1332,6 +1332,65 @@ func (_c *MixCoord_BroadcastAlteredCollection_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// CancelRequests provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CancelRequests(_a0 context.Context, _a1 *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CancelRequests")
+	}
+
+	var r0 *milvuspb.CancelRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) *milvuspb.CancelRequestsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CancelRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CancelRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelRequests'
+type MixCoord_CancelRequests_Call struct {
+	*mock.Call
+}
+
+// CancelRequests is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CancelRequestsRequest
+func (_e *MixCoord_Expecter) CancelRequests(_a0 interface{}, _a1 interface{}) *MixCoord_CancelRequests_Call {
+	return &MixCoord_CancelRequests_Call{Call: _e.mock.On("CancelRequests", _a0, _a1)}
+}
+
+func (_c *MixCoord_CancelRequests_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CancelRequestsRequest)) *MixCoord_CancelRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CancelRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CancelRequests_Call) Return(_a0 *milvuspb.CancelRequestsResponse, _a1 error) *MixCoord_CancelRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CancelRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)) *MixCoord_CancelRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckBalanceStatus provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) CheckBalanceStatus(_a0 context.Context, _a1 *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3917,6 +3976,65 @@ func (_c *MixCoord_DropVirtualChannel_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// EnsureCollectionReady provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) EnsureCollectionReady(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureCollectionReady")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.EnsureCollectionReadyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_EnsureCollectionReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnsureCollectionReady'
+type MixCoord_EnsureCollectionReady_Call struct {
+	*mock.Call
+}
+
+// EnsureCollectionReady is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.EnsureCollectionReadyRequest
+func (_e *MixCoord_Expecter) EnsureCollectionReady(_a0 interface{}, _a1 interface{}) *MixCoord_EnsureCollectionReady_Call {
+	return &MixCoord_EnsureCollectionReady_Call{Call: _e.mock.On("EnsureCollectionReady", _a0, _a1)}
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) Run(run func(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest)) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.EnsureCollectionReadyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) RunAndReturn(run func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExportSnapshot provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ExportSnapshot(_a0 context.Context, _a1 *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6053,6 +6171,11 @@ func (_c *MixCoord_GetQueryViewLoadInfo_Call) Return(_a0 *querypb.GetQueryViewLo
 func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)) *MixCoord_GetQueryViewLoadInfo_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
 }
 
 // GetQuotaMetrics provides a mock function with given fields: _a0, _a1
@@ -8492,6 +8615,65 @@ func (_c *MixCoord_ListRowPolicies_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// ListRunningRequests provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListRunningRequests(_a0 context.Context, _a1 *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRunningRequests")
+	}
+
+	var r0 *milvuspb.ListRunningRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) *milvuspb.ListRunningRequestsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRunningRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRunningRequestsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListRunningRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRunningRequests'
+type MixCoord_ListRunningRequests_Call struct {
+	*mock.Call
+}
+
+// ListRunningRequests is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRunningRequestsRequest
+func (_e *MixCoord_Expecter) ListRunningRequests(_a0 interface{}, _a1 interface{}) *MixCoord_ListRunningRequests_Call {
+	return &MixCoord_ListRunningRequests_Call{Call: _e.mock.On("ListRunningRequests", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListRunningRequests_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRunningRequestsRequest)) *MixCoord_ListRunningRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRunningRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListRunningRequests_Call) Return(_a0 *milvuspb.ListRunningRequestsResponse, _a1 error) *MixCoord_ListRunningRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListRunningRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)) *MixCoord_ListRunningRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSnapshots provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ListSnapshots(_a0 context.Context, _a1 *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8783,53 +8965,6 @@ func (_c *MixCoord_ManualCompaction_Call) Return(_a0 *milvuspb.ManualCompactionR
 }
 
 func (_c *MixCoord_ManualCompaction_Call) RunAndReturn(run func(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)) *MixCoord_ManualCompaction_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ManualUpdateCurrentTarget provides a mock function with given fields: ctx, collectionID
-func (_m *MixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	ret := _m.Called(ctx, collectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ManualUpdateCurrentTarget")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MixCoord_ManualUpdateCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ManualUpdateCurrentTarget'
-type MixCoord_ManualUpdateCurrentTarget_Call struct {
-	*mock.Call
-}
-
-// ManualUpdateCurrentTarget is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(ctx interface{}, collectionID interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
-	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", ctx, collectionID)}
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 error) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MixCoord_ManualUpdateCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -12140,6 +12275,13 @@ func (_c *MixCoord_WatchChannels_Call) RunAndReturn(run func(context.Context, *d
 	return _c
 }
 
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
+
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}
+
 // NewMixCoord creates a new instance of MixCoord. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMixCoord(t interface {
@@ -12152,14 +12294,4 @@ func NewMixCoord(t interface {
 	t.Cleanup(func() { mock.AssertExpectations(t) })
 
 	return mock
-}
-
-// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
-func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	panic("patch GetQueryViewSegmentLoadInfos with mockey")
-}
-
-// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
-func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }

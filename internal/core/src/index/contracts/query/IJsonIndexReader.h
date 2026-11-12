@@ -30,8 +30,8 @@
 
 namespace milvus::index {
 
-// A resolved typed path borrows the child reader. The caller must keep its
-// parent reader pinned while using this handle.
+// A resolved typed path borrows its request-specific child reader. The parent
+// request reader must outlive this handle.
 class JsonResolvedReader {
  public:
     JsonResolvedReader() = default;
@@ -82,7 +82,7 @@ class IJsonIndexReader {
     virtual ~IJsonIndexReader() = default;
 
     // Resolve a supported path/cast pair to a borrowed child reader. Keep the
-    // parent reader pinned while using it. Cast to the query interface once
+    // parent request reader alive while using it. Cast to the query interface once
     // after resolve.
     // An empty result means this index cannot serve the path/cast pair; choosing a
     // raw or shredded-column fallback belongs to the consumer.

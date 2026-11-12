@@ -35,6 +35,7 @@ const (
 	FormatLanceTable   = "lance-table"
 	FormatVortex       = "vortex"
 	FormatIcebergTable = "iceberg-table"
+	FormatPaimonTable  = "paimon-table"
 	FormatMilvusTable  = "milvus-table"
 )
 
@@ -60,8 +61,10 @@ const (
 	ExtfsKeyUseSSL                  = "use_ssl"
 	ExtfsKeyUseVirtualHost          = "use_virtual_host"
 	ExtfsKeyLoadFrequency           = "load_frequency"
-	ExtfsKeyAzureClientID           = "azure_client_id"
-	ExtfsKeyAzureTenantID           = "azure_tenant_id"
+	// #nosec G101 -- configuration key name, not a credential.
+	ExtfsKeyCredentialEndpoint = "credential_endpoint"
+	ExtfsKeyAzureClientID      = "azure_client_id"
+	ExtfsKeyAzureTenantID      = "azure_tenant_id"
 	// #nosec G101 -- configuration key name, not a credential.
 	ExtfsKeyAzureCredentialEndpoint = "azure_credential_endpoint"
 )
@@ -72,6 +75,7 @@ type ExternalSpec struct {
 	Columns    []string          `json:"columns"`         // optional: specific columns to load
 	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides
 	SnapshotID *int64            `json:"snapshot_id,omitempty"`
+	ScanMode   string            `json:"scan_mode,omitempty"` // Paimon: auto, direct-file, or data-split
 }
 
 // UnmarshalJSON accepts snapshot_id as either a JSON number or a decimal
@@ -137,6 +141,7 @@ var supportedFormats = map[string]bool{
 	FormatLanceTable:   true,
 	FormatVortex:       true,
 	FormatIcebergTable: true,
+	FormatPaimonTable:  true,
 	FormatMilvusTable:  true,
 }
 
@@ -161,6 +166,7 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeyBucketName:              true,
 	ExtfsKeyGCPTargetServiceAccount: true,
 	ExtfsKeyAnonymous:               true,
+	ExtfsKeyCredentialEndpoint:      true,
 	ExtfsKeyAzureClientID:           true,
 	ExtfsKeyAzureTenantID:           true,
 	ExtfsKeyAzureCredentialEndpoint: true,
@@ -193,6 +199,20 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 			spec.Format, strings.Join(sortedKeys(supportedFormats), ", "))
 	}
 
+	if spec.Format == FormatPaimonTable {
+		if spec.ScanMode == "" {
+			spec.ScanMode = "auto"
+		}
+		switch spec.ScanMode {
+		case "auto", "direct-file", "data-split":
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"unsupported Paimon scan_mode %q; allowed values: auto, direct-file, data-split", spec.ScanMode)
+		}
+	} else if spec.ScanMode != "" {
+		return nil, merr.WrapErrParameterInvalidMsg("scan_mode is only supported for format %q", FormatPaimonTable)
+	}
+
 	for key, val := range spec.Extfs {
 		if !allowedExtfsKeys[key] {
 			return nil, merr.WrapErrParameterInvalidMsg("extfs key %q is not allowed; allowed keys: %s",
@@ -204,6 +224,59 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	}
 
 	return &spec, nil
+}
+
+// NormalizeExternalSpec decodes a spec and canonicalizes known top-level
+// keys for case-sensitive native readers. Call it at native boundaries as well
+// as for new inputs: persisted schemas may contain legacy case variants.
+//
+// Duplicate known keys use the result of Go's existing typed decoder, in input
+// order (including map merging and null handling). Unknown values stay as raw
+// JSON, preserving nested fields and numeric precision. Missing optional keys
+// remain absent, so a missing scan_mode does not override reader defaults.
+// API policy validation remains in ParseExternalSpec; native callers retain
+// their existing handling of unknown formats and filesystem options.
+func NormalizeExternalSpec(specStr string) (string, error) {
+	if specStr == "" {
+		return "", nil
+	}
+	var spec ExternalSpec
+	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &fields); err != nil {
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	// A top-level null has historically meant the default spec.
+	if fields == nil {
+		return specStr, nil
+	}
+	var snapshotID *string
+	if spec.SnapshotID != nil {
+		value := strconv.FormatInt(*spec.SnapshotID, 10)
+		snapshotID = &value
+	}
+	known := map[string]any{
+		"format": spec.Format, "columns": spec.Columns, "extfs": spec.Extfs,
+		"snapshot_id": snapshotID, "scan_mode": spec.ScanMode,
+	}
+	normalized := make(map[string]any, len(fields))
+	for key, raw := range fields {
+		canonical, value := key, any(raw)
+		for name, parsed := range known {
+			if strings.EqualFold(key, name) {
+				canonical, value = name, parsed
+				break
+			}
+		}
+		normalized[canonical] = value
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "marshal normalized external spec")
+	}
+	return string(encoded), nil
 }
 
 func sortedKeys(m map[string]bool) []string {

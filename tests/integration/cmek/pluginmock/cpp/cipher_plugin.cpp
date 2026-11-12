@@ -20,10 +20,15 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
+#include <unistd.h>
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -279,8 +284,10 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     Update(int64_t ez_id,
            int64_t coll_id,
            const std::string& root_key) override {
-        static_cast<void>(coll_id);
         if (root_key.empty()) {
+            std::lock_guard<std::mutex> lock(context_mutex_);
+            contexts_.erase({ez_id, coll_id});
+            record(ez_id, coll_id, "release");
             return;
         }
         auto expected_key = base64Encode(deriveEZKey(ez_id));
@@ -289,16 +296,29 @@ class FixtureCipherPlugin final : public ICipherPlugin {
                 "fixture cipher received an unexpected EZ key for EZ " +
                 std::to_string(ez_id));
         }
+        std::string key(3 * (root_key.size() / 4), '\0');
+        auto size = EVP_DecodeBlock(
+            reinterpret_cast<unsigned char*>(key.data()),
+            reinterpret_cast<const unsigned char*>(root_key.data()),
+            root_key.size());
+        if (size < 0) {
+            throw std::runtime_error("fixture cipher EZ key is not base64");
+        }
+        // The validated fixture EZK is exactly SHA256Size bytes.
+        key.resize(kSHA256Size);
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        contexts_[{ez_id, coll_id}] = std::move(key);
+        record(ez_id, coll_id, "register");
     }
 
     std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
-        auto ezk = deriveEZKey(ez_id);
+        auto ezk = registeredKey(ez_id, coll_id, false);
         auto nonce = newNonce();
+        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         auto tag = deriveEDEKTag(ezk, nonce, ez_id, coll_id);
         auto edek = std::string(kEDEKVersion) + ":" + hexEncode(nonce) + ":" +
                     hexEncode(tag);
-        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         return {std::make_shared<FixtureEncryptor>(std::move(dek)),
                 std::move(edek)};
     }
@@ -307,8 +327,8 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
                  const std::string& safe_key) const override {
+        auto ezk = registeredKey(ez_id, coll_id, true);
         auto decoded = decodeEDEK(safe_key);
-        auto ezk = deriveEZKey(ez_id);
         auto expected_tag = deriveEDEKTag(ezk, decoded.nonce, ez_id, coll_id);
         if (!constantTimeEqual(decoded.tag, expected_tag)) {
             throw std::runtime_error(
@@ -319,6 +339,48 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         auto dek = deriveDataKey(ezk, decoded.nonce, ez_id, coll_id);
         return std::make_shared<FixtureDecryptor>(std::move(dek));
     }
+
+ private:
+    std::string
+    registeredKey(int64_t ez_id, int64_t coll_id, bool read) const {
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        auto it = contexts_.find({ez_id, coll_id});
+        // Import registers the source EZ with collection ID 0. The source
+        // file's authenticated metadata supplies its original collection ID.
+        // This source context cannot authorize a target collection's writer.
+        if (it == contexts_.end() && read) {
+            it = contexts_.find({ez_id, 0});
+        }
+        if (it == contexts_.end()) {
+            throw std::runtime_error(
+                "fixture cipher has no registered collection context");
+        }
+        return it->second;
+    }
+
+    // Called under context_mutex_; no keys or EDEKs enter the observation log.
+    void
+    record(int64_t ez_id, int64_t coll_id, const char* operation) const {
+        const char* dir = std::getenv("MILVUS_CMEK_FIXTURE_CONTROL");
+        if (dir == nullptr || *dir == '\0') {
+            return;
+        }
+        const char* node = std::getenv("MILVUS_NODE_ID_FOR_TESTING");
+        auto node_id = node == nullptr ? 0 : std::stoll(node);
+        std::ofstream log(std::string(dir) + "/cpp-" +
+                              std::to_string(getpid()) + ".jsonl",
+                          std::ios::app);
+        log << "{\"pid\":" << getpid() << ",\"node_id\":" << node_id
+            << ",\"ez_id\":" << ez_id << ",\"collection_id\":" << coll_id
+            << ",\"operation\":\"" << operation << "\"}\n";
+        log.close();
+        if (!log) {
+            throw std::runtime_error("fixture cipher observation write failed");
+        }
+    }
+
+    mutable std::mutex context_mutex_;
+    std::map<std::pair<int64_t, int64_t>, std::string> contexts_;
 };
 
 }  // namespace

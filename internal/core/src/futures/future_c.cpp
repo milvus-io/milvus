@@ -78,6 +78,14 @@ executor_set_search_thread_num(int thread_num) {
 }
 
 extern "C" void
+executor_set_search_fanout_thread_core_coefficient(float coefficient) {
+    try {
+        milvus::futures::setSearchFanoutThreadCoreCoefficient(coefficient);
+    }
+    CGO_CATCH_AND_LOG("executor_set_search_fanout_thread_core_coefficient")
+}
+
+extern "C" void
 executor_set_load_thread_num(int thread_num) {
     try {
         milvus::futures::getLoadCPUExecutor()->setNumThreads(thread_num);

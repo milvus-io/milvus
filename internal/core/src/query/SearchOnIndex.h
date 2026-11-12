@@ -25,7 +25,6 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const index::IVectorReader& reader,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
-              milvus::OpContext* op_context,
               SearchResult& search_result,
               bool is_sparse = false);
 

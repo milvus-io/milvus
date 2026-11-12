@@ -16,8 +16,7 @@
 
 #pragma once
 
-#include "folly/coro/Task.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 
 namespace milvus {
 class OpContext;
@@ -25,34 +24,36 @@ class OpContext;
 
 namespace milvus::index {
 
+struct IndexCacheConfig;
+
 /**
- * @brief Family-internal contract for prepared state that can create readers.
+ * @brief Family-internal contract for prepared state that can create index owners.
  *
  * A concrete family's Create entry owns family validation and metadata parsing.
- * The returned loader owns that family's reusable state; this interface
+ * The returned loader owns that family's prepared state; this interface
  * exposes no storage-format properties or partially completed source-opening
  * steps.
  * External loading consumers use LoaderEntry::Load instead of this interface.
- * @note Load calls on one instance must be sequential. Keep the instance alive
- * until its task finishes. A returned reader owns its resources independently.
+ * @note Load consumes the prepared source once. A returned Index owns its cache
+ * and reload source independently.
  */
 class IndexLoader {
  public:
     virtual ~IndexLoader() = default;
 
     /**
-     * @brief Materialize a new reader from the already-opened index.
+     * @brief Consume the prepared source and create an index with its storage cache.
      * @param context Borrowed for this call only; nullptr uses default priority
-     * and inherited coroutine cancellation. Keep it alive through completion.
-     * @return A fully initialized reader owning its resources.
-     * @note On failure, issued I/O drains and temporary targets are cleaned up
-     * before the exception propagates. A later call may retry.
-     * @note A Task does not imply a thread hop. Synchronous transport executes
-     * on the calling thread; asynchronous implementations preserve I/O
-     * scheduling.
+     * and no request cancellation.
+     * @param cache Required storage cache policy, borrowed for this call.
+     * Construction consumes the prepared source, including on failure;
+     * do not reuse the loader afterward.
+     * @return An index owning its cache and reload source.
+     * @note Synchronous warmup may perform I/O before returning. Recreate the
+     * loader to retry construction after failure.
      */
-    virtual folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) = 0;
+    virtual IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) = 0;
 };
 
 }  // namespace milvus::index

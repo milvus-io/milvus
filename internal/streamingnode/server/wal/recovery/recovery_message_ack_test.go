@@ -83,7 +83,7 @@ func TestDataScannerReleasesOwnerAfterAllModulesObserve(t *testing.T) {
 	t.Cleanup(storage.metrics.Close)
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
+	msg := newAckTestRecoveryBarrier(t, 20, 2)
 
 	storage.observeMessage(context.Background(), msg)
 
@@ -110,7 +110,6 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	installRetainingManager(t, storage, module)
 	scheduler := &recordingAckTaskScheduler{}
 	storage.broadcastAck = newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
-	storage.broadcastAck.retryDelay = time.Millisecond
 	attempts := 0
 	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error {
 		attempts++
@@ -134,12 +133,12 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	module.handle.Release()
 	assert.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
 	first := scheduler.waitTask(t)
-	require.NoError(t, first.Execute(context.Background()))
+	require.ErrorIs(t, first.Execute(context.Background()), nodescheduler.ErrDelay)
 	assert.Equal(t, 1, attempts)
 	assert.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
 
-	retry := scheduler.waitTaskAfter(t, 1)
-	require.NoError(t, retry.Execute(context.Background()))
+	require.Len(t, scheduler.snapshot(), 1)
+	require.NoError(t, first.Execute(context.Background()))
 	assert.Equal(t, 2, attempts)
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, msg.LastConfirmedMessageID().EQ(completed.MessageID))
@@ -151,7 +150,7 @@ func TestReplayDoesNotRegressCheckpoint(t *testing.T) {
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
 
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newAckTestRecoveryBarrier(t, 20, 2))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, checkpoint.MessageID.EQ(completed.MessageID))
 	assert.Equal(t, checkpoint.TimeTick, completed.TimeTick)
@@ -173,7 +172,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	storage.SetLogger(mlog.With())
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	first := newAckTestTimeTickMessage(t, 20, 2)
+	first := newAckTestRecoveryBarrier(t, 20, 2)
 	storage.observeMessage(context.Background(), first)
 	module.handle.Release()
 	assert.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
@@ -199,8 +198,9 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(20), storage.pendingPersistSnapshot.Checkpoint.TimeTick)
 	firstEndOffset := uint64(first.EstimateSize())
 	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
+	assert.Equal(t, uint64(1), storage.pendingPersistSnapshot.LogicalEndMessageCount)
 
-	second := newAckTestTimeTickMessage(t, 30, 3)
+	second := newAckTestRecoveryBarrier(t, 30, 3)
 	storage.observeMessage(context.Background(), second)
 	module.handle.Release()
 	assert.Equal(t, uint64(30), storage.ackTracker.CompletedPoint().TimeTick)
@@ -213,12 +213,15 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.RecoveryTailBytes)
 	assert.Zero(t, metrics.BlockingBytes)
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.PublishLagBytes)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().PublishedMessages)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().RecoveryTailMessages)
 
 	followUp := storage.consumeDirtySnapshot()
 	require.NotNil(t, followUp)
 	assert.Equal(t, uint64(30), followUp.Checkpoint.TimeTick)
 	assert.True(t, second.LastConfirmedMessageID().EQ(followUp.Checkpoint.MessageID))
 	assert.Equal(t, firstEndOffset+uint64(second.EstimateSize()), followUp.LogicalEndOffset)
+	assert.Equal(t, uint64(2), followUp.LogicalEndMessageCount)
 }
 
 func TestPersistBatchMarksModuleSnapshotsAfterCompoundCommit(t *testing.T) {
@@ -393,6 +396,16 @@ func assertCheckpointPointEqual(t *testing.T, expected, actual *WALCheckpoint) {
 	assert.True(t, expected.MessageID.EQ(actual.MessageID))
 }
 
+func newAckTestRecoveryBarrier(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
+	t.Helper()
+	return message.NewRecoveryBarrierMessageBuilderV2().WithAllVChannel().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		MustBuildMutable().WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(lastConfirmed)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(lastConfirmed + 1))
+}
+
 func newAckTestTimeTickMessage(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
 	t.Helper()
 	mutable, err := message.NewTimeTickMessageBuilderV1().
@@ -450,10 +463,11 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
 		require.NoError(t, err)
 		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
+		require.Len(t, batch.Entries, 1)
 		observed = true
 	}).Build()
 	defer patch.UnPatch()
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newRecoveryTestDeleteMessage(t, "v1", 20))
 	require.True(t, observed)
 }
 

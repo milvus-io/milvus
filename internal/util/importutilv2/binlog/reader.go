@@ -307,6 +307,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 			return err
 		}
 		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
+	} else {
+		// schema describes the target collection. A plaintext backup must
+		// not inherit its encryption context.
+		rwOptions = append(rwOptions, storage.WithPluginContext(nil))
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
@@ -719,7 +723,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if r.readErr != nil {
 		return nil, r.readErr
 	}
-	insertData, err := storage.NewInsertDataWithMemoryTracking(r.schema)
+	insertData, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking().Build()
 	if err != nil {
 		return nil, err
 	}
@@ -776,7 +780,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		for _, field := range allFields {
 			fieldData := insertData.Data[field.GetFieldID()]
 			if fieldData == nil {
-				fieldData, err = storage.NewFieldDataWithMemoryTracking(field.GetDataType(), field, 1024)
+				fieldData, err = storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(1024).WithMemoryTracking().Build()
 				if err != nil {
 					return nil, err
 				}

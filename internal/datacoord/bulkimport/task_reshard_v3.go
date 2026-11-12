@@ -202,7 +202,10 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		PluginContext: meta.GetReadPluginContext(job.GetOptions()),
 		Plan:          plan,
 	}
-	meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		return
+	}
 	// PrepareRun: persist the intended run/node before the uncertain Create RPC.
 	// If we crash after the RPC was accepted but before this write, recovery can
 	// only see Pending and might re-dispatch the same run. Persisting first makes

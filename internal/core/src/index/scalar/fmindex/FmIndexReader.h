@@ -19,12 +19,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -75,7 +79,7 @@ enum class FmIndexStateOrigin {
 // backing mapping is unmapped.
 class FmIndexStorage final {
  public:
-    static std::shared_ptr<const FmIndexStorage>
+    static std::unique_ptr<FmIndexStorage>
     Create(std::shared_ptr<const FmIndexMappedFile> mapped_file,
            std::shared_ptr<const fmindex::FMIndex> engine,
            TargetBitmap null_bitmap,
@@ -108,6 +112,9 @@ class FmIndexStorage final {
     int64_t
     FileBytes() const;
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
  private:
     FmIndexStorage(std::shared_ptr<const FmIndexMappedFile> mapped_file,
                    std::shared_ptr<const fmindex::FMIndex> engine,
@@ -130,6 +137,40 @@ class FmIndexStorage final {
     int64_t file_bytes_{0};
 };
 
+/** @brief Owns one Fm storage version shared by request readers. */
+class FmIndex final : public IIndex,
+                      public std::enable_shared_from_this<FmIndex> {
+ public:
+    explicit FmIndex(std::shared_ptr<const FmIndexStorage> storage,
+                     double cost_ratio = 0.001);
+
+    FmIndex(std::shared_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot,
+            DataType value_type,
+            int64_t count,
+            double cost_ratio);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class FmIndexReader;
+    std::shared_ptr<const FmIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot;
+        DataType value_type;
+        int64_t count;
+    };
+    std::variant<std::shared_ptr<const FmIndexStorage>, CachedStorage> storage_;
+    double cost_ratio_;
+};
+
 class FmIndexReader final : public IIndexReaderBase,
                             public IPatternMatchReader,
                             public INullReader {
@@ -143,6 +184,11 @@ class FmIndexReader final : public IIndexReaderBase,
 
     // ---- IIndexReaderBase ----------------------------------------
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 
@@ -154,12 +200,6 @@ class FmIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     // ---- IPatternMatchReader -------------------------------------
 
@@ -187,12 +227,19 @@ class FmIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
+    friend class FmIndex;
+    FmIndexReader(std::shared_ptr<const FmIndex> index,
+                  milvus::OpContext* op_ctx);
+
     // O(|pattern|) occurrence count; -1 means "unknown, accept".
     int64_t
-    PatternCount(std::string_view pattern, PatternOp op) const;
+    PatternCount(const FmIndexStorage& storage,
+                 std::string_view pattern,
+                 PatternOp op) const;
 
     TargetBitmap
-    DocsToBitmap(const std::vector<uint64_t>& docs) const;
+    DocsToBitmap(const FmIndexStorage& storage,
+                 const std::vector<uint64_t>& docs) const;
 
     // Count-first guard for general LIKE (Match). Declines an empty pattern
     // and every pattern with no literal fragment (`%`, `%_%`), because phase 1
@@ -215,19 +262,21 @@ class FmIndexReader final : public IIndexReaderBase,
     };
 
     std::optional<RarestFragment>
-    RarestMatchFragment(std::string_view pattern) const;
+    RarestMatchFragment(const FmIndexStorage& storage,
+                        const std::vector<std::string>& parts) const;
 
     // Regex TRUE conditions decline routing. Otherwise select against current
     // index counts, using the same locate-only cost bound as LIKE.
     bool
     RegexGuardAccepts(std::string_view pattern) const;
 
-    std::shared_ptr<const FmIndexStorage> storage_;
+    std::shared_ptr<const FmIndex> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const FmIndexStorage> storage_;
 
-    // The cost ratio is fixed for this reader's lifetime. TODO: if live query
-    // configuration updates are required, inject a policy callback instead of
-    // assuming this construction-time value follows later changes.
-    double cost_ratio_{0.001};
+    const std::shared_ptr<const FmIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

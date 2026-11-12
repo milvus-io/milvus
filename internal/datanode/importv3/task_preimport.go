@@ -203,7 +203,7 @@ func (t *preImportTask) countFile(ctx context.Context, file *internalpb.ImportFi
 		if err := importv2.CheckRowsEqual(t.req.GetSchema(), data); err != nil {
 			return nil, err
 		}
-		if err := importv2.CheckStructArrayConsistency(t.req.GetSchema(), data); err != nil {
+		if err := importv2.NormalizeStructArrayFields(t.req.GetSchema(), data); err != nil {
 			return nil, err
 		}
 		rows := data.GetRowNum()
@@ -234,7 +234,7 @@ func (t *preImportTask) simpleRowCount(ctx context.Context, file *internalpb.Imp
 	}
 	switch fileType {
 	case importutilv2.FileTypeParquet:
-		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, t.cm, file.GetPaths()[0])
+		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, t.cm, t.req.GetSchema(), file.GetPaths()[0])
 		return rows, bytes, size, true, err
 	case importutilv2.FileTypeNumpy:
 		rows, bytes, size, err := numpy.NumRowsAndBytes(ctx, t.cm, t.req.GetSchema(), file.GetPaths())

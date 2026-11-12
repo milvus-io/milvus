@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -111,11 +110,11 @@ func TestOracleInsertConversionDoesNotBlockQueries(t *testing.T) {
 	started, finish := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(finish) })
 	defer unblock()
-	var original func(bm25Stats, *schemapb.CollectionSchema, walview.SegmentInsertMessage) error
-	patch := mockey.Mock(collectGrowingInsertStats).Origin(&original).To(func(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {
+	var original func(*oracleRuntime, context.Context, bm25Stats, walview.SegmentInsertMessage) error
+	patch := mockey.Mock((*oracleRuntime).collectGrowingInsertStats).Origin(&original).To(func(r *oracleRuntime, ctx context.Context, stats bm25Stats, insert walview.SegmentInsertMessage) error {
 		close(started)
 		<-finish
-		return original(stats, schema, insert)
+		return original(r, ctx, stats, insert)
 	}).Build()
 	defer patch.UnPatch()
 	inserted := make(chan struct{})

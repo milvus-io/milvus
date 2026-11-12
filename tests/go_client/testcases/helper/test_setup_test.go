@@ -166,6 +166,12 @@ func TestInheritDefaultConnectionConfig(t *testing.T) {
 }
 
 func TestManagementBaseURL(t *testing.T) {
+	t.Setenv("MILVUS_MANAGEMENT_URL", "")
+	t.Run("explicit isolated endpoint", func(t *testing.T) {
+		withTestAddr(t, "localhost:33500")
+		t.Setenv("MILVUS_MANAGEMENT_URL", " http://127.0.0.1:19093/ ")
+		require.Equal(t, "http://127.0.0.1:19093", managementBaseURL())
+	})
 	t.Run("uses host from grpc address", func(t *testing.T) {
 		withTestAddr(t, "http://milvus.example:19530")
 

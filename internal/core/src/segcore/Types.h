@@ -53,11 +53,10 @@ struct LoadIndexInfo {
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
-    std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-        cache_index;
+    index::IndexPtr index;
     // Pending factory, moved into the inventory entry during registration.
     IndexInventory::Factory lazy_index_factory;
-    // Reader metadata captured when the translator and cache slot are created.
+    // Query metadata captured when the Index is created.
     std::string index_family;
     DataType index_value_type{DataType::NONE};
     index::ReaderCaps index_caps;
@@ -104,7 +103,7 @@ struct LoadIndexInfo {
           index_store_path_version(other.index_store_path_version),
           index_params(other.index_params),
           index_files(other.index_files),
-          cache_index(nullptr),
+          index(nullptr),
           lazy_index_factory(nullptr),
           index_family(other.index_family),
           index_value_type(other.index_value_type),
@@ -138,7 +137,7 @@ struct LoadIndexInfo {
             index_store_path_version = other.index_store_path_version;
             index_params = other.index_params;
             index_files = other.index_files;
-            cache_index = nullptr;
+            index = nullptr;
             lazy_index_factory = nullptr;
             index_family = other.index_family;
             index_value_type = other.index_value_type;

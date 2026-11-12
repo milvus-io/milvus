@@ -67,7 +67,6 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	dm := &index.IndexTestMetas{}
 	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker, index.LoadIndexTestMetas(s.catalog, dm))
@@ -103,7 +102,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	dm := &index.IndexTestMetas{}
 	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, index.LoadIndexTestMetas(catalog, dm))
@@ -169,7 +167,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	dm := &index.IndexTestMetas{}
 	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, index.LoadIndexTestMetas(catalog, dm))
@@ -222,7 +219,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	dm := &index.IndexTestMetas{}
 	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, index.LoadIndexTestMetas(catalog, dm))

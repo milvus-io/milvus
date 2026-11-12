@@ -68,6 +68,24 @@ func (c *catalog) ListVChannel(ctx context.Context, pchannelName string) ([]*str
 	return c.newVChannelMetaFromKV(prefix, keys, values)
 }
 
+func (c *catalog) GetVChannelBase(ctx context.Context, pchannelName, vchannelName string) (*streamingpb.VChannelMeta, error) {
+	value, err := c.metaKV.Load(ctx, buildVChannelKey(pchannelName, vchannelName))
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta := &streamingpb.VChannelMeta{}
+	if err := proto.Unmarshal([]byte(value), meta); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "invalid VChannel base metadata for %s/%s", pchannelName, vchannelName)
+	}
+	if meta.GetVchannel() != vchannelName {
+		return nil, merr.WrapErrDataIntegrityMsg("VChannel base metadata mismatch: requested %s, got %s", vchannelName, meta.GetVchannel())
+	}
+	return meta, nil
+}
+
 // newVChannelMetaFromKV groups the vchannel meta by the vchannel name.
 func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []string) ([]*streamingpb.VChannelMeta, error) {
 	keys = removePrefix(prefix, keys)

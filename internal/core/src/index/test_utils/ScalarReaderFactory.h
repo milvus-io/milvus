@@ -31,7 +31,6 @@
 #include <vector>
 
 #include "index/contracts/Registry.h"
-#include "index/contracts/build/IReaderConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/IPatternMatchReader.h"

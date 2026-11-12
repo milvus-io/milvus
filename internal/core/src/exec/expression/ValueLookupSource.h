@@ -30,13 +30,13 @@
 namespace milvus::exec {
 
 // One expression-local value source. Resolving a sealed lazy index may read
-// artifact metadata; the exact entry is then pinned. An empty pin means the
-// caller scans raw column data.
-class PinnedValueLookup final {
+// artifact metadata; the selected entry then creates a reader. Without a reader,
+// the caller scans raw column data.
+class ValueLookupSource final {
  public:
-    PinnedValueLookup() = default;
+    ValueLookupSource() = default;
 
-    PinnedValueLookup(const segcore::SegmentInternalInterface* segment,
+    ValueLookupSource(const segcore::SegmentInternalInterface* segment,
                       OpContext* op_ctx,
                       FieldId field_id,
                       DataType data_type,
@@ -59,18 +59,18 @@ class PinnedValueLookup final {
             field_id.get());
         const index::IIndexReaderBase* reader = nullptr;
         if (segment->type() == SegmentType::Growing) {
-            growing_pin_ = segment->PinGrowingIndex(field_id);
+            growing_pin_ = segment->PinGrowingIndex(op_ctx, field_id);
             if (!growing_pin_) {
                 return;
             }
             reader = &growing_pin_.Reader();
             covered_end_ = std::min(active_count, growing_pin_.CoveredRowEnd());
         } else {
-            root_pin_ = segment->PinIndex(op_ctx, *decision.key);
-            if (!root_pin_) {
+            index_reader_ = segment->CreateIndexReader(op_ctx, *decision.key);
+            if (!index_reader_) {
                 return;
             }
-            reader = root_pin_.get();
+            reader = index_reader_.get();
             covered_end_ = active_count;
         }
         AssertInfo(segcore::SameCaps(entry->caps, reader->Caps()),
@@ -81,23 +81,23 @@ class PinnedValueLookup final {
         reader_ = reader;
     }
 
-    PinnedValueLookup(const PinnedValueLookup&) = delete;
-    PinnedValueLookup&
-    operator=(const PinnedValueLookup&) = delete;
-    PinnedValueLookup(PinnedValueLookup&& other) noexcept
-        : root_pin_(std::move(other.root_pin_)),
+    ValueLookupSource(const ValueLookupSource&) = delete;
+    ValueLookupSource&
+    operator=(const ValueLookupSource&) = delete;
+    ValueLookupSource(ValueLookupSource&& other) noexcept
+        : index_reader_(std::move(other.index_reader_)),
           growing_pin_(std::move(other.growing_pin_)),
           reader_(std::exchange(other.reader_, nullptr)),
           covered_end_(std::exchange(other.covered_end_, 0)) {
     }
-    PinnedValueLookup&
-    operator=(PinnedValueLookup&& other) noexcept {
+    ValueLookupSource&
+    operator=(ValueLookupSource&& other) noexcept {
         if (this == &other) {
             return *this;
         }
         reader_ = nullptr;
         covered_end_ = 0;
-        root_pin_ = std::move(other.root_pin_);
+        index_reader_ = std::move(other.index_reader_);
         growing_pin_ = std::move(other.growing_pin_);
         reader_ = std::exchange(other.reader_, nullptr);
         covered_end_ = std::exchange(other.covered_end_, 0);
@@ -178,8 +178,8 @@ class PinnedValueLookup final {
         }
     }
 
-    // Reader pointers are non-owning and are destroyed before both pins.
-    segcore::IndexPin root_pin_;
+    // Borrowed interfaces are destroyed before their owning reader or snapshot.
+    index::IIndexReaderBasePtr index_reader_;
     index::GrowingIndexSnapshotPin growing_pin_;
     const index::IIndexReaderBase* reader_{nullptr};
     int64_t covered_end_{0};
