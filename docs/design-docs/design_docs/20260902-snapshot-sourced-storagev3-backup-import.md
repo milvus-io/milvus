@@ -1020,7 +1020,7 @@ The V1 binlog and V3 snapshot readers use the same field-selection function:
 
 Source and target AutoID settings need not match: both PreImport and Import use
 the existing backup behavior that preserves source PKs. Stored function outputs
-are imported without rerunning functions. Source nullable/default definitions,
+are imported without rerunning functions. Source default definitions,
 partition/clustering markers, collection properties, shard counts and indexes
 are not restored or compared for equality. Target routing and writing remain
 the standard Import path. Present NULL values and decoding failures retain
@@ -1036,7 +1036,9 @@ unchanged. StorageV2's legacy packed-binlog path is not modified by this change.
 
 DataCoord checks that source/target schemas exist and the collections are
 eligible, but does not require schema identity or compare field names. For
-matching physical FieldIDs, it rejects different data types when either field
+matching physical FieldIDs, it requires equal `nullable` settings, even when the
+target has a default. Missing fields retain the existing filling rules. It
+rejects different data types when either field
 is a vector (including ArrayOfVector). For the same fixed-dimensional vector
 type, it rejects different dimensions and ArrayOfVector element types before
 opening the native reader. Equal-width
@@ -1051,11 +1053,10 @@ promise that every segment can be decoded. A missing or invalid target dimension
 is classified as a system error because the target schema comes from collection
 metadata; malformed source dimensions retain input-error classification.
 
-Manifest-backed Import validates decoded VarChar values against the target
-`max_length` in UTF-8 bytes, after stored-NULL/default conversion and before
-timestamp/delete filtering. A wider source declaration alone is not rejected
-when its actual values fit the target limit. Both PreImport and Import use this
-reader check.
+For matching VarChar fields, DataCoord requires the source `max_length` to
+be no greater than the target `max_length`. A narrower target is rejected
+at admission and Pending preparation, even when the stored values would fit.
+The reader does not add per-value length checks.
 
 Both phases retain the full target task schema while projecting only the
 reader schema. Filling occurs at the point the existing pipeline needs it:
@@ -1085,15 +1086,15 @@ For ordinary fields, whole-column absence and a stored NULL are separate paths:
 | Physical column absent | Has a default | Omit from reader; fill target default later, with the PreImport routing exception above |
 | Physical column absent | Nullable, no default | Omit from reader; Import fills NULL |
 | Physical column absent | Required, no default | Reader initialization fails |
-| Column present, row is NULL | Has a default | Shared deserializer substitutes the target default in both phases |
+| Column present, row is NULL | Nullable, has a default | Shared deserializer substitutes the target default in both phases |
 | Column present, row is NULL | Nullable, no default | Preserve NULL |
 | Column present, row is NULL | Non-nullable, no default | Reject during row conversion |
 
+Source/target nullable mismatches are rejected at admission and Pending
+preparation; a target default does not permit importing a nullable source into a
+non-nullable target. The native reader uses the target schema unchanged.
 `ValueDeserializerWithSchema` applies the present-NULL rule before timestamp
-and delete filtering. For manifest reads, a separate native read schema makes
-default-valued fields nullable so Vortex can return stored NULLs for that
-conversion. The logical reader and target schemas retain their original
-nullability. A non-NULL stored value must decode as the target type;
+and delete filtering. A non-NULL stored value must decode as the target type;
 it is not replaced merely because the target has a default. Missing dynamic
 data is filled with `{}`; StructArray presence retains the shared backup rules
 described above.

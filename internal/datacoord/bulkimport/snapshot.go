@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -776,13 +777,13 @@ func prepareSnapshotImportOptions(target, source *schemapb.CollectionSchema, opt
 	// Renaming a field does not remap its data; callers must retain the intended
 	// field-ID correspondence, just as when importing binlog backups. Optional
 	// target columns, AutoID and target routing use the existing Import behavior.
-	if err := validateSnapshotVectorSchema(target, source); err != nil {
+	if err := validateSnapshotSchema(target, source); err != nil {
 		return nil, err
 	}
 	return options, nil
 }
 
-func validateSnapshotVectorSchema(target, source *schemapb.CollectionSchema) error {
+func validateSnapshotSchema(target, source *schemapb.CollectionSchema) error {
 	sourceFields := make(map[int64]*schemapb.FieldSchema)
 	for _, field := range typeutil.GetAllFieldSchemas(source) {
 		sourceFields[field.GetFieldID()] = field
@@ -791,6 +792,27 @@ func validateSnapshotVectorSchema(target, source *schemapb.CollectionSchema) err
 		sourceField := sourceFields[field.GetFieldID()]
 		if sourceField == nil {
 			continue // Missing columns retain reader validation and default filling.
+		}
+		if sourceField.GetNullable() != field.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetNullable(), field.GetNullable())
+		}
+		if sourceField.GetDataType() == schemapb.DataType_VarChar && field.GetDataType() == schemapb.DataType_VarChar {
+			sourceLength, err := parameterutil.GetMaxLength(sourceField)
+			if err != nil {
+				return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+			}
+			targetLength, err := parameterutil.GetMaxLength(field)
+			if err != nil {
+				return merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+			}
+			if sourceLength > targetLength {
+				return merr.WrapErrImportFailedMsg(
+					"source max_length exceeds target for field %s (ID %d): source %d, target %d",
+					field.GetName(), field.GetFieldID(), sourceLength, targetLength)
+			}
+			continue
 		}
 		if sourceField.GetDataType() != field.GetDataType() &&
 			(typeutil.IsVectorType(sourceField.GetDataType()) || typeutil.IsVectorType(field.GetDataType())) {

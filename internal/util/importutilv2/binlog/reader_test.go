@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -2092,7 +2091,6 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 				wantFirst    any
 				wantErr      bool
 			}{
-				{name: "required_default", defaultValue: defaultValue, wantFirst: int64(42)},
 				{name: "nullable_default", nullable: true, defaultValue: defaultValue, wantFirst: int64(42)},
 				{name: "nullable_no_default", nullable: true},
 				{name: "required_no_default", wantErr: true},
@@ -2114,7 +2112,7 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 					for {
 						data, err := r.Read()
 						if tc.wantErr {
-							require.Error(t, err, "stored NULL cannot satisfy a required field without a default")
+							require.Error(t, err, "stored NULL cannot be read with a non-nullable schema")
 							require.NotErrorIs(t, err, io.EOF)
 							require.Nil(t, data)
 							return
@@ -2135,132 +2133,35 @@ func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
 	}
 }
 
-func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
+func TestStorageV3Reader_DeserializeFailureClosesReader(t *testing.T) {
 	paramtable.Init()
-	for _, tc := range []struct {
-		name       string
-		value      any
-		defaultVal string
-		maxLength  string
-		initErr    string
-		wantErr    string
-	}{
-		{name: "empty", value: ""},
-		{name: "ascii_boundary", value: "abcdef"},
-		{name: "utf8_boundary", value: "中文"},
-		{name: "ascii_oversized", value: "abcdefg", wantErr: "exceeds max_length(6)"},
-		{name: "utf8_oversized", value: "中文a", wantErr: "exceeds max_length(6)"},
-		{name: "nullable"},
-		{name: "default", defaultVal: "中文"},
-		{name: "invalid_limit", value: "a", maxLength: "invalid", initErr: "invalid max length"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{
-					FieldID: 101, Name: "source_text", DataType: schemapb.DataType_VarChar, Nullable: true,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
-				},
-			}})
-			target := typeutil.Clone(source)
-			text := typeutil.GetField(target, 101)
-			text.Name = "renamed_text"
-			text.TypeParams[0].Value = "6"
-			if tc.maxLength != "" {
-				text.TypeParams[0].Value = tc.maxLength
-			}
-			if tc.defaultVal != "" {
-				text.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: tc.defaultVal}}
-				text.Nullable = false
-			}
-			// Keep a valid row before the boundary case: a failed batch must not
-			// expose that prefix. The source declaration is wider than the target.
-			record, err := storage.ValueSerializer([]*storage.Value{
-				{Value: map[int64]any{0: int64(1), 1: int64(100), 100: int64(1), 101: "a"}},
-				{Value: map[int64]any{0: int64(2), 1: int64(100), 100: int64(2), 101: tc.value}},
-			}, source)
-			require.NoError(t, err)
-			owner := &storageV3DeltaRecordReader{record: record}
-			defer owner.Close()
-			patchStorageV3TestFieldIDs(t, 100, 101)
-			fragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment(nil), nil).Build()
-			defer fragments.UnPatch()
-			deltas := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
-			defer deltas.UnPatch()
-			open := mockey.Mock(storage.NewManifestRecordReader).To(func(_ context.Context, _ string,
-				readSchema *schemapb.CollectionSchema, _ ...storage.RwOption,
-			) (storage.RecordReader, error) {
-				require.True(t, typeutil.GetField(readSchema, 101).GetNullable(), "native reader must preserve stored NULLs")
-				require.False(t, typeutil.GetField(readSchema, 100).GetNullable(), "required fields without defaults stay required")
-				return owner, nil
-			}).Build()
-			defer open.UnPatch()
-			manifest := packed.MarshalManifestPath("snapshot/segment/10", 7)
-			r, err := NewStorageV3ManifestReader(context.Background(), nil, target, &indexpb.StorageConfig{},
-				manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, nil)
-			if tc.initErr != "" {
-				require.ErrorIs(t, err, merr.ErrParameterInvalid)
-				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-				require.ErrorContains(t, err, "renamed_text")
-				require.ErrorContains(t, err, tc.initErr)
-				require.Nil(t, r)
-				return
-			}
-			require.NoError(t, err)
-			defer r.Close()
-			require.Equal(t, tc.defaultVal == "", typeutil.GetField(target, 101).GetNullable(), "do not mutate target nullability")
-			data, err := r.Read()
-			if tc.wantErr != "" {
-				require.ErrorIs(t, err, merr.ErrParameterInvalid)
-				require.Equal(t, merr.InputError, merr.GetErrorType(err))
-				require.ErrorContains(t, err, tc.wantErr)
-				require.Nil(t, data)
-				require.Nil(t, r.dr, "failed read must immediately close the native reader")
-				require.Nil(t, owner.record, "failed read must release the borrowed Arrow record")
-				next, nextErr := r.Read()
-				require.Nil(t, next)
-				require.Same(t, err, nextErr, "retry must not skip the rejected batch")
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, 2, data.GetRowNum())
-			want := tc.value
-			if tc.defaultVal != "" {
-				want = tc.defaultVal
-			}
-			require.Equal(t, want, data.Data[101].GetRow(1))
-		})
-	}
-}
-
-func TestStorageV3Reader_VarcharLimitAcrossBatches(t *testing.T) {
-	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+	source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{
-			FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "6"}},
-		},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_VarChar},
 	}})
-	limitCalls := 0
-	limit := mockey.Mock(parameterutil.GetMaxLength).To(func(field *schemapb.FieldSchema) (int64, error) {
-		require.Equal(t, int64(101), field.GetFieldID())
-		limitCalls++
-		return 6, nil
-	}).Build()
-	defer limit.UnPatch()
-
-	deserialize, err := newStorageV3Deserializer(schema)
+	record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{
+		0: int64(1), 1: int64(100), 100: int64(1), 101: "invalid int64",
+	}}}, source)
 	require.NoError(t, err)
-	require.Equal(t, 1, limitCalls)
-	for _, value := range []string{"abcdef", "中文"} {
-		record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{0: int64(1), 1: int64(100), 100: int64(1), 101: value}}}, schema)
-		require.NoError(t, err)
-		defer record.Release()
-		values := make([]*storage.Value, 1)
-		require.NoError(t, deserialize(record, values))
-		require.Equal(t, value, values[0].Value.(map[int64]any)[101])
-	}
-	require.Equal(t, 1, limitCalls, "parse target length once across record batches")
+	owner := &storageV3DeltaRecordReader{record: record}
+	defer owner.Close()
+	target := typeutil.Clone(source)
+	typeutil.GetField(target, 101).DataType = schemapb.DataType_Int64
+	r := newReader(context.Background(), nil, target, nil, storage.StorageV3, 1024, "")
+	r.dr = storage.NewDeserializeReader(owner, func(record storage.Record, values []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(record, values, target, true)
+	})
+	defer r.Close()
+
+	data, err := r.Read()
+	require.Error(t, err)
+	require.NotErrorIs(t, err, io.EOF)
+	require.Nil(t, data)
+	require.Nil(t, r.dr)
+	require.Nil(t, owner.record, "failed read must release the borrowed Arrow record")
+	next, nextErr := r.Read()
+	require.Nil(t, next)
+	require.Same(t, err, nextErr, "retry must not skip the rejected batch")
 }
 
 func TestStorageV3Reader_ManifestFieldSelectionErrors(t *testing.T) {
