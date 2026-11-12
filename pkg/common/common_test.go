@@ -386,6 +386,42 @@ func TestIsDisableFuncRuntimeCheck(t *testing.T) {
 	assert.False(t, disable)
 }
 
+func TestGetCollectionSegmentMaxRows(t *testing.T) {
+	kv := func(value string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: "10"}, {Key: CollectionSegmentMaxRowsKey, Value: value}}
+	}
+	// not set
+	maxRows, exist, err := GetCollectionSegmentMaxRows([]*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: "10"}})
+	assert.NoError(t, err)
+	assert.False(t, exist)
+	assert.Zero(t, maxRows)
+	maxRows, exist, err = GetCollectionSegmentMaxRowsFromMap(nil)
+	assert.NoError(t, err)
+	assert.False(t, exist)
+	assert.Zero(t, maxRows)
+
+	for value, expect := range map[string]int64{"0": 0, "1": 1, "4000000": 4000000} {
+		maxRows, exist, err = GetCollectionSegmentMaxRows(kv(value))
+		assert.NoError(t, err, value)
+		assert.True(t, exist, value)
+		assert.Equal(t, expect, maxRows, value)
+		maxRows, exist, err = GetCollectionSegmentMaxRowsFromMap(map[string]string{CollectionSegmentMaxRowsKey: value})
+		assert.NoError(t, err, value)
+		assert.True(t, exist, value)
+		assert.Equal(t, expect, maxRows, value)
+	}
+
+	for _, value := range []string{"-1", "", "1.5", "4e6", "many", "100000000000000000000"} {
+		_, exist, err = GetCollectionSegmentMaxRows(kv(value))
+		assert.True(t, exist, value)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid, value)
+		assert.ErrorContains(t, err, CollectionSegmentMaxRowsKey, value)
+		_, exist, err = GetCollectionSegmentMaxRowsFromMap(map[string]string{CollectionSegmentMaxRowsKey: value})
+		assert.True(t, exist, value)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid, value)
+	}
+}
+
 func TestGetCollectionTTL(t *testing.T) {
 	type testCase struct {
 		tag       string

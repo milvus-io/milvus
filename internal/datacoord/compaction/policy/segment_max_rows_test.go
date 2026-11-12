@@ -21,8 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -34,27 +32,23 @@ func TestGetSegmentMaxRows(t *testing.T) {
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "4000000"))
 	t.Cleanup(func() { params.Reset(params.DataCoordCfg.SegmentMaxRows.Key) })
 
-	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
-	noVector := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		pk,
-		{FieldID: 101, Name: "doc", DataType: schemapb.DataType_JSON},
-	}}
-	lowDim := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, {
-		FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
-	}}}
-
-	// The cap follows the presence of a vector field, not the row size: a
-	// JSON field does not lift it and a low dimensional vector does not
-	// bring it in.
-	require.Equal(t, int64(4000000), GetSegmentMaxRows(noVector))
-	require.Equal(t, int64(0), GetSegmentMaxRows(lowDim))
-	require.Equal(t, int64(0), GetSegmentMaxRows(nil))
+	// The cap does not depend on the schema: it is the configured value
+	// unless the collection property overrides it.
+	require.Equal(t, int64(4000000), GetSegmentMaxRows(nil))
+	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionTTLConfigKey: "10"}))
+	require.Equal(t, int64(1000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "1000000"}))
+	require.Equal(t, int64(9000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "9000000"}))
+	// 0 turns the cap off for the collection
+	require.Equal(t, int64(0), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "0"}))
+	// a property that does not parse is ignored
+	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "-1"}))
+	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "many"}))
 
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "0"))
-	require.Equal(t, int64(0), GetSegmentMaxRows(noVector))
+	require.Equal(t, int64(0), GetSegmentMaxRows(nil))
+	require.Equal(t, int64(1000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "1000000"}))
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "-1"))
-	require.Equal(t, int64(0), GetSegmentMaxRows(noVector))
+	require.Equal(t, int64(0), GetSegmentMaxRows(nil))
 }
 
 func TestRowCapSizing(t *testing.T) {

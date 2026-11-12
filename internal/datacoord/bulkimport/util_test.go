@@ -2134,9 +2134,9 @@ func TestGetV3TaskProgressesFromReshardHashedRows(t *testing.T) {
 	assert.Empty(t, byName["[a.parquet]"].GetCompleteTime())
 }
 
-// A collection without a vector field imports segments of about
-// dataCoord.segment.maxRows rows: the byte target is lowered to maxRows rows of
-// the job's measured row size. Other collections keep the byte target.
+// An import of narrow rows produces segments of about the row cap: the byte
+// target is lowered to maxRows rows of the job's measured row size, whatever
+// the schema. Wide rows keep the byte target.
 func TestImportUtil_CapSegmentMaxSizeByRows(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
@@ -2160,17 +2160,23 @@ func TestImportUtil_CapSegmentMaxSizeByRows(t *testing.T) {
 	}
 
 	// 44 M rows of 12 B: 4 M rows are 48 MB
-	require.Equal(t, int64(48_000_000), CapSegmentMaxSizeByRows(newJob(nil, age), gb, 44_000_000*12, 44_000_000))
+	require.Equal(t, int64(48_000_000), CapSegmentMaxSizeByRows(newJob(nil, age), nil, gb, 44_000_000*12, 44_000_000))
 	// 1 M rows of 2 KB: 4 M rows would be 8 GB, the byte target stays
-	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 1_000_000*2048, 1_000_000))
-	// a vector field: no row cap
-	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age, vec), gb, 44_000_000*44, 44_000_000))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), nil, gb, 1_000_000*2048, 1_000_000))
+	// a vector field does not change the rule: 44 B rows are capped, 2 KB rows are not
+	require.Equal(t, int64(4_000_000*44), CapSegmentMaxSizeByRows(newJob(nil, age, vec), nil, gb, 44_000_000*44, 44_000_000))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age, vec), nil, gb, 1_000_000*2048, 1_000_000))
 	// nothing measured yet
-	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 0, 0))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), nil, gb, 0, 0))
 	// an L0 import carries deletes, not rows
 	l0 := []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}
-	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(l0, age), gb, 44_000_000*12, 44_000_000))
-	// maxRows 0 disables the cap
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(l0, age), nil, gb, 44_000_000*12, 44_000_000))
+	// the collection property overrides the configuration; 0 turns the cap off
+	prop := func(v string) map[string]string { return map[string]string{common.CollectionSegmentMaxRowsKey: v} }
+	require.Equal(t, int64(12_000_000), CapSegmentMaxSizeByRows(newJob(nil, age), prop("1000000"), gb, 44_000_000*12, 44_000_000))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), prop("0"), gb, 44_000_000*12, 44_000_000))
+	// maxRows 0 disables the cap, a collection property still applies
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "0"))
-	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 44_000_000*12, 44_000_000))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), nil, gb, 44_000_000*12, 44_000_000))
+	require.Equal(t, int64(12_000_000), CapSegmentMaxSizeByRows(newJob(nil, age), prop("1000000"), gb, 44_000_000*12, 44_000_000))
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func IsCollectionAutoCompactionEnabled(coll *meta.CollectionInfo) bool {
@@ -106,18 +105,23 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
-// GetSegmentMaxRows returns the number of rows a segment of the collection is
-// capped at, or 0 when no cap applies.
+// GetSegmentMaxRows returns the number of rows a segment of a collection with
+// the given properties is capped at, or 0 when no cap applies.
 //
-// Segments are sized in bytes. A vector field bounds the row count as a side
-// effect; without one a segment of maxSize bytes holds tens of millions of
-// rows, and the per-segment serial work (scalar index build, delete replay at
-// load) grows with the row count. So a collection without a vector field is
-// additionally capped at dataCoord.segment.maxRows rows per segment. The cap
-// counts rows; it does not depend on any estimate of the row size.
-func GetSegmentMaxRows(schema *schemapb.CollectionSchema) int64 {
-	if schema == nil || typeutil.HasVectorField(schema) {
-		return 0
+// Segments are sized in bytes. A segment of maxSize bytes of narrow rows holds
+// tens of millions of rows, and the per-segment serial work (scalar index
+// build, delete replay at load) grows with the row count. So a segment is full
+// at maxSize bytes or at this many rows, whichever comes first. The cap counts
+// rows; it does not depend on the schema or on any estimate of the row size,
+// so it does not change when a vector field is added or dropped: wide rows
+// reach the byte limit first and are not affected by it.
+//
+// The collection property collection.segment.maxRows overrides
+// dataCoord.segment.maxRows; 0 in either turns the cap off. A property that
+// does not parse is ignored (it is rejected when it is set).
+func GetSegmentMaxRows(properties map[string]string) int64 {
+	if maxRows, exist, err := common.GetCollectionSegmentMaxRowsFromMap(properties); exist && err == nil {
+		return maxRows
 	}
 	return max(Params.DataCoordCfg.SegmentMaxRows.GetAsInt64(), 0)
 }

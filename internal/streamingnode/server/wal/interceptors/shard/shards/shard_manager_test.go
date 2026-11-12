@@ -710,6 +710,40 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(2), ver)
 
+	// Test 4b: an AlterCollection that changes only the properties replaces
+	// the properties of the schema snapshot, and with them the row cap of the
+	// collection. It is not a schema change: nothing is flushed and the
+	// schema version stays.
+	assert.Equal(t, int64(-1), m.collections[100].MaxRowsOverride())
+	alterProperties := func(timetick uint64, properties ...*commonpb.KeyValuePair) {
+		msg := message.MustAsMutableAlterCollectionMessageV2(
+			message.NewAlterCollectionMessageBuilderV2().
+				WithVChannel("v_schema").
+				WithHeader(&message.AlterCollectionMessageHeader{
+					CollectionId: 100,
+					UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionProperties}},
+				}).
+				WithBody(&message.AlterCollectionMessageBody{
+					Updates: &message.AlterCollectionMessageUpdates{Properties: properties},
+				}).
+				MustBuildMutable().
+				WithTimeTick(timetick),
+		)
+		flushed, err := m.AlterCollection(msg)
+		assert.NoError(t, err)
+		assert.Empty(t, flushed)
+	}
+	alterProperties(510, &commonpb.KeyValuePair{Key: common.CollectionSegmentMaxRowsKey, Value: "1000000"})
+	assert.Equal(t, int64(1000000), m.collections[100].MaxRowsOverride())
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 100, SchemaVersion: proto.Int32(2)})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), ver)
+	alterProperties(520, &commonpb.KeyValuePair{Key: common.CollectionSegmentMaxRowsKey, Value: "0"})
+	assert.Equal(t, int64(0), m.collections[100].MaxRowsOverride())
+	// the property is deleted: back to dataCoord.segment.maxRows
+	alterProperties(530)
+	assert.Equal(t, int64(-1), m.collections[100].MaxRowsOverride())
+
 	// Test 5: AlterCollection on non-existent collection
 	alterMsgBad := message.MustAsMutableAlterCollectionMessageV2(
 		message.NewAlterCollectionMessageBuilderV2().

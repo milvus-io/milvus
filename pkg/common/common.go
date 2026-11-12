@@ -400,11 +400,15 @@ const (
 	CollectionTTLConfigKey          = "collection.ttl.seconds"
 	CollectionAutoReleaseIdleTTLKey = "collection.autorelease.ttl.seconds"
 	CollectionAutoCompactionKey     = "collection.autocompaction.enabled"
-	CollectionDescription           = "collection.description"
-	CollectionExternalSource        = "collection.external_source"
-	CollectionExternalSpec          = "collection.external_spec"
-	CollectionTTLFieldKey           = "ttl_field"
-	MaxTTLSeconds                   = 3155760000 // 100 years
+	// CollectionSegmentMaxRowsKey overrides dataCoord.segment.maxRows for one
+	// collection: the number of rows a segment of the collection is full at,
+	// 0 for no row limit.
+	CollectionSegmentMaxRowsKey = "collection.segment.maxRows"
+	CollectionDescription       = "collection.description"
+	CollectionExternalSource    = "collection.external_source"
+	CollectionExternalSpec      = "collection.external_spec"
+	CollectionTTLFieldKey       = "ttl_field"
+	MaxTTLSeconds               = 3155760000 // 100 years
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -1117,6 +1121,38 @@ func GetCollectionAutoReleaseIdleTTL(kvs []*commonpb.KeyValuePair) (time.Duratio
 		ttl = time.Duration(seconds) * time.Second
 	}
 	return ttl, nil
+}
+
+// GetCollectionSegmentMaxRows reads the collection.segment.maxRows property:
+// the per collection override of dataCoord.segment.maxRows. exist is false
+// when the property is not set. The value must be a non-negative integer; 0
+// turns the row limit off for the collection.
+func GetCollectionSegmentMaxRows(kvs []*commonpb.KeyValuePair) (maxRows int64, exist bool, err error) {
+	value, exist := GetStringValue(kvs, CollectionSegmentMaxRowsKey)
+	if !exist {
+		return 0, false, nil
+	}
+	maxRows, err = parseCollectionSegmentMaxRows(value)
+	return maxRows, true, err
+}
+
+// GetCollectionSegmentMaxRowsFromMap is GetCollectionSegmentMaxRows for a
+// property map.
+func GetCollectionSegmentMaxRowsFromMap(kvs map[string]string) (maxRows int64, exist bool, err error) {
+	value, exist := kvs[CollectionSegmentMaxRowsKey]
+	if !exist {
+		return 0, false, nil
+	}
+	maxRows, err = parseCollectionSegmentMaxRows(value)
+	return maxRows, true, err
+}
+
+func parseCollectionSegmentMaxRows(value string) (int64, error) {
+	maxRows, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || maxRows < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("%s must be a non-negative integer, got %q", CollectionSegmentMaxRowsKey, value)
+	}
+	return maxRows, nil
 }
 
 func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {

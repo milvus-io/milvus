@@ -480,7 +480,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 
 	expectedSegmentSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	maxRows := policy.GetSegmentMaxRows(collection.Schema)
+	maxRows := policy.GetSegmentMaxRows(collection.Properties)
 	totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(collection, cv, expectedSegmentSize, maxRows)
 	if err != nil {
 		log.Warn(ctx, "Failed to calculate cluster compaction config fail", mlog.Err(err))
@@ -555,7 +555,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	}
 
 	expectedSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	maxRows := policy.GetSegmentMaxRows(collection.Schema)
+	maxRows := policy.GetSegmentMaxRows(collection.Properties)
 	if triggerType.GetCompactionType() == datapb.CompactionType_SortCompaction {
 		// A sort compaction rewrites one segment into one segment; its
 		// writer does not split, so the plan carries no row limit.
@@ -800,7 +800,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		totalRows += s.NumOfRows
 	}
 	expectedSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	maxRows := policy.GetSegmentMaxRows(collection.Schema)
+	maxRows := policy.GetSegmentMaxRows(collection.Properties)
 	totalSize := policy.RowCappedSize(cv.GetTotalSize(), totalRows, expectedSize, maxRows)
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
 	if err != nil {
