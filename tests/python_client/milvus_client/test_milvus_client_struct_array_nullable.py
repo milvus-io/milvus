@@ -32,7 +32,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from common.struct_array_data import vector_score_tolerance
+from common.struct_array_data import normalized_vector, vector_score_tolerance
 from minio import Minio
 from minio.error import S3Error
 from pymilvus import AnnSearchRequest, DataType, WeightedRanker
@@ -2999,11 +2999,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 STRUCT_FIELD: gen_profile(3),
             },
         ]
-        # Distinct unit vectors give each probe a unique COSINE match; gen_vector's
-        # nearly collinear values are unsuitable for asserting exact top-1 IDs.
-        for row_index, row in enumerate(non_empty_rows):
-            for offset, element in enumerate(row[STRUCT_FIELD]):
-                element[VECTOR_SUBFIELD] = gen_unit_vector(row_index * 2 + offset, VECTOR_DIM)
         control_rows = [missing_profile_row, empty_profile_row, *non_empty_rows]
         filler_rows = gen_vector_index_filler_rows(
             10000,
@@ -3017,10 +3012,17 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 {
                     **element,
                     TAG_SUBFIELD: f"{element[TAG_SUBFIELD]}_1",
-                    VECTOR_SUBFIELD: gen_vector(row[PK_FIELD] + 1, VECTOR_DIM),
                 }
             )
         sealed_rows = control_rows + filler_rows
+        # Use the same seeded dense distribution for probes and background vectors.
+        # Nearly collinear fillers plus a few one-hot probes turn this mapping/reload
+        # test into a degenerate quantizer-calibration case instead.
+        for row in sealed_rows:
+            for offset, element in enumerate(row.get(STRUCT_FIELD) or []):
+                element[VECTOR_SUBFIELD] = normalized_vector(
+                    row[PK_FIELD] * STRUCT_MAX_CAPACITY + offset, VECTOR_SUBFIELD_DIM
+                )
         # With one filler element per row, the two null/empty rows and two
         # double-element control rows cancel out, hiding the row/element mismatch.
         element_count = sum(len(row.get(STRUCT_FIELD) or []) for row in sealed_rows)
