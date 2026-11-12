@@ -3982,7 +3982,9 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
         {"chinaeast", "core.chinacloudapi.cn"},
         {"usgovvirginia", "core.usgovcloudapi.net"},
         {"usdodcentral", "core.usgovcloudapi.net"},
-        {"germanynortheast", "core.cloudapi.de"},
+        // Microsoft Cloud Germany closed; these are public Azure regions.
+        {"germanywestcentral", "core.windows.net"},
+        {"germanynorth", "core.windows.net"},
         {"eastus", "core.windows.net"},
     };
     for (const auto& c : cases) {
@@ -3999,6 +4001,78 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
                   c.expected_suffix)
             << "region=" << c.region;
     }
+}
+
+// Spec producers write azure://core.windows.net/<container>/<blob> together
+// with the storage account's region. The authority in the source wins over the
+// region-derived one, so a region never turns the authority into a container.
+TEST(InjectExtfsAllowlist, AzureAuthorityHostWinsOverRegion) {
+    // The native policy is process-wide and immutable: reuse the allowlist
+    // that the other Broker tests in this binary install.
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    struct Case {
+        std::string source;
+        std::string region;
+        std::string address;
+    };
+    const std::vector<Case> cases = {
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "westeurope",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "germanywestcentral",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "germanynorth",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "chinaeast2",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "usgovvirginia",
+         "core.windows.net"},
+        {"azure://core.chinacloudapi.cn/ctr/dir/file.parquet",
+         "eastus",
+         "core.chinacloudapi.cn"},
+        {"azure://CORE.WINDOWS.NET/ctr/dir/file.parquet",
+         "eastus",
+         "CORE.WINDOWS.NET"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.source + " region=" + c.region);
+        // The target-mode spec the Zilliz Cloud control plane builds.
+        nlohmann::json spec = {{"format", "parquet"},
+                               {"extfs",
+                                {{"cloud_provider", "azure"},
+                                 {"region", c.region},
+                                 {"access_key_id", "account"},
+                                 {"azure_client_id", "client"},
+                                 {"azure_tenant_id", "tenant"},
+                                 {"azure_credential_endpoint", endpoint},
+                                 {"load_frequency", "3600"}}}};
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(props, 42, c.source, spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.address);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "ctr");
+    }
+    // A container host still takes its authority from the region.
+    milvus_storage::api::Properties props;
+    ::InjectExternalSpecProperties(
+        props,
+        42,
+        "azure://ctr/dir/file.parquet",
+        R"({"format":"parquet","extfs":{"cloud_provider":"azure","region":"germanywestcentral","access_key_id":"account","access_key_value":"KEY"}})");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "core.windows.net");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")), "ctr");
 }
 
 TEST(InjectExtfsAllowlist, AzuriteMilvusFormURIUsesHostAsEndpoint) {
