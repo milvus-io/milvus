@@ -83,21 +83,19 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 				paramtable.Get().DataNodeCfg.StorageFormat.Key: format,
 			})
 			defer restore()
-			requiredNullErr := "Wrong row type: invalid parameter[expected=int64][actual=<nil>]"
-			if format == "vortex" {
-				requiredNullErr = "to non-nullable Arrow field because it contains nulls"
-			}
 			for _, tc := range []struct {
-				name          string
-				dim           int
-				targetType    schemapb.DataType
-				sourceElement schemapb.DataType
-				targetElement schemapb.DataType
-				text          string
-				nullable      bool
-				withDefault   bool
-				admissionErr  string
-				readErr       string
+				name           string
+				dim            int
+				targetType     schemapb.DataType
+				sourceElement  schemapb.DataType
+				targetElement  schemapb.DataType
+				text           string
+				sourceLength   int
+				targetLength   int
+				sourceNullable bool
+				targetNullable bool
+				withDefault    bool
+				admissionErr   string
 			}{
 				{name: "smaller_dimension", dim: 64, admissionErr: "vector dimension mismatch"},
 				{name: "larger_dimension", dim: 256, admissionErr: "vector dimension mismatch"},
@@ -113,14 +111,20 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					name: "array_float16_to_bfloat16", sourceElement: schemapb.DataType_Float16Vector,
 					targetElement: schemapb.DataType_BFloat16Vector, admissionErr: "vector element type mismatch",
 				},
-				{name: "ascii_boundary", text: "abcdef", nullable: true},
-				{name: "utf8_boundary", text: "中文", nullable: true},
-				{name: "ascii_oversized", text: "abcdefg", nullable: true, readErr: "exceeds max_length(6)"},
-				{name: "utf8_oversized", text: "中文a", nullable: true, readErr: "exceeds max_length(6)"},
-				{name: "required_default", withDefault: true},
-				{name: "nullable_default", nullable: true, withDefault: true},
-				{name: "nullable_no_default", nullable: true},
-				{name: "required_no_default", readErr: requiredNullErr},
+				{name: "ascii_boundary", text: "abcdef", sourceLength: 6, sourceNullable: true, targetNullable: true},
+				{name: "utf8_boundary", text: "中文", sourceLength: 6, sourceNullable: true, targetNullable: true},
+				{name: "ascii_oversized", text: "abcdefg", targetLength: 6, sourceNullable: true, targetNullable: true, admissionErr: "max_length"},
+				{name: "utf8_oversized", text: "中文a", targetLength: 6, sourceNullable: true, targetNullable: true, admissionErr: "max_length"},
+				{name: "narrower_target_short_value", text: "abc", targetLength: 6, sourceNullable: true, targetNullable: true, admissionErr: "max_length"},
+				{name: "wider_target", text: "abc", sourceLength: 6, targetLength: 64, sourceNullable: true, targetNullable: true},
+				{name: "nullable_to_required_with_default", sourceNullable: true, withDefault: true, admissionErr: "nullable mismatch"},
+				{name: "nullable_default", sourceNullable: true, targetNullable: true, withDefault: true},
+				{name: "nullable_no_default", sourceNullable: true, targetNullable: true},
+				{name: "nullable_to_required", sourceNullable: true, admissionErr: "nullable mismatch"},
+				{name: "required_to_nullable", targetNullable: true, admissionErr: "nullable mismatch"},
+				{name: "required_to_nullable_with_default", targetNullable: true, withDefault: true, admissionErr: "nullable mismatch"},
+				{name: "both_required"},
+				{name: "both_required_with_default", withDefault: true},
 			} {
 				s.Run(tc.name, func() {
 					ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
@@ -145,7 +149,7 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 						{Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 						{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
-						{Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+						{Name: "value", DataType: schemapb.DataType_Int64, Nullable: tc.sourceNullable},
 					}}
 					if tc.sourceElement != schemapb.DataType_None {
 						source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "group", Fields: []*schemapb.FieldSchema{
@@ -155,10 +159,16 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 							},
 						}}}
 					}
+					if tc.sourceLength != 0 {
+						source.Fields[2].TypeParams[0].Value = fmt.Sprint(tc.sourceLength)
+					}
 					create(source)
 					values := integration.NewInt64FieldData("value", 3)
-					values.GetScalars().GetLongData().Data = []int64{0, 5}
-					typeutil.SetFieldDataValidData(values, []bool{false, true, true})
+					values.GetScalars().GetLongData().Data = []int64{7, 0, 5}
+					if tc.sourceNullable {
+						values.GetScalars().GetLongData().Data = []int64{0, 5}
+						typeutil.SetFieldDataValidData(values, []bool{false, true, true})
+					}
 					text := integration.NewVarCharFieldData("text", 3, false)
 					typeutil.SetFieldDataValidData(text, nil)
 					text.GetScalars().GetStringData().Data = []string{"", "a", tc.text}
@@ -243,8 +253,10 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					if tc.targetElement != schemapb.DataType_None {
 						target.StructArrayFields[0].Fields[0].ElementType = tc.targetElement
 					}
-					target.Fields[2].TypeParams[0].Value = "6"
-					target.Fields[3].Nullable = tc.nullable
+					if tc.targetLength != 0 {
+						target.Fields[2].TypeParams[0].Value = fmt.Sprint(tc.targetLength)
+					}
+					target.Fields[3].Nullable = tc.targetNullable
 					if tc.withDefault {
 						target.Fields[3].DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
 					}
@@ -255,6 +267,7 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					})
 					if tc.admissionErr != "" {
 						s.Require().ErrorContains(merr.CheckRPCCall(response, err), tc.admissionErr)
+						s.Require().Empty(response.GetJobID(), "schema rejection must precede job creation")
 						// A rejected schema must leave the service available.
 						response, err := s.Cluster.MilvusClient.DescribeCollection(ctx,
 							&milvuspb.DescribeCollectionRequest{CollectionName: target.GetName()})
@@ -272,11 +285,6 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						return err == nil && merr.Ok(progress.GetStatus()) &&
 							(progress.GetState() == internalpb.ImportJobState_Completed || progress.GetState() == internalpb.ImportJobState_Failed)
 					}, time.Minute, 100*time.Millisecond)
-					if tc.readErr != "" {
-						s.Require().Equal(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
-						s.Contains(progress.GetReason(), tc.readErr)
-						return
-					}
 					s.Require().Equal(internalpb.ImportJobState_Completed, progress.GetState(), progress.GetReason())
 					status, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 						CollectionName: target.GetName(), FieldName: "vector", IndexName: "vector_idx",
@@ -296,10 +304,13 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						fields := lo.KeyBy(result.GetFieldsData(), func(field *schemapb.FieldData) string { return field.GetFieldName() })
 						s.Require().Equal([]int64{pk}, fields["pk"].GetScalars().GetLongData().GetData())
 						s.Equal([]string{"", "a", tc.text}[pk], fields["text"].GetScalars().GetStringData().GetData()[0])
-						if pk == 0 && !tc.withDefault {
+						if pk == 0 && tc.sourceNullable && !tc.withDefault {
 							s.Require().Equal([]bool{false}, typeutil.GetFieldDataValidData(fields["value"]))
 						} else {
-							want := []int64{42, 0, 5}[pk]
+							want := []int64{7, 0, 5}[pk]
+							if pk == 0 && tc.sourceNullable {
+								want = 42
+							}
 							if valid := typeutil.GetFieldDataValidData(fields["value"]); len(valid) != 0 {
 								s.Equal([]bool{true}, valid)
 							}

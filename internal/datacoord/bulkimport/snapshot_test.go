@@ -2036,9 +2036,6 @@ func TestPrepareSnapshotImportOptions_Schema(t *testing.T) {
 	_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
 	assert.NoError(t, err)
 
-	source.Fields[1].Nullable = true
-	_, err = prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
-	assert.NoError(t, err, "backup import applies the target schema rather than requiring equality")
 	source.Fields[0].AutoID = true
 	source.Fields[1].IsPartitionKey = true
 	source.Fields[1].IsClusteringKey = true
@@ -2075,6 +2072,110 @@ func TestPrepareSnapshotImportOptions_Schema(t *testing.T) {
 				require.ErrorIs(t, err, merr.ErrOperationNotSupported)
 			})
 		}
+	}
+}
+
+func TestPrepareSnapshotImportOptions_Nullable(t *testing.T) {
+	defaultValue := &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}}
+	for _, tc := range []struct {
+		name           string
+		sourceNullable bool
+		targetNullable bool
+		targetDefault  *schemapb.ValueField
+		missingSource  bool
+		wantErr        bool
+	}{
+		{name: "both_required"},
+		{name: "both_nullable", sourceNullable: true, targetNullable: true},
+		{name: "nullable_to_required", sourceNullable: true, wantErr: true},
+		{name: "required_to_nullable", targetNullable: true, wantErr: true},
+		{name: "nullable_to_required_with_default", sourceNullable: true, targetDefault: defaultValue, wantErr: true},
+		{name: "required_to_nullable_with_default", targetNullable: true, targetDefault: defaultValue, wantErr: true},
+		{name: "same_nullable_different_default", sourceNullable: true, targetNullable: true, targetDefault: defaultValue},
+		{name: "missing_source_nullable", targetNullable: true, missingSource: true},
+		{name: "missing_source_default", targetDefault: defaultValue, missingSource: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+			source.Fields[1].Nullable = tc.sourceNullable
+			target.Fields[1].Nullable = tc.targetNullable
+			target.Fields[1].DefaultValue = tc.targetDefault
+			target.Fields[1].Name = "renamed_text"
+			if tc.missingSource {
+				source.Fields = source.Fields[:1]
+			}
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrImportFailed)
+				require.ErrorContains(t, err, "nullable mismatch for field renamed_text (ID 101)")
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+			} else {
+				require.NoError(t, err)
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
+	}
+}
+
+func TestPrepareSnapshotImportOptions_VarcharMaxLength(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		sourceLength  string
+		targetLength  string
+		wantErr       error
+		wantErrorType merr.ErrorType
+		wantMessage   string
+	}{
+		{name: "equal", sourceLength: "64", targetLength: "64"},
+		{name: "wider_target", sourceLength: "6", targetLength: "64"},
+		{
+			name: "narrower_target", sourceLength: "64", targetLength: "6",
+			wantErr: merr.ErrImportFailed, wantErrorType: merr.InputError, wantMessage: "max_length",
+		},
+		{
+			name: "source_missing", targetLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError, wantMessage: "snapshot source field",
+		},
+		{
+			name: "target_missing", sourceLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError, wantMessage: "snapshot target field",
+		},
+		{
+			name: "source_invalid", sourceLength: "invalid", targetLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError, wantMessage: "snapshot source field",
+		},
+		{
+			name: "target_invalid", sourceLength: "64", targetLength: "invalid",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError, wantMessage: "snapshot target field",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+			source.Fields[1].TypeParams = nil
+			target.Fields[1].TypeParams = nil
+			target.Fields[1].Name = "renamed_text"
+			if tc.sourceLength != "" {
+				source.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: tc.sourceLength}}
+			}
+			if tc.targetLength != "" {
+				target.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: tc.targetLength}}
+			}
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.wantErr)
+				require.ErrorContains(t, err, tc.wantMessage)
+				require.Equal(t, tc.wantErrorType, merr.GetErrorType(err))
+				require.Equal(t, tc.wantErrorType, merr.GetErrorType(merr.Error(merr.Status(err))))
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
 	}
 }
 
