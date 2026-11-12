@@ -17,7 +17,9 @@
 package milvusclient
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -299,6 +301,51 @@ func (s *SearchOptionSuite) TestQueryOrderByFields() {
 	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
 	s.Equal("price:desc,name:asc", queryParams[spOrderByFields])
 	s.Equal("10", queryParams[spLimit])
+}
+
+func (s *SearchOptionSuite) TestQueryCalcDistance() {
+	queryReq, err := NewQueryOption("collection").
+		WithFilter("pk >= 0").
+		WithCalcDistance(map[string]any{
+			"metric_type": "IP",
+			"field":       "vec",
+			"vector":      []float32{1, 2, 3, 4},
+			"output_name": "distance",
+		}).
+		Request()
+	s.Require().NoError(err)
+
+	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
+	raw, ok := queryParams["calc_distance"]
+	s.Require().True(ok)
+	var parsed map[string]any
+	s.Require().NoError(json.Unmarshal([]byte(raw), &parsed))
+	s.Equal("IP", parsed["metric_type"])
+	s.Equal("vec", parsed["field"])
+	s.Equal("distance", parsed["output_name"])
+	vector, ok := parsed["vector"].([]any)
+	s.Require().True(ok)
+	s.Len(vector, 4)
+
+	// vector expression string is preserved as-is
+	queryReq, err = NewQueryOption("collection").
+		WithCalcDistance(map[string]any{
+			"metric_type": "IP",
+			"field":       "vec",
+			"vector":      "pk == 2",
+			"output_name": "distance",
+		}).
+		Request()
+	s.Require().NoError(err)
+	raw, ok = entity.KvPairsMap(queryReq.GetQueryParams())["calc_distance"]
+	s.Require().True(ok)
+	s.Contains(raw, `"vector":"pk == 2"`)
+
+	// NaN in the vector cannot be JSON-encoded; Request() must surface the error
+	_, err = NewQueryOption("collection").
+		WithCalcDistance(map[string]any{"vector": []float32{float32(math.NaN())}}).
+		Request()
+	s.Error(err)
 }
 
 func (s *SearchOptionSuite) TestPlaceHolder() {
