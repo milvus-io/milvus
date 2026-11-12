@@ -21,13 +21,75 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	source := filepath.Join(root, "source")
+	destination := filepath.Join(root, "new", "parents", "copy")
+	require.NoError(t, cm.Write(ctx, source, []byte("complete")))
+	require.NoError(t, cm.Copy(ctx, source, destination))
+	require.NoError(t, cm.Copy(ctx, source, source))
+	data, err := cm.Read(ctx, source)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+	data, err = cm.Read(ctx, destination)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+
+	patch := mockey.Mock(localstorage.SyncDirectories).Return(syscall.EIO).Build()
+	defer patch.UnPatch()
+	require.Error(t, cm.Write(ctx, source, []byte("new")))
+	require.Error(t, cm.Copy(ctx, source, destination))
+	require.Error(t, cm.MultiWrite(ctx, map[string][]byte{source: []byte("batch")}))
+}
+
+func TestLocalChunkManagerRootPreparationFailureBlocksWritesUntilRecovered(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	name := filepath.Join(root, "object")
+	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
+	// A root that cannot be prepared never acknowledges a write.
+	require.ErrorIs(t, cm.Write(t.Context(), name, []byte("data")), merr.ErrIoFailed)
+	require.ErrorIs(t, cm.MultiWrite(t.Context(), map[string][]byte{name: []byte("data")}), merr.ErrIoFailed)
+	patch.UnPatch()
+	_, err := os.Stat(name)
+	require.True(t, os.IsNotExist(err))
+	// The failure is not sticky: once the root is available, writes succeed.
+	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
+	data, err := os.ReadFile(name)
+	require.NoError(t, err)
+	require.Equal(t, "data", string(data))
+}
+
+func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	ancestor := filepath.Join(t.TempDir(), "search")
+	root := ancestor + "/data"
+	require.NoError(t, os.MkdirAll(root+"/actual/child", 0o700))
+	require.NoError(t, os.Symlink(root+"/actual/child", root+"/link"))
+	require.NoError(t, os.Chmod(ancestor, 0o111))
+	defer func() { require.NoError(t, os.Chmod(ancestor, 0o700)) }()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	name := root + "/link/../source"
+	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
+	require.NoError(t, cm.Copy(t.Context(), name, name))
+	require.NoError(t, cm.Copy(t.Context(), name, root+"/new/copy"))
+}
 
 var localPath string
 
@@ -116,6 +178,25 @@ func TestLocalChunkManagerWalkWithPrefixKeepsStringPrefixSemantics(t *testing.T)
 		}))
 		require.ElementsMatch(t, keys[:4], found)
 	})
+}
+
+func TestLocalChunkManagerWithoutRootIsNotBoundedByWorkingDirectory(t *testing.T) {
+	// A manager without a root has no provisioned boundary; the working
+	// directory must not become one, or absolute keys elsewhere fail.
+	t.Chdir(t.TempDir())
+	ctx := t.Context()
+	cm := NewLocalChunkManager()
+	first := filepath.Join(t.TempDir(), "a", "object")
+	second := filepath.Join(t.TempDir(), "b", "object")
+	require.NoError(t, cm.Write(ctx, first, []byte("one")))
+	require.NoError(t, cm.MultiWrite(ctx, map[string][]byte{first: []byte("1"), second: []byte("2")}))
+	copied := filepath.Join(t.TempDir(), "c", "copy")
+	require.NoError(t, cm.Copy(ctx, second, copied))
+	for name, expected := range map[string]string{first: "1", second: "2", copied: "2"} {
+		data, err := os.ReadFile(name)
+		require.NoError(t, err)
+		require.Equal(t, expected, string(data))
+	}
 }
 
 func TestLocalChunkManagerEmptyKeyDoesNotDeleteRoot(t *testing.T) {

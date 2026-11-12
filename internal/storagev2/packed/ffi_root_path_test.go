@@ -43,6 +43,9 @@ func TestMakePropertiesFromStorageConfig_RootPath(t *testing.T) {
 			defer FreeProperties(props)
 			assert.Equal(t, tc.expected, loonPropertyString(props, PropertyFSRootPath))
 			assert.Equal(t, "false", loonPropertyString(props, PropertyFSS3UseCRT))
+			if tc.storageType == "local" {
+				assert.Equal(t, tc.rootPath, loonPropertyString(props, "fs.local_durability_root"))
+			}
 		})
 	}
 }

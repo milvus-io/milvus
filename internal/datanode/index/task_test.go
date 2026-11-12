@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -145,8 +146,9 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 		FieldType:    schemapb.DataType_FloatVector,
 	}
 
-	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
-	suite.NoError(err)
+	// The node's persistent storage and the request share one local root, as
+	// in production; a durable local manager persists only within its root.
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(suite.rootPath))
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
 	var vectorBlob *storage.Blob

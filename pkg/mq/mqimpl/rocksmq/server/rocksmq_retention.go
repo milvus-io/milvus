@@ -329,6 +329,7 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 
 	writeOpts := gorocksdb.NewDefaultWriteOptions()
 	defer writeOpts.Destroy()
+	writeOpts.SetSync(true)
 	err = ri.kv.DB.Write(writeOpts, writeBatch)
 	if err != nil {
 		return err
@@ -346,6 +347,7 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
 	opts := gorocksdb.NewDefaultWriteOptions()
 	defer opts.Destroy()
+	opts.SetSync(true)
 	err := db.Write(opts, writeBatch)
 	if err != nil {
 		return err
