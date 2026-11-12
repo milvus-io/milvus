@@ -98,30 +98,33 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() && h.dqlQueueFull() {
 			err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
-			// admission aborts before wrapperPost, the only ProxyFunctionCall
-			// site for v2 routes, so the rejection is recorded here. The
-			// method comes from the route; db and collection stay empty:
-			// neither authoritative value exists before decode, and a
-			// client-controlled header must not mint or shift per-database
-			// series.
-			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
-				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
-				label, cause := requestutil.ParseMetricLabel(nil, err)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
-			}
-			c.Header("Retry-After", "1")
-			// Retry-After is not CORS-safelisted; expose it so browser
-			// callers can read the retry delay.
-			c.Header("Access-Control-Expose-Headers", "Retry-After")
-			HTTPAbortReturn(c, http.StatusTooManyRequests, gin.H{
-				HTTPReturnCode:    merr.Code(err),
-				HTTPReturnMessage: err.Error(),
-			})
+			rejectQueueFullBeforeDecode(c, err)
 			return
 		}
 		handler(c)
 	}
+}
+
+// Admission runs before wrapperPost, so record the request here. Before
+// decoding, neither the database nor the collection is known.
+func rejectQueueFullBeforeDecode(c *gin.Context, err error) {
+	if methodTag, ok := routeToMethod[c.FullPath()]; ok {
+		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
+		label, cause := requestutil.ParseMetricLabel(nil, err)
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
+	}
+	rejectQueueFull(c, err)
+}
+
+func rejectQueueFull(c *gin.Context, err error) {
+	c.Header("Retry-After", "1")
+	// Retry-After is not CORS-safelisted.
+	c.Header("Access-Control-Expose-Headers", "Retry-After")
+	HTTPAbortReturn(c, http.StatusTooManyRequests, gin.H{
+		HTTPReturnCode:    merr.Code(err),
+		HTTPReturnMessage: err.Error(),
+	})
 }
 
 var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a route-to-method mapping
@@ -167,6 +170,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/entities/insert":          "Insert",
 	"/v2/vectordb/entities/upsert":          "Upsert",
 	"/v2/vectordb/entities/search":          "Search",
+	"/v2/vectordb/entities/multi_search":    "MultiSearch",
 	"/v2/vectordb/entities/advanced_search": "HybridSearch",
 	"/v2/vectordb/entities/hybrid_search":   "HybridSearch",
 
@@ -327,6 +331,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
+	router.POST(EntityCategory+MultiSearchAction, h.multiSearchAdmission(restfulSizeMiddleware(wrapperPost(func() any {
+		return &MultiSearchReqV2{}
+	}, wrapperTraceLog(h.multiSearch)), true)))
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
@@ -446,9 +453,12 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
 		var bindErr error
-		if dataReq, ok := req.(*CollectionDataReq); ok {
+		switch dataReq := req.(type) {
+		case *CollectionDataReq:
 			bindErr = bindCollectionDataMetadata(gCtx, dataReq)
-		} else {
+		case *MultiSearchReqV2:
+			bindErr = bindMultiSearchRequest(gCtx.Request.Body, dataReq)
+		default:
 			bindErr = gCtx.ShouldBindBodyWith(req, binding.JSON)
 		}
 		if err := bindErr; err != nil {
@@ -495,6 +505,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			mlog.Any("url", gCtx.Request.URL.Path))
 
 		resp, err := v2(ctx, gCtx, req, dbName)
+		if _, batch := req.(*MultiSearchReqV2); batch {
+			dbName = "" // The fallback DB header does not describe the batch's targets.
+		}
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
 		if !ok {
 			return
@@ -697,6 +710,8 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		redactedReq := *request
 		redactedReq.ExprParams = redactExprParams(request.ExprParams)
 		return mlog.Any("request", &redactedReq)
+	case *MultiSearchReqV2:
+		return mlog.Int("search_requests", len(request.Requests))
 	case *HybridSearchReq:
 		if request == nil || !hasExprParams(request.Search) {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
@@ -800,21 +815,11 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		}
 	}
 	mlog.Debug(ctx, "high level restful api, try to do a grpc call")
-	username, ok := ginCtx.Get(ContextUsername)
-	if !ok {
-		username = ""
-	}
-
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
-		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
-		if token, ok := ginCtx.Get(ContextToken); ok {
-			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
-		}
-		return interceptor(reqCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
-			return handler(ctx, req)
-		})
+		return forwardRESTProxy(reqCtx, req, ginCtx.GetString(ContextToken), fullMethod, handler)
 	}
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	ctx = context.WithValue(ctx, hook.GinParamsKey, ginCtx)
+	response, err := proxy.HookInterceptor(ctx, req, ginCtx.GetString(ContextUsername), fullMethod, forwardHandler)
 	if response != nil {
 		ginCtx.Set(ContextResponse, response)
 	}
@@ -835,6 +840,14 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		}
 	}
 	return response, err
+}
+
+func forwardRESTProxy(ctx context.Context, req any, token, fullMethod string, handler grpc.UnaryHandler) (any, error) {
+	forward := streaming.ForwardLegacyProxyUnaryServerInterceptor()
+	if token != "" {
+		forward = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token))
+	}
+	return forward(ctx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, handler)
 }
 
 func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -2135,13 +2148,15 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 	return params, nil
 }
 
-func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
-	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
-	}
-	httpReq := anyReq.(*SearchReqV2)
+type restSearchError struct {
+	error
+	message string
+}
+
+func (err restSearchError) Error() string { return err.message }
+func (err restSearchError) Unwrap() error { return err.error }
+
+func newRESTSearchRequest(ctx context.Context, httpReq *SearchReqV2, dbName string) (*milvuspb.SearchRequest, error) {
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2150,84 +2165,64 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 	}
-	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
+	consistency, useDefault, err := convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
-		})
-		return nil, err
+		return nil, restSearchError{err, "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error()}
 	}
-	c.Set(ContextRequest, req)
+	req.ConsistencyLevel = consistency
+	req.UseDefaultConsistency = useDefault
+	return req, nil
+}
 
-	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
-	if err != nil {
-		// has already throw http in GetCollectionSchema if fails to get schema
-		return nil, err
-	}
-
+func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq *SearchReqV2, collSchema *schemapb.CollectionSchema, body string) error {
+	var err error
 	// Check if search by primary keys or by vectors
 	hasIDs := len(httpReq.Ids) > 0
 	hasData := len(httpReq.Data) > 0
 
 	// Primary keys and query vectors are mutually exclusive
 	if hasIDs && hasData {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
-			HTTPReturnMessage: "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
-		})
-		return nil, merr.ErrParameterInvalid
+		return restSearchError{merr.ErrParameterInvalid, "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both"}
 	}
 
 	// At least one of ids or data must be provided
 	if !hasIDs && !hasData {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
-		})
-		return nil, merr.ErrMissingRequiredParameters
+		return restSearchError{merr.ErrMissingRequiredParameters, "either 'ids' (for primary key search) or 'data' (for vector search) must be provided"}
 	}
 
 	if httpReq.SearchAggregation != nil {
 		if hasIDs {
 			err := merr.WrapErrParameterInvalidMsg("ids and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		if httpReq.Offset != 0 {
 			err := merr.WrapErrParameterInvalidMsg("offset is not supported with searchAggregation")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		if searchParamsContainAny(httpReq.SearchParams, proxy.OffsetKey) {
 			err := merr.WrapErrParameterInvalidMsg("searchParams.offset is not supported with searchAggregation")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		if httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil {
 			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		if searchParamsContainAny(httpReq.SearchParams,
 			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
 			// wording kept compatible: the group_by_field(s) sentence is what
 			// clients and the REST e2e suite already pin on
 			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously, and neither can group_size/strict_group_size")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		if len(httpReq.OrderByFields) > 0 {
 			err := merr.WrapErrParameterInvalidMsg("orderByFields and searchAggregation cannot be used simultaneously")
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert SearchAggregation failed", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return err
 		}
 	}
 
@@ -2235,8 +2230,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	// dedicated field (first key wins on the proxy side), so reject the ambiguity.
 	if len(httpReq.OrderByFields) > 0 && searchParamsContainAny(httpReq.SearchParams, proxy.OrderByFieldsKey) {
 		err := merr.WrapErrParameterInvalidMsg("ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return err
 	}
 
 	// The group knobs have the same two spellings, and the searchParams one is
@@ -2249,8 +2243,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
 		err := merr.WrapErrParameterInvalidMsg(
 			"ambiguous grouping: use either the top-level groupingField/groupSize/strictGroupSize or the searchParams group keys, not both")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return err
 	}
 
 	// The rule that a size knob needs a grouping field holds for the legacy
@@ -2264,8 +2257,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupSizeKey, proxy.StrictGroupSize) {
 		err := merr.WrapErrParameterInvalidMsg(
 			"searchParams group_size/strict_group_size require a group field")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return err
 	}
 
 	// Group keys nested under searchParams.params never act -- the proxy reads
@@ -2280,8 +2272,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if _, present := nested[key]; present {
 					err := merr.WrapErrParameterInvalidMsg(
 						"searchParams.params cannot carry %s; use the top-level grouping fields or searchParams.%s", key, key)
-					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-					return nil, err
+					return err
 				}
 			}
 		}
@@ -2290,32 +2281,25 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, generate SearchParams failed", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: err.Error(),
-		})
-		return nil, err
+		return err
 	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return err
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return restSearchError{merr.ErrParameterInvalid, err.Error()}
 		}
 	}
 	if len(httpReq.FunctionChains) != 0 {
 		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return restSearchError{merr.ErrParameterInvalid, err.Error()}
 		}
 	}
 
@@ -2323,22 +2307,14 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		// Search by primary keys
 		primaryField, ok := getPrimaryField(collSchema)
 		if !ok {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
-				HTTPReturnMessage: "collection has no primary key field",
-			})
-			return nil, merr.ErrParameterInvalid
+			return restSearchError{merr.ErrParameterInvalid, "collection has no primary key field"}
 		}
 
 		// Convert ids to schemapb.IDs
 		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert ids to schemapb.IDs failed", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
-				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
-			})
-			return nil, err
+			return restSearchError{merr.ErrParameterInvalid, merr.ErrParameterInvalid.Error() + ", error: " + err.Error()}
 		}
 
 		// Set Ids field using the oneof SearchInput field
@@ -2352,15 +2328,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	} else {
 		// Search by vectors (existing logic)
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
-		body, _ := c.Get(gin.BodyBytesKey)
-		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+		placeholderGroup, err := generatePlaceholderGroup(ctx, body, collSchema, httpReq.AnnsField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, search with vector invalid", mlog.Err(err))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-			})
-			return nil, err
+			return restSearchError{merr.ErrIncorrectParameterFormat, merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error()}
 		}
 		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
 			PlaceholderGroup: placeholderGroup,
@@ -2371,106 +2342,99 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: err.Error(),
-		})
-		return nil, err
+		return err
 	}
 	req.ExprTemplateValues = templateValues
-	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	return nil
+}
+
+func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	httpReq := anyReq.(*SearchReqV2)
+	req, err := newRESTSearchRequest(ctx, httpReq, dbName)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	c.Set(ContextRequest, req)
+
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := c.Get(gin.BodyBytesKey)
+	rawBody, _ := body.([]byte)
+	if err := prepareRESTSearch(ctx, req, httpReq, collSchema, string(rawBody)); err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, milvuspb.MilvusService_Search_FullMethodName, true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
 	if err == nil {
-		searchResp := resp.(*milvuspb.SearchResults)
-		cost := proxy.GetCostValue(searchResp.GetStatus())
-		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
-		if hasSearchAggregationResult(searchResp.Results) {
-			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
-			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: resultErrMessage(err),
-				})
-			} else {
-				respBody := gin.H{
-					HTTPReturnCode:     merr.Code(nil),
-					HTTPReturnData:     outputData,
-					HTTPReturnCost:     cost,
-					HTTPReturnAggTopks: searchResp.Results.GetAggTopks(),
-				}
-				if len(searchResp.Results.Recalls) > 0 {
-					respBody[HTTPReturnRecalls] = searchResp.Results.Recalls
-				}
-				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-					respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
-					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
-					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
-				}
-				HTTPReturnStream(c, http.StatusOK, respBody)
-			}
-		} else if searchResp.Results.TopK == int64(0) {
-			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
+		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+		response, stream := buildRESTSearchResponse(ctx, resp.(*milvuspb.SearchResults), allowJS, collSchema, vectorEncoding)
+		if stream {
+			HTTPReturnStream(c, http.StatusOK, response)
 		} else {
-			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
-			if err == nil {
-				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
-			}
-			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: resultErrMessage(err),
-				})
-			} else {
-				if len(searchResp.Results.Recalls) > 0 {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:               merr.Code(nil),
-							HTTPReturnData:               outputData,
-							HTTPReturnCost:               cost,
-							HTTPReturnRecalls:            searchResp.Results.Recalls,
-							HTTPReturnTopks:              searchResp.Results.Topks,
-							HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-							HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-							HTTPReturnCacheHitRatio:      cacheHitRatio,
-						})
-					} else {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:    merr.Code(nil),
-							HTTPReturnData:    outputData,
-							HTTPReturnCost:    cost,
-							HTTPReturnRecalls: searchResp.Results.Recalls,
-							HTTPReturnTopks:   searchResp.Results.Topks,
-						})
-					}
-				} else {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:               merr.Code(nil),
-							HTTPReturnData:               outputData,
-							HTTPReturnCost:               cost,
-							HTTPReturnTopks:              searchResp.Results.Topks,
-							HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-							HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-							HTTPReturnCacheHitRatio:      cacheHitRatio,
-						})
-					} else {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:  merr.Code(nil),
-							HTTPReturnData:  outputData,
-							HTTPReturnCost:  cost,
-							HTTPReturnTopks: searchResp.Results.Topks,
-						})
-					}
-				}
-			}
+			HTTPReturn(c, http.StatusOK, response)
 		}
 	}
 	return resp, err
+}
+
+func buildRESTSearchResponse(ctx context.Context, response *milvuspb.SearchResults, allowJS bool, collSchema *schemapb.CollectionSchema, vectorEncoding floatVectorEncoding) (gin.H, bool) {
+	result := response.GetResults()
+	if result == nil {
+		return gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+			HTTPReturnMessage: resultErrMessage(merr.WrapErrServiceInternalMsg("Search returned no result data")),
+		}, false
+	}
+
+	cost := proxy.GetCostValue(response.GetStatus())
+	aggregated := hasSearchAggregationResult(result)
+	if !aggregated && result.GetTopK() == 0 {
+		return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []any{}, HTTPReturnCost: cost}, false
+	}
+
+	var output any
+	var err error
+	body := gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnCost: cost}
+	if aggregated {
+		output, err = buildSearchAggregationResp(result, allowJS, collSchema)
+		body[HTTPReturnAggTopks] = result.GetAggTopks()
+	} else {
+		rows, buildErr := buildQueryRespWithEncoding(0, result.OutputFields, result.FieldsData, result.Ids, result.Scores, allowJS, collSchema, vectorEncoding)
+		err = buildErr
+		if err == nil {
+			err = setSearchElementOffsets(rows, result.GetElementIndices())
+		}
+		output = rows
+		body[HTTPReturnTopks] = result.GetTopks()
+	}
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", result), mlog.Err(err))
+		return gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)}, false
+	}
+
+	body[HTTPReturnData] = output
+	if len(result.GetRecalls()) > 0 {
+		body[HTTPReturnRecalls] = result.GetRecalls()
+	}
+	if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
+		if remote, total, ratio, valid := proxy.GetStorageCost(response.GetStatus()); valid {
+			body[HTTPReturnScannedRemoteBytes] = remote
+			body[HTTPReturnScannedTotalBytes] = total
+			body[HTTPReturnCacheHitRatio] = ratio
+		}
+	}
+	return body, true
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

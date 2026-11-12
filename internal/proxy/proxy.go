@@ -104,7 +104,8 @@ type Proxy struct {
 
 	chMgr channelmgr.ChannelsMgr
 
-	sched *scheduler.TaskScheduler
+	sched       *scheduler.TaskScheduler
+	multiSearch *multiSearchScheduler
 
 	rowIDAllocator *allocator.IDAllocator
 	tsoAllocator   *timestampAllocator
@@ -166,6 +167,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 		requests:        reqregistry.New(),
+		multiSearch:     newMultiSearchScheduler(ctx1, multiSearchQueueCapacity),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	hookutil.SetHook(connection.GetManager())
@@ -412,6 +414,10 @@ func (node *Proxy) Start() error {
 	}
 	mlog.Debug(node.ctx, "start id allocator done", mlog.String("role", typeutil.ProxyRole))
 
+	if node.multiSearch != nil {
+		node.multiSearch.start(multiSearchWorkers)
+	}
+
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
 		cb()
@@ -452,6 +458,10 @@ func (node *Proxy) Stop() error {
 	// PyUDF cleanup errors do not fail Proxy shutdown.
 	if err := pyudf.StopSupervisor(context.Background()); err != nil {
 		mlog.Warn(node.ctx, "PyUDF supervisor cleanup failed; continuing Proxy shutdown", mlog.Err(err))
+	}
+
+	if node.multiSearch != nil {
+		node.multiSearch.stop()
 	}
 
 	if node.rowIDAllocator != nil {
