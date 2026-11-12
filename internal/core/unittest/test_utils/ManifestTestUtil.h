@@ -129,9 +129,17 @@ WriteRecordBatchesToV3(
                "failed to close storage V3 test writer: {}",
                close_result.status().ToString());
     auto column_groups = std::move(close_result).ValueOrDie();
+    // Commit through the filesystem that wrote the column groups, not the
+    // process default: a durable local filesystem persists directory entries
+    // only within its own root, and base_path is caller-chosen.
+    auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
+        shared_properties, "");
+    AssertInfo(fs_result.ok(),
+               "failed to resolve storage V3 test filesystem: {}",
+               fs_result.status().ToString());
     auto transaction_result =
         milvus_storage::api::transaction::Transaction::Open(
-            milvus::segcore::GetDefaultArrowFileSystem(), base_path);
+            std::move(fs_result).ValueOrDie(), base_path);
     AssertInfo(transaction_result.ok(),
                "failed to open storage V3 test transaction: {}",
                transaction_result.status().ToString());
@@ -245,8 +253,14 @@ class V3SegmentTestData {
                    close_result.status().ToString());
         auto column_groups = std::move(close_result).ValueOrDie();
 
-        // Commit manifest via Transaction
-        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        // Commit manifest via Transaction, through the filesystem that wrote
+        // the column groups (see WriteRecordBatchesToV3).
+        auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
+            shared_properties, "");
+        AssertInfo(fs_result.ok(),
+                   "Failed to resolve filesystem: {}",
+                   fs_result.status().ToString());
+        auto fs = std::move(fs_result).ValueOrDie();
         auto txn_result =
             milvus_storage::api::transaction::Transaction::Open(fs, base_path_);
         AssertInfo(txn_result.ok(),

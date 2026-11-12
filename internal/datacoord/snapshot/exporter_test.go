@@ -367,11 +367,14 @@ func TestSnapshotExporter_CopiesFilesWithBoundedConcurrency(t *testing.T) {
 	})
 	result := make(chan error, 1)
 	targetRoot := path.Join(t.TempDir(), "export-root")
+	// Like production's foreign chunk manager, the target manager is rooted at
+	// the export target; a durable local manager persists only within its root.
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(targetRoot))
 	go func() {
 		_, err := exportSnapshot(
 			context.Background(),
 			cm,
-			cm,
+			targetCM,
 			copier,
 			"source-bucket",
 			"target-bucket",
@@ -506,6 +509,7 @@ func TestSnapshotExporter_AllowsSameBucketWithoutObjectOverlap(t *testing.T) {
 	sourceRoot := path.Join(baseRoot, "source")
 	targetRoot := path.Join(baseRoot, "backup")
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(sourceRoot))
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(targetRoot))
 	snapshotData := createTestSnapshotDataForMeta()
 	snapshotData.Segments = nil
 	snapshotData.SegmentIDs = nil
@@ -514,7 +518,7 @@ func TestSnapshotExporter_AllowsSameBucketWithoutObjectOverlap(t *testing.T) {
 	metadataURI, err := exportSnapshot(
 		context.Background(),
 		cm,
-		cm,
+		targetCM,
 		newSnapshotExporterCopierMock(t, func(context.Context, string, string, string, string) error {
 			return nil
 		}),
@@ -535,6 +539,7 @@ func TestSnapshotExporter_ObjectKeyWithURLDelimitersReturnsWrittenMetadataPath(t
 			sourceRoot := path.Join(baseRoot, "source")
 			targetRoot := path.Join(baseRoot, "backup"+delimiter)
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath(sourceRoot))
+			targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(targetRoot))
 			snapshotData := createTestSnapshotDataForMeta()
 			snapshotData.Segments = nil
 			snapshotData.SegmentIDs = nil
@@ -543,7 +548,7 @@ func TestSnapshotExporter_ObjectKeyWithURLDelimitersReturnsWrittenMetadataPath(t
 			metadataPath, err := exportSnapshot(
 				context.Background(),
 				cm,
-				cm,
+				targetCM,
 				newSnapshotExporterCopierMock(t, func(context.Context, string, string, string, string) error {
 					return nil
 				}),
@@ -679,10 +684,11 @@ func TestSnapshotExporter_CrossBucketCopiesMatchingObjectKey(t *testing.T) {
 	require.NoError(t, cm.Write(context.Background(), sourcePath, []byte("binlog")))
 
 	copyCalled := false
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(targetRoot))
 	_, err := exportSnapshot(
 		context.Background(),
 		cm,
-		cm,
+		targetCM,
 		newSnapshotExporterCopierMock(t, func(_ context.Context, srcBucket, src, dstBucket, dst string) error {
 			copyCalled = true
 			assert.Equal(t, "source-bucket", srcBucket)

@@ -905,7 +905,7 @@ PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
         storage::CreateChunkManager(get_default_local_storage_config());
 
     std::string path =
-        TestLocalPath + "diskann/opt_field/" + std::to_string(kOptFieldId);
+        TestRemotePath + "diskann/opt_field/" + std::to_string(kOptFieldId);
     boost::filesystem::remove_all(path);
     chunk_manager->Write(path, serialized_data.data(), serialized_data.size());
     return path;
@@ -1357,9 +1357,9 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
             auto serialized_data =
                 insert_data.Serialize(storage::StorageType::Remote);
 
-            std::string insert_file_path = TestLocalPath + "diskann/nullable_" +
-                                           vec_type.type_name + "_" +
-                                           std::to_string(null_percent);
+            std::string insert_file_path =
+                TestRemotePath + "diskann/nullable_" + vec_type.type_name +
+                "_" + std::to_string(null_percent);
             boost::filesystem::remove_all(insert_file_path);
             cm_->Write(insert_file_path,
                        serialized_data.data(),
@@ -1826,7 +1826,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
 
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
-    std::string insert_file_path = TestLocalPath + "diskann/valid_data_test";
+    std::string insert_file_path = TestRemotePath + "diskann/valid_data_test";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());
@@ -2204,7 +2204,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
     std::string insert_file_path =
-        TestLocalPath + "diskann/empty_emb_list_binlog/1";
+        TestRemotePath + "diskann/empty_emb_list_binlog/1";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());
@@ -2345,7 +2345,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
 
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
-    std::string insert_file_path = TestLocalPath + "diskann/non_nullable_test";
+    std::string insert_file_path = TestRemotePath + "diskann/non_nullable_test";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());

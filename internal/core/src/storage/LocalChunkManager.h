@@ -143,6 +143,22 @@ class LocalChunkManager : public ChunkManager {
     std::string path_prefix_;
 };
 
+// Persistent objects are written whole and synchronized at completion.
+// Positional writes keep LocalChunkManager semantics and are not synchronized:
+// persistent objects have no positional writer. Cache/staging users keep
+// LocalChunkManager.
+class DurableLocalChunkManager final : public LocalChunkManager {
+ public:
+    explicit DurableLocalChunkManager(const std::string& path);
+
+    using LocalChunkManager::Write;
+    void
+    Write(const std::string& filepath, void* data, uint64_t size) override;
+
+ private:
+    std::string durability_root_;
+};
+
 using LocalChunkManagerSPtr =
     std::shared_ptr<milvus::storage::LocalChunkManager>;
 

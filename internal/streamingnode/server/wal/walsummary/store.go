@@ -161,6 +161,9 @@ func (s *Store) writeChunk(
 		return nil, nil, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
 	}
 	if bytes.Equal(existingPayload, payload) {
+		if err := s.rewriteExistingChunk(ctx, key, existingPayload); err != nil {
+			return nil, nil, err
+		}
 		return footer, payload, nil
 	}
 	// Same key, different bytes. The key carries this store's term and the
@@ -182,13 +185,29 @@ func (s *Store) writeChunk(
 			// match but the encodings do not, and the manifest carries the
 			// footer's per-vchannel section offsets verbatim -- publishing the
 			// new encoding's offsets against the old object's bytes would make
-			// every later ranged read slice the wrong range. The object is not
-			// rewritten, so what the manifest describes has to be the object
+			// every later ranged read slice the wrong range. The stored bytes
+			// are kept, so what the manifest describes has to be the object
 			// that is there.
+			if err := s.rewriteExistingChunk(ctx, key, existingPayload); err != nil {
+				return nil, nil, err
+			}
 			return existingFooter, existingPayload, nil
 		}
 	}
 	return nil, nil, storeCorruptedf("summary chunk already exists with different payload: %s", key)
+}
+
+// rewriteExistingChunk rewrites a reused chunk with its stored bytes before the
+// manifest may reference it. Presence is not durability: an earlier attempt can
+// leave the complete payload at the key and still fail its durability step,
+// and after a failed fsync only a fresh write, not another fsync, makes the
+// bytes durable. The key is term-scoped and a chunk is recorded in the manifest
+// only after writeChunk succeeds, so no manifest references the object yet.
+func (s *Store) rewriteExistingChunk(ctx context.Context, key string, payload []byte) error {
+	if err := s.chunkManager.Write(ctx, key, payload); err != nil {
+		return merr.Wrapf(err, "failed to rewrite summary chunk %s", key)
+	}
+	return nil
 }
 
 // ReadChunk reads and decodes one chunk object. The term of the chunk is

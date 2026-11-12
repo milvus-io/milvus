@@ -23,6 +23,7 @@
 #include <boost/system/error_code.hpp>
 #include <fstream>
 #include <sstream>
+#include <milvus-storage/filesystem/local_durability.h>
 
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -303,6 +304,38 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     }
 
     return total_file_size;
+}
+
+DurableLocalChunkManager::DurableLocalChunkManager(const std::string& path)
+    : LocalChunkManager(path) {
+    auto root = milvus_storage::PrepareLocalRoot(path);
+    if (!root.ok()) {
+        ThrowInfo(FileWriteFailed, root.status().ToString());
+    }
+    durability_root_ = std::move(root).ValueOrDie();
+}
+
+void
+DurableLocalChunkManager::Write(const std::string& filename,
+                                void* data,
+                                uint64_t size) {
+    boost::filesystem::path path(filename);
+    boost::filesystem::create_directories(path.parent_path());
+    auto opened = milvus_storage::OpenDurableLocalOutput(
+        filename, false, durability_root_);
+    if (!opened.ok()) {
+        ThrowInfo(FileWriteFailed, opened.status().ToString());
+    }
+    auto output = std::move(opened).ValueOrDie();
+    auto status = output->Write(data, size);
+    if (status.ok()) {
+        status = output->Close();
+    } else {
+        (void)output->Abort();
+    }
+    if (!status.ok()) {
+        ThrowInfo(FileWriteFailed, status.ToString());
+    }
 }
 
 }  // namespace milvus::storage
