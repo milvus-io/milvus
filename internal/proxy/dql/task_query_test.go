@@ -410,6 +410,16 @@ func TestQueryTaskPreExecuteForwardsResolvedConsistencyLevel(t *testing.T) {
 			wantGuarantee:   schedulerTS,
 		},
 		{
+			// No session timestamp is sent, so the guarantee is 0; QueryView
+			// must still plan it as Session (Strong) to keep read-your-writes.
+			name:            "go sdk default on session collection",
+			collectionLevel: commonpb.ConsistencyLevel_Session,
+			requestLevel:    commonpb.ConsistencyLevel_Bounded,
+			useDefault:      true,
+			wantLevel:       commonpb.ConsistencyLevel_Session,
+			wantGuarantee:   0,
+		},
+		{
 			name:            "explicit level overrides collection",
 			collectionLevel: commonpb.ConsistencyLevel_Bounded,
 			requestLevel:    commonpb.ConsistencyLevel_Eventually,
@@ -417,6 +427,9 @@ func TestQueryTaskPreExecuteForwardsResolvedConsistencyLevel(t *testing.T) {
 			wantGuarantee:   1,
 		},
 		{
+			// Compatibility: the legacy marker (level 0 with a placeholder
+			// guarantee timestamp) only selects the guarantee; the level
+			// stays 0, so QueryView keeps planning it as Strong.
 			name:             "legacy bounded marker stays strong",
 			collectionLevel:  commonpb.ConsistencyLevel_Bounded,
 			requestLevel:     commonpb.ConsistencyLevel_Strong,
