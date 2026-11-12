@@ -218,7 +218,7 @@ func TestRejectedCopyCleanupAllowsAbsentLocalPrefixes(t *testing.T) {
 	// not publish the now-deleted artifact, even though the intent is cleared.
 	restarted, err := copysegment.NewCopySegmentMeta(ctx, m.Catalog, m, nil, nil, nil)
 	require.NoError(t, err)
-	err = copysegment.SyncCopySegmentTask(restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
+	err = copysegment.SyncCopySegmentTask(context.TODO(), restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
 		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001}},
 	}, restarted, m, nil)

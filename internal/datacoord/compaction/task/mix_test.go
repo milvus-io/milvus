@@ -36,7 +36,7 @@ type MixCompactionTaskSuite struct {
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
-	s.mockMeta = NewMockCompactionMeta(s.T())
+	s.mockMeta = newTestCompactionMeta(s.T())
 	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
 	s.compactionTaskMeta = NewCompactionTaskMetaOverCatalog(s.mockCatalog)
 }
@@ -100,7 +100,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 				paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
 			})
 
-			mockMeta := NewMockCompactionMeta(s.T())
+			mockMeta := newTestCompactionMeta(s.T())
 			mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *meta.SegmentInfo {
 				return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 					ID:            segID,
@@ -173,7 +173,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
-		}, nil, NewMockCompactionMeta(s.T()), nil, index.NewTestVersionManager())
+		}, nil, newTestCompactionMeta(s.T()), nil, index.NewTestVersionManager())
 
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
@@ -181,7 +181,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	})
 
 	s.Run("mix_task_schema_older_than_input", func() {
-		mt := NewMockCompactionMeta(s.T())
+		mt := newTestCompactionMeta(s.T())
 		mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
@@ -200,7 +200,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	})
 
 	s.Run("sort_task_schema_older_than_input", func() {
-		mt := NewMockCompactionMeta(s.T())
+		mt := newTestCompactionMeta(s.T())
 		mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
@@ -252,7 +252,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 		},
 	} {
 		s.Run(test.name, func() {
-			mt := NewMockCompactionMeta(s.T())
+			mt := newTestCompactionMeta(s.T())
 			mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,

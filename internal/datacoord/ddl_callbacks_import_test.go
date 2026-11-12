@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -1196,6 +1197,18 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
+func TestRollbackImportCallback_AfterBroadcastStarted_NoOp(t *testing.T) {
+	ctx := t.Context()
+	imports, _ := newTestImportMeta(t)
+	require.NoError(t, imports.AddJob(ctx, &bulkimport.Job{
+		ImportJob: &datapb.ImportJob{JobID: 5, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: true},
+		Tr:        timerecord.NewTimeRecorder("test"),
+	}))
+	callbacks := newDDLCallbacks(&Server{importMeta: imports})
+	require.NoError(t, callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(5)))
+	require.Equal(t, internalpb.ImportJobState_Uncommitted, imports.GetJob(ctx, 5).GetState())
+}
+
 // TestImportAckCallbacks_CommitVsAbort_Race fires commit and rollback ack
 // callbacks concurrently against the same Uncommitted job. In production these
 // callbacks are serialized by the broadcaster's exclusive collection-level
@@ -1252,6 +1265,19 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	}
 }
 
+func newBroadcastImportTestServer(t *testing.T, job bulkimport.ImportJob) *Server {
+	t.Helper()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	m.AddCollection(&meta.CollectionInfo{ID: job.GetCollectionID(), Schema: readinessVectorSchema()})
+	imports, err := bulkimport.NewImportMeta(t.Context(), m.Catalog, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, imports.AddJob(t.Context(), job))
+	server := &Server{meta: m, importMeta: imports}
+	server.ddl = newDDLCallbacks(server)
+	return server
+}
+
 func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, bulkimport.ImportJob) error) {
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
@@ -1269,21 +1295,22 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := seedCollections(&Server{},
-		&meta.CollectionInfo{ID: 7, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
-	server.ddl = newDDLCallbacks(server)
 	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        7,
 			CollectionID: 7,
 			Vchannels:    wantVchannels,
+			State:        internalpb.ImportJobState_Uncommitted,
 		},
 		Tr: timerecord.NewTimeRecorder("test"),
 	}
+	server := newBroadcastImportTestServer(t, job)
+	server.broker = mockBroker
+	server.ddl = newDDLCallbacks(server)
 
 	err := broadcastFn(server, ctx, job)
-	assert.NoError(t, err)
-	assert.NotNil(t, capture.Captured, "Broadcast must have been called")
+	require.NoError(t, err)
+	require.NotNil(t, capture.Captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.Captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 	assert.False(t, capture.Captured.BroadcastHeader().AckSyncUp)
@@ -1291,7 +1318,12 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 
 // CommitImport targets business channels and CChannel for the unified callback.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
-	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("segment_change_"+enabled, func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, enabled)
+			testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+		})
+	}
 }
 
 func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
@@ -1301,14 +1333,93 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 	capture := &meta.CaptureBroadcastAPI{}
 	patch := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(capture, nil).Build()
 	defer patch.UnPatch()
-	for _, coordinator := range []bool{false, true} {
-		job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
-		err := (&Server{}).broadcastCommitImportMessage(context.Background(), job)
-		assert.NoError(t, err)
-		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
-		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
-		assert.Equal(t, coordinator, msg.BroadcastHeader().AckSyncUp,
-			"coordinator commits wait for query MVCC publication; legacy commits retain FastAck")
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("segment_change_"+enabled, func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, enabled)
+			for _, coordinator := range []bool{false, true} {
+				job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: coordinator}}
+				server := newBroadcastImportTestServer(t, job)
+				capture.Captured = nil
+				require.NoError(t, server.broadcastCommitImportMessage(context.Background(), job))
+				require.NotNil(t, capture.Captured)
+				msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
+				assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+				assert.Equal(t, coordinator, msg.BroadcastHeader().AckSyncUp,
+					"coordinator commits wait for query MVCC publication; legacy commits retain FastAck")
+			}
+		})
+	}
+}
+
+type captureBroadcastAPI struct {
+	captured message.BroadcastMutableMessage
+	err      error
+}
+
+func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	c.captured = msg
+	return &types.BroadcastAppendResult{BroadcastID: 1}, c.err
+}
+
+func (c *captureBroadcastAPI) Close() {}
+
+func TestBroadcastCommitImportMarksStartedAfterPreparation(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := t.Context()
+	catalog := &datacoordkv.Catalog{MetaKv: meta.NewMetaMemoryKV()}
+	imports, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
+		JobID: 7, CollectionID: 100, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted,
+	}}
+	require.NoError(t, imports.AddJob(ctx, job))
+	capture := &captureBroadcastAPI{}
+	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(capture, nil).Build()
+	defer start.UnPatch()
+	ready := false
+	prepare := mockey.Mock((*Server).prepareImportPublication).To(func(_ *Server, _ context.Context, _ bulkimport.ImportJob) error {
+		if !ready {
+			return merr.WrapErrServiceUnavailableMsg("group is not ready")
+		}
+		return nil
+	}).Build()
+	defer prepare.UnPatch()
+	server := &Server{importMeta: imports}
+	server.ddl = newDDLCallbacks(server)
+	require.ErrorIs(t, server.broadcastCommitImportMessage(ctx, job), merr.ErrServiceUnavailable)
+	require.False(t, imports.GetJob(ctx, 7).GetCommitBroadcastStarted())
+	require.Nil(t, capture.captured)
+
+	ready = true
+	require.NoError(t, server.broadcastCommitImportMessage(ctx, job))
+	require.NotNil(t, capture.captured)
+	require.True(t, imports.GetJob(ctx, 7).GetCommitBroadcastStarted())
+	restored, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	require.True(t, restored.GetJob(ctx, 7).GetCommitBroadcastStarted())
+}
+
+func TestBroadcastCommitImportClearsOnlyProvenUnsentFence(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	for _, tc := range []struct {
+		name       string
+		priorFence bool
+		err        error
+		wantFence  bool
+	}{
+		{"not_created", false, broadcaster.ErrBroadcastTaskNotCreated, false},
+		{"ambiguous", false, merr.ErrServiceUnavailable, true},
+		{"prior_attempt", true, broadcaster.ErrBroadcastTaskNotCreated, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: tc.priorFence}}
+			server := newBroadcastImportTestServer(t, job)
+			capture := &captureBroadcastAPI{err: tc.err}
+			patch := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(capture, nil).Build()
+			defer patch.UnPatch()
+			require.ErrorIs(t, server.broadcastCommitImportMessage(t.Context(), job), tc.err)
+			require.Equal(t, tc.wantFence, server.importMeta.GetJob(t.Context(), 7).GetCommitBroadcastStarted())
+		})
 	}
 }
 

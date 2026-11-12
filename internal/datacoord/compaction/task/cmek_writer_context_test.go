@@ -55,7 +55,7 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 	} {
 		t.Run(kind.String(), func(t *testing.T) {
 			cipher.key = nil
-			mt := NewMockCompactionMeta(t)
+			mt := NewDefaultMockCompactionMeta(t)
 			catalog := mocks.NewDataCoordCatalog(t)
 			compactionTaskMeta := NewCompactionTaskMetaOverCatalog(catalog)
 			mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{

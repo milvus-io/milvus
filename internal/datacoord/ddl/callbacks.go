@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -50,6 +51,7 @@ type Deps struct {
 	NotifyIndexChan                  chan UniqueID
 	// CreateImportJobFromAck creates the import job of an acked ImportMessageV1.
 	CreateImportJobFromAck func(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error)
+	StageImportChange      func(context.Context, bulkimport.ImportJob, string, []int64, uint64, model.SegmentChangeSource) (bool, error)
 }
 
 // Callbacks holds the DDL ack callbacks and the helpers they share with the RPC handlers.

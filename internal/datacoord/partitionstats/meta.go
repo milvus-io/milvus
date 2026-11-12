@@ -134,6 +134,13 @@ func (psm *PartitionStatsMeta) SavePartitionStatsAndVersion(info *datapb.Partiti
 	// then innerSaveCurrentPartitionStatsVersion's (set currentVersion). The
 	// insert runs first so the (vchannel, partition) entry exists when the
 	// version is set - mirroring the original two-call ordering.
+	psm.ApplySavedPartitionStatsLocked(info, currentVersion)
+	return nil
+}
+
+// ApplySavedPartitionStatsLocked updates the in-memory cache after a composite
+// catalog write; the caller must hold the write lock.
+func (psm *PartitionStatsMeta) ApplySavedPartitionStatsLocked(info *datapb.PartitionStatsInfo, currentVersion int64) {
 	if _, ok := psm.PartitionStatsInfos[info.GetVChannel()]; !ok {
 		psm.PartitionStatsInfos[info.GetVChannel()] = make(map[int64]*PartitionStatsInfo)
 	}
@@ -144,7 +151,6 @@ func (psm *PartitionStatsMeta) SavePartitionStatsAndVersion(info *datapb.Partiti
 	}
 	psm.PartitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].Infos[info.GetVersion()] = info
 	psm.PartitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].CurrentVersion = currentVersion
-	return nil
 }
 
 // getRollbackVersionLocked returns the current-partition-stats-version
