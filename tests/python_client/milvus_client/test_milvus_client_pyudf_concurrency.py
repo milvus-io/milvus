@@ -3,10 +3,12 @@
 import io
 import json
 import statistics
+import sys
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import grpc
 import pyarrow as pa
@@ -40,6 +42,30 @@ def require_config(request, expected):
         response = requests.get(endpoint.rstrip("/") + "/management/config/get", params={"keys": key}, timeout=10)
         response.raise_for_status()
         assert response.json()["configs"][0]["value"] == str(value), response.json()
+
+
+def cleanup_runtime_resources(runtime_connection, registered, uploaded, observer_cleanup=None):
+    """Attempt every owned cleanup and retain any failure active in the caller's finally block."""
+    failure = sys.exception()
+    client, storage, bucket = runtime_connection
+    operations = []
+    if observer_cleanup is not None:
+        operations.append(("remove cancellation marker", observer_cleanup))
+    operations.extend(
+        (f"remove resource {name}", partial(client.remove_file_resource, name, timeout=30)) for name in registered
+    )
+    operations.extend(
+        (f"remove wheel object {path}", partial(storage.remove_object, bucket, path)) for path in uploaded
+    )
+    errors = []
+    for operation, remove in operations:
+        try:
+            remove()
+        except Exception as error:
+            error.add_note(operation)
+            errors.append(error)
+    if errors:
+        raise BaseExceptionGroup("PyUDF runtime cleanup failed", ([failure] if failure is not None else []) + errors)
 
 
 @pytest.mark.tags("L3", "pyudf")
@@ -144,10 +170,11 @@ def test_pyudf_worker_pool_matrix_cold_resources_and_precise_results(
                 name = "pyudf_r2_concurrent_" + uuid.uuid4().hex[:12]
                 data = build_wheel(name, CONCURRENT_MODULE)
                 key = "pyudf_r2/" + name + ".whl"
-                storage.put_object(bucket, key, io.BytesIO(data), len(data))
+                # Own writes before sending them: a lost reply can hide success.
                 uploaded.append(key)
-                client.add_file_resource(name, key)
+                storage.put_object(bucket, key, io.BytesIO(data), len(data))
                 registered.append(name)
+                client.add_file_resource(name, key)
                 resources.append(name)
 
             # Snapshot polling is deliberately separated from successful factory calls.
@@ -209,10 +236,7 @@ def test_pyudf_worker_pool_matrix_cold_resources_and_precise_results(
             probe.check()
             probe.check(with_udf=False)
         finally:
-            for resource in registered:
-                client.remove_file_resource(resource)
-            for key in uploaded:
-                storage.remove_object(bucket, key)
+            cleanup_runtime_resources(runtime_connection, registered, uploaded)
 
 
 UPPER_WORKER_MODULE = """import os,threading,time
@@ -250,11 +274,12 @@ def test_pyudf_256_workers_serving_search_with_bounded_load(request, runtime_con
     resource = "pyudf_upper_" + uuid.uuid4().hex[:12]
     path = "pyudf_r2/" + resource + ".whl"
     wheel = build_wheel(resource, UPPER_WORKER_MODULE)
-    storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
-    registered = False
+    registered, uploaded = [], []
     try:
+        uploaded.append(path)
+        storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
+        registered.append(resource)
         client.add_file_resource(resource, path)
-        registered = True
         record_property("upper_server", json.dumps(client.get_server_version(detail=True)))
         record_property("upper_resource", resource)
         with pyudf_probe(*runtime_connection) as probe:
@@ -354,9 +379,7 @@ def test_pyudf_256_workers_serving_search_with_bounded_load(request, runtime_con
             probe.check()
             assert client.query(probe.name, filter="", output_fields=["count(*)"])[0]["count(*)"] == 3
     finally:
-        if registered:
-            client.remove_file_resource(resource)
-        storage.remove_object(bucket, path)
+        cleanup_runtime_resources(runtime_connection, registered, uploaded)
 
 
 CANCELLATION_MODULE = """import os,time
@@ -425,10 +448,10 @@ def test_pyudf_search_cancels_loader_wait_and_later_query_batches(request, runti
                 )
                 wheel = build_wheel(name, module)
                 path = "pyudf_r2/" + name + ".whl"
-                storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
                 uploaded.append(path)
-                client.add_file_resource(name, path)
+                storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
                 registered.append(name)
+                client.add_file_resource(name, path)
                 resources.append(name)
             blocking, observer = resources
 
@@ -486,12 +509,12 @@ def test_pyudf_search_cancels_loader_wait_and_later_query_batches(request, runti
             probe.check()
             probe.check(with_udf=False)
         finally:
-            if observer:
-                search(observer, {"cleanup": True})
-            for resource in registered:
-                client.remove_file_resource(resource)
-            for path in uploaded:
-                storage.remove_object(bucket, path)
+            cleanup_runtime_resources(
+                runtime_connection,
+                registered,
+                uploaded,
+                observer_cleanup=partial(search, observer, {"cleanup": True}) if observer else None,
+            )
 
 
 @pytest.mark.tags("L3", "pyudf")
