@@ -421,7 +421,9 @@ def test_multisearch_load(endpoint, token, request):
         phase(metrics_url, call, searches, mode, concurrency)
         for mode, concurrency in [("fanout", 4), ("batch", 4), ("batch", 8), ("fanout", 8)]
     ]
-    offered_rate = min(sample["group"]["rounds"] / sample["seconds"] for sample in samples[:2]) * 0.5
+    # Leave headroom for ordinary Search so each mode can sustain the same
+    # scheduled batch rate during the mixed comparison.
+    offered_rate = min(sample["group"]["rounds"] / sample["seconds"] for sample in samples[:2]) * 0.2
     phase(metrics_url, call, searches, "resident", 4, mixed=True)
     for mode in ["fanout", "batch", "batch", "fanout"]:
         phase(metrics_url, call, searches, mode, 4, offered_rate=offered_rate, mixed=True)
