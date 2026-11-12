@@ -6869,7 +6869,9 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a scalar index or
 replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and imported at
 maxSize bytes or maxRows rows, whichever comes first. Rows wider than maxSize / maxRows bytes (268 bytes by
-default) reach the byte limit first and are not affected. The collection property collection.segment.maxRows
+default) reach the byte limit first and are not affected. That width grows with the byte limit: it is 537 bytes
+for a collection that uses diskSegmentMaxSize, and a deployment that raises maxSize should raise maxRows in
+proportion to keep the same collections unaffected. The collection property collection.segment.maxRows
 overrides this value for one collection. 0 disables the row limit.`,
 		Export: true,
 	}
