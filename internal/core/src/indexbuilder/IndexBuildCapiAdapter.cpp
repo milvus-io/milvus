@@ -45,37 +45,6 @@
 namespace milvus::indexbuilder {
 namespace {
 
-storage::StorageConfig
-AdaptStorageConfig(const proto::indexcgo::StorageConfig& config) {
-    storage::StorageConfig result;
-    result.address = config.address();
-    result.bucket_name = config.bucket_name();
-    result.access_key_id = config.access_keyid();
-    result.access_key_value = config.secret_access_key();
-    result.root_path = config.root_path();
-    result.storage_type = config.storage_type();
-    result.cloud_provider = config.cloud_provider();
-    result.iam_endpoint = config.iamendpoint();
-    result.useSSL = config.usessl();
-    result.sslCACert = config.sslcacert();
-    result.useIAM = config.useiam();
-    result.region = config.region();
-    result.useVirtualHost = config.use_virtual_host();
-    result.requestTimeoutMs = config.request_timeout_ms();
-    result.gcp_credential_json = config.gcpcredentialjson();
-    result.max_connections = config.max_connections();
-    result.tls_min_version = config.ssl_tls_min_version();
-    result.use_crc32c_checksum = config.use_crc32c_checksum();
-    result.talon_mode = config.talon_mode();
-    result.talon_small_read_threshold = config.talon_small_read_threshold();
-    result.talon_coordinator = config.talon_coordinator();
-    result.talon_block_size = config.talon_block_size();
-    result.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
-    result.talon_enable_for_external_table =
-        config.talon_enable_for_external_table();
-    return result;
-}
-
 OptFieldT
 AdaptOptionalFields(const google::protobuf::RepeatedPtrField<
                     proto::indexcgo::OptionalFieldInfo>& fields) {
@@ -157,15 +126,16 @@ CanonicalBuildDimension(const proto::indexcgo::BuildIndexInfo& info) {
 }
 
 void
-ConfigureManifestContext(storage::FileManagerContext& context,
-                         const proto::indexcgo::BuildIndexInfo& info,
-                         const storage::StorageConfig& storage_config) {
+ConfigureManifestContext(
+    storage::FileManagerContext& context,
+    const proto::indexcgo::BuildIndexInfo& info,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        storage_config) {
     if (info.manifest().empty()) {
         return;
     }
 
-    auto properties = MakeInternalPropertiesFromStorageConfig(
-        ToCStorageConfig(storage_config));
+    auto properties = MakeInternalProperties(storage_config);
     if (!info.external_source().empty()) {
         InjectExternalSpecProperties(*properties,
                                      info.collectionid(),
@@ -312,10 +282,12 @@ ConfigureTextParams(index::BuildParams& params,
 }
 
 storage::FileManagerContext
-MakeFileManagerContext(const proto::indexcgo::BuildIndexInfo& info,
-                       const storage::StorageConfig& storage_config,
-                       const index::BuildParams& params,
-                       DataType field_type) {
+MakeFileManagerContext(
+    const proto::indexcgo::BuildIndexInfo& info,
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        storage_config,
+    const index::BuildParams& params,
+    DataType field_type) {
     storage::FieldDataMeta field_meta{info.collectionid(),
                                       info.partitionid(),
                                       info.segmentid(),
@@ -432,7 +404,7 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
         .json_path = json_path,
     };
 
-    auto storage_config = AdaptStorageConfig(info.storage_config());
+    auto storage_config = MakeStorageProperties(info.storage_config());
     auto context = MakeFileManagerContext(
         info, storage_config, request.params, field_type);
     return {.request = std::move(request),

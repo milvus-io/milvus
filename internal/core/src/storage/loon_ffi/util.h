@@ -21,6 +21,52 @@
 #include "milvus-storage/properties.h"
 #include "storage/Types.h"
 
+// Preserve the configured root for ChunkManager key construction.
+std::shared_ptr<milvus_storage::api::Properties>
+MakeStorageProperties(CStorageConfig c_storage_config);
+
+// Index-build and clustering protobufs share the storage fields. Reuse the C
+// boundary for owned strings, optional tuning defaults and node-local policy.
+template <typename ProtoStorageConfig>
+std::shared_ptr<milvus_storage::api::Properties>
+MakeStorageProperties(const ProtoStorageConfig& config) {
+    return MakeStorageProperties(CStorageConfig{
+        .address = config.address().c_str(),
+        .bucket_name = config.bucket_name().c_str(),
+        .access_key_id = config.access_keyid().c_str(),
+        .access_key_value = config.secret_access_key().c_str(),
+        .root_path = config.root_path().c_str(),
+        .storage_type = config.storage_type().c_str(),
+        .cloud_provider = config.cloud_provider().c_str(),
+        .iam_endpoint = config.iamendpoint().c_str(),
+        .log_level = "warn",
+        .region = config.region().c_str(),
+        .useSSL = config.usessl(),
+        .sslCACert = config.sslcacert().c_str(),
+        .useIAM = config.useiam(),
+        .useVirtualHost = config.use_virtual_host(),
+        .requestTimeoutMs = config.request_timeout_ms(),
+        .gcp_credential_json = config.gcpcredentialjson().c_str(),
+        .use_custom_part_upload = true,
+        .max_connections = config.max_connections(),
+        .tls_min_version = config.ssl_tls_min_version().c_str(),
+        .use_crc32c_checksum = config.use_crc32c_checksum(),
+        .talon_mode = config.talon_mode(),
+        .talon_small_read_threshold = config.talon_small_read_threshold(),
+        .talon_coordinator = config.talon_coordinator().c_str(),
+        .talon_block_size = config.talon_block_size(),
+        .talon_max_idle_per_addr = config.talon_max_idle_per_addr(),
+        .talon_enable_for_external_table =
+            config.talon_enable_for_external_table(),
+        .crt_queue_sizes = 0,
+    });
+}
+
+// Normalize a private copy for Arrow/loon, without modifying shared properties.
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalProperties(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
+
 /**
  * @brief Create internal API Properties from CStorageConfig
  *
@@ -51,18 +97,6 @@ inline constexpr const char* kLoonLocalFSRootPath = "/";
 
 std::string
 LoonFSRootPath(const std::string& storage_type, const std::string& root_path);
-
-/**
- * @brief Convert StorageConfig to C-style CStorageConfig
- *
- * Converts the C++ StorageConfig object into a CStorageConfig structure
- * suitable for passing through FFI boundaries.
- *
- * @param config The StorageConfig object to convert
- * @return CStorageConfig struct with copied configuration values
- */
-CStorageConfig
-ToCStorageConfig(const milvus::storage::StorageConfig& config);
 
 /**
  * @brief Retrieve ColumnGroups metadata from manifest path

@@ -270,9 +270,9 @@ class GroupByJsonGetterTest
     InstallShreddedStrings() {
         storage::FieldDataMeta field_meta{1, 2, 36, field_id_.get(), {}};
         storage::IndexMeta index_meta{36, field_id_.get(), 6, 1};
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = TestLocalPath;
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
         storage::FileManagerContext context(
             field_meta,
             index_meta,

@@ -39,8 +39,8 @@
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
-#include "storage/StorageV2FSCache.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 #include "storage/StatusToErrorCode.h"
 
@@ -72,38 +72,8 @@ UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
 
 milvus_storage::ArrowFileSystemPtr
 GetFsFromStorageConfig(const CStorageConfig& c_storage_config) {
-    return milvus::storage::StorageV2FSCache::Instance().Get({
-        std::string(c_storage_config.address),
-        std::string(c_storage_config.bucket_name),
-        std::string(c_storage_config.access_key_id),
-        std::string(c_storage_config.access_key_value),
-        std::string(c_storage_config.root_path),
-        std::string(c_storage_config.storage_type),
-        std::string(c_storage_config.cloud_provider),
-        std::string(c_storage_config.iam_endpoint),
-        std::string(c_storage_config.log_level),
-        std::string(c_storage_config.region),
-        c_storage_config.useSSL,
-        std::string(c_storage_config.sslCACert),
-        c_storage_config.useIAM,
-        c_storage_config.useVirtualHost,
-        c_storage_config.requestTimeoutMs,
-        false,
-        std::string(c_storage_config.gcp_credential_json),
-        c_storage_config.use_custom_part_upload,
-        c_storage_config.max_connections,
-        c_storage_config.tls_min_version != nullptr
-            ? std::string(c_storage_config.tls_min_version)
-            : "",
-        c_storage_config.use_crc32c_checksum,
-        c_storage_config.talon_mode,
-        c_storage_config.talon_small_read_threshold,
-        c_storage_config.talon_coordinator != nullptr
-            ? c_storage_config.talon_coordinator
-            : "",
-        c_storage_config.talon_block_size,
-        c_storage_config.talon_max_idle_per_addr,
-    });
+    return milvus::storage::InitArrowFileSystem(
+        MakeStorageProperties(c_storage_config));
 }
 
 }  // namespace

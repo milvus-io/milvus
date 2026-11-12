@@ -55,9 +55,9 @@ struct ResourceFixture {
             "resource estimate test");
     storage::FileManagerContext context;
     ResourceFixture() {
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = root->Path();
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] = std::string(root->Path());
         context =
             storage::FileManagerContext(storage::FieldDataMeta{1, 2, 3, 101},
                                         storage::IndexMeta{3, 101, 1000, 10000},

@@ -97,7 +97,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     // AppendIndexV2 loads through RemoteChunkManagerSingleton, so build the
     // index under the same TestRemotePath root.
     auto storage_config = get_default_local_storage_config();
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
     // Test data: 8 rows
@@ -205,7 +205,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
 
             auto log_path =
                 fmt::format("{}insert_log/like_conjunct/{}/{}/{}/{}/{}",
-                            storage_config.root_path,
+                            milvus::storage::GetStorageProperty<std::string>(
+                                storage_config, PROPERTY_FS_ROOT_PATH),
                             collection_id,
                             partition_id,
                             segment_id,

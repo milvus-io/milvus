@@ -38,6 +38,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "milvus-storage/thread_pool.h"
 
 CStatus
@@ -73,52 +74,10 @@ InitLocalChunkManagerSingleton(const char* c_path) {
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     try {
-        milvus::storage::StorageConfig storage_config;
-        storage_config.address = std::string(c_storage_config.address);
-        storage_config.bucket_name = std::string(c_storage_config.bucket_name);
-        storage_config.access_key_id =
-            std::string(c_storage_config.access_key_id);
-        storage_config.access_key_value =
-            std::string(c_storage_config.access_key_value);
-        storage_config.root_path = std::string(c_storage_config.root_path);
-        storage_config.storage_type =
-            std::string(c_storage_config.storage_type);
-        storage_config.cloud_provider =
-            std::string(c_storage_config.cloud_provider);
-        storage_config.iam_endpoint =
-            std::string(c_storage_config.iam_endpoint);
-        storage_config.cloud_provider =
-            std::string(c_storage_config.cloud_provider);
-        storage_config.log_level = std::string(c_storage_config.log_level);
-        storage_config.useSSL = c_storage_config.useSSL;
-        storage_config.sslCACert = std::string(c_storage_config.sslCACert);
-        storage_config.useIAM = c_storage_config.useIAM;
-        storage_config.useVirtualHost = c_storage_config.useVirtualHost;
-        storage_config.region = c_storage_config.region;
-        storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
-        storage_config.max_connections = c_storage_config.max_connections;
-        storage_config.gcp_credential_json =
-            std::string(c_storage_config.gcp_credential_json);
-        if (c_storage_config.tls_min_version != nullptr) {
-            storage_config.tls_min_version =
-                std::string(c_storage_config.tls_min_version);
-        }
-        storage_config.use_crc32c_checksum =
-            c_storage_config.use_crc32c_checksum;
-        storage_config.talon_mode = c_storage_config.talon_mode;
-        storage_config.talon_small_read_threshold =
-            c_storage_config.talon_small_read_threshold;
-        storage_config.talon_coordinator =
-            c_storage_config.talon_coordinator != nullptr
-                ? c_storage_config.talon_coordinator
-                : "";
-        storage_config.talon_block_size = c_storage_config.talon_block_size;
-        storage_config.talon_max_idle_per_addr =
-            c_storage_config.talon_max_idle_per_addr;
-        storage_config.talon_enable_for_external_table =
-            c_storage_config.talon_enable_for_external_table;
+        // Preserve the ChunkManager filesystem's custom multipart setting.
+        c_storage_config.use_custom_part_upload = true;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
-            storage_config);
+            MakeStorageProperties(c_storage_config));
 
         return milvus::SuccessCStatus();
     }
@@ -133,11 +92,6 @@ InitS3CrtQueueSizes(uint32_t crt_queue_sizes) {
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
-}
-
-void
-SetArrowFileSystemChunkManagerEnabled(bool enable) {
-    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
 }
 
 CStatus

@@ -802,10 +802,12 @@ TEST_F(VectorSideInputFixture,
     }
 
     // Serialize only after the raw file and scalar sidecar have been removed.
-    storage::StorageConfig config;
-    config.storage_type = "local";
-    config.root_path = root->Path() + "/objects/";
-    std::filesystem::create_directories(config.root_path);
+    auto config = std::make_shared<milvus_storage::api::Properties>();
+    (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*config)[PROPERTY_FS_ROOT_PATH] = std::string(root->Path() + "/objects/");
+    std::filesystem::create_directories(
+        milvus::storage::GetStorageProperty<std::string>(
+            config, PROPERTY_FS_ROOT_PATH));
     storage::FileManagerContext context({1, 2, 3, 100},
                                         {3,
                                          100,

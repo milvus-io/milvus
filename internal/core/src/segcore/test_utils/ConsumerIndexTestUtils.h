@@ -137,9 +137,9 @@ BuildVectorReader(DataType field_type,
 
     auto directory = storage::LocalDirectory::CreateOwned(
         TestRemotePath, "src-consumer-vector-XXXXXX", "consumer vector files");
-    storage::StorageConfig config;
-    config.storage_type = "local";
-    config.root_path = directory->Path();
+    auto config = std::make_shared<milvus_storage::api::Properties>();
+    (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*config)[PROPERTY_FS_ROOT_PATH] = std::string(directory->Path());
     const auto id = static_cast<int64_t>(expr_index::NextFixtureId()) + 100000;
     storage::FileManagerContext context(storage::FieldDataMeta{1, 2, id, 100},
                                         storage::IndexMeta{id, 100, id, 1},
