@@ -88,6 +88,8 @@ CheckStatus(MgGrepStatus status,
 MgGrepMatchOptions
 ToOptions(const MatchOptions& options) {
     MgGrepMatchOptions out{};
+    out.has_max_count = options.max_count.has_value();
+    out.max_count = options.max_count.value_or(0);
     switch (options.pattern_kind) {
         case PatternKind::Regex:
             out.pattern_kind = MG_GREP_PATTERN_REGEX;
@@ -306,6 +308,32 @@ Plan::CreateSession() const {
         throw GrepError(Status::AllocationError,
                         Operation::CreateSession,
                         "C++ session state allocation failed");
+    }
+}
+
+std::string
+Plan::ConditionPayload() const {
+    if (!handle_) {
+        throw GrepError(Status::InvalidArgument,
+                        Operation::ReadCondition,
+                        "plan has been moved from");
+    }
+    MgGrepBytes view{};
+    MgGrepError error{};
+    CheckStatus(mg_grep_plan_condition(handle_.get(), &view, &error),
+                Operation::ReadCondition,
+                error);
+    if (!view.data || view.len == 0 || view.len > std::string{}.max_size()) {
+        throw GrepError(Status::InternalError,
+                        Operation::ReadCondition,
+                        "invalid condition payload view");
+    }
+    try {
+        return std::string(reinterpret_cast<const char*>(view.data), view.len);
+    } catch (const std::bad_alloc&) {
+        throw GrepError(Status::AllocationError,
+                        Operation::ReadCondition,
+                        "C++ condition payload allocation failed");
     }
 }
 
