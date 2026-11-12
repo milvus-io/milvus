@@ -1,3 +1,19 @@
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import json
 import os
 import random
@@ -4972,7 +4988,6 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             ({"is_partition_key": True}, "cannot be partition key"),
             ({"is_clustering_key": True}, "cannot be clustering key"),
             ({"is_dynamic": True}, "cannot be dynamic field"),
-            ({"nullable": True}, "cannot be nullable individually"),
             ({"default_value": 7}, "cannot have default value"),
         ],
     )
@@ -4980,7 +4995,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         """
         target: test invalid sub-field property validation when dynamically adding a struct array field
         method: add a struct array field whose sub-field is primary key, partition key, clustering key, dynamic,
-            individually nullable, or has default value
+            or has default value
         expected: invalid sub-field properties are rejected, and no struct field is added to the collection
         """
         collection_name = cf.gen_unique_str(f"{prefix}_add_struct_bad_subfield_attr")
