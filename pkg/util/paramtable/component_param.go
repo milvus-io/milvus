@@ -9659,11 +9659,15 @@ type streamingConfig struct {
 	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
 	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryFlushSizeThreshold        ParamItem `refreshable:"false"`
+	WALRecoveryFlushMessageThreshold     ParamItem `refreshable:"false"`
+	WALRecoveryFlushIdleMinSize          ParamItem `refreshable:"false"`
+	WALRecoveryFlushIdleTimeout          ParamItem `refreshable:"false"`
 
 	// idempotent write configuration.
-	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
-	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
-	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
+	IdempotencyTTLPerPChannel                ParamItem `refreshable:"false"`
+	IdempotencyMaxSizePerPChannel            ParamItem `refreshable:"false"`
+	IdempotencyBestEffortMinCountPerVChannel ParamItem `refreshable:"false"`
 
 	TransformLogCatchupConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -9973,8 +9977,7 @@ Coordinator recovery restarts the retention clock; checkpoint lag can extend it 
 		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
 The key is stored in the message properties of every write it guards, so an
 oversized key inflates both the WAL entry and the in-memory dedup index.
-Zero disables the bound, as it does for the other streaming.idempotency.*
-limits; requests that carry no key are accepted at any value.`,
+Zero disables this key-length bound; requests that carry no key are accepted at any value.`,
 		DefaultValue: "256",
 		Export:       false,
 	}
@@ -10183,7 +10186,7 @@ This no-op setting is retained so existing configurations remain loadable.`,
 	p.WALRecoveryTailSoftWatermark = ParamItem{
 		Key:          "streaming.walRecovery.tail.softWatermark",
 		Version:      "2.7.0",
-		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		Doc:          "RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.",
 		DefaultValue: "8g",
 		Export:       true,
 	}
@@ -10197,6 +10200,30 @@ This no-op setting is retained so existing configurations remain loadable.`,
 		Export:       true,
 	}
 	p.WALRecoveryTailHighWatermark.Init(base.mgr)
+	p.WALRecoveryFlushSizeThreshold = ParamItem{
+		Key:     "streaming.walRecovery.flush.sizeThreshold",
+		Version: "3.1.0", DefaultValue: "6g", Export: true,
+		Doc: "Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryFlushSizeThreshold.Init(base.mgr)
+	p.WALRecoveryFlushMessageThreshold = ParamItem{
+		Key:     "streaming.walRecovery.flush.messageThreshold",
+		Version: "3.1.0", DefaultValue: "6144", Export: true,
+		Doc: "Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryFlushMessageThreshold.Init(base.mgr)
+	p.WALRecoveryFlushIdleMinSize = ParamItem{
+		Key:     "streaming.walRecovery.flush.idleMinSize",
+		Version: "3.1.0", DefaultValue: "512MB", Export: true,
+		Doc: "Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryFlushIdleMinSize.Init(base.mgr)
+	p.WALRecoveryFlushIdleTimeout = ParamItem{
+		Key:     "streaming.walRecovery.flush.idleTimeout",
+		Version: "3.1.0", DefaultValue: "10m", Export: true,
+		Doc: "Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryFlushIdleTimeout.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",
@@ -10208,15 +10235,30 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 
-	p.IdempotencyMaxBytesPerWindow = ParamItem{
-		Key:          "streaming.idempotency.maxBytesPerWindow",
-		Version:      "3.0.0",
-		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Nothing is evicted until this is reached; then the oldest entries by commit order are replaced. There is deliberately no TTL: any horizon expressed in time is invalidated by time passing, which would leave the window empty after an outage -- exactly when a resuming client needs it.`,
-		DefaultValue: "16777216",
-		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
-		Export:       false,
+	p.IdempotencyTTLPerPChannel = ParamItem{
+		Key:          "streaming.idempotency.ttlPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "1h",
+		Doc:          "Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.",
+		Export:       true,
 	}
-	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+	p.IdempotencyTTLPerPChannel.Init(base.mgr)
+	p.IdempotencyMaxSizePerPChannel = ParamItem{
+		Key:          "streaming.idempotency.maxSizePerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "256MB",
+		Doc:          "PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.IdempotencyMaxSizePerPChannel.Init(base.mgr)
+	p.IdempotencyBestEffortMinCountPerVChannel = ParamItem{
+		Key:          "streaming.idempotency.bestEffortMinCountPerVChannel",
+		Version:      "3.1.0",
+		DefaultValue: "16",
+		Doc:          "Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.IdempotencyBestEffortMinCountPerVChannel.Init(base.mgr)
 
 	p.QueryViewLiveEventDispatchConcurrencyPerPChannel = ParamItem{
 		Key:          "streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel",

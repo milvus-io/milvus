@@ -199,6 +199,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(20), storage.pendingPersistSnapshot.Checkpoint.TimeTick)
 	firstEndOffset := uint64(first.EstimateSize())
 	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
+	assert.Equal(t, uint64(1), storage.pendingPersistSnapshot.LogicalEndMessageCount)
 
 	second := newAckTestRecoveryBarrier(t, 30, 3)
 	storage.observeMessage(context.Background(), second)
@@ -213,12 +214,15 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.RecoveryTailBytes)
 	assert.Zero(t, metrics.BlockingBytes)
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.PublishLagBytes)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().PublishedMessages)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().RecoveryTailMessages)
 
 	followUp := storage.consumeDirtySnapshot()
 	require.NotNil(t, followUp)
 	assert.Equal(t, uint64(30), followUp.Checkpoint.TimeTick)
 	assert.True(t, second.LastConfirmedMessageID().EQ(followUp.Checkpoint.MessageID))
 	assert.Equal(t, firstEndOffset+uint64(second.EstimateSize()), followUp.LogicalEndOffset)
+	assert.Equal(t, uint64(2), followUp.LogicalEndMessageCount)
 }
 
 func TestPersistBatchMarksModuleSnapshotsAfterCompoundCommit(t *testing.T) {
