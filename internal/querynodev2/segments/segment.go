@@ -85,7 +85,7 @@ type baseSegment struct {
 	version        *atomic.Int64
 
 	segmentType   SegmentType
-	pkCandidate   pkoracle.Candidate // PK candidate: BloomFilterSet for regular collections, ExternalSegmentCandidate for external collections
+	pkCandidate   pkoracle.Candidate // Initialized for growing segments; optional for sealed segments.
 	loadInfo      *atomic.Pointer[querypb.SegmentLoadInfo]
 	skipGrowingBF bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel       metautil.Channel
@@ -105,12 +105,14 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		loadInfo:      atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
 		version:       atomic.NewInt64(version),
 		segmentType:   segmentType,
-		pkCandidate:   pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 		channel:       channel,
 		skipGrowingBF: segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
+	}
+	if segmentType == SegmentTypeGrowing {
+		bs.pkCandidate = pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType)
 	}
 	return bs, nil
 }
@@ -670,7 +672,7 @@ func (s *LocalSegment) advanceLastDeltaTimestamp(tss []typeutil.Timestamp) {
 // UpdatePkCandidate updates the PK candidate with provided pks and charges resource.
 // Overrides baseSegment.UpdatePkCandidate to handle resource charging for growing segments.
 func (s *LocalSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
-	if s.skipGrowingBF {
+	if s.skipGrowingBF || s.pkCandidate == nil {
 		return
 	}
 
@@ -1417,7 +1419,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// s.manager.SubLogicalResource(usage)
 
 	// Refund PK candidate resource
-	s.pkCandidate.Refund()
+	s.Refund()
 
 	binlogSize := s.binlogSize.Load()
 	if binlogSize > 0 {
