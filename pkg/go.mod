@@ -26,10 +26,10 @@ require (
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
-	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0
 	github.com/sirupsen/logrus v1.9.4
-	github.com/spf13/cast v1.3.1
+	github.com/spf13/cast v1.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
@@ -50,7 +50,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	go.uber.org/atomic v1.11.0
-	go.uber.org/automaxprocs v1.5.3
+	go.uber.org/automaxprocs v1.6.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
@@ -118,7 +118,7 @@ require (
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
-	github.com/fatih/color v1.10.0 // indirect
+	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/getsentry/sentry-go v0.12.0 // indirect
@@ -131,7 +131,7 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/goccy/go-yaml v1.9.8 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
-	github.com/gofrs/flock v0.8.1 // indirect
+	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
@@ -162,7 +162,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hashicorp/memberlist v0.5.3 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
-	github.com/iskorotkov/avro/v2 v2.33.1
+	github.com/iskorotkov/avro/v2 v2.33.1 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -170,8 +170,8 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/labstack/gommon v0.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.19 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
