@@ -167,9 +167,10 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Must use git config --global: upstream git before 2.38 reads safe.directory
-# only from system/global config, ignoring -c and GIT_CONFIG_COUNT, and the
-# ubuntu20.04 builder used by ARM CI still ships such a git (2.25.1).
+# Must use git config --global: git without 2.38's protected config reads
+# safe.directory only from system/global config, ignoring -c and
+# GIT_CONFIG_COUNT. That includes Ubuntu focal's git and jammy's before
+# 2.34.1-1ubuntu1.16; #47916 hit it in the CI build container.
 # Every make run parses this line, so write only when `git rev-parse` fails and
 # '*' is not in the global config yet. An unconditional --add appended a
 # duplicate entry to ~/.gitconfig on each run and disabled git's ownership
