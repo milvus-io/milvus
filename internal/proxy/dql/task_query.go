@@ -236,6 +236,7 @@ type queryParams struct {
 	orderByFields       []string // NEW: ORDER BY field specifications (e.g., "price:desc")
 	extractTimeFields   []string
 	queryIteratorCursor *planpb.QueryIteratorCursor
+	calcDistance        *calcDistanceSpec
 }
 
 func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
@@ -571,6 +572,11 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		return nil, err
 	}
 
+	calcDistance, err := parseCalcDistance(queryParamsPair)
+	if err != nil {
+		return nil, err
+	}
+
 	return &queryParams{
 		limit:               limit,
 		offset:              offset,
@@ -581,6 +587,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		orderByFields:       orderByFields,
 		queryIteratorCursor: queryIteratorCursor,
 		extractTimeFields:   extractTimeFields,
+		calcDistance:        calcDistance,
 	}, nil
 }
 
@@ -981,6 +988,13 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// calc_distance: resolve the spec into the plan before the expr plan is
+	// serialized below. Runs after GetPartitionIDs so the internal
+	// reference-vector query reuses t.PartitionIDs.
+	if err := t.prepareCalcDistance(ctx); err != nil {
+		return err
+	}
+
 	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
 	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
@@ -1242,6 +1256,17 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	// final order (finishMaterialize); the plain pipeline's pk reduce passes a
 	// single result through untouched, so only complement_fields and the
 	// steps below act on it -- no cross-shard reduce runs.
+
+	// calc_distance: keep the synthetic distance column through the ORDER BY
+	// remap. The ORDER BY pipeline rebuilds FieldsData from this id list
+	// (FieldIDRemapOperator) and would otherwise drop the QueryNode's synthetic
+	// distance column (FieldId common.CalcDistanceFieldID) while PostExecute
+	// still advertises its name in output_fields. Appending it last keeps the
+	// column position aligned with the output_fields order.
+	outputFieldIDs := filterSystemFields(t.GetOutputFieldsId())
+	if t.queryParams.calcDistance != nil {
+		outputFieldIDs = append(outputFieldIDs, common.CalcDistanceFieldID)
+	}
 	pipeline, err := NewQueryPipeline(
 		t.schema.CollectionSchema,
 		t.queryParams.limit,
@@ -1251,7 +1276,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		t.GetGroupByFieldIds(),
 		t.GetAggregates(),
 		t.aggregationFieldMap,
-		filterSystemFields(t.GetOutputFieldsId()),
+		outputFieldIDs,
 	)
 	if err != nil {
 		log.Warn(ctx, "fail to create query pipeline", mlog.Err(err))
@@ -1275,6 +1300,21 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.result.OutputFields = t.userOutputFields
+	if t.queryParams.calcDistance != nil {
+		// Append the resolved distance column name only when the column actually
+		// survived the reduce. In a mixed-version cluster an old QueryNode drops
+		// the calc_distance plan field and produces no reserved-FieldId column;
+		// advertising the name without data would break SDK reconstruction, so
+		// the clean result is "no distance column" (design doc §Upgrade note).
+		// Zero-row results go through FillRetrieveResultIfEmpty, which classifies
+		// the reserved FieldId (a negative id) as a system field and fabricates a
+		// nameless Int64 column; rewrite it into the Float32 distance column with
+		// the resolved name, idempotently: on non-empty results the QueryNode
+		// already emits exactly this column, so the rewrite is a no-op there.
+		if rewriteCalcDistanceColumn(t.result, t.queryParams.calcDistance.distanceOutputName) {
+			t.result.OutputFields = append(t.result.OutputFields, t.queryParams.calcDistance.distanceOutputName)
+		}
+	}
 	if !t.reQuery {
 		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
 	}
