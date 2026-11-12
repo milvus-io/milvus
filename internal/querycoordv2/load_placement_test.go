@@ -166,7 +166,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
-		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
+		_, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
 			&querypb.LoadCollectionRequest{
 				CollectionID:   collectionID,
 				ReplicaNumber:  1,
@@ -273,7 +273,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
-		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
+		_, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
 			&querypb.LoadCollectionRequest{
 				CollectionID:  collectionID,
 				ReplicaNumber: 1,
@@ -407,7 +407,7 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
-		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
+		_, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
 			&querypb.LoadCollectionRequest{
 				CollectionID:   collectionID,
 				ReplicaNumber:  1,

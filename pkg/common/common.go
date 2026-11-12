@@ -510,6 +510,10 @@ const (
 	// WarmupHintKey is the LoadCollection parameter requesting one background
 	// prewarm pass over the serving resources.
 	WarmupHintKey = "warmup_hint"
+
+	// LoadInfoVersionKey carries the admitted configuration in the internal
+	// LoadCollection status. Proxy consumes it before returning the public status.
+	LoadInfoVersionKey = "load_info_version"
 )
 
 const (

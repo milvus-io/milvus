@@ -19,30 +19,33 @@ import (
 const prewarmConcurrency = 16
 
 // Prewarm warms each configured replica once using the client's query route.
-func Prewarm(ctx context.Context, client Client, collectionID int64) error {
+func Prewarm(ctx context.Context, client Client, collectionID int64, loadVersion uint64) error {
 	warmer, ok := client.(interface {
-		Prewarm(context.Context, int64) error
+		Prewarm(context.Context, int64, uint64) error
 	})
 	if !ok {
 		return merr.Wrap(merr.ErrServiceUnimplemented, "query client does not support prewarm")
 	}
-	return warmer.Prewarm(ctx, collectionID)
+	return warmer.Prewarm(ctx, collectionID, loadVersion)
 }
 
-func (c *legacyOnlyClient) Prewarm(ctx context.Context, collectionID int64) error {
-	return c.legacy.prewarm(ctx, collectionID)
+func (c *legacyOnlyClient) Prewarm(ctx context.Context, collectionID int64, loadVersion uint64) error {
+	return c.legacy.prewarm(ctx, collectionID, loadVersion)
 }
 
-func (c *viewQueryClientImpl) Prewarm(ctx context.Context, collectionID int64) error {
-	return c.legacyClient.prewarm(ctx, collectionID)
+func (c *viewQueryClientImpl) Prewarm(ctx context.Context, collectionID int64, loadVersion uint64) error {
+	return c.legacyClient.prewarm(ctx, collectionID, loadVersion)
 }
 
 // prewarm captures the configured replica set, then independently waits for each
 // shard to become Up. A target's advertised View and owner are selected once.
 // Neither plans nor executions are retried, even when ordinary queries could
 // recover by selecting a newer View or another worker.
-func (c *legacyClient) prewarm(ctx context.Context, collectionID int64) (err error) {
+func (c *legacyClient) prewarm(ctx context.Context, collectionID int64, loadVersion uint64) (err error) {
 	defer func() { err = toMilvusError(err) }()
+	if loadVersion == 0 {
+		return merr.WrapErrServiceNotReadyMsg("prewarm requires the admitted load configuration version")
+	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	client := c.shardClient
@@ -61,7 +64,10 @@ func (c *legacyClient) prewarm(ctx context.Context, collectionID int64) (err err
 	if err != nil {
 		return err
 	}
-	if info.GetVersion() == 0 || len(info.GetReplicaIds()) == 0 {
+	if info.GetVersion() != loadVersion {
+		return viewerror.NewViewInvalidated("prewarm load configuration changed before dispatch")
+	}
+	if len(info.GetReplicaIds()) == 0 {
 		return merr.WrapErrServiceNotReadyMsg("prewarm requires a configured replica set")
 	}
 	// This request owns the load-config probe; QC owns no prewarm task.

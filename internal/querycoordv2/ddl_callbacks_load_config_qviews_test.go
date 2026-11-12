@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -56,15 +58,66 @@ func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 		captured = msg
 	})
 
-	require.NoError(t, server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
+	_, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
 		CollectionID: collectionID,
-	}))
+	})
+	require.NoError(t, err)
 	require.NotNil(t, captured)
 	// The broadcaster resolves an empty target list to the control channel.
 	assert.Empty(t, captured.BroadcastHeader().VChannels)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 	assert.Empty(t, server.meta.GetAll(ctx))
 	catalog.AssertNotCalled(t, "SaveCollection", mock.Anything, mock.Anything)
+}
+
+func TestLoadCollectionReturnsAdmittedVersionAfterConcurrentReload(t *testing.T) {
+	server, _, _ := newLoadConfigQViewsServer(t)
+	putTestCollection(server, testDescribeCollection(100, []string{"v0"}), 10)
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	var admitted uint64
+	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
+		header := message.MustAsMutableAlterLoadConfigMessageV2(msg).Header()
+		require.NoError(t, server.qviewsRuntime.loadManager.ApplyLoadConfig(t.Context(), header))
+		store := server.qviewsRuntime.loadConfigStore
+		admitted = store.GetConfigVersion(100)
+		// Broadcast releases the resource key in the callback before returning.
+		// A later request may already have replaced the config at that point.
+		store.StopPlanning(100)
+		require.NoError(t, store.Remove(t.Context(), 100))
+		require.NoError(t, server.qviewsRuntime.loadManager.ApplyLoadConfig(t.Context(), header))
+		require.Greater(t, store.GetConfigVersion(100), admitted)
+	})
+	status, err := server.LoadCollection(t.Context(), &querypb.LoadCollectionRequest{CollectionID: 100})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status), status.GetReason())
+	require.NotZero(t, admitted)
+	require.Equal(t, strconv.FormatUint(admitted, 10), status.GetExtraInfo()[common.LoadInfoVersionKey])
+}
+
+func TestLoadCollectionUnchangedAdmissionKeepsItsVersion(t *testing.T) {
+	server, _, _ := newLoadConfigQViewsServer(t)
+	putTestCollection(server, testDescribeCollection(100, []string{"v0"}), 10)
+	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
+		require.NoError(t, server.qviewsRuntime.loadManager.ApplyLoadConfig(t.Context(), message.MustAsMutableAlterLoadConfigMessageV2(msg).Header()))
+	})
+	req := &querypb.LoadCollectionRequest{CollectionID: 100}
+	version, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req)
+	require.NoError(t, err)
+	require.NotZero(t, version)
+
+	// An identical load should capture the existing version under its entrance
+	// lock without waiting for a commit or creating another broadcast.
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Close().Return().Once()
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Once()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.ResetBroadcaster()
+	broadcast.Register(mb)
+	unchanged, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, version, unchanged)
+	require.Equal(t, version, server.qviewsRuntime.loadConfigStore.GetConfigVersion(100))
 }
 
 func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {

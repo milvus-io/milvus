@@ -40,17 +40,17 @@ import (
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
-func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) error {
+func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (uint64, error) {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
 	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	partitionIDs := coll.Partitions
@@ -61,7 +61,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		req.GetCollectionID(),
 	)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	legacyLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
@@ -93,13 +93,13 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	// the whole placement, which is a config update like any other.
 	requestedReplicasNumber, err := utils.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	checkNodeNum := legacyLoadConfig.Collection == nil ||
 		(extension.FormInstalled() && len(scopedResourceGroups) > 0 && scopedLoadAddsReplicas(requestedReplicasNumber, legacyLoadConfig))
 	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// With a form installed, a request that names resource groups speaks only
 	// for those and leaves the placement of the others alone; a request that
@@ -135,24 +135,35 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if msg == nil {
 		// load config unchanged, the collection is already loaded as requested.
 		mlog.Info(ctx, "load collection ignored, load config is unchanged",
 			mlog.Int64("collectionID", req.GetCollectionID()))
-		return nil
+		return s.qviewsRuntime.loadConfigStore.GetConfigVersion(req.GetCollectionID()), nil
 	}
 	requiredByRG, err := s.checkLoadResource(ctx, alterLoadConfigReq)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	// Broadcast transfers the collection lock to its callback and may release
+	// it before returning. Capture the first publication while that lock still
+	// belongs to this load; a later release/reload must not replace its identity.
+	committed, unsubscribe := s.qviewsRuntime.loadConfigStore.WatchNextLoadConfig(req.GetCollectionID())
+	defer unsubscribe()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	recordLoadResourceDemand(requiredByRG)
-	return nil
+	select {
+	case version := <-committed:
+		return version, nil
+	default:
+		// Optional work must not turn an otherwise successful load into a failure.
+		return 0, nil
+	}
 }
 
 // getLoadReplicaConfigForRequest resolves the replica configuration a load

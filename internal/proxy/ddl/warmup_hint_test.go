@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -88,6 +89,54 @@ func TestLoadCollectionWarmupPartialFieldIndexes(t *testing.T) {
 			task.MetaCache = cache
 			require.NoError(t, task.PreExecute(t.Context()))
 			require.ErrorIs(t, task.Execute(t.Context()), tc.wantErr)
+		})
+	}
+}
+
+func TestLoadCollectionWarmupAdmissionVersion(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name    string
+		version string
+		want    uint64
+		failure bool
+	}{
+		{name: "accepted load", version: "42", want: 42},
+		{name: "older coordinator"},
+		{name: "malformed metadata", version: "invalid"},
+		{name: "overflow", version: "18446744073709551616"},
+		{name: "failed load", failure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "default", "warmup_test").Return(int64(100), nil).Once()
+			cache.EXPECT().GetCollectionSchema(mock.Anything, "default", "warmup_test").Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+			}), nil).Once()
+			mix := mocks.NewMockMixCoordClient(t)
+			mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil).Once()
+			status := merr.Success()
+			if tc.failure {
+				status = merr.Status(merr.WrapErrServiceNotReadyMsg("injected admission failure"))
+			}
+			status.ExtraInfo = map[string]string{"existing": "preserved"}
+			if tc.version != "" {
+				status.ExtraInfo[common.LoadInfoVersionKey] = tc.version
+			}
+			mix.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(status, nil).Once()
+			task := &LoadCollectionTask{LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+				Base: commonpbutil.NewMsgBase(), DbName: "default", CollectionName: "warmup_test",
+				LoadParams: map[string]string{common.WarmupHintKey: "true"},
+			}, mixCoord: mix}
+			task.MetaCache = cache
+			require.NoError(t, task.PreExecute(t.Context()))
+			require.NoError(t, task.Execute(t.Context()))
+			collectionID, version, requested := task.PrewarmTarget()
+			require.EqualValues(t, 100, collectionID)
+			require.Equal(t, tc.want, version)
+			require.True(t, requested)
+			require.Equal(t, map[string]string{"existing": "preserved"}, task.result.GetExtraInfo())
+			require.Equal(t, !tc.failure, task.result.GetErrorCode() == commonpb.ErrorCode_Success)
 		})
 	}
 }

@@ -766,8 +766,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	if collectionID, requested := lct.PrewarmCollectionID(); requested && merr.Ok(lct.Result()) {
-		node.prewarmCollection(ctx, collectionID)
+	if collectionID, version, requested := lct.PrewarmTarget(); requested && merr.Ok(lct.Result()) {
+		node.prewarmCollection(ctx, collectionID, version)
 	}
 
 	return lct.Result(), nil

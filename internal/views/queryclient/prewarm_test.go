@@ -31,6 +31,7 @@ type prewarmRoutingFixture struct {
 	planError   error
 	workerError error
 	borrow      chan struct{}
+	beforeLoad  func(context.Context) error
 }
 
 type prewarmSubscription struct{ wal.ReplicaWatchSubscription }
@@ -54,7 +55,12 @@ func (f *prewarmRoutingFixture) publish(replicas ...qviews.Replica) {
 	}
 }
 
-func (f *prewarmRoutingFixture) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest, ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+func (f *prewarmRoutingFixture) GetQueryViewLoadInfo(ctx context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	if f.beforeLoad != nil {
+		if err := f.beforeLoad(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if f.loadUnavailable.Load() {
 		return nil, merr.WrapErrServiceNotReadyMsg("injected metadata failure")
 	}
@@ -111,7 +117,47 @@ func awaitPrewarm[T any](t *testing.T, ch <-chan T) T {
 }
 
 func TestPrewarmUnsupportedClient(t *testing.T) {
-	require.ErrorIs(t, Prewarm(t.Context(), struct{ Client }{}, 100), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, Prewarm(t.Context(), struct{ Client }{}, 100, 7), merr.ErrServiceUnimplemented)
+}
+
+func TestPrewarmCannotAdoptReloadBeforeFirstLookup(t *testing.T) {
+	f, c := newPrewarmRoutingFixture(t)
+	started, resume := make(chan struct{}), make(chan struct{})
+	f.beforeLoad = func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-resume:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	f.publish(warmReplica(1, 10), warmReplica(2, 20))
+	done := make(chan error, 1)
+	go func() { done <- Prewarm(t.Context(), c, 100, 7) }()
+	awaitPrewarm(t, started)
+	// The original load was version 7. A complete release/reload happens
+	// before its delayed request can obtain any load metadata or View.
+	f.loadVersion.Store(0)
+	f.loadVersion.Store(8)
+	close(resume)
+	require.Error(t, awaitPrewarm(t, done))
+	require.Empty(t, f.plans)
+	require.Empty(t, f.workers)
+	f.mu.Lock()
+	require.Empty(t, f.handlers)
+	f.mu.Unlock()
+}
+
+func TestPrewarmWithoutAdmissionVersionDoesNotLookUpCurrentLoad(t *testing.T) {
+	f, c := newPrewarmRoutingFixture(t)
+	f.beforeLoad = func(context.Context) error {
+		t.Error("missing admission version must not adopt the current load")
+		return nil
+	}
+	require.Error(t, Prewarm(t.Context(), c, 100, 0))
+	require.Empty(t, f.plans)
+	require.Empty(t, f.workers)
 }
 
 func TestPrewarmAllReplicasIndependentlyAndOnlyOnce(t *testing.T) {
@@ -119,7 +165,7 @@ func TestPrewarmAllReplicasIndependentlyAndOnlyOnce(t *testing.T) {
 	f.borrow = make(chan struct{})
 	f.publish(warmReplica(1, 10))
 	done := make(chan error, 1)
-	go func() { done <- Prewarm(t.Context(), c, 100) }()
+	go func() { done <- Prewarm(t.Context(), c, 100, 7) }()
 	// Replica 1 must start while replica 2 is still cold.
 	for range 2 {
 		plan := awaitPrewarm(t, f.workers)
@@ -144,7 +190,7 @@ func TestPrewarmAllReplicasIndependentlyAndOnlyOnce(t *testing.T) {
 	require.Len(t, f.plans, 4)
 	require.Empty(t, f.workers)
 	// A second explicit request is allowed to warm the newly advertised version.
-	require.NoError(t, Prewarm(t.Context(), c, 100))
+	require.NoError(t, Prewarm(t.Context(), c, 100, 7))
 	require.Len(t, f.plans, 8)
 }
 
@@ -159,7 +205,7 @@ func TestPrewarmFailuresAreNotRetried(t *testing.T) {
 				f.workerError = injected
 			}
 			f.publish(warmReplica(1, 10), warmReplica(2, 20))
-			require.Error(t, Prewarm(t.Context(), c, 100))
+			require.Error(t, Prewarm(t.Context(), c, 100, 7))
 			require.Len(t, f.plans, 4, "each replica/shard is planned once even on retryable errors")
 			if phase == "plan" {
 				require.Empty(t, f.workers)
@@ -179,7 +225,7 @@ func TestPrewarmReleaseReplacementAndShutdownCancelWaitsAndBorrowers(t *testing.
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- Prewarm(ctx, c, 100) }()
+			go func() { done <- Prewarm(ctx, c, 100, 7) }()
 			awaitPrewarm(t, f.workers)
 			awaitPrewarm(t, f.workers)
 			switch event {
@@ -203,7 +249,7 @@ func TestPrewarmReleaseReplacementAndShutdownCancelWaitsAndBorrowers(t *testing.
 func TestPrewarmReleaseBeforeAnyViewIsUp(t *testing.T) {
 	f, c := newPrewarmRoutingFixture(t)
 	done := make(chan error, 1)
-	go func() { done <- Prewarm(t.Context(), c, 100) }()
+	go func() { done <- Prewarm(t.Context(), c, 100, 7) }()
 	require.Eventually(t, func() bool { f.mu.Lock(); defer f.mu.Unlock(); return len(f.handlers) == 2 }, time.Second, time.Millisecond)
 	f.loadVersion.Store(0)
 	require.Error(t, awaitPrewarm(t, done))
@@ -216,7 +262,7 @@ func TestPrewarmDeadlineDoesNotDispatch(t *testing.T) {
 	f.publish(warmReplica(1, 10), warmReplica(2, 20))
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	require.Error(t, Prewarm(ctx, c, 100))
+	require.Error(t, Prewarm(ctx, c, 100, 7))
 	require.Empty(t, f.plans)
 	require.Empty(t, f.workers)
 }

@@ -39,3 +39,53 @@ func TestLoadConfigPublicationCommitOwnershipAndFailure(t *testing.T) {
 	replay := store.RegisterLoadConfigListener(func(int64, *LoadConfig, uint64) { t.Error("releasing config replayed") })
 	replay()
 }
+
+func TestLoadConfigAdmissionKeepsFirstCommitAcrossReload(t *testing.T) {
+	for _, unchanged := range []bool{false, true} {
+		t.Run(map[bool]string{false: "first load", true: "unchanged load"}[unchanged], func(t *testing.T) {
+			store, _ := newTestStore(t)
+			cfg := sampleConfig()
+			if unchanged {
+				require.NoError(t, store.Put(t.Context(), cfg))
+			}
+			committed, unsubscribe := store.WatchNextLoadConfig(100)
+			defer unsubscribe()
+			require.Empty(t, committed, "registration must not capture pre-admission state")
+			require.NoError(t, store.Put(t.Context(), cfg))
+			admitted := store.GetConfigVersion(100)
+			// Model a release and another load after the callback releases its DDL
+			// lock, but before the original Broadcast caller reads its result.
+			store.StopPlanning(100)
+			require.NoError(t, store.Remove(t.Context(), 100))
+			require.NoError(t, store.Put(t.Context(), cfg))
+			require.Greater(t, store.GetConfigVersion(100), admitted)
+			require.Len(t, committed, 1)
+			require.Equal(t, admitted, <-committed)
+		})
+	}
+}
+
+func TestLoadConfigAdmissionIgnoresFailedAndUnrelatedCommits(t *testing.T) {
+	store, hooks := newTestStore(t)
+	committed, unsubscribe := store.WatchNextLoadConfig(100)
+	defer unsubscribe()
+	other := sampleConfig()
+	other.CollectionID = 200
+	require.NoError(t, store.Put(t.Context(), other))
+	require.Empty(t, committed)
+	hooks.beforeSave = func(*viewpb.CollectionLoadConfig) error {
+		return merr.WrapErrServiceUnavailableMsg("injected persistence failure")
+	}
+	require.Error(t, store.Put(t.Context(), sampleConfig()))
+	require.Empty(t, committed)
+	hooks.beforeSave = nil
+	require.NoError(t, store.Put(t.Context(), sampleConfig()))
+	require.Len(t, committed, 1)
+	require.Equal(t, store.GetConfigVersion(100), <-committed)
+
+	abandoned, stop := store.WatchNextLoadConfig(100)
+	stop()
+	stop() // cleanup is idempotent
+	require.NoError(t, store.Put(t.Context(), sampleConfig()))
+	require.Empty(t, abandoned)
+}

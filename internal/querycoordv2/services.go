@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -306,7 +308,8 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Success(), nil
 	}
 
-	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
+	version, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req)
+	if err != nil {
 		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return statusWithLoadResourcePrecheckSuggestion(err), nil
@@ -314,7 +317,9 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	logger.Info(ctx, "load collection done")
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-	return merr.Success(), nil
+	result := merr.Success()
+	result.ExtraInfo = map[string]string{common.LoadInfoVersionKey: strconv.FormatUint(version, 10)}
+	return result, nil
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {

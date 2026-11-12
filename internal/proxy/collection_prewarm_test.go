@@ -20,15 +20,16 @@ func TestPrewarmAdmissionDoesNotWaitOrFollowClientCancellation(t *testing.T) {
 
 	started := make(chan context.Context, 1)
 	finished := make(chan struct{})
-	client := &prewarmTestClient{warm: func(ctx context.Context, collectionID int64) error {
+	client := &prewarmTestClient{warm: func(ctx context.Context, collectionID int64, loadVersion uint64) error {
 		require.EqualValues(t, 100, collectionID)
+		require.EqualValues(t, 7, loadVersion)
 		defer close(finished)
 		started <- ctx
 		<-ctx.Done()
 		return ctx.Err()
 	}}
 	node := &Proxy{ctx: lifetime, viewQueryClient: client}
-	node.prewarmCollection(ctx, 100)
+	node.prewarmCollection(ctx, 100, 7)
 	select {
 	case warmCtx := <-started:
 		require.NoError(t, warmCtx.Err())
@@ -45,9 +46,9 @@ func TestPrewarmAdmissionDoesNotWaitOrFollowClientCancellation(t *testing.T) {
 
 type prewarmTestClient struct {
 	queryclient.Client
-	warm func(context.Context, int64) error
+	warm func(context.Context, int64, uint64) error
 }
 
-func (c *prewarmTestClient) Prewarm(ctx context.Context, collectionID int64) error {
-	return c.warm(ctx, collectionID)
+func (c *prewarmTestClient) Prewarm(ctx context.Context, collectionID int64, loadVersion uint64) error {
+	return c.warm(ctx, collectionID, loadVersion)
 }

@@ -3109,8 +3109,9 @@ type LoadCollectionTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID UniqueID
-	warmupHint   bool
+	collectionID    UniqueID
+	warmupHint      bool
+	loadInfoVersion uint64
 }
 
 func (t *LoadCollectionTask) TraceCtx() context.Context {
@@ -3290,6 +3291,12 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	if t.result == nil {
 		return merr.CheckRPCCall(t.result, nil)
 	}
+	// Missing or malformed metadata from an older coordinator disables only
+	// optional prewarming; it must never fall back to a later active load.
+	if version, parseErr := strconv.ParseUint(t.result.GetExtraInfo()[common.LoadInfoVersionKey], 10, 64); parseErr == nil {
+		t.loadInfoVersion = version
+	}
+	delete(t.result.ExtraInfo, common.LoadInfoVersionKey)
 	return nil
 }
 
