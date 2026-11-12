@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -378,3 +379,29 @@ func TestCheckpointThroughSelectsCoherentCompletedPosition(t *testing.T) {
 	require.Equal(t, point, older)
 	require.Equal(t, offset, olderOffset)
 }
+
+// Exercise the optional pressure interface without changing
+// legacy requesters used throughout the existing tracker tests.
+func TestTrackerPromotesPreviouslyRequestedPressurePrefix(t *testing.T) {
+	requester := &pressureTestRequester{}
+	var pressure []persistRequest
+	patch := mockey.Mock((*pressureTestRequester).RequestPersistThroughUnderPressure).To(func(_ *pressureTestRequester, v string, tt uint64) {
+		pressure = append(pressure, persistRequest{vchannel: v, targetTimeTick: tt})
+	}).Build()
+	defer patch.UnPatch()
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, requester)
+	first := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 2, 20))
+	defer first.Release()
+	second := retainTrackedMessage(tracker, testVChannelMessage(t, "v2", 3, 30))
+	defer second.Release()
+	tracker.triggerVChannels(time.Now().Add(2*time.Hour), time.Hour, false)
+	require.Len(t, requester.snapshot(), 2)
+	require.Empty(t, pressure)
+	tracker.triggerVChannels(time.Now().Add(2*time.Hour), time.Hour, true)
+	require.Equal(t, []persistRequest{{vchannel: "v1", targetTimeTick: 20}}, pressure)
+	require.Len(t, requester.snapshot(), 2, "unrelated stalled VChannel is not promoted")
+}
+
+type pressureTestRequester struct{ recordingDataPersister }
+
+func (*pressureTestRequester) RequestPersistThroughUnderPressure(string, uint64) { panic("mocked") }

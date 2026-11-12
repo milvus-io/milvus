@@ -404,3 +404,43 @@ func TestSummaryBootstrapSkipsCheckpointReplay(t *testing.T) {
 	require.Equal(t, uint64(100), batch.FastForwardTimeTick)
 	require.Len(t, batch.Entries, 1)
 }
+
+func TestSummaryPressurePromotesQueuedWritesAndPublication(t *testing.T) {
+	promoted := make(map[*moduleapi.DataTaskPriority]bool)
+	patch := mockey.Mock((*moduleapi.DataTaskPriority).Promote).To(func(p *moduleapi.DataTaskPriority) { promoted[p] = true }).Build()
+	defer patch.UnPatch()
+	m, _ := newTransformTestManagerWithStore(t)
+	ctx := context.Background()
+	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
+	m.RequestFlushThrough(100)
+	first := m.pendingSealed[0].task
+	require.Empty(t, promoted)
+	require.Empty(t, m.pending)
+	m.flushBacklog(true) // Already sealed backlog still needs promotion.
+	require.True(t, promoted[&first.priority])
+	require.NoError(t, first.Execute(ctx))
+	manifest := m.manifestTask
+	require.True(t, promoted[&manifest.priority])
+	clear(promoted)
+	m.flushBacklog(true) // The first manifest still gates the recovery frontier.
+	require.Same(t, manifest, m.manifestTask)
+	require.True(t, promoted[&manifest.priority])
+	require.NoError(t, manifest.Execute(ctx))
+	require.Equal(t, uint64(100), m.LastAcked())
+	clear(promoted)
+	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 200, 10, 2))
+	m.RequestFlushThrough(200)
+	later := m.pendingSealed[0].task
+	require.Empty(t, promoted, "new work cannot inherit an old pressure target")
+	require.NoError(t, later.Execute(ctx))
+	require.Empty(t, promoted)
+	publication := m.manifestTask
+	m.flushBacklog(true) // Later publication does not gate this already confirmed frontier.
+	require.Same(t, publication, m.manifestTask)
+	require.False(t, promoted[&publication.priority])
+	require.NoError(t, publication.Execute(ctx))
+	require.Equal(t, uint64(200), m.LastAcked())
+	m.terminalErr = context.Canceled
+	m.flushBacklog(true)
+	require.Same(t, publication, m.manifestTask)
+}
