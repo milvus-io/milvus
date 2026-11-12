@@ -284,6 +284,38 @@ func TestExplainPlan_UnknownNodesAreRepresented(t *testing.T) {
 		assert.Contains(t, got.Text(), "    value\n    value <unknown value: unknown field 7>\n")
 	})
 
+	// Redaction hides a template value, not the fact that this build cannot
+	// describe it: the count is the same with and without it.
+	t.Run("redacted template value from a newer planpb", func(t *testing.T) {
+		newer := &planpb.GenericValue{}
+		fromNewer(t, newer, 7)
+		column := known.GetUnaryRangeExpr().GetColumnInfo()
+		expr := &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+			Op: planpb.BinaryExpr_LogicalAnd,
+			Left: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: column, Op: planpb.OpType_Equal, Value: newer, TemplateVariableName: "x",
+			}}},
+			Right: &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+				ColumnInfo:           column,
+				Values:               []*planpb.GenericValue{{Val: &planpb.GenericValue_Int64Val{Int64Val: 1}}, newer},
+				TemplateVariableName: "ids",
+			}}},
+		}}}
+		plan := &planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: expr}}
+
+		verbatim, err := ExplainPlan(plan, helper, nil)
+		require.NoError(t, err)
+		assert.Equal(t, &UnknownValue{Detail: "unknown field 7"}, verbatim.Predicates.Left.Value)
+		assert.Equal(t, []any{int64(1), &UnknownValue{Detail: "unknown field 7"}}, verbatim.Predicates.Right.Values)
+		assert.Equal(t, 2, verbatim.UnknownNodeCount)
+
+		redacted, err := ExplainPlan(plan, helper, &ExplainOptions{RedactTemplateValues: true})
+		require.NoError(t, err)
+		assert.Equal(t, "<template x elided>", redacted.Predicates.Left.Value)
+		assert.Equal(t, []any{"<template ids elided, 2 values>"}, redacted.Predicates.Right.Values)
+		assert.Equal(t, 2, redacted.UnknownNodeCount)
+	})
+
 	t.Run("expression from a newer planpb", func(t *testing.T) {
 		newer := &planpb.Expr{}
 		fromNewer(t, newer, 99)

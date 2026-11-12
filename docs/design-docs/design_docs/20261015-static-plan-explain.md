@@ -83,8 +83,9 @@ pinned by `TestExplainPlan_ContractKeys`; the shape is:
   object `{"elements": [...], "same_type": bool}` plus `element_type` when
   the plan carries one; a binary payload as `{"bytes": N}`; a non-finite
   float as `{"non_finite": ...}`; a value of a kind this version cannot
-  describe as `{"unknown_value": detail}`; `null` for a value the plan left
-  empty (an unfilled template bound).
+  describe as `{"unknown_value": detail}`. A value the plan left empty (an
+  unfilled template bound) is `null` in a bound's `value` and inside a list;
+  a node's own `value` and `operand` are omitted instead.
 
 Rules:
 
