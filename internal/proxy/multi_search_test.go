@@ -106,6 +106,54 @@ func TestMultiSearchKeepsInputOrder(t *testing.T) {
 	require.NotSame(t, metrics.GetStats(ctx), secondStats)
 }
 
+func TestMultiSearchLimitsActiveItems(t *testing.T) {
+	const itemCount = multiSearchConcurrency + 2
+	for _, tt := range []struct {
+		name           string
+		maxConcurrency uint32
+		wantActive     int
+	}{
+		{name: "default", wantActive: multiSearchConcurrency},
+		{name: "one", maxConcurrency: 1, wantActive: 1},
+		{name: "above default", maxConcurrency: multiSearchConcurrency + 1, wantActive: multiSearchConcurrency + 1},
+		{name: "limited by batch size", maxConcurrency: ^uint32(0), wantActive: itemCount},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := NewMultiSearchTestProxy(t, 1, 1)
+				items := make([]MultiSearchPrepare, itemCount)
+				for i := range items {
+					items[i] = multiSearchTestPrepare("ready")
+				}
+				started := make(chan struct{}, itemCount)
+				release := make(chan struct{})
+				releaseAll := sync.OnceFunc(func() { close(release) })
+				defer releaseAll()
+				batchDone := make(chan error, 1)
+				go func() {
+					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: tt.maxConcurrency}, items,
+						func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+							started <- struct{}{}
+							<-release
+							return &milvuspb.SearchResults{Status: merr.Success()}, nil
+						})
+					batchDone <- err
+				}()
+				synctest.Wait()
+				require.Len(t, started, tt.wantActive)
+				if tt.wantActive < itemCount {
+					release <- struct{}{}
+					synctest.Wait()
+					require.Len(t, started, tt.wantActive+1)
+				}
+				releaseAll()
+				require.NoError(t, <-batchDone)
+				require.Len(t, started, itemCount)
+			})
+		})
+	}
+}
+
 func TestMultiSearchBoundsBatchAdmission(t *testing.T) {
 	p := NewMultiSearchTestProxy(t, 1, 1)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
