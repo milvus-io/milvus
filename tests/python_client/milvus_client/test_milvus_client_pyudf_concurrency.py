@@ -7,10 +7,9 @@ import sys
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
-import grpc
 import pyarrow as pa
 import pytest
 import requests
@@ -68,6 +67,16 @@ def cleanup_runtime_resources(runtime_connection, registered, uploaded, observer
         raise BaseExceptionGroup("PyUDF runtime cleanup failed", ([failure] if failure is not None else []) + errors)
 
 
+def wait_for_full_admission(futures):
+    """Observe a real capacity rejection without assuming which caller arrived first."""
+    rejected = next(as_completed(futures, timeout=3))
+    with pytest.raises(MilvusException) as error:
+        rejected.result()
+    assert error.value.code == 12, f"No full admission window observed: {error.value}"
+    assert "Concurrent RPC limit exceeded" in str(error.value), error.value
+    return [future for future in futures if future is not rejected]
+
+
 @pytest.mark.tags("L3", "pyudf")
 def test_pyudf_expired_active_call_retains_capacity_until_actual_completion(
     request, runtime_connection, record_property
@@ -102,13 +111,15 @@ def test_pyudf_expired_active_call_retains_capacity_until_actual_completion(
                 active = pool.submit(invoke, "server_timeout", 12)
                 assert_pyudf_deadline(lambda: active.result(timeout=7))
                 assert 4.5 < time.monotonic() - begin < 7, "Service deadline did not occur before Python completion"
-                late = pool.submit(invoke, "normal", 1)
-                time.sleep(0.15)
+                # Either contender may take the remaining slot. Its peer's
+                # capacity rejection is the observable full-admission barrier.
+                contenders = [pool.submit(invoke, "normal", 1) for _ in range(2)]
+                pending = wait_for_full_admission(contenders)
                 with pytest.raises(MilvusException) as rejected:
                     invoke("normal", 1)
                 assert rejected.value.code == 12, rejected.value
                 probe.check(with_udf=False)
-                assert_pyudf_deadline(lambda: late.result(timeout=2))
+                assert_pyudf_deadline(lambda: pending[0].result(timeout=2))
         finally:
             time.sleep(max(0, 8.5 - (time.monotonic() - begin)))
         state = {hit["distance"] for hit in probe.search("state")[0]}
@@ -549,25 +560,21 @@ def test_pyudf_admission_queue_expiry_and_server_deadline(request, runtime_conne
 
         started = time.monotonic()
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                active = pool.submit(invoke, "server_timeout", 12)
-                time.sleep(0.3)
-                queued = pool.submit(invoke, "state", 1)
-                time.sleep(0.3)
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                # All contenders run the same blocking code, so arrival order
+                # cannot turn an intended queued request into a fast success.
+                contenders = [pool.submit(invoke, "server_timeout", 12) for _ in range(3)]
+                pending = wait_for_full_admission(contenders)
                 with pytest.raises(MilvusException) as admission:
                     invoke("normal", 1)
                 assert admission.value.code == 12, admission.value
-                with pytest.raises((MilvusException, grpc.RpcError)) as expiry:
-                    queued.result(timeout=3)
-                if isinstance(expiry.value, grpc.RpcError):
-                    assert expiry.value.code() == grpc.StatusCode.DEADLINE_EXCEEDED, expiry.value
-                else:
-                    assert expiry.value.code == 10001, expiry.value
                 # Ordinary Search remains available while the worker's only executor is occupied.
                 probe.check(with_udf=False)
-                with pytest.raises(MilvusException) as server_timeout:
-                    active.result(timeout=7)
-                assert server_timeout.value.code == 10001, server_timeout.value
+                # Both accepted RPCs hit the service deadline; only one entered Python.
+                for future in pending:
+                    with pytest.raises(MilvusException) as server_timeout:
+                        future.result(timeout=7)
+                    assert server_timeout.value.code == 10001, server_timeout.value
                 assert 4.5 <= time.monotonic() - started < 7.5
         finally:
             # An Execute timeout cannot end the eight-second Python invocation.
