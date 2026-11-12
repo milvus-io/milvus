@@ -28,3 +28,5 @@ substrait==0.26.0; python_version >= "3.11"
 pyiceberg[sql-sqlite]==0.8.1
 # for geometry data type
 shapely>=2.0.0
+
+pytest-timeout==2.3.1
