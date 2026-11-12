@@ -123,7 +123,8 @@ The metadata root includes the meta subpath, for example `my-test/meta`.
 
 The optional assertion reads the submitted job's exact metadata key and checks
 its collection ID and task count. The existing test also checks refresh
-completion, row count, index creation, loading and BM25 search results. Without
-the expectation variable, ordinary SDK tests require no etcd connection.
+completion, metadata and query-visible row counts, index creation, loading and
+BM25 search results. Without the expectation variable, ordinary SDK tests require
+no etcd connection.
 The 64-task case exercises a plan larger than the default 64-op metadata
 transaction limit; the job publication marker must follow its task records.

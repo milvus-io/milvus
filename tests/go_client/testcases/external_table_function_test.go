@@ -582,6 +582,15 @@ refreshDone:
 	common.CheckErr(t, err, true)
 	t.Log("Collection loaded")
 
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	common.CheckErr(t, err, true)
+	require.Equal(t, totalRows, count, "all refresh tasks must be query-visible after loading")
+	t.Logf("Verified query-visible row count: %d", count)
+
 	// Step 6: BM25 search; each query should rank the matching text class first.
 	// Corpus repeats 10 distinct sentences, so rows where id%10 matches the
 	// queried class should dominate the top results.
