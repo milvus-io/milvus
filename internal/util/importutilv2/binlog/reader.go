@@ -437,20 +437,9 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 			deltaPaths[i] = snapshotstorage.NormalizeSnapshotObjectPath(path)
 		}
 	}
-	type varcharLimit struct {
-		field     *schemapb.FieldSchema
-		maxLength int64
-	}
-	var varcharLimits []varcharLimit
-	for _, field := range typeutil.GetAllFieldSchemas(r.schema) {
-		if field.GetDataType() != schemapb.DataType_VarChar {
-			continue
-		}
-		maxLength, err := parameterutil.GetMaxLength(field)
-		if err != nil {
-			return merr.Wrapf(merr.WrapErrAsSysError(err), "target field %s", field.GetName())
-		}
-		varcharLimits = append(varcharLimits, varcharLimit{field: field, maxLength: maxLength})
+	deserialize, err := newStorageV3Deserializer(r.schema)
+	if err != nil {
+		return err
 	}
 	// Vortex enforces Arrow nullability while decoding. Preserve stored NULLs
 	// until ValueDeserializerWithSchema applies the target defaults below.
@@ -464,25 +453,7 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 	if err != nil {
 		return err
 	}
-	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
-		if err := storage.ValueDeserializerWithSchema(record, v, r.schema, true); err != nil {
-			return err
-		}
-		// Manifest reads bypass the ordinary Parquet import value checks. Apply
-		// target limits after NULL/default conversion and before row filtering.
-		for _, limit := range varcharLimits {
-			for _, value := range v {
-				cell := value.Value.(map[int64]any)[limit.field.GetFieldID()]
-				if cell == nil {
-					continue
-				}
-				if err := importcommon.CheckValidString(cell.(string), limit.maxLength, limit.field); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
+	r.dr = storage.NewDeserializeReader(rr, deserialize)
 	if r.deleteMask != nil {
 		return nil // Both shared and segment-local deletes are already folded.
 	}
@@ -503,6 +474,43 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 	}
 	r.filters = append(r.filters, deleteFilter)
 	return nil
+}
+
+func newStorageV3Deserializer(schema *schemapb.CollectionSchema) (storage.Deserializer[*storage.Value], error) {
+	type varcharLimit struct {
+		field     *schemapb.FieldSchema
+		maxLength int64
+	}
+	var varcharLimits []varcharLimit
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() != schemapb.DataType_VarChar {
+			continue
+		}
+		maxLength, err := parameterutil.GetMaxLength(field)
+		if err != nil {
+			return nil, merr.Wrapf(merr.WrapErrAsSysError(err), "target field %s", field.GetName())
+		}
+		varcharLimits = append(varcharLimits, varcharLimit{field: field, maxLength: maxLength})
+	}
+	return func(record storage.Record, v []*storage.Value) error {
+		if err := storage.ValueDeserializerWithSchema(record, v, schema, true); err != nil {
+			return err
+		}
+		// Manifest reads bypass the ordinary Parquet import value checks. Apply
+		// target limits after NULL/default conversion and before row filtering.
+		for _, limit := range varcharLimits {
+			for _, value := range v {
+				cell := value.Value.(map[int64]any)[limit.field.GetFieldID()]
+				if cell == nil {
+					continue
+				}
+				if err := importcommon.CheckValidString(cell.(string), limit.maxLength, limit.field); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}, nil
 }
 
 func (r *reader) collectStorageV3Files(manifestPath string) error {

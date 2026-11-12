@@ -2084,63 +2084,71 @@ func TestPrepareSnapshotImportOptions_VectorDimensions(t *testing.T) {
 		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
 	} {
-		for _, mode := range []string{"matching", "smaller", "larger", "missing_source", "different_type", "source_dim_missing", "target_dim_missing", "source_dim_invalid", "target_dim_invalid", "struct_child"} {
-			t.Run(dataType.String()+"/"+mode, func(t *testing.T) {
+		for _, tc := range []struct {
+			name          string
+			sourceDim     string
+			targetDim     string
+			sourceType    schemapb.DataType
+			missingSource bool
+			structChild   bool
+			wantErr       error
+			wantMessage   string
+			wantErrorType merr.ErrorType
+		}{
+			{name: "matching", sourceDim: "32", targetDim: "32"},
+			{name: "smaller", sourceDim: "32", targetDim: "16", wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError},
+			{name: "larger", sourceDim: "32", targetDim: "64", wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError},
+			{name: "missing_source", sourceDim: "32", targetDim: "32", missingSource: true},
+			{
+				name: "different_type", sourceDim: "32", targetDim: "32", sourceType: schemapb.DataType_Int64,
+				wantErr: merr.ErrImportFailed, wantMessage: "vector data type mismatch", wantErrorType: merr.InputError,
+			},
+			{name: "source_dim_missing", targetDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError},
+			{name: "target_dim_missing", sourceDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError},
+			{name: "source_dim_invalid", sourceDim: "invalid", targetDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError},
+			{name: "target_dim_invalid", sourceDim: "32", targetDim: "invalid", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError},
+			{
+				name: "struct_child", sourceDim: "32", targetDim: "16", structChild: true,
+				wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError,
+			},
+		} {
+			t.Run(dataType.String()+"/"+tc.name, func(t *testing.T) {
 				source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
-				vector := &schemapb.FieldSchema{
-					FieldID: 102, Name: "source_vector", DataType: dataType,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
-				}
+				vector := &schemapb.FieldSchema{FieldID: 102, Name: "source_vector", DataType: dataType}
 				if dataType == schemapb.DataType_ArrayOfVector {
 					vector.ElementType = schemapb.DataType_FloatVector
 				}
-				source.Fields = append(source.Fields, vector)
 				targetVector := proto.Clone(vector).(*schemapb.FieldSchema)
 				targetVector.Name = "renamed_vector"
-				target.Fields = append([]*schemapb.FieldSchema{targetVector}, target.Fields...)
-				switch mode {
-				case "smaller", "struct_child":
-					targetVector.TypeParams[0].Value = "16"
-				case "larger":
-					targetVector.TypeParams[0].Value = "64"
-				case "missing_source":
-					source.Fields = source.Fields[:2]
-				case "different_type":
-					vector.DataType = schemapb.DataType_Int64
-				case "source_dim_missing":
-					vector.TypeParams = nil
-				case "target_dim_missing":
-					targetVector.TypeParams = nil
-				case "source_dim_invalid":
-					vector.TypeParams[0].Value = "invalid"
-				case "target_dim_invalid":
-					targetVector.TypeParams[0].Value = "invalid"
+				if tc.sourceDim != "" {
+					vector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.sourceDim}}
 				}
-				if mode == "struct_child" {
-					source.Fields = source.Fields[:2]
-					target.Fields = target.Fields[1:]
+				if tc.targetDim != "" {
+					targetVector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.targetDim}}
+				}
+				if tc.sourceType != schemapb.DataType_None {
+					vector.DataType = tc.sourceType
+				}
+				if tc.structChild {
 					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{vector}}}
 					target.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{targetVector}}}
+				} else {
+					if !tc.missingSource {
+						source.Fields = append(source.Fields, vector)
+					}
+					target.Fields = append([]*schemapb.FieldSchema{targetVector}, target.Fields...)
 				}
 				beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
 				_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
-				switch mode {
-				case "different_type":
-					require.ErrorIs(t, err, merr.ErrImportFailed)
-					require.ErrorContains(t, err, "vector data type mismatch")
-				case "smaller", "larger", "struct_child":
-					require.ErrorIs(t, err, merr.ErrImportFailed)
-					require.ErrorContains(t, err, "vector dimension mismatch")
-				case "source_dim_missing", "target_dim_missing", "source_dim_invalid", "target_dim_invalid":
-					require.ErrorIs(t, err, merr.ErrParameterInvalid)
-					if strings.HasPrefix(mode, "target_") {
-						require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-					} else {
-						require.Equal(t, merr.InputError, merr.GetErrorType(err))
-					}
-					require.Equal(t, merr.GetErrorType(err), merr.GetErrorType(merr.Error(merr.Status(err))))
-				default:
+				if tc.wantErr == nil {
 					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, tc.wantErr)
+					require.Equal(t, tc.wantErrorType, merr.GetErrorType(err))
+					require.Equal(t, tc.wantErrorType, merr.GetErrorType(merr.Error(merr.Status(err))))
+					if tc.wantMessage != "" {
+						require.ErrorContains(t, err, tc.wantMessage)
+					}
 				}
 				require.True(t, proto.Equal(beforeSource, source))
 				require.True(t, proto.Equal(beforeTarget, target))
