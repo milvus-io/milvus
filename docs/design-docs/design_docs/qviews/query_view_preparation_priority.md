@@ -23,7 +23,7 @@ ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力�
 | 场景（按判断顺序） | 基础分 | 流量分上限 | 含配置后的范围 |
 | --- | --- | --- | --- |
 | 近期访问，缺少存活 UpView | +10 | 8 | [10,20] |
-| 有待完成的 AutoLoad/readiness 请求 | +5 | 0 | [5,7] |
+| 有待完成的 AutoLoad/readiness 请求 | +10 | 0 | [10,12] |
 | 近期访问，已有存活 UpView | 0 | 2 | [0,4] |
 | 无近期访问，已有存活 UpView（冷 handoff） | -10 | 0 | [-10,-8] |
 | 已知长期无访问，缺少存活 UpView（冷恢复） | -5 | 0 | [-5,-3] |
@@ -33,7 +33,7 @@ ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力�
 - 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤2 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
 - 流量映射：`share=clamp(replica.Last6Windows / same_RG_total,0,1)`，`heat=log1p(100*share)/log1p(100)`，`traffic=round(limit*heat)`。分母 ≤0 时流量分为 0。
 - 总分为 `clamp(base + traffic + config, -20,20)`；当前策略实际产生 [-10,20]，wire/scheduler 合法范围仍是 [-20,20]，不要求用满。
-- 最紧急档中，1%/5%/10%/50%/100% 占比分别得到 1/3/4/7/8 流量分。配置 +2 不会跨越主要场景之间的顺序。
+- 最紧急档中，1%/5%/10%/50%/100% 占比分别得到 1/3/4/7/8 流量分。AutoLoad 与近期缺 UpView 的恢复共用 +10 基准；同配置下零流量恢复与 AutoLoad 同分，恢复可再按流量加分。不同配置的 +2 偏移允许这两个场景在低流量时交错排序。
 
 ViewFeedback 将超过 2 分钟的窗口清理，但保留 replica 的最后活动时间直到 replica 撤销。窗口归零不等于变冷：仍在 2 分钟内就保留该场景基准分。最近 6 窗口不假定固定 6 秒。缺失统计不能证明长期无人访问；没有历史的缺 UpView 场景使用首次/手动加载基准，不凭空创造访问记录。
 
@@ -143,7 +143,7 @@ P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
 
 具体场景与固定参数见开头映射表。总 rate ≤0 时 traffic=0；无 snapshot 或零 LastAccessTime 代表没有访问历史，不等同于已知长期无人访问。没有额外采集 NQ、执行成本或准备进度。
 
-同一 replica 的多个 shard 共用访问反馈，但 UpView 健康状态按 `(ReplicaID,VChannel)` 分别判断，因此可获得不同分值。同一 RG 的其他 replica 即使存在 UpView，也不会抵消目标 shard 的恢复紧急程度。配置只提供 +2 偏移，不颠倒主要场景顺序。
+同一 replica 的多个 shard 共用访问反馈，但 UpView 健康状态按 `(ReplicaID,VChannel)` 分别判断，因此可获得不同分值。同一 RG 的其他 replica 即使存在 UpView，也不会抵消目标 shard 的恢复紧急程度。配置只提供 +2 偏移；AutoLoad 与近期缺 UpView 的恢复共享基准分，二者按最终分数排序。
 
 ### 4.3 UpView 与节点健康
 
@@ -157,7 +157,7 @@ AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。在共享 singlefligh
 
 `AutoLoadDemand` 是独立的内存需求标记，按 collection 计数，`Pending(collectionID)` 提供 O(1) 读取。它不修改 ViewFeedback、不伪造 LastAccessTime/rate、不持久化、不创建 goroutine/timer。并发登记只有最后一次释放才移除；单个 Proxy 取消不提前清除仍在执行的共享加载操作。Coord 重启后由重试请求重新登记，不保留永久 AutoLoad 属性。
 
-默认策略通过 `WithAutoLoadDemand` 注入；本轮首次对某个 collection 评分时捕获其 pending 值，后续复用。未注入反馈读取器时不扫描全部 collection；AutoLoad 仅按需读取目标 collection。AutoLoad 可覆盖已知冷历史，表示新出现的查询需求；近期访问且缺 UpView 的故障恢复仍比它更紧急。手动首次加载无历史时自然落在普通档，不额外建立持久化的手动加载标记。
+默认策略通过 `WithAutoLoadDemand` 注入；本轮首次对某个 collection 评分时捕获其 pending 值，后续复用。未注入反馈读取器时不扫描全部 collection；AutoLoad 仅按需读取目标 collection。AutoLoad 可覆盖已知冷历史，表示新出现的查询需求；近期访问且缺 UpView 的故障恢复先匹配恢复分支，与 AutoLoad 共用 +10 基准并保留最多 +8 的流量加分。手动首次加载无历史时自然落在普通档，不额外建立持久化的手动加载标记。
 
 已接受的 Preparing View 不因新 AutoLoad 请求到达而重新创建或调分。统计和请求需求只影响以后正常创建的 View，配置与场景输入不会被节点重新计算。
 

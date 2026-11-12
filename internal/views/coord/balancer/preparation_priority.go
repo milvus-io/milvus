@@ -25,7 +25,7 @@ func preparationPriority(config commonpb.LoadPriority, feedback *viewfeedback.Sn
 	case recent && !hasUp:
 		base, trafficLimit = 10, 8
 	case autoLoad:
-		base = 5
+		base = 10
 	case recent:
 		trafficLimit = 2
 	case hasUp:

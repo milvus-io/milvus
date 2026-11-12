@@ -33,9 +33,9 @@ func TestPreparationPriorityScenarios(t *testing.T) {
 		{"ten-percent", time.Minute, true, false, false, 10, 100, 14},
 		{"half", time.Minute, true, false, false, 50, 100, 17},
 		{"same-share", time.Minute, true, false, false, 500, 1000, 17},
-		{"auto-unknown", 0, false, false, true, 0, 0, 5},
-		{"auto-cold", time.Hour, true, false, true, 0, 0, 5},
-		{"auto-incomplete-existing-up", time.Hour, true, true, true, 0, 0, 5},
+		{"auto-unknown", 0, false, false, true, 0, 0, 10},
+		{"auto-cold", time.Hour, true, false, true, 0, 0, 10},
+		{"auto-incomplete-existing-up", time.Hour, true, true, true, 0, 0, 10},
 		{"manual-unknown", 0, false, false, false, 0, 0, 0},
 		{"cold-recovery", time.Hour, true, false, false, 100, 100, -5},
 		{"cold-handoff", time.Hour, true, true, false, 100, 100, -10},
@@ -46,7 +46,7 @@ func TestPreparationPriorityScenarios(t *testing.T) {
 		{"after-boundary", 2*time.Minute + time.Nanosecond, true, false, false, 0, 0, -5},
 		{"handoff-at-boundary", 2 * time.Minute, true, true, false, 100, 100, 2},
 		{"handoff-after-boundary", 2*time.Minute + time.Nanosecond, true, true, false, 100, 100, -10},
-		{"autoload-after-boundary", 2*time.Minute + time.Nanosecond, true, false, true, 100, 100, 5},
+		{"autoload-after-boundary", 2*time.Minute + time.Nanosecond, true, false, true, 100, 100, 10},
 		{"future-access", -time.Minute, true, false, false, 0, 0, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,13 +63,14 @@ func TestPreparationPriorityScenarios(t *testing.T) {
 		})
 	}
 	require.Zero(t, preparationPriority(commonpb.LoadPriority(99), &viewfeedback.Snapshot{}, 0, false, false, now))
-	// Configuration cannot invert urgency bands, and increasing rate never lowers priority.
+	// Recovery shares the AutoLoad baseline; traffic can only raise its priority.
+	auto := preparationPriority(commonpb.LoadPriority_LOW, nil, 0, false, true, now)
 	previous := int32(0)
 	for rate := 0.0; rate <= 100; rate++ {
 		sample := &viewfeedback.Snapshot{LastAccessUnixNanos: now.UnixNano(), RequestRates: viewfeedback.RequestRates{Last6Windows: rate}}
 		score := preparationPriority(commonpb.LoadPriority_LOW, sample, 100, false, false, now)
 		require.GreaterOrEqual(t, score, previous)
-		require.Greater(t, score, int32(7))
+		require.GreaterOrEqual(t, score, auto)
 		previous = score
 	}
 }
@@ -144,15 +145,15 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
 		finish := demand.Begin(10)
 		auto := b.preparationPriorities()
-		require.EqualValues(t, 7, auto.preparationPriority(id), "new query demand overrides cold history")
+		require.EqualValues(t, 12, auto.preparationPriority(id), "new query demand overrides cold history")
 		finish()
-		require.EqualValues(t, 7, auto.preparationPriority(id), "captured operation remains immutable")
+		require.EqualValues(t, 12, auto.preparationPriority(id), "captured operation remains immutable")
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
 		sample = nil
 		require.EqualValues(t, 2, b.preparationPriorities().preparationPriority(id))
 		finish = demand.Begin(10)
 		b = NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithAutoLoadDemand(demand)), nil)
-		require.EqualValues(t, 7, b.preparationPriorities().preparationPriority(id), "AutoLoad does not require feedback")
+		require.EqualValues(t, 12, b.preparationPriorities().preparationPriority(id), "AutoLoad does not require feedback")
 		finish()
 	})
 }
@@ -171,9 +172,9 @@ func TestPreparationPriorityPlanPublishesImmutableControl(t *testing.T) {
 	plan := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id)
 	view := plan.Prepares[id].Build()
-	require.EqualValues(t, 7, view.GetMeta().GetControl().GetPreparationPriority())
+	require.EqualValues(t, 12, view.GetMeta().GetControl().GetPreparationPriority())
 	finish()
-	require.EqualValues(t, 7, view.GetMeta().GetControl().GetPreparationPriority())
+	require.EqualValues(t, 12, view.GetMeta().GetControl().GetPreparationPriority())
 	next := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, next.Prepares, id)
 	require.EqualValues(t, 2, next.Prepares[id].Build().GetMeta().GetControl().GetPreparationPriority())
