@@ -654,6 +654,51 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             assert_snapshot_objects_unchanged(store, bucket, objects)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_import_preserves_source_upsert(self, snapshot_resources, db_name):
+        """
+        target: Preserve a source Upsert through Snapshot Import
+        method: Insert and flush two rows, Upsert one PK, then capture and import the snapshot
+        expected: The replacement and untouched row match on the target, including their vectors
+        """
+        client, source, target, snapshot = snapshot_resources
+        self._create_collection(
+            client, source, "src_vec_idx", shards_num=1, properties={"collection.autocompaction.enabled": "false"}
+        )
+        self._create_collection(client, target, "dst_vec_idx", shards_num=1)
+        original, untouched = self._snapshot_lifecycle_rows([10, 11], "original")
+        replacement = self._snapshot_lifecycle_rows([10], "updated")[0]
+        replacement["vec"] = [value + 1 for value in original["vec"]]
+        expected = {row["id"]: row for row in (replacement, untouched)}
+
+        assert self.insert(client, source, [original, untouched])[0]["insert_count"] == 2
+        self.flush(client, source)
+        assert self.upsert(client, source, [replacement])[0]["upsert_count"] == 1
+        self.flush(client, source)
+        self.load_collection(client, source)
+        self._assert_rows(client, source, expected, filter_expr="")
+
+        self.create_snapshot(client, snapshot, source, db_name=db_name, compaction_protection_seconds=3600)
+        uri = self.describe_snapshot(client, snapshot, source, db_name=db_name)[0].s3_location
+        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        self._retain_import_resources = True
+        response = bulk_import(
+            url=url,
+            collection_name=target,
+            db_name=db_name,
+            files=[[uri]],
+            options={"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
+            api_key=cf.param_info.param_token,
+            timeout=30,
+        ).json()
+        assert response["code"] == 0, response
+        progress = self._wait_for_import(url, response["data"]["jobId"], db_name)
+        self._retain_import_resources = progress["state"] not in ("Completed", "Failed")
+        assert progress["state"] == "Completed", progress
+        assert progress["importedRows"] == len(expected), progress
+        self.load_collection(client, target)
+        self._assert_rows(client, target, expected, filter_expr="")
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
     def test_snapshot_import_isolates_partition_deletes(self, snapshot_partition_resources, layout, db_name):
         """
