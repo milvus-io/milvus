@@ -346,9 +346,10 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	require.NotNil(t, firstAccess)
 	require.NotNil(t, secondAccess)
 	require.NotSame(t, firstAccess, secondAccess)
-	require.Len(t, hook.searchCalls, 3)
-	require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, <-hook.searchCalls)
-	require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, <-hook.searchCalls)
+	require.Len(t, hook.searchCalls, 4)
+	for range 4 {
+		require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, <-hook.searchCalls)
+	}
 	require.Len(t, hook.authCalls, 1)
 	require.Len(t, batchOptions, 1)
 	options := <-batchOptions
