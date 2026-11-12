@@ -21,6 +21,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -615,16 +616,17 @@ class SegmentExpr : public Expr {
         return !HasUpdates() && Expr::IsCacheable();
     }
 
-    // Unknown leaf operations use existing evaluators over versioned values.
+    // Preserve existing index selection when no temp-index path is available.
     virtual void
     DetermineUpdateExecPath() {
-        exec_path_ = ExprExecPath::RawData;
+        DetermineExecPath();
     }
 
     void
     SelectUpdateIndexReader() {
         exec_path_ = ExprExecPath::RawData;
         if (!update_readers_.temp_index) {
+            DetermineExecPath();
             return;
         }
         selected_reader_ = update_readers_.temp_index.get();
@@ -2039,7 +2041,8 @@ class SegmentExpr : public Expr {
             if (HasUpdates()) {
                 std::vector<int64_t> rows(input->begin(), input->end());
                 UpdatedFieldBatch<T> batch(
-                    update_readers_.values->ReadOffsets(rows));
+                    update_readers_.values->ReadCandidates(rows,
+                                                           candidate_mask));
                 func.template operator()<FilterType::random>(batch.Data(),
                                                              batch.Validity(),
                                                              nullptr,
@@ -3060,8 +3063,13 @@ class SegmentExpr : public Expr {
                       std::is_same_v<T, std::string>) {
             if (HasUpdates()) {
                 const auto count = GetNextBatchSize();
-                UpdatedFieldBatch<T> batch(update_readers_.values->Scan(
-                    current_data_global_pos_, count));
+                std::vector<int64_t> candidate_rows(count);
+                std::iota(candidate_rows.begin(),
+                          candidate_rows.end(),
+                          current_data_global_pos_);
+                UpdatedFieldBatch<T> batch(
+                    update_readers_.values->ReadCandidates(candidate_rows,
+                                                           candidate_mask));
                 if constexpr (NeedSegmentOffsets) {
                     std::vector<int32_t> rows(count);
                     std::iota(
@@ -3290,6 +3298,18 @@ class SegmentExpr : public Expr {
         AssertInfo(segment_->type() == SegmentType::Sealed,
                    "ProcessDataChunkForRange requires sealed segment");
 
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            if (HasUpdates()) {
+                std::vector<int64_t> rows(size);
+                std::iota(rows.begin(), rows.end(), segment_offset);
+                TargetBitmap mask(size, false);
+                for (int64_t i = 0; i < size; ++i) mask[i] = res[i];
+                UpdatedFieldBatch<T> batch(
+                    update_readers_.values->ReadCandidates(rows, &mask));
+                func(batch.Data(), size, res);
+                return size;
+            }
+        }
         int64_t processed_size = 0;
         int64_t remaining = size;
 
@@ -3427,11 +3447,28 @@ class SegmentExpr : public Expr {
             cached_is_nested_index_ = selected_element_level_result_;
 
             auto cached = ExprCacheHelper::GetOrCompute(
-                segment_,
+                HasUpdates() ? nullptr : segment_,
                 [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
+                    // Explicitly opt-in wall-time profiling for this POC.
+                    static const bool profile_index =
+                        std::getenv("MILVUS_POC_PROFILE_INDEX") != nullptr;
+                    using ProfileClock = std::chrono::steady_clock;
+                    const auto* correction_profile = dynamic_cast<
+                        const segcore::experimental::IndexCorrectionProfile*>(
+                        predicate);
+                    const auto before =
+                        correction_profile
+                            ? correction_profile->CorrectionTimings()
+                            : segcore::experimental::IndexCorrectionTimings{};
+                    const auto profile_start = profile_index
+                                                   ? ProfileClock::now()
+                                                   : ProfileClock::time_point{};
                     TargetBitmap res = func(predicate, values...);
+                    const auto predicate_done =
+                        profile_index ? ProfileClock::now()
+                                      : ProfileClock::time_point{};
 
                     TargetBitmap valid_res;
                     const bool multi_path_json =
@@ -3510,6 +3547,37 @@ class SegmentExpr : public Expr {
                             null_reader_ != nullptr,
                             "selected predicate reader has no null reader");
                         valid_res = null_reader_->IsNotNull();
+                    }
+                    if (profile_index) {
+                        const auto done = ProfileClock::now();
+                        const auto after =
+                            correction_profile
+                                ? correction_profile->CorrectionTimings()
+                                : segcore::experimental::
+                                      IndexCorrectionTimings{};
+                        const auto ns = [](auto duration) {
+                            return std::chrono::duration_cast<
+                                       std::chrono::nanoseconds>(duration)
+                                .count();
+                        };
+                        const auto original_ns = after.original_predicate_ns -
+                                                 before.original_predicate_ns;
+                        const auto validity_ns = after.original_validity_ns -
+                                                 before.original_validity_ns;
+                        const auto correction_ns =
+                            after.correction_ns - before.correction_ns;
+                        LOG_INFO(
+                            "POC_INDEX_PROFILE field={} corrected={} "
+                            "predicate_call_ns={} validity_call_ns={} "
+                            "original_predicate_ns={} original_validity_ns={} "
+                            "correction_ns={}",
+                            field_id_.get(),
+                            correction_profile != nullptr,
+                            ns(predicate_done - profile_start),
+                            ns(done - predicate_done),
+                            original_ns,
+                            validity_ns,
+                            correction_ns);
                     }
                     return {std::move(res), std::move(valid_res)};
                 },
@@ -4333,6 +4401,25 @@ class SegmentExpr : public Expr {
                 auto self = const_cast<SegmentExpr*>(this);
                 if (self->HasUpdates()) {
                     self->DetermineUpdateExecPath();
+                    if (self->exec_path_ == ExprExecPath::ScalarIndex &&
+                        self->selected_reader_ !=
+                            self->update_readers_.temp_index.get()) {
+                        self->corrected_index_reader_ =
+                            self->update_readers_.values->CorrectOriginalIndex(
+                                self->selected_reader_);
+                        self->selected_reader_ =
+                            self->corrected_index_reader_.get();
+                        self->null_reader_ =
+                            dynamic_cast<const index::INullReader*>(
+                                self->selected_reader_);
+                        self->pattern_reader_ =
+                            dynamic_cast<const index::IPatternMatchReader*>(
+                                self->selected_reader_);
+                        if (self->ngram_reader_)
+                            self->ngram_reader_ =
+                                dynamic_cast<const index::INgramReader*>(
+                                    self->selected_reader_);
+                    }
                 } else {
                     self->DetermineExecPath();
                 }
@@ -4710,6 +4797,7 @@ class SegmentExpr : public Expr {
     }
 
     segcore::experimental::UpdateReaders update_readers_;
+    std::unique_ptr<index::IIndexReaderBase> corrected_index_reader_;
     const segcore::SegmentInternalInterface* segment_;
     // Request-scoped sealed read snapshot, borrowed from the owning
     // QueryContext. Null for growing segments and non-pinned paths.

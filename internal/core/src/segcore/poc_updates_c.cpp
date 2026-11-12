@@ -122,3 +122,31 @@ GetPOCReadCounts(CSegmentInterface segment,
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
+
+CStatus
+GetPOCStats(void* session, CSegmentInterface segment, char** output) {
+    try {
+        AssertInfo(output && (session || segment),
+                   "Missing POC statistics source");
+        auto owned = session ? nullptr
+                             : static_cast<SegmentInternalInterface*>(segment)
+                                   ->GetExperimentalUpdates();
+        const auto* records =
+            session ? &static_cast<SealedUpdatesRecord*>(session)->Records()
+                    : owned.get();
+        AssertInfo(records, "POC records are not attached");
+        auto s = records->GetStats();
+        nlohmann::json json{{"updated_cells", s.updated_cells},
+                            {"update_versions", s.update_versions},
+                            {"base_index_rows", s.base_index_rows},
+                            {"value_rows", s.value_rows},
+                            {"base_rows", s.base_rows},
+                            {"correction_rows", s.correction_rows},
+                            {"old_index_reads", s.old_index_reads},
+                            {"index_postings", s.index_postings}};
+        *output = strdup(json.dump().c_str());
+        AssertInfo(*output, "Failed to allocate POC statistics");
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}

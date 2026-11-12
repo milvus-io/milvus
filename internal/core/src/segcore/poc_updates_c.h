@@ -38,6 +38,8 @@ CommitPOCUpdates(void* session);
 void
 DestroyPOCUpdates(void* session);
 CStatus
+GetPOCStats(void* session, CSegmentInterface segment, char** output);
+CStatus
 GetPOCReadCounts(CSegmentInterface segment,
                  uint64_t* index_reads,
                  uint64_t* value_reads);

@@ -61,6 +61,9 @@ func (s *LocalSegment) PreparePOCUpdates(ctx context.Context) error {
 	if cfg.EnableSegmentPrune.GetAsBool() {
 		return merr.WrapErrServiceInternalMsg("PK-update POC requires queryNode.enableSegmentPrune=false on all query runtimes")
 	}
+	if cfg.ExprResCacheEnabled.GetAsBool() {
+		return merr.WrapErrServiceInternalMsg("PK-update POC requires queryNode.exprCache.enabled=false")
+	}
 	s.pocMu.Lock()
 	defer s.pocMu.Unlock()
 	if s.pocReady.Load() {
@@ -124,6 +127,7 @@ func (s *LocalSegment) PreparePOCUpdates(ctx context.Context) error {
 	}
 	defer C.DestroyPOCUpdates(session)
 	log.Info(ctx, "PK-update POC store built", mlog.Duration("buildDuration", time.Since(started)), mlog.Uint64("baseTimestamp", uint64(base)))
+	s.logPOCStats(ctx, session, "initialized")
 	applied, matched := int64(0), int64(0)
 	last := uint64(base)
 	applyStart := time.Now()
@@ -169,6 +173,7 @@ func (s *LocalSegment) PreparePOCUpdates(ctx context.Context) error {
 	if err := HandleCStatus(ctx, &status, "publish POC updates"); err != nil {
 		return err
 	}
+	s.logPOCStats(ctx, session, "applied")
 	s.pocReady.Store(true)
 	log.Info(ctx, "PK-update POC ready", mlog.Int64("appliedCount", applied), mlog.Int64("matchedRows", matched), mlog.Uint64("appliedThroughTimestamp", last), mlog.Duration("applyDuration", time.Since(applyStart)), mlog.Bool("ready", true))
 	return nil
@@ -179,7 +184,7 @@ func (s *LocalSegment) logPOCReadCounts(ctx context.Context) {
 		return
 	}
 	n := s.pocQueries.Inc()
-	if n != 1 && n%100 != 0 {
+	if n > 64 && n%100 != 0 {
 		return
 	}
 	if err := s.PinIfNotReleased(); err != nil {
@@ -191,5 +196,21 @@ func (s *LocalSegment) logPOCReadCounts(ctx context.Context) {
 	if err := HandleCStatus(ctx, &status, "read POC execution counters"); err != nil {
 		return
 	}
-	mlog.RatedInfo(ctx, 0.2, "PK-update POC reader usage", mlog.FieldSegmentID(s.ID()), mlog.Uint64("queryCount", n), mlog.Uint64("tempIndexReads", uint64(indexReads)), mlog.Uint64("valueReads", uint64(valueReads)))
+	s.logPOCStats(ctx, nil, "query")
+	mlog.RatedInfo(ctx, 10, "PK-update POC reader usage", mlog.FieldSegmentID(s.ID()), mlog.Uint64("queryCount", n), mlog.Uint64("tempIndexReads", uint64(indexReads)), mlog.Uint64("valueReads", uint64(valueReads)))
+}
+
+func (s *LocalSegment) logPOCStats(ctx context.Context, session unsafe.Pointer, stage string) {
+	var data *C.char
+	status := C.GetPOCStats(session, s.ptr, &data)
+	if err := HandleCStatus(ctx, &status, "read POC structure and path statistics"); err != nil {
+		return
+	}
+	defer C.free(unsafe.Pointer(data))
+	fields := []mlog.Field{mlog.FieldSegmentID(s.ID()), mlog.String("stage", stage), mlog.String("stats", C.GoString(data))}
+	if stage == "query" {
+		mlog.RatedInfo(ctx, 10, "PK-update POC statistics", fields...)
+	} else {
+		mlog.Info(ctx, "PK-update POC statistics", fields...)
+	}
 }

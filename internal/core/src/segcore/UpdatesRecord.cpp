@@ -24,6 +24,7 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,7 +52,7 @@ struct Version {
     uint64_t end_ts = kInfinity;
 };
 
-// Most initial cells need one ref: avoid a heap allocation per history. Growth
+// Sparse update histories share stable Version records. Growth
 // remains append-only, with random access for binary search. GC is out of scope.
 using History = absl::InlinedVector<Version*, 1>;
 
@@ -71,7 +72,10 @@ Visible(const History& history, uint64_t query_ts) {
                                                                       : nullptr;
 }
 
-using Postings = std::unordered_map<int64_t, History>;
+struct Postings {
+    std::vector<int64_t> base;
+    std::unordered_map<int64_t, History> updates;
+};
 
 // variant ordering puts the dedicated NULL key before INT64/VARCHAR. A field
 // contains only one non-null type. Strings use byte lexicographic ordering.
@@ -84,7 +88,9 @@ struct Field {
     UpdateFieldType type;
     bool nullable;
     std::deque<Version> versions;
-    std::vector<History> offsets;
+    std::unordered_map<int64_t, History> offsets;
+    UpdatesRecord::BaseReader base_reader;
+    uint64_t base_index_rows = 0, updated_cells = 0;
     std::unique_ptr<AllDataVersionedIndex> index;
 
     void
@@ -105,18 +111,25 @@ struct Field {
         if (it == index->end()) {
             it = index->emplace(value, std::make_unique<Postings>()).first;
         }
-        return (*it->second)[offset];
+        return it->second->updates[offset];
     }
 };
 
 void
-Collect(const Postings& postings,
+Collect(const Field& field,
+        const Postings& postings,
         uint64_t query_ts,
         std::vector<int64_t>& result) {
-    for (const auto& [offset, history] : postings) {
-        if (Visible(history, query_ts)) {
+    for (auto offset : postings.base) {
+        auto it = field.offsets.find(offset);
+        if (it == field.offsets.end() || it->second.empty() ||
+            query_ts < it->second.front()->begin_ts) {
             result.push_back(offset);
         }
+    }
+    for (const auto& [offset, history] : postings.updates) {
+        if (Visible(history, query_ts))
+            result.push_back(offset);
     }
 }
 
@@ -165,6 +178,8 @@ class UpdatesRecord::Impl {
     std::unordered_map<int64_t, std::unique_ptr<Field>> fields;
     std::optional<uint64_t> last_mutation_ts;
     std::atomic<uint64_t> index_reads{0}, value_reads{0};
+    std::atomic<uint64_t> value_rows{0}, base_rows{0}, correction_rows{0};
+    std::atomic<uint64_t> old_index_reads{0}, index_postings{0};
 };
 
 UpdatesRecord::UpdatesRecord(size_t row_count, bool enable_temp_index)
@@ -211,44 +226,77 @@ UpdatesRecord::CaptureReadBinding(int64_t field_id, uint64_t query_ts) const {
 }
 
 void
-UpdatesRecord::InitializeField(int64_t field_id,
-                               UpdateFieldType type,
-                               bool nullable,
-                               const std::vector<UpdateValue>& values,
-                               const std::vector<uint64_t>& begin_timestamps) {
+UpdatesRecord::RegisterField(int64_t field_id,
+                             UpdateFieldType type,
+                             bool nullable,
+                             BaseReader base_reader) {
     std::unique_lock lock(impl_->mutex);
-    Require(!impl_->last_mutation_ts,
-            "POC fields must be initialized before update apply");
-    Require(impl_->fields.count(field_id) == 0,
-            "POC field is already initialized");
-    Require(type == UpdateFieldType::Int64 || type == UpdateFieldType::VarChar,
-            "Unsupported POC field type");
-    Require(values.size() == impl_->row_count &&
-                begin_timestamps.size() == impl_->row_count,
-            "POC initial values must cover the physical segment");
-
+    Require(!impl_->last_mutation_ts && !impl_->fields.count(field_id),
+            "POC field registration must precede updates");
+    Require(bool(base_reader), "Missing POC base reader");
     auto field = std::make_unique<Field>();
     field->type = type;
     field->nullable = nullable;
-    field->offsets.resize(impl_->row_count);
-    if (impl_->enable_temp_index) {
+    field->base_reader = std::move(base_reader);
+    if (impl_->enable_temp_index)
         field->index = std::make_unique<AllDataVersionedIndex>();
+    impl_->fields.emplace(field_id, std::move(field));
+}
+
+void
+UpdatesRecord::IndexBaseBatch(int64_t field_id,
+                              int64_t start,
+                              const std::vector<UpdateValue>& values) {
+    std::unique_lock lock(impl_->mutex);
+    auto& field = impl_->IndexedField(field_id);
+    Require(!impl_->last_mutation_ts && start == field.base_index_rows &&
+                start + values.size() <= impl_->row_count,
+            "POC index base batches must be contiguous and precede updates");
+    for (size_t i = 0; i < values.size(); ++i) {
+        field.Validate(values[i]);
+        auto& postings = (*field.index)[values[i]];
+        if (!postings)
+            postings = std::make_unique<Postings>();
+        postings->base.push_back(start + i);
     }
-    for (size_t offset = 0; offset < values.size(); ++offset) {
-        field->Validate(values[offset]);
-        Require(begin_timestamps[offset] < kInfinity,
-                "Infinity is reserved for an open version end");
-        field->versions.push_back(
-            {std::make_shared<const UpdateValue>(values[offset]),
-             begin_timestamps[offset],
-             kInfinity});
-        auto* version = &field->versions.back();
-        field->offsets[offset].push_back(version);
-        if (field->index) {
-            field->IndexHistory(values[offset], offset).push_back(version);
+    field.base_index_rows += values.size();
+}
+
+void
+UpdatesRecord::VisitUpdates(
+    int64_t field_id,
+    uint64_t query_ts,
+    const std::function<void(int64_t, const UpdateValue&)>& visit) const {
+    std::shared_lock lock(impl_->mutex);
+    uint64_t count = 0;
+    for (const auto& [offset, history] : impl_->GetField(field_id).offsets) {
+        if (auto* version = Visible(history, query_ts)) {
+            visit(offset, *version->value);
+            ++count;
         }
     }
-    impl_->fields.emplace(field_id, std::move(field));
+    impl_->correction_rows.fetch_add(count, std::memory_order_relaxed);
+}
+
+UpdatesRecord::Stats
+UpdatesRecord::GetStats() const {
+    std::shared_lock lock(impl_->mutex);
+    Stats stats;
+    for (const auto& [id, field] : impl_->fields) {
+        stats.updated_cells += field->updated_cells;
+        stats.update_versions += field->versions.size();
+        stats.base_index_rows += field->base_index_rows;
+    }
+    stats.value_rows = impl_->value_rows.load();
+    stats.base_rows = impl_->base_rows.load();
+    stats.correction_rows = impl_->correction_rows.load();
+    stats.old_index_reads = impl_->old_index_reads.load();
+    stats.index_postings = impl_->index_postings.load();
+    return stats;
+}
+void
+UpdatesRecord::RecordOldIndexRead() const {
+    impl_->old_index_reads.fetch_add(1, std::memory_order_relaxed);
 }
 
 size_t
@@ -281,7 +329,7 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
         for (const auto& assignment : assignments) {
             const auto& history =
                 impl_->GetField(assignment.field_id).offsets[offset];
-            Require(history.back()->begin_ts < mutation_ts,
+            Require(history.empty() || history.back()->begin_ts < mutation_ts,
                     "POC cell timestamps must be strictly increasing");
         }
     }
@@ -327,7 +375,10 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
     // All allocations finished. Both ref paths are installed under the same
     // write lock before a reader can observe the newly closed/open intervals.
     for (auto& item : pending) {
-        item.history->back()->end_ts = mutation_ts;
+        if (!item.history->empty())
+            item.history->back()->end_ts = mutation_ts;
+        else
+            ++item.field->updated_cells;
         item.history->push_back(item.version);
         if (item.index_history) {
             item.index_history->push_back(item.version);
@@ -341,48 +392,59 @@ std::shared_ptr<const UpdateValue>
 UpdatesRecord::Lookup(int64_t field_id,
                       int64_t offset,
                       uint64_t query_ts) const {
-    std::shared_lock lock(impl_->mutex);
-    impl_->ValidateOffset(offset);
-    const auto* version =
-        Visible(impl_->GetField(field_id).offsets[offset], query_ts);
-    return version ? version->value : nullptr;
+    return Gather(field_id, {offset}, query_ts).front();
 }
 
-std::vector<std::shared_ptr<const UpdateValue>>
+UpdatesRecord::Values
 UpdatesRecord::Gather(int64_t field_id,
                       const std::vector<int64_t>& offsets,
                       uint64_t query_ts) const {
-    std::shared_lock lock(impl_->mutex);
-    const auto& field = impl_->GetField(field_id);
-    std::vector<std::shared_ptr<const UpdateValue>> result;
-    result.reserve(offsets.size());
-    for (auto offset : offsets) {
-        impl_->ValidateOffset(offset);
-        const auto* version = Visible(field.offsets[offset], query_ts);
-        result.push_back(version ? version->value : nullptr);
+    Values result(offsets.size());
+    std::vector<int64_t> missing;
+    std::vector<size_t> positions;
+    BaseReader base_reader;
+    {
+        std::shared_lock lock(impl_->mutex);
+        const auto& field = impl_->GetField(field_id);
+        base_reader = field.base_reader;
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            impl_->ValidateOffset(offsets[i]);
+            auto it = field.offsets.find(offsets[i]);
+            const auto* version = it == field.offsets.end()
+                                      ? nullptr
+                                      : Visible(it->second, query_ts);
+            if (version)
+                result[i] = version->value;
+            else {
+                missing.push_back(offsets[i]);
+                positions.push_back(i);
+            }
+        }
     }
+    if (!missing.empty()) {
+        auto base = base_reader(missing);
+        Require(base.size() == missing.size(),
+                "POC base reader returned wrong row count");
+        for (size_t i = 0; i < base.size(); ++i)
+            result[positions[i]] = std::move(base[i]);
+    }
+    impl_->value_rows.fetch_add(offsets.size(), std::memory_order_relaxed);
+    impl_->base_rows.fetch_add(missing.size(), std::memory_order_relaxed);
     return result;
 }
 
-std::vector<std::shared_ptr<const UpdateValue>>
+UpdatesRecord::Values
 UpdatesRecord::Scan(int64_t field_id,
                     int64_t begin_offset,
                     size_t count,
                     uint64_t query_ts) const {
-    std::shared_lock lock(impl_->mutex);
     Require(begin_offset >= 0 &&
                 static_cast<size_t>(begin_offset) <= impl_->row_count &&
-                count <= impl_->row_count - static_cast<size_t>(begin_offset),
-            "POC scan range is outside the physical segment");
-    const auto& field = impl_->GetField(field_id);
-    std::vector<std::shared_ptr<const UpdateValue>> result;
-    result.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
-        const auto* version =
-            Visible(field.offsets[begin_offset + i], query_ts);
-        result.push_back(version ? version->value : nullptr);
-    }
-    return result;
+                count <= impl_->row_count - begin_offset,
+            "Invalid POC scan range");
+    std::vector<int64_t> offsets(count);
+    std::iota(offsets.begin(), offsets.end(), begin_offset);
+    return Gather(field_id, offsets, query_ts);
 }
 
 std::vector<int64_t>
@@ -400,7 +462,10 @@ UpdatesRecord::In(int64_t field_id,
         field.Validate(value);
         auto it = field.index->find(value);
         if (it != field.index->end()) {
-            Collect(*it->second, query_ts, result);
+            impl_->index_postings.fetch_add(
+                it->second->base.size() + it->second->updates.size(),
+                std::memory_order_relaxed);
+            Collect(field, *it->second, query_ts, result);
         }
     }
     SortUnique(result);
@@ -436,7 +501,10 @@ UpdatesRecord::Range(int64_t field_id,
                                   : tree.lower_bound(upper->value);
     std::vector<int64_t> result;
     for (auto it = begin; it != end; ++it) {
-        Collect(*it->second, query_ts, result);
+        impl_->index_postings.fetch_add(
+            it->second->base.size() + it->second->updates.size(),
+            std::memory_order_relaxed);
+        Collect(field, *it->second, query_ts, result);
     }
     SortUnique(result);
     return result;
@@ -458,7 +526,10 @@ UpdatesRecord::Prefix(int64_t field_id,
         if (value.compare(0, prefix.size(), prefix) != 0) {
             break;
         }
-        Collect(*it->second, query_ts, result);
+        impl_->index_postings.fetch_add(
+            it->second->base.size() + it->second->updates.size(),
+            std::memory_order_relaxed);
+        Collect(field, *it->second, query_ts, result);
     }
     SortUnique(result);
     return result;
@@ -467,19 +538,18 @@ UpdatesRecord::Prefix(int64_t field_id,
 std::vector<int64_t>
 UpdatesRecord::IsNull(int64_t field_id, uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
-    const auto& tree = *impl_->IndexedField(field_id).index;
+    const auto& field = impl_->IndexedField(field_id);
+    const auto& tree = *field.index;
     std::vector<int64_t> result;
     auto it = tree.find(UpdateValue{std::monostate{}});
     if (it != tree.end()) {
-        Collect(*it->second, query_ts, result);
+        impl_->index_postings.fetch_add(
+            it->second->base.size() + it->second->updates.size(),
+            std::memory_order_relaxed);
+        Collect(field, *it->second, query_ts, result);
     }
     SortUnique(result);
     return result;
-}
-
-std::vector<int64_t>
-UpdatesRecord::IsNotNull(int64_t field_id, uint64_t query_ts) const {
-    return Range(field_id, std::nullopt, std::nullopt, query_ts);
 }
 
 }  // namespace milvus::segcore::experimental

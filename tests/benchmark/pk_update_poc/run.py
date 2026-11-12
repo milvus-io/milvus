@@ -69,6 +69,8 @@ class Instance:
             "    sealProportion: 1.0\n"
             "    sealProportionJitter: 0\n"
             "queryNode:\n"
+            "  exprCache:\n"
+            "    enabled: false\n"
             "  enableSegmentPrune: false\n"
             "  pkUpdatePOC:\n"
             f"    collectionID: {collection_id}\n"
@@ -347,6 +349,76 @@ def benchmark(collection, manifest, args):
     return output
 
 
+def structure_stats(logs, stage):
+    samples = []
+    for line in logs.splitlines():
+        if "PK-update POC statistics" not in line or not re.search(r'stage["= :]+%s' % stage, line):
+            continue
+        match = re.search(r'stats="((?:\\.|[^"\\])*)"', line)
+        if match:
+            samples.append(json.loads(json.loads('"' + match[1] + '"')))
+    return samples
+
+
+def verify_principles(instance, collection, manifest):
+    """Reject wrong paths/storage before accepting any latency samples."""
+    if instance.mode == "R2":
+        return {}
+    logs = instance.wait_logs(
+        lambda text: structure_stats(text, "initialized") and structure_stats(text, "applied"),
+        "initial and applied sparse-storage statistics",
+    )
+    initial = structure_stats(logs, "initialized")[-1]
+    applied = structure_stats(logs, "applied")[-1]
+    expected_index_rows = 2 * manifest["rows"] if instance.mode == "R1-ON" else 0
+    assert initial["updated_cells"] == initial["update_versions"] == initial["base_rows"] == 0, initial
+    assert initial["base_index_rows"] == expected_index_rows, initial
+    assert applied["updated_cells"] == 2 * len(range(0, manifest["rows"], 5)), applied
+    assert applied["update_versions"] == 2 * manifest["row_updates"], applied
+    assert applied["base_index_rows"] == expected_index_rows, applied
+    evidence = {"initialized": initial, "applied": applied, "paths": {}}
+
+    def run_case(name, expression, expected):
+        time.sleep(0.3)  # Keep rate-limited diagnostic logs outside timing runs.
+        old_logs = instance.logs()
+        before = (structure_stats(old_logs, "query") or [applied])[-1]
+        count = collection.query(
+            expression, output_fields=["count(*)"], timeout=instance.args.timeout, consistency_level="Strong"
+        )[0]["count(*)"]
+        assert count == expected, (name, count, expected)
+        logs = instance.wait_logs(
+            lambda text: len(structure_stats(text, "query")) > len(structure_stats(old_logs, "query")),
+            f"per-query path evidence for {name}",
+        )
+        after = structure_stats(logs, "query")[-1]
+        diff = {key: after[key] - before[key] for key in after}
+        evidence["paths"][name] = diff
+        return diff
+
+    equality = run_case("equality", "age == 42", manifest["counts"]["eq"])
+    assert equality["base_rows"] == equality["value_rows"] == 0, equality
+    if instance.mode == "R1-ON":
+        assert equality["old_index_reads"] == equality["correction_rows"] == 0, equality
+        assert 0 < equality["index_postings"] < manifest["rows"], equality
+    else:
+        assert equality["old_index_reads"] > 0 and equality["correction_rows"] > 0, equality
+        assert equality["index_postings"] == 0, equality
+    # All fixture values ending in "tail" start with "hot". General LIKE is
+    # eligible for INVERTED; its current policy declines the pure suffix op.
+    pattern = run_case("unsupported_temp_like", 'name like "hot%tail"', manifest["counts"]["suffix"])
+    assert pattern["old_index_reads"] > 0 and pattern["correction_rows"] > 0, pattern
+    assert pattern["base_rows"] == pattern["value_rows"] == pattern["index_postings"] == 0, pattern
+    # Numeric leaves precede string LIKE in the existing conjunction order.
+    # The fixture's tail values have age=7, so the intersection is empty while
+    # the string reader must visit exactly the age=42 candidates.
+    candidates = run_case("candidate_mask", 'age == 42 and name like "%tail"', 0)
+    assert 0 < candidates["value_rows"] < manifest["rows"], candidates
+    assert candidates["value_rows"] == manifest["counts"]["eq"], candidates
+    assert candidates["base_rows"] <= candidates["value_rows"], candidates
+    LOG.info("Validated sparse storage and expression paths for %s: %s", instance.mode, evidence)
+    return evidence
+
+
 def check_reader_usage(instance):
     if instance.mode == "R2":
         return {}
@@ -446,6 +518,7 @@ def main():
         try:
             instance.start()
             collection, identity = prepare(instance, fixture, manifest)
+            principles = verify_principles(instance, collection, manifest)
             verify(collection, fixture, args.timeout)
             latencies = benchmark(collection, manifest, args)
             # Counters are sampled on the first/each 100th request, rate-limited.
@@ -463,6 +536,7 @@ def main():
             results[mode] = {
                 **identity,
                 "latencies": latencies,
+                "principles": principles,
                 "reader_usage": check_reader_usage(instance),
                 "container_usage": docker("stats", "--no-stream", "--format", "{{json .}}", instance.name).strip(),
             }

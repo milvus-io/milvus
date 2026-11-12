@@ -48,14 +48,9 @@ struct UpdateRangeBound {
     bool inclusive = true;
 };
 
-// One instance belongs to one physical segment. Each initialized field contains
-// ALL rows, including their original values. The offset directory and optional
-// all-data B-tree share version records. No version GC is performed in this POC.
-//
-// Methods serialize mutation against readers. Callers must still supply one
-// fixed query timestamp across filter/output calls and publish QueryView progress
-// only after Apply succeeds. Segment liveness/row visibility remains the caller's
-// responsibility; index results contain field-value matches, not a delete mask.
+// Sparse update histories for one physical segment. Unchanged values remain in
+// the pinned base reader. The optional all-data index owns base memberships,
+// not copies of base values in the update history. No GC in this static POC.
 class UpdatesRecord {
  public:
     // The segment adapter resolves PKs to rows eligible for this mutation:
@@ -71,15 +66,34 @@ class UpdatesRecord {
     UpdatesRecord&
     operator=(const UpdatesRecord&) = delete;
 
-    // Offsets are [0, row_count). begin_timestamps describe the loaded values'
-    // visibility, not load time. Initialization completes before the first Apply.
-    // Field type is explicit so an all-NULL column is unambiguous.
+    using Values = std::vector<std::shared_ptr<const UpdateValue>>;
+    using BaseReader = std::function<Values(const std::vector<int64_t>&)>;
     void
-    InitializeField(int64_t field_id,
-                    UpdateFieldType type,
-                    bool nullable,
-                    const std::vector<UpdateValue>& values,
-                    const std::vector<uint64_t>& begin_timestamps);
+    RegisterField(int64_t field_id,
+                  UpdateFieldType type,
+                  bool nullable,
+                  BaseReader base_reader);
+    // Called in bounded batches only when building the all-data index.
+    void
+    IndexBaseBatch(int64_t field_id,
+                   int64_t start,
+                   const std::vector<UpdateValue>& values);
+
+    // Visit only cells with an update visible at Q_TS; never visits base rows.
+    void
+    VisitUpdates(
+        int64_t field_id,
+        uint64_t query_ts,
+        const std::function<void(int64_t, const UpdateValue&)>& visit) const;
+    struct Stats {
+        uint64_t updated_cells = 0, update_versions = 0, base_index_rows = 0;
+        uint64_t value_rows = 0, base_rows = 0, correction_rows = 0;
+        uint64_t old_index_reads = 0, index_postings = 0;
+    };
+    Stats
+    GetStats() const;
+    void
+    RecordOldIndexRead() const;
 
     // Apply one ordered PK mutation to all assignments. Timestamps must be
     // nondecreasing across calls and strictly increasing for each affected cell.
@@ -93,7 +107,7 @@ class UpdatesRecord {
           const ResolveRows& resolve_rows);
 
     // An owning immutable value survives subsequent updates and store teardown.
-    // nullptr means no version visible at query_ts; monostate means SET NULL.
+    // Missing visible updates fall back to the pinned base; monostate is NULL.
     std::shared_ptr<const UpdateValue>
     Lookup(int64_t field_id, int64_t offset, uint64_t query_ts) const;
 
@@ -105,7 +119,7 @@ class UpdatesRecord {
            const std::vector<int64_t>& offsets,
            uint64_t query_ts) const;
 
-    // Contiguous batch for a raw evaluator, without building an offsets array.
+    // Contiguous batch lookup for evaluators that have no suitable index.
     std::vector<std::shared_ptr<const UpdateValue>>
     Scan(int64_t field_id,
          int64_t begin_offset,
@@ -113,7 +127,7 @@ class UpdatesRecord {
          uint64_t query_ts) const;
 
     // Exact, sorted unique offset results. Ordinary predicates exclude NULL.
-    // A future expression adapter supplies SQL validity and segment visibility.
+    // Expression readers supply SQL validity and segment visibility.
     // Calling an index operation with enable_temp_index=false is an error,
     // rather than silently measuring a scan as an index lookup.
     std::vector<int64_t>
@@ -135,9 +149,6 @@ class UpdatesRecord {
 
     std::vector<int64_t>
     IsNull(int64_t field_id, uint64_t query_ts) const;
-
-    std::vector<int64_t>
-    IsNotNull(int64_t field_id, uint64_t query_ts) const;
 
     bool
     HasField(int64_t field_id) const;

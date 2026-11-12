@@ -6,7 +6,7 @@ resource limits:
 | Mode | Persisted data | Query path |
 |---|---|---|
 | R1-ON | Initial dataset, then local JSONL updates at segment load | All-data versioned temp index + UpdatesRecord |
-| R1-OFF | Same initial dataset and logical updates | UpdatesRecord; no temp index construction/maintenance |
+| R1-OFF | Same initial dataset and logical updates | Original index + sparse UpdatesRecord correction; no temp index construction/maintenance |
 | R2 | Precomputed final mirror dataset | Ordinary base/scalar indexes |
 
 The runner requires an image containing sub-phases 1–4 of this POC. A normal
@@ -49,14 +49,25 @@ The runner:
    appear, then publishes it by atomic rename and waits for readiness.
 5. Validates complete result PK sets against precomputed ground truth, and
    equality output values, before timing any query.
-6. Warms up and measures the fixed cases, checks reader-usage evidence, saves
+6. Requires sparse-store counters and per-query path evidence before timing:
+   equality uses no base-value reads, general `LIKE 'hot%tail'` uses original-index
+   correction, and an indexed conjunction reads only its candidate offsets.
+7. Warms up and measures the fixed cases, checks reader-usage evidence, saves
    results/logs, then stops the instance before running the next mode.
 
 Each instance uses `dataCoord.segment.maxSize=2048`, `sealProportion=1.0`, zero
-jitter, compaction disabled and segment pruning disabled. The layout check is
+jitter, compaction disabled, expression cache explicitly disabled, and segment pruning
+disabled. POC load rejects an enabled expression cache. The layout check is
 mandatory; these settings alone do not prove a single segment was produced.
 
 ## Workload and cases
+
+The initial review baseline is limited to `age == 42` with `count(*)` across
+ON, OFF and R2. Establish its result count, actual reader path, latency and
+memory first. The broader cases below remain coverage items; they do not need
+to block publication of this explicitly limited baseline. Candidate-mask
+checks must use a plan where an earlier leaf actually produces candidates;
+the current optimizer may place arithmetic before equality.
 
 - Schema: INT64 PK, nullable INT64 `age`, nullable VARCHAR `name` (maximum 32
   bytes), FLOAT_VECTOR dimension 8. Non-NULL names contain 32 lowercase ASCII
@@ -65,8 +76,10 @@ mandatory; these settings alone do not prove a single segment was produced.
   fields. Includes NULL transitions, restoration of earlier values, and rows
   entering/leaving matches. No writes occur during correctness or timing runs.
 - Eight filters: equality, IN, range, prefix, NULL, arithmetic, suffix LIKE, and
-  an AND/OR/NOT combination. Arithmetic and suffix exercise the value-reader
-  fallback. The same filters run in all three modes.
+  an AND/OR/NOT combination. Arithmetic and pure suffix LIKE exercise value
+  evaluation: the current INVERTED reader declines the pure suffix operator even
+  without updates. A separate, untimed general-LIKE gate checks original-index
+  correction in both ON and OFF. The same timed filters run in all three modes.
 - Filter timings use `count(*)` to avoid result-transfer volume dominating the
   comparison. Equality alone adds two cases with limit 128: PK-only output and
   `pk, age, name` output. No predicate × output-field Cartesian product.
@@ -86,7 +99,7 @@ python tests/benchmark/pk_update_poc/workload.py /tmp/pk-update-fixture --rows 1
 Generation streams JSONL and uses disk-backed SQLite. It creates both base and
 mirror datasets, so allow several GiB of disk for a 10M-row workload, plus
 database/index storage. Verification holds one case's expected PK set in memory.
-All-data version histories and the temp index need additional memory beyond the
+Sparse update histories and the optional all-data temp index need memory beyond the
 base column size; choose memory limits from measured usage before scaling up.
 
 ## Artifacts and interpretation

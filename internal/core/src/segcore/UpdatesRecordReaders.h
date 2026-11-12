@@ -28,6 +28,20 @@
 
 namespace milvus::segcore::experimental {
 
+// Query-local wall-time counters for the POC index-correction profile.
+// The expr layer measures the original predicate separately from these stages.
+struct IndexCorrectionTimings {
+    uint64_t original_predicate_ns = 0;
+    uint64_t original_validity_ns = 0;
+    uint64_t correction_ns = 0;
+};
+class IndexCorrectionProfile {
+ public:
+    virtual ~IndexCorrectionProfile() = default;
+    virtual IndexCorrectionTimings
+    CorrectionTimings() const = 0;
+};
+
 // Cross-cast to IScalarPredicateReader<int64_t/string_view> for point/range
 // predicates; VARCHAR also exposes IPatternMatchReader (literal prefix only).
 // No storage IO or reader registration is performed by these resident readers.
@@ -82,6 +96,12 @@ class ValueReader : public index::IIndexReaderBase {
     CoordDomain() const override {
         return index::Domain::Row;
     }
+    std::unique_ptr<index::IIndexReaderBase>
+    CorrectOriginalIndex(const index::IIndexReaderBase* original) const;
+    // Mask positions are kept aligned but excluded rows are never looked up.
+    std::vector<std::shared_ptr<const UpdateValue>>
+    ReadCandidates(const std::vector<int64_t>& offsets,
+                   const TargetBitmap* candidates) const;
     DataType
     ValueType() const override;
     index::ReaderCaps

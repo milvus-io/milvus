@@ -968,7 +968,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 SelectUpdateIndexReader();
                 break;
             default:
-                exec_path_ = ExprExecPath::RawData;
+                DetermineExecPath();
         }
     }
 

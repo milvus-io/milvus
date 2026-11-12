@@ -16,9 +16,13 @@
 
 #include "segcore/UpdatesRecordReaders.h"
 
+#include <chrono>
 #include <type_traits>
 
 #include "common/EasyAssert.h"
+#include "common/RegexQuery.h"
+#include "index/contracts/query/INgramReader.h"
+#include <unordered_set>
 
 namespace milvus::segcore::experimental {
 namespace {
@@ -133,6 +137,266 @@ class TypedTempIndexReader final
     }
 };
 
+// The original index owns base matches. Only visible updated cells are
+// reevaluated here; unchanged offsets and their values are never visited.
+template <typename T>
+class CorrectedIndexReader final
+    : public IndexCorrectionProfile,
+      public index::IIndexReaderBase,
+      public index::IScalarPredicateReader<T>,
+      public index::INullReader,
+      public index::INgramReader,
+      public index::
+          PatternMatchReaderAdapter<CorrectedIndexReader<T>, T, true> {
+ public:
+    CorrectedIndexReader(
+        std::shared_ptr<const detail::UpdateReadBinding> binding,
+        const index::IIndexReaderBase* original)
+        : binding_(std::move(binding)),
+          original_(original),
+          predicate_(
+              dynamic_cast<const index::IScalarPredicateReader<T>*>(original)),
+          nulls_(dynamic_cast<const index::INullReader*>(original)) {
+    }
+    int64_t
+    Count() const override {
+        return original_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return original_->ValueType();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return original_->CoordDomain();
+    }
+    index::ReaderCaps
+    Caps() const override {
+        return original_->Caps();
+    }
+    void
+    Prefetch() const override {
+        original_->Prefetch();
+    }
+    IndexCorrectionTimings
+    CorrectionTimings() const override {
+        return timings_;
+    }
+    template <typename Eval>
+    TargetBitmap
+    Correct(TargetBitmap bitmap, Eval&& eval) const {
+        binding_->records->RecordOldIndexRead();
+        // Predicate evaluation precedes IsNotNull in the scalar expr path.
+        // Produce both bitmaps while selecting each visible version only once.
+        const bool build_validity = !validity_;
+        auto validity = build_validity ? OriginalValidity() : TargetBitmap{};
+        const auto start = std::chrono::steady_clock::now();
+        binding_->records->VisitUpdates(
+            binding_->field_id,
+            binding_->query_ts,
+            [&](int64_t offset, const UpdateValue& value) {
+                bitmap[offset] = eval(value);
+                if (build_validity) {
+                    validity[offset] =
+                        !std::holds_alternative<std::monostate>(value);
+                }
+            });
+        timings_.correction_ns += ElapsedNs(start);
+        if (build_validity) {
+            // Publish only after the complete traversal succeeds.
+            validity_.emplace(std::move(validity));
+        }
+        return bitmap;
+    }
+    template <typename Eval>
+    TargetBitmap
+    CorrectValues(TargetBitmap bitmap, Eval&& eval) const {
+        return Correct(std::move(bitmap), [&](const UpdateValue& value) {
+            return !std::holds_alternative<std::monostate>(value) &&
+                   eval(T(std::get<index::owned_t<T>>(value)));
+        });
+    }
+    TargetBitmap
+    In(size_t n, const T* values) const override {
+        RequireReaderInput(n == 0 || values != nullptr,
+                           "Missing predicate values");
+        std::unordered_set<T> wanted;
+        for (size_t i = 0; i < n; ++i) wanted.insert(values[i]);
+        return CorrectValues(
+            TimePredicate([&] { return predicate_->In(n, values); }),
+            [&](const T& value) { return wanted.count(value) != 0; });
+    }
+    TargetBitmap
+    NotIn(size_t n, const T* values) const override {
+        RequireReaderInput(n == 0 || values != nullptr,
+                           "Missing predicate values");
+        std::unordered_set<T> wanted;
+        for (size_t i = 0; i < n; ++i) wanted.insert(values[i]);
+        return CorrectValues(
+            TimePredicate([&] { return predicate_->NotIn(n, values); }),
+            [&](const T& value) { return wanted.count(value) == 0; });
+    }
+    TargetBitmap
+    Range(const T& value, index::CompareOp op) const override {
+        return CorrectValues(
+            TimePredicate([&] { return predicate_->Range(value, op); }),
+            [&](const T& v) {
+                switch (op) {
+                    case index::CompareOp::Equal:
+                        return v == value;
+                    case index::CompareOp::NotEqual:
+                        return v != value;
+                    case index::CompareOp::GreaterThan:
+                        return v > value;
+                    case index::CompareOp::GreaterEqual:
+                        return v >= value;
+                    case index::CompareOp::LessThan:
+                        return v < value;
+                    case index::CompareOp::LessEqual:
+                        return v <= value;
+                }
+                return false;
+            });
+    }
+    TargetBitmap
+    Range(const T& lo, bool li, const T& hi, bool hi_i) const override {
+        return CorrectValues(
+            TimePredicate([&] { return predicate_->Range(lo, li, hi, hi_i); }),
+            [&](const T& v) {
+                return (li ? v >= lo : v > lo) && (hi_i ? v <= hi : v < hi);
+            });
+    }
+    TargetBitmap
+    IsNull() const override {
+        auto result = IsNotNull();
+        result.flip();
+        return result;
+    }
+    TargetBitmap
+    IsNotNull() const override {
+        if (!validity_) {
+            // Standalone null predicates still work without a predicate call.
+            auto validity = OriginalValidity();
+            const auto start = std::chrono::steady_clock::now();
+            binding_->records->VisitUpdates(
+                binding_->field_id,
+                binding_->query_ts,
+                [&](int64_t offset, const UpdateValue& value) {
+                    validity[offset] =
+                        !std::holds_alternative<std::monostate>(value);
+                });
+            timings_.correction_ns += ElapsedNs(start);
+            validity_.emplace(std::move(validity));
+        }
+        return validity_->clone();
+    }
+    bool
+    CanHandle(std::string_view literal, index::PatternOp op) const override {
+        auto* reader = dynamic_cast<const index::INgramReader*>(original_);
+        return reader && reader->CanHandle(literal, op);
+    }
+    bool
+    CandidatesAreExact(std::string_view, index::PatternOp) const override {
+        return false;  // Updated candidates require the existing evaluator.
+    }
+    void
+    Candidates(std::string_view literal,
+               index::PatternOp op,
+               TargetBitmap& candidates) const override {
+        auto parent = candidates.clone();
+        dynamic_cast<const index::INgramReader*>(original_)->Candidates(
+            literal, op, candidates);
+        binding_->records->RecordOldIndexRead();
+        binding_->records->VisitUpdates(
+            binding_->field_id,
+            binding_->query_ts,
+            [&](int64_t offset, const UpdateValue& value) {
+                candidates[offset] =
+                    parent[offset] &&
+                    !std::holds_alternative<std::monostate>(value);
+            });
+    }
+    bool
+    ShouldUseForOpImpl(index::PatternOp op, std::string_view pattern) const {
+        auto* reader =
+            dynamic_cast<const index::IPatternMatchReader*>(original_);
+        return reader && reader->ShouldUseForOp(op, pattern);
+    }
+    bool
+    PatternMatchIsExact(index::PatternOp op) const {
+        return dynamic_cast<const index::IPatternMatchReader*>(original_)
+            ->PatternMatchIsExact(op);
+    }
+    TargetBitmap
+    PatternMatchImpl(std::string_view pattern, index::PatternOp op) const {
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            auto* reader =
+                dynamic_cast<const index::IPatternMatchReader*>(original_);
+            std::unique_ptr<LikePatternMatcher> like;
+            std::unique_ptr<PartialRegexMatcher> regex;
+            if (op == index::PatternOp::Match)
+                like =
+                    std::make_unique<LikePatternMatcher>(std::string(pattern));
+            if (op == index::PatternOp::RegexMatch)
+                regex =
+                    std::make_unique<PartialRegexMatcher>(std::string(pattern));
+            return CorrectValues(TimePredicate([&] {
+                                     return reader->PatternMatch(pattern, op);
+                                 }),
+                                 [&](std::string_view v) {
+                                     switch (op) {
+                                         case index::PatternOp::PrefixMatch:
+                                             return v.starts_with(pattern);
+                                         case index::PatternOp::PostfixMatch:
+                                             return v.ends_with(pattern);
+                                         case index::PatternOp::InnerMatch:
+                                             return v.find(pattern) != v.npos;
+                                         case index::PatternOp::Match:
+                                             return (*like)(v);
+                                         case index::PatternOp::RegexMatch:
+                                             return (*regex)(v);
+                                     }
+                                     return false;
+                                 });
+        } else {
+            throw SegcoreError(Unsupported,
+                               "Pattern correction requires VARCHAR");
+        }
+    }
+
+ private:
+    static uint64_t
+    ElapsedNs(std::chrono::steady_clock::time_point start) {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now() - start)
+            .count();
+    }
+    template <typename Read>
+    TargetBitmap
+    TimePredicate(Read&& read) const {
+        const auto start = std::chrono::steady_clock::now();
+        auto result = read();
+        timings_.original_predicate_ns += ElapsedNs(start);
+        return result;
+    }
+    TargetBitmap
+    OriginalValidity() const {
+        const auto start = std::chrono::steady_clock::now();
+        auto result = nulls_->IsNotNull();
+        timings_.original_validity_ns += ElapsedNs(start);
+        binding_->records->RecordOldIndexRead();
+        return result;
+    }
+    // Owned by one expr reader, bound to its immutable Q_TS; never shared
+    // between requests or stored in the expression result cache.
+    mutable std::optional<TargetBitmap> validity_;
+    mutable IndexCorrectionTimings timings_;
+    std::shared_ptr<const detail::UpdateReadBinding> binding_;
+    const index::IIndexReaderBase* original_;
+    const index::IScalarPredicateReader<T>* predicate_;
+    const index::INullReader* nulls_;
+};
+
 template <typename T>
 class TypedValueReader final : public ValueReader,
                                public index::IScalarValueReader<T> {
@@ -227,8 +491,39 @@ TempIndexReader::IsNull() const {
 
 TargetBitmap
 TempIndexReader::IsNotNull() const {
-    return ToBitmap(
-        binding_->records->IsNotNull(binding_->field_id, binding_->query_ts));
+    auto result = IsNull();
+    result.flip();
+    return result;
+}
+
+std::unique_ptr<index::IIndexReaderBase>
+ValueReader::CorrectOriginalIndex(
+    const index::IIndexReaderBase* original) const {
+    if (binding_->type == UpdateFieldType::Int64)
+        return std::make_unique<CorrectedIndexReader<int64_t>>(binding_,
+                                                               original);
+    return std::make_unique<CorrectedIndexReader<std::string_view>>(binding_,
+                                                                    original);
+}
+
+UpdatesRecord::Values
+ValueReader::ReadCandidates(const std::vector<int64_t>& offsets,
+                            const TargetBitmap* candidates) const {
+    if (!candidates || candidates->empty())
+        return ReadOffsets(offsets);
+    RequireReaderInput(candidates->size() == offsets.size(),
+                       "POC candidate size mismatch");
+    std::vector<int64_t> selected;
+    for (size_t i = 0; i < offsets.size(); ++i)
+        if ((*candidates)[i])
+            selected.push_back(offsets[i]);
+    auto values = ReadOffsets(selected);
+    UpdatesRecord::Values result(offsets.size());
+    size_t n = 0;
+    for (size_t i = 0; i < offsets.size(); ++i)
+        if ((*candidates)[i])
+            result[i] = std::move(values[n++]);
+    return result;
 }
 
 DataType

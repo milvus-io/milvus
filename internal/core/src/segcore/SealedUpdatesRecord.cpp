@@ -103,41 +103,60 @@ SealedUpdatesRecord::Build(std::shared_ptr<ChunkedSegmentSealedImpl> source,
     for (auto field_id : field_ids) {
         const auto& field = (*schema)[FieldId(field_id)];
         const bool is_int = field.get_data_type() == DataType::INT64;
-        std::vector<UpdateValue> values;
-        values.reserve(row_count);
+        // This fork predates AttachExperimentalUpdates and pins the original
+        // base/index. The callback owns the fork, never the mutable source.
+        auto read_base =
+            [state = result->read_state_,
+             field_id,
+             is_int,
+             nullable = field.is_nullable()](const std::vector<int64_t>& rows) {
+                auto& base = static_cast<SegmentInternalInterface&>(*state);
+                auto data = base.bulk_subscript(
+                    nullptr, FieldId(field_id), rows.data(), rows.size());
+                AssertInfo(data != nullptr, "POC base lookup returned no data");
+                auto owned = std::make_shared<std::vector<UpdateValue>>();
+                owned->reserve(rows.size());
+                const auto& validity = GetFieldDataRowValidData(*data);
+                const auto& scalars = data->scalars();
+                AssertInfo(
+                    (is_int ? scalars.long_data().data_size()
+                            : scalars.string_data().data_size()) == rows.size(),
+                    "Incomplete POC base values");
+                AssertInfo(!nullable || validity.size() == rows.size(),
+                           "Incomplete POC validity");
+                for (size_t i = 0; i < rows.size(); ++i) {
+                    if (nullable && !validity[i])
+                        owned->emplace_back(std::monostate{});
+                    else if (is_int)
+                        owned->emplace_back(scalars.long_data().data(i));
+                    else
+                        owned->emplace_back(scalars.string_data().data(i));
+                }
+                UpdatesRecord::Values values;
+                values.reserve(rows.size());
+                for (const auto& value : *owned)
+                    values.emplace_back(owned, &value);
+                return values;
+            };
+        result->records_->RegisterField(
+            field_id,
+            is_int ? UpdateFieldType::Int64 : UpdateFieldType::VarChar,
+            field.is_nullable(),
+            read_base);
+        if (!enable_temp_index)
+            continue;
         for (int64_t start = 0; start < row_count;) {
             CheckCancelled(op_ctx);
             auto count = std::min(kReadBatchSize, row_count - start);
             offsets.resize(count);
             std::iota(offsets.begin(), offsets.end(), start);
-            // Reuses scalar index reverse lookup when raw columns are absent.
-            auto data = segment.bulk_subscript(
-                op_ctx, FieldId(field_id), offsets.data(), count);
-            AssertInfo(data != nullptr, "POC source returned no field data");
-            const auto& scalars = data->scalars();
-            AssertInfo((is_int ? scalars.long_data().data_size()
-                               : scalars.string_data().data_size()) == count,
-                       "POC source value count differs from requested offsets");
-            const auto& validity = GetFieldDataRowValidData(*data);
-            AssertInfo(!field.is_nullable() || validity.size() == count,
-                       "POC nullable source has incomplete validity");
-            for (int64_t i = 0; i < count; ++i) {
-                if (field.is_nullable() && !validity[i]) {
-                    values.emplace_back(std::monostate{});
-                } else if (is_int) {
-                    values.emplace_back(scalars.long_data().data(i));
-                } else {
-                    values.emplace_back(scalars.string_data().data(i));
-                }
-            }
+            auto values = read_base(offsets);
+            std::vector<UpdateValue> batch;
+            batch.reserve(count);
+            for (const auto& value : values) batch.push_back(*value);
+            result->records_->IndexBaseBatch(field_id, start, batch);
             start += count;
         }
-        result->records_->InitializeField(
-            field_id,
-            is_int ? UpdateFieldType::Int64 : UpdateFieldType::VarChar,
-            field.is_nullable(),
-            values,
-            result->insertion_timestamps_);
     }
     return result;
 }

@@ -29,7 +29,8 @@ class ChunkedSegmentSealedImpl;
 namespace milvus::segcore::experimental {
 
 // Preparation adapter for the static, sealed-segment POC. Pins the original
-// physical base/index state and builds the experimental store from its values.
+// physical base/index state, registers sparse histories and optionally builds
+// the all-data index. OFF does not copy base column values.
 // Expression routing is activated explicitly after preparation.
 class SealedUpdatesRecord {
  public:
@@ -68,7 +69,7 @@ class SealedUpdatesRecord {
     // The pinned read facade shares delete state with source; source must
     // outlive the facade. Reverse member destruction preserves that order.
     std::shared_ptr<ChunkedSegmentSealedImpl> source_;
-    std::unique_ptr<ChunkedSegmentSealedImpl> read_state_;
+    std::shared_ptr<ChunkedSegmentSealedImpl> read_state_;
     std::shared_ptr<UpdatesRecord> records_;
     std::vector<uint64_t> insertion_timestamps_;
 };
