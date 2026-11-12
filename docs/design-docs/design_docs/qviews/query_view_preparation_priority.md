@@ -30,12 +30,12 @@ ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力�
 | 无访问历史、无存活 UpView、无 AutoLoad 需求（首次/手动加载） | 0 | 0 | [0,2] |
 
 - 配置偏移：HIGH（含 proto 默认值）+2，LOW 0，未知 enum 0。不使用 enum 底层数值。
-- 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤10 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
+- 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤2 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
 - 流量映射：`share=clamp(replica.Last6Windows / same_RG_total,0,1)`，`heat=log1p(100*share)/log1p(100)`，`traffic=round(limit*heat)`。分母 ≤0 时流量分为 0。
 - 总分为 `clamp(base + traffic + config, -20,20)`；当前策略实际产生 [-10,20]，wire/scheduler 合法范围仍是 [-20,20]，不要求用满。
 - 最紧急档中，1%/5%/10%/50%/100% 占比分别得到 1/3/4/7/8 流量分。配置 +2 不会跨越主要场景之间的顺序。
 
-ViewFeedback 将超过 2 分钟的窗口清理，但保留 replica 的最后活动时间直到 replica 撤销。窗口归零不等于变冷：仍在 10 分钟内就保留该场景基准分。最近 6 窗口不假定固定 6 秒。缺失统计不能证明长期无人访问；没有历史的缺 UpView 场景使用首次/手动加载基准，不凭空创造访问记录。
+ViewFeedback 将超过 2 分钟的窗口清理，但保留 replica 的最后活动时间直到 replica 撤销。窗口归零不等于变冷：仍在 2 分钟内就保留该场景基准分。最近 6 窗口不假定固定 6 秒。缺失统计不能证明长期无人访问；没有历史的缺 UpView 场景使用首次/手动加载基准，不凭空创造访问记录。
 
 **尚未实现的细分方案：** 下文第 6、12 节的独立 Yield/Wait/Event 接口、collection 分组公平，以及 Transform catch-up 独立 drain 池、IDF permit 和 live-event dispatcher 内部的优先级细分。第一版保持这些已有执行边界与预算；一旦 Execute 已开始，其中的 I/O/native/模块阶段不会因更高分到达而中断或重新 admission。因此当前实现证明主要准备任务的排队优先级，不表示所有下游队列都能按 View 优先级排序，也不承诺墙钟恢复延迟。
 
@@ -134,7 +134,7 @@ Store 已将各 shard 的窗口 rate 按 collection 的全部 shard 数平均成
 ### 4.2 场景评分
 
 ```text
-recent = LastAccessTime != 0 && now - LastAccessTime <= 10min
+recent = LastAccessTime != 0 && now - LastAccessTime <= 2min
 (base, limit) = SelectScenario(recent, healthyUp, pendingAutoLoad, knownHistory)
 share = clamp(replica.Last6Windows / same_RG_total, 0, 1)
 traffic = round(limit * log1p(100 * share) / log1p(100))
@@ -303,7 +303,7 @@ SN 仍共享物理执行器，不按 RG 复制 runtime 或引入新 RG 配额。
 
 ## 11. 已定参数与后续讨论
 
-- 第一版范围、+2 配置偏移、需求场景、10 分钟近期阈值、最近 6 窗口 RG 内 rate 占比的对数映射与未知统计策略已确定，见第 4 节及开头映射表。
+- 第一版范围、+2 配置偏移、需求场景、2 分钟近期阈值、最近 6 窗口 RG 内 rate 占比的对数映射与未知统计策略已确定，见第 4 节及开头映射表。
 - 当前 scheduler 每 8 次优先派发后进行一次年龄公平派发；collection fairness key 和细分资源阶段的协作 quantum 留待后续。
 - 第 12 节接口命名与兼容适配的实现细节，以及各 native/I/O 阶段的可继续边界。
 

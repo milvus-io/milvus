@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	recentPreparationAccess       = 10 * time.Minute
+	recentPreparationAccess       = 2 * time.Minute
 	minPreparationPriority  int32 = nodescheduler.MinPriority
 	maxPreparationPriority  int32 = nodescheduler.MaxPriority
 )

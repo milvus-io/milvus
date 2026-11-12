@@ -42,8 +42,11 @@ func TestPreparationPriorityScenarios(t *testing.T) {
 		{"silent-up-handoff", 0, false, true, false, 0, 0, -10},
 		{"active-handoff", time.Minute, true, true, false, 100, 100, 2},
 		{"active-handoff-zero-rate", time.Minute, true, true, false, 0, 100, 0},
-		{"recent-boundary", 10 * time.Minute, true, false, false, 0, 0, 10},
-		{"after-boundary", 10*time.Minute + time.Nanosecond, true, false, false, 0, 0, -5},
+		{"recent-boundary", 2 * time.Minute, true, false, false, 0, 0, 10},
+		{"after-boundary", 2*time.Minute + time.Nanosecond, true, false, false, 0, 0, -5},
+		{"handoff-at-boundary", 2 * time.Minute, true, true, false, 100, 100, 2},
+		{"handoff-after-boundary", 2*time.Minute + time.Nanosecond, true, true, false, 100, 100, -10},
+		{"autoload-after-boundary", 2*time.Minute + time.Nanosecond, true, false, true, 100, 100, 5},
 		{"future-access", -time.Minute, true, false, false, 0, 0, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
