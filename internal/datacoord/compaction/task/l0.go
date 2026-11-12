@@ -72,8 +72,9 @@ func (t *L0CompactionTask) GetTaskState() taskcommon.State {
 
 // GetTaskResource prices an L0 compaction by what the worker holds in memory:
 // the delta logs of every input L0 segment, and the PK stats logs (bloom
-// filters) of every target segment the deletes are applied to, which
-// l0_compactor.go loadBF loads in full before applying. On a large collection
+// filters) of every target segment the deletes are applied to. The worker's
+// l0_compactor.go loads these through loadBF in batches; summing all targets
+// is conservative across batches. On a large collection
 // the targets' stats logs usually outweigh the delta logs. The targets are
 // the segments the plan will select (targetSegments), read at pricing time;
 // a segment that flushes between pricing and dispatch is not counted.

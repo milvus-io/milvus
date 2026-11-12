@@ -46,6 +46,9 @@ import (
 // more than it can hold. A task whose inputs are still resolving is priced at
 // an upper bound on itself; only one whose inputs are gone for good is priced
 // at the floor, and that task is on its way to being retired.
+// A segment without size statistics or binlogs deliberately falls back to
+// average per-record sizes within these conservative task formulas, not a
+// strict per-value bound (see EstimateSegmentSize).
 //
 // Every memory formula mirrors what the worker actually holds for that family
 // (the comment next to each formula names the worker-side code it mirrors),
@@ -180,8 +183,9 @@ func DeleteMapBytes(segment *meta.SegmentInfo, pkType schemapb.DataType) int64 {
 
 // L0Compaction: the worker (compactor/l0_compactor.go) loads every
 // input delta log into memory before applying it batch by batch (deltaSize,
-// times the factor), and loads the PK stats logs of every target segment in
-// full to build their bloom filters (loadBF; statsSize, held as is).
+// times the factor), and loads the target segments' PK stats logs in batches
+// to build their bloom filters (loadBF). statsSize sums all targets, so it is
+// conservative across batches.
 func L0Compaction(deltaSize, statsSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    DefaultCPU(),
@@ -365,7 +369,12 @@ func StatsTargetFields(schema *schemapb.CollectionSchema, subJob indexpb.StatsSu
 
 // EstimateSegmentSize is getSegmentSize with a fallback for segments whose
 // Stats were never persisted (external-collection segments): rows times the
-// schema's per-record estimate.
+// schema's average per-record estimate. This is an intentional trade-off within
+// the conservative task formulas (expansion factors and memory floor): schema
+// maxima can serialize work through the oversized path. It is not a strict
+// bound on every variable-width value. EstimateFieldSize uses it as a cap too.
+// EstimateMaxSizePerRecord still uses heuristics for text, JSON, arrays,
+// geometry and sparse vectors; actual field sizes remain a follow-up.
 func EstimateSegmentSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema) int64 {
 	if segment == nil || segment.SegmentInfo == nil {
 		return 0
@@ -429,6 +438,8 @@ func decodesWholeColumnGroup(segment *meta.SegmentInfo) bool {
 // exceeds every worker, is dispatched as oversized, and the worker then books
 // the whole of it and reports no free memory until the task ends. A few such
 // tasks take every worker out of memory-aware placement at once.
+// If the segment has no recorded size, the cap is itself a heuristic; see
+// EstimateSegmentSize for that fallback's accepted estimation trade-off.
 //
 // The rule does not look at whether the collection is external. External
 // segments differ only in what meta holds for them, and that is exactly what
@@ -476,9 +487,10 @@ func EstimateFieldSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSch
 	return segmentSize
 }
 
-// Cache memoizes a task's requirement so what the scheduler placed and
-// what the request ships are the same number, and so the meta walk runs once
-// per task rather than once per scheduling round.
+// Cache memoizes an exact requirement so placement and request construction
+// reuse it and avoid repeating the meta walk. An inexact answer is recomputed
+// on each call, including the request builder's call in the same round, so it
+// can differ from the placement estimate if its inputs change.
 //
 // ok controls caching and nothing else. A computation that could not resolve
 // its inputs returns ok=false and is NOT cached, so the next round retries

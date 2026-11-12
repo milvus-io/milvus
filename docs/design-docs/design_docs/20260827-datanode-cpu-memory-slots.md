@@ -50,7 +50,7 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 
 | message | new fields |
 |---|---|
-| `datapb.QuerySlotResponse` | `int64 total_cpu`, `int64 available_cpu`, `int64 total_memory`, `int64 available_memory` (memory in bytes), tags 6-9; tags 4 and 5 are master's `copy_segment_shared_indexes` and `segment_rooted_indexes` |
+| `datapb.QuerySlotResponse` | `int64 total_cpu`, `int64 available_cpu`, `int64 total_memory`, `int64 available_memory`, `int64 machine_memory` (memory in bytes), tags 6-10; tags 4 and 5 are master's `copy_segment_shared_indexes` and `segment_rooted_indexes` |
 
 That is the only proto change. The worker's report needs fixed fields because
 it is a response the coordinator reads directly; a per-task estimate does not.
@@ -66,13 +66,17 @@ it. The request payload protos — `CompactionPlan`, `CreateJobRequest`,
 `AnalyzeRequest`, `CreateStatsRequest`, `PreImportRequest`, `ImportRequest`,
 `CopySegmentRequest` — are unchanged.
 
-One consequence worth naming: because DataCoord reads its own estimate once per
-dispatch and hands that same value to `Create*`, "what the scheduler placed the
-task on" and "what the worker books" are the same variable by construction,
-not two independently computed numbers that have to be kept in step.
+The scheduler reads the estimate for placement, and `CreateTaskOnWorker` reads
+it again to pass to `Create*`. An exact answer is cached, so both reads use the
+same value. An inexact answer is not cached and can change if its inputs resolve
+between placement and request construction. The worker books the value in the
+request; its next `QuerySlot` report corrects the scheduler's view, but cannot
+undo placements already made in that round. Passing the placement estimate into
+request construction is a follow-up. The per-node import bound is also computed
+on both sides, as described below.
 
 `RefreshExternalCollectionTaskRequest` carries its estimate the same way, and
-the DataNode's external collection manager books it like the three executors
+the DataNode's external collection manager books it like the four executors
 do. Its scalar slot is still not counted in the slot report (QuerySlot sums
 index, compaction and import slots only), which stays as is.
 
@@ -101,7 +105,7 @@ is placed meanwhile.
 | stats (TextIndex / BM25 / JsonKeyIndex) | 1 | sum(size of the fields the sub job indexes) x 2; whole segment when the schema is not cached | `index/task_stats.go` loops over the `enable_match` fields / the JSON fields / the BM25 output fields only |
 | sort compaction | 1 | segmentSize x 2 | `storage.Sort` retains every input record |
 | mix compaction / bump schema version | 1 | min(sum(input segments), `dataCoord.segment.maxSize`) + delete maps | `MultiSegmentWriter` streams: never more than the input, never more than one output segment. The pk -> ts delete maps are not streamed: delete rows x 64 bytes per segment, plus the deltalog bytes for a VarChar key; summed over the inputs on the merge-sort path, which keeps every map until the merge ends, and the largest one on mergeSplit, which holds one at a time |
-| L0 compaction | 1 | sum(deltalog) x 2 + sum(target statslog) | `l0_compactor.go` loads every delta log, and `loadBF` loads the PK stats logs of every target L1/L2 segment in full |
+| L0 compaction | 1 | sum(deltalog) x 2 + sum(target statslog) | `l0_compactor.go` loads every delta log, then loads the target L1/L2 bloom filters in batches through `loadBF`; summing all targets' stats logs is conservative across batches |
 | clustering compaction | 8 | sum(input segments) | buckets are flushed at `memoryBufferRatio` of the machine; that cap is not applied, so a large input is over-priced |
 | analyze | 8 | Σ clustering-key field size (the field-size rule below) x 2 | the train set is down-sampled to `maxTrainSizeRatio` of the machine; that cap is not applied. Going through the field-size rule gives sparse and array-of-vector keys an answer, where rows x dim had none |
 | import | 1 | sum over files of min(base x vchannels x partitions, file size) x `importMemoryFactor`; at placement, at most `dataNode.import.memoryLimitPercentage` x `importMemoryFactor` of the node's total memory (L0 import excluded) | every file is submitted at once with one read buffer, and a buffer never fills beyond the file it reads; every reader reserves from the import allocator, which caps all import buffers at that share of the machine |
@@ -243,6 +247,17 @@ of magnitude above the data. Uncapped, such a task exceeds every worker, is
 dispatched as oversized, and the worker books all of it and reports no free
 memory for the task's whole run.
 
+When meta has neither positive size statistics nor binlogs, that cap itself is
+an estimate: `EstimateSegmentSize` deliberately uses rows x
+`typeutil.EstimateSizePerRecord(schema)`. As discussed in the earlier review,
+the task memory formulas are already conservative, with expansion factors and
+a memory floor, so this fallback keeps average per-record sizes rather than
+schema maxima that can serialize work through the oversized path. This is an
+accepted estimation trade-off, not a strict upper-bound guarantee for every
+variable-width value. `EstimateMaxSizePerRecord` also still uses heuristics for
+text/JSON/array/geometry and sparse vectors. Recording actual field sizes
+remains a follow-up; this change keeps the existing fallback.
+
 The rule is the same for internal and external collections; they differ only in
 what meta holds for their segments, and that is what the three steps key on.
 
@@ -271,11 +286,10 @@ once, several times the field, so it is priced on `estimateFMIndexBuildPeakBytes
 | `minTaskMemory` | 64MB |
 | `externalRefreshMemory` | 1GB |
 
-The estimate is cached once on the task object (same pattern as
-`slotUsage.Load()` today) and the request builder ships the same value the
-scheduler saw: cached on the task for the nine families that walk meta, a pure
-function of three job fields for import/preimport. Either way, what was placed
-and what was shipped are the same number.
+An exact estimate is cached on the task object (same pattern as
+`slotUsage.Load()` today). The request builder reuses that cached value. Inexact
+answers are recomputed, including between placement and request construction;
+see the wire section for the resulting same-round accounting gap.
 
 A family that cannot resolve its inputs is **not** cached, so the next
 scheduling round retries instead of freezing a placeholder for the task's
@@ -311,10 +325,10 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   admission and, for vector builds, to `MaxVecIndexBuildConcurrency`; this
   change adds no gate of its own.
 - The external-collection refresh task runs through its own manager rather
-  than one of the three executors. The manager books the estimate when it
+  than one of the four executors. The manager books the estimate when it
   accepts the task (queued in its pool included, a duplicate dispatch books
   nothing) and releases it when the task function returns, or at once if the
-  pool refuses the task. `QuerySlot` adds that ledger to the other three. Its
+  pool refuses the task. `QuerySlot` adds that ledger to the other four. Its
   scalar slot still never entered the slot report.
 - `QuerySlot`: `total_cpu = hardware.GetCPUNum()`,
   `total_memory = hardware.GetMemoryCount()`; in standalone both are multiplied
@@ -322,9 +336,10 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   QueryNode). `machine_memory = hardware.GetMemoryCount()` without the
   discount: the base of the per-node bound of a `NodeMemoryBounded` task. `available_cpu = max(total_cpu - sum(accepted cpu), 0)`.
   `available_memory = min(max(total_memory - sum(accepted memory), 0),
-  system free memory)`, where system free memory is the cgroup-aware limit
-  minus this process's resident memory (the definition
+  system free memory)`, where system free memory on Linux is the cgroup-aware
+  limit minus this process's resident memory excluding shared pages (the definition
   `hardware.GetFreeMemoryCount` uses, computed without its uint64 wrap-around).
+  On Darwin and Windows the helper instead subtracts machine-wide used memory.
   A failed limit reading leaves the ledger's figure alone rather than reporting
   nothing free. The system term applies only while the ledger has something
   booked: a node with nothing booked reports `available_memory = total_memory`,
@@ -405,7 +420,7 @@ Same rules as PR #52561, implemented thinner:
 - New DataCoord + old DataNode: no new fields in the report, so the scalar
   heap is used; the extra `task_cpu` / `task_memory` properties are unknown
   keys the old worker simply ignores.
-- Old DataCoord + new DataNode: the properties carry neither key, so
+- Old DataCoord using `CreateTask` + new DataNode: the properties carry neither key, so
   `GetTaskResource` returns the zero resource with no error. `CreateTask` then
   books the share of the node the task's `task_slot` stands for:
   `slot / CalculateNodeSlots()` of the node's capacity. Both totals describe
@@ -417,8 +432,13 @@ Same rules as PR #52561, implemented thinner:
   a missing `task_cpu` never fails the task. A key that is present but
   unparsable is a real error and does fail the `CreateTask` call.
 - The pre-`CreateTask` RPCs (`PreImport`, `ImportV2`, `CompactionV2`,
-  `CreateJob`, `CreateJobV2`) carry no properties at all; a coordinator
-  reaching them books zero for the same reason.
+  `PreImportV3`, `CreateJob`, `CreateJobV2`) carry no properties at all and
+  currently book zero CPU/memory. They do not reach `CreateTask`'s slot-share
+  fallback. Current DataCoord dispatch uses `CreateTask`; accounting for direct
+  legacy-RPC callers is outside this change. A pool serving such callers
+  alongside resource-priced tasks does not account for the legacy tasks in its
+  CPU/memory ledger. The compatibility guarantee above covers keyless
+  `CreateTask` requests, not every historical RPC.
 - Scheduling semantics are those of the slot heap: a task that does not fit
   ends the round (see the `NullNodeID` rule above). What changes is when a
   task fits: on a dimensioned worker that is memory, not only slots.

@@ -930,7 +930,8 @@ func reportedAvailableResource(total, used taskcommon.Resource, systemAvailable 
 }
 
 // systemAvailableMemory is the memory the machine has free right now: the
-// cgroup-aware limit minus this process's resident memory, the same definition
+// cgroup-aware limit minus this process's resident memory excluding shared pages
+// on Linux, or machine-wide used memory on Darwin and Windows, the same definition
 // hardware.GetFreeMemoryCount uses. It is computed here rather than through that
 // helper because the helper subtracts two uint64 readings and wraps to an
 // enormous value when resident memory briefly exceeds the limit; here that
