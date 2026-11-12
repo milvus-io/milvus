@@ -1009,7 +1009,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -1023,6 +1022,9 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
+	// Forward the resolved level: QueryView and the delegator plan the read by
+	// it, so it must match the level the guarantee timestamp was computed from.
+	t.ConsistencyLevel = consistencyLevel
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)

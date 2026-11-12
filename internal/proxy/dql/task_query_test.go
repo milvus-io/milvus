@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -337,6 +338,124 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 			require.Zero(t, task.GetMvccTimestamp())
 			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
 			require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+		})
+	}
+}
+
+// The level forwarded to QueryView decides how the read is planned (Strong
+// and Session wait for pending WAL writes; Bounded and Eventually do not), so
+// it must be the level the guarantee timestamp was computed from, not the raw
+// request field. SDKs that defer to the collection default send a placeholder
+// level with use_default_consistency=true: pymilvus sends 0 (Strong), the Go
+// SDK sends Bounded.
+func TestQueryTaskPreExecuteForwardsResolvedConsistencyLevel(t *testing.T) {
+	const collectionID = int64(100)
+	schedulerTime := time.Unix(1_700_000_000, 0)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
+	graceful := paramtable.Get().CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+	boundedTS := tsoutil.ComposeTSByTime(schedulerTime.Add(-graceful))
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	})
+	info := &collectionInfo{CollID: collectionID, Schema: schema}
+	for _, m := range []*mockey.Mocker{
+		mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil),
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, info, nil),
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil),
+		mockey.Mock((*metacache.MetaCache).GetPartitions).Return(map[string]UniqueID{
+			paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(): 200,
+		}, nil).Build(),
+	} {
+		defer m.UnPatch()
+	}
+
+	for _, tc := range []struct {
+		name             string
+		collectionLevel  commonpb.ConsistencyLevel
+		requestLevel     commonpb.ConsistencyLevel
+		useDefault       bool
+		requestGuarantee uint64
+		wantLevel        commonpb.ConsistencyLevel
+		wantGuarantee    uint64
+	}{
+		{
+			name:            "pymilvus default on bounded collection",
+			collectionLevel: commonpb.ConsistencyLevel_Bounded,
+			requestLevel:    commonpb.ConsistencyLevel_Strong,
+			useDefault:      true,
+			wantLevel:       commonpb.ConsistencyLevel_Bounded,
+			wantGuarantee:   boundedTS,
+		},
+		{
+			name:            "pymilvus default on eventually collection",
+			collectionLevel: commonpb.ConsistencyLevel_Eventually,
+			requestLevel:    commonpb.ConsistencyLevel_Strong,
+			useDefault:      true,
+			wantLevel:       commonpb.ConsistencyLevel_Eventually,
+			wantGuarantee:   1,
+		},
+		{
+			name:            "go sdk default on strong collection",
+			collectionLevel: commonpb.ConsistencyLevel_Strong,
+			requestLevel:    commonpb.ConsistencyLevel_Bounded,
+			useDefault:      true,
+			wantLevel:       commonpb.ConsistencyLevel_Strong,
+			wantGuarantee:   schedulerTS,
+		},
+		{
+			name:            "explicit level overrides collection",
+			collectionLevel: commonpb.ConsistencyLevel_Bounded,
+			requestLevel:    commonpb.ConsistencyLevel_Eventually,
+			wantLevel:       commonpb.ConsistencyLevel_Eventually,
+			wantGuarantee:   1,
+		},
+		{
+			name:             "legacy bounded marker stays strong",
+			collectionLevel:  commonpb.ConsistencyLevel_Bounded,
+			requestLevel:     commonpb.ConsistencyLevel_Strong,
+			requestGuarantee: 2,
+			wantLevel:        commonpb.ConsistencyLevel_Strong,
+			wantGuarantee:    boundedTS,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info.ConsistencyLevel = tc.collectionLevel
+			ctx := context.Background()
+			legacy := &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{}}
+			task := &QueryTask{
+				baseTask:        baseTask{MetaCache: newTestCache()},
+				Condition:       NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}},
+				ctx:             ctx,
+				request: &milvuspb.QueryRequest{
+					Base:                  &commonpb.MsgBase{},
+					DbName:                "default",
+					CollectionName:        "test_collection",
+					Expr:                  "id in [1]",
+					OutputFields:          []string{"id"},
+					ConsistencyLevel:      tc.requestLevel,
+					UseDefaultConsistency: tc.useDefault,
+					GuaranteeTimestamp:    tc.requestGuarantee,
+				},
+				viewQueryClient: &fakeLegacyViewQueryClient{legacy: legacy},
+			}
+			require.NoError(t, task.OnEnqueue())
+			task.SetTs(schedulerTS)
+
+			require.NoError(t, task.PreExecute(ctx))
+			require.Equal(t, tc.wantGuarantee, task.GetGuaranteeTimestamp())
+			require.Equal(t, tc.wantLevel, task.GetConsistencyLevel())
+
+			require.NoError(t, task.Execute(ctx))
+			require.Equal(t, 1, legacy.queryCalled)
+			require.Equal(t, tc.wantLevel, legacy.lastQuery.Req.GetConsistencyLevel())
 		})
 	}
 }
