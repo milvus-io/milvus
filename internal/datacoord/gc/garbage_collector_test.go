@@ -3692,7 +3692,10 @@ func TestGarbageCollectorRemoveDroppedSegmentFilesRejectsForeignLocalRoot(t *tes
 		t.Run(path.Base(otherRoot), func(t *testing.T) {
 			basePath := path.Join(otherRoot, "insert_log/100/10/2001")
 			sentinelPath := path.Join(basePath, "data")
-			require.NoError(t, cli.Write(ctx, sentinelPath, []byte("keep foreign data")))
+			// Foreign data is written by its own root's manager: the GC manager
+			// persists only within its own root.
+			foreign := storage.NewLocalChunkManager(objectstorage.RootPath(otherRoot))
+			require.NoError(t, foreign.Write(ctx, sentinelPath, []byte("keep foreign data")))
 			segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 2001, CollectionID: 100, PartitionID: 10,
 				StorageVersion: storage.StorageV3,

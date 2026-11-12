@@ -548,7 +548,7 @@ TEST_F(StorageTest, RecordBatchSizeHandlesArrowViewTypes) {
 // hitting the insert_record assert (issue #51117).
 TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     std::string test_dir =
-        "/tmp/flush_skip_fn_output_" +
+        TestRemotePath + "flush_skip_fn_output_" +
         std::to_string(
             std::chrono::system_clock::now().time_since_epoch().count());
     std::filesystem::create_directories(test_dir);
@@ -646,7 +646,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
 // flush must skip it instead of erroring or asserting.
 TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
     std::string test_dir =
-        "/tmp/flush_skip_dropped_field_" +
+        TestRemotePath + "flush_skip_dropped_field_" +
         std::to_string(
             std::chrono::system_clock::now().time_since_epoch().count());
     std::filesystem::create_directories(test_dir);
@@ -731,7 +731,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
 // skip it instead of tripping the empty-chunk assert.
 TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
     std::string test_dir =
-        "/tmp/flush_skip_empty_fn_output_" +
+        TestRemotePath + "flush_skip_empty_fn_output_" +
         std::to_string(
             std::chrono::system_clock::now().time_since_epoch().count());
     std::filesystem::create_directories(test_dir);
@@ -816,7 +816,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
 // load with milvus-storage "No needed columns found in column group".
 TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
     std::string test_dir =
-        "/tmp/load_skip_dropped_group_" +
+        TestRemotePath + "load_skip_dropped_group_" +
         std::to_string(
             std::chrono::system_clock::now().time_since_epoch().count());
     std::filesystem::create_directories(test_dir);

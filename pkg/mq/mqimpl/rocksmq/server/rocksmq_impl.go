@@ -746,6 +746,8 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	opts := gorocksdb.NewDefaultWriteOptions()
 	defer opts.Destroy()
+	// Persist messages to the WAL before acknowledging the produce.
+	opts.SetSync(true)
 	err = rmq.store.Write(opts, batch)
 	if err != nil {
 		return []UniqueID{}, err

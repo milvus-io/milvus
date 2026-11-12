@@ -64,7 +64,9 @@ class TextPublicationFixture {
         param->set_value(index::INVERTED_INDEX_TYPE);
         info.mutable_storage_config()->set_storage_type("local");
         info.mutable_storage_config()->set_root_path(root->Path() + "/remote");
-        const auto source = root->Path() + "/insert/1";
+        // The source binlog is remote data; the durable local chunk manager
+        // persists only within its storage root.
+        const auto source = root->Path() + "/remote/insert/1";
         info.add_insert_files(source);
         auto prepared = indexbuilder::AdaptBuildIndexInfo(
             info, indexbuilder::BuildPurpose::TextIndex);

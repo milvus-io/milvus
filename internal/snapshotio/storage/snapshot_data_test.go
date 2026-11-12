@@ -2317,8 +2317,11 @@ func TestValidateExternalSnapshotPaths_ValidatesURIIdentityBeforeNormalization(t
 }
 
 func TestSnapshotWriter_SaveAllowsEmptyRoot(t *testing.T) {
-	t.Chdir(t.TempDir())
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	// Relative object keys resolve against the working directory, so it is the
+	// manager's root; a durable local manager persists only within its root.
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(dir))
 	snapshotData := createTestSnapshotData()
 
 	metadataPath, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(
