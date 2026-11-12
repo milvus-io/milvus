@@ -61,10 +61,10 @@ const (
 	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
 	// default for the Storage V3 async read-window threshold.
 	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
-	DefaultGracefulTime                          = 5000 // ms
-	DefaultGracefulStopTimeout                   = 1800 // s, for node
-	DefaultProxyGracefulStopTimeout              = 30   // s，for proxy
-	DefaultCoordGracefulStopTimeout              = 5    // s，for coord
+	DefaultGracefulTime                          = 60000 // ms
+	DefaultGracefulStopTimeout                   = 1800  // s, for node
+	DefaultProxyGracefulStopTimeout              = 30    // s，for proxy
+	DefaultCoordGracefulStopTimeout              = 5     // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient     = 10
 	DefaultMiddlePriorityThreadCoreCoefficient   = 5
 	DefaultLowPriorityThreadCoreCoefficient      = 1
