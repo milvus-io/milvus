@@ -1218,6 +1218,7 @@ type requeryOperator struct {
 	dbName             string
 	collectionName     string
 	collectionID       int64
+	schemaVersion      int32
 	notReturnAllMeta   bool
 	partitionNames     []string
 	partitionIDs       []int64
@@ -1278,6 +1279,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		dbName:             dbName,
 		collectionName:     collectionName,
 		collectionID:       t.GetCollectionID(),
+		schemaVersion:      t.schema.GetVersion(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
 		queryChannelsNode:  queryChannelsNode,
@@ -1341,6 +1343,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes[k] = v
 	}
 	qt := &QueryTask{
+		requerySchemaVersion: &op.schemaVersion,
 		baseTask: baseTask{
 			MetaCache: op.node.GetMetaCache(),
 		},
