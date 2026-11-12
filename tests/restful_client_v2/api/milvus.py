@@ -982,9 +982,8 @@ class ImportJobClient(Requests):
         return response.json()
 
     def wait_import_job_state(self, job_id, expected_state, timeout=120, db_name="default", interval=2):
-        t0 = time.time()
-        last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
-        while time.time() - t0 < timeout:
+        deadline = time.monotonic() + timeout
+        while True:
             last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
             if last_rsp.get("code") == 0:
                 state = last_rsp.get("data", {}).get("state")
@@ -992,8 +991,11 @@ class ImportJobClient(Requests):
                     return last_rsp, True
                 if state in ("Completed", "Failed"):
                     return last_rsp, False
-            time.sleep(interval)
-        return last_rsp, False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return last_rsp, False
+            # Poll once at the deadline instead of returning a stale pre-sleep response.
+            time.sleep(min(interval, remaining))
 
     def wait_import_job_completed(self, job_id):
         finished = False
