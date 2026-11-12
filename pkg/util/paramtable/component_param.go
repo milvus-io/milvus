@@ -444,6 +444,7 @@ type commonConfig struct {
 	StorageIopsInitialRate              ParamItem `refreshable:"false"`
 	StorageIopsMaxRate                  ParamItem `refreshable:"false"`
 	StorageTalonMode                    ParamItem `refreshable:"false"`
+	StorageTalonEnabledStages           ParamItem `refreshable:"false"`
 	StorageTalonEnableForExternalTable  ParamItem `refreshable:"false"`
 	StorageTalonSmallReadThreshold      ParamItem `refreshable:"false"`
 	StorageTalonCoordinator             ParamItem `refreshable:"false"`
@@ -1601,7 +1602,7 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Key:          "common.storage.talon.mode",
 		Version:      "3.0.1",
 		DefaultValue: "0",
-		Doc:          "Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.",
+		Doc:          "Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseUint(value, 10, 32)
 			if err != nil || parsed > 2 {
@@ -1612,6 +1613,22 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Export: true,
 	}
 	p.StorageTalonMode.Init(base.mgr)
+
+	p.StorageTalonEnabledStages = ParamItem{
+		Key:          "common.storage.talon.enabledStages",
+		Version:      "3.0.1",
+		DefaultValue: "all",
+		Doc:          "Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.",
+		Formatter: func(value string) string {
+			mask, ok := common.ParseTalonEnabledStages(value)
+			if !ok {
+				panic(fmt.Sprintf("invalid common.storage.talon.enabledStages: %q", value))
+			}
+			return strconv.FormatUint(uint64(mask), 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonEnabledStages.Init(base.mgr)
 
 	p.StorageTalonEnableForExternalTable = ParamItem{
 		Key:          "common.storage.talon.enableForExternalTable",

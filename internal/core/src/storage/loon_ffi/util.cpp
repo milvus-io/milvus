@@ -325,19 +325,27 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     const bool is_local =
         c_storage_config.storage_type != nullptr &&
         std::string_view(c_storage_config.storage_type) == "local";
+    // Default properties serve arbitrary operations. Only unrestricted policy
+    // enables their FS; load readers select their own mode and file policy later.
+    const uint32_t data_mode = (c_storage_config.talon_enabled_stages == 0 ||
+                                c_storage_config.talon_enabled_stages ==
+                                    milvus::storage::kTalonStagesAll)
+                                   ? c_storage_config.talon_mode
+                                   : 0;
     const std::pair<const char*, uint32_t> talon_values[] = {
-        {PROPERTY_FS_TALON_MODE, c_storage_config.talon_mode},
+        {PROPERTY_FS_TALON_MODE, data_mode},
         {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
          c_storage_config.talon_small_read_threshold},
         {PROPERTY_FS_TALON_BLOCK_SIZE, c_storage_config.talon_block_size},
         {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR,
          c_storage_config.talon_max_idle_per_addr}};
+    // Ordinary callers retain unrestricted file behavior; a QN load copy may
+    // select the immutable open-only filesystem policy below.
+    (*properties_map)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
     // Keep the External Table policy alongside ordinary filesystem properties.
-    // This Milvus-only key is consumed below; storage ignores unknown properties.
-    (*properties_map)["milvus.talon.external_mode"] =
-        std::to_string(c_storage_config.talon_enable_for_external_table
-                           ? c_storage_config.talon_mode
-                           : 0);
+    // This Milvus-only key is consumed below, including for local primary storage.
+    (*properties_map)["milvus.talon.external_mode"] = std::to_string(
+        c_storage_config.talon_enable_for_external_table ? data_mode : 0);
     for (const auto& [key, value] : talon_values) {
         const bool is_mode = std::string_view(key) == PROPERTY_FS_TALON_MODE;
         if (!is_mode && value == 0) {
@@ -991,6 +999,7 @@ InjectExternalSpecProperties(
         PropertyValueAsString(
             properties, (extfs_prefix + "storage_type").c_str()) == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
+                            PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
                             PROPERTY_FS_TALON_COORDINATOR,
                             PROPERTY_FS_TALON_BLOCK_SIZE,
@@ -1012,7 +1021,6 @@ InjectExternalSpecProperties(
             properties[extfs_key] = *value;
         }
     }
-
     // Format-layer: emit per-format properties derived from spec.format.
     // Iceberg and Paimon use reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
@@ -1148,7 +1156,9 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_coordinator.c_str(),
                           config.talon_block_size,
                           config.talon_max_idle_per_addr,
-                          config.talon_enable_for_external_table};
+                          config.talon_enable_for_external_table,
+                          0,  // CRT queue tuning is node-local.
+                          config.talon_enabled_stages};
 }
 
 std::optional<LoonManifestPath>

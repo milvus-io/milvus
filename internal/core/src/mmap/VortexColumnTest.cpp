@@ -39,6 +39,7 @@
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/SparseVortexFileSystem.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/format/vortex/vortex_types.h"
 #include "milvus-storage/properties.h"

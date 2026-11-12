@@ -216,6 +216,7 @@ milvus_storage	internal/core/src/storage/LegacyIndexFileIO.h
 milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/loon_error_code.h
 milvus_storage	internal/core/src/storage/loon_ffi/milvus_table_c.cpp
+milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.h
 milvus_storage	internal/core/src/storage/loon_ffi/util.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/util.h

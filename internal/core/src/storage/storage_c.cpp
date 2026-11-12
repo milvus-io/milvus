@@ -38,6 +38,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "milvus-storage/thread_pool.h"
 
 CStatus
@@ -106,6 +107,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         storage_config.use_crc32c_checksum =
             c_storage_config.use_crc32c_checksum;
         storage_config.talon_mode = c_storage_config.talon_mode;
+        storage_config.talon_enabled_stages =
+            c_storage_config.talon_enabled_stages;
         storage_config.talon_small_read_threshold =
             c_storage_config.talon_small_read_threshold;
         storage_config.talon_coordinator =
