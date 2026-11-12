@@ -25,11 +25,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ChildStream is the portion of a ReduceStream needed to receive and close
-// child streams. Close must unblock an active Recv so shutdown can join it.
-type ChildStream[T any] interface {
+// ReduceStream is the shared contract for reducers, transport-backed children
+// and wrappers. T is the operation's result type. Recv calls must be serial;
+// Close may run concurrently and must unblock Recv so shutdown can join it.
+type ReduceStream[T any] interface {
 	Recv() (T, error)
 	Close() error
+	Interrupt() (T, error)
 }
 
 type childRecvCompletion[T any] struct {
@@ -42,7 +44,7 @@ type childRecvCompletion[T any] struct {
 // called serially by the owning ReduceStream, except Cancel, which may run
 // concurrently to wake a pending receive wait.
 type ChildStreams[T any] struct {
-	streams     []ChildStream[T]            // Child streams owned by this manager.
+	streams     []ReduceStream[T]           // Child streams owned by this manager.
 	receiving   []bool                      // Whether each child has a Recv in progress.
 	drained     []bool                      // Whether each child has returned EOF.
 	completions chan childRecvCompletion[T] // Delivers asynchronous Recv results to the owner.
@@ -55,8 +57,8 @@ type ChildStreams[T any] struct {
 }
 
 // NewChildStreams creates the shared child receive state for one ReduceStream.
-func NewChildStreams[T any, S ChildStream[T]](streams []S) *ChildStreams[T] {
-	children := make([]ChildStream[T], len(streams))
+func NewChildStreams[T any, S ReduceStream[T]](streams []S) *ChildStreams[T] {
+	children := make([]ReduceStream[T], len(streams))
 	for i := range streams {
 		children[i] = streams[i]
 	}
@@ -94,7 +96,7 @@ func (s *ChildStreams[T]) ReceiveUntilReady(
 
 			s.receiving[i] = true
 			s.pending.Add(1)
-			go func(childIndex int, childStream ChildStream[T]) {
+			go func(childIndex int, childStream ReduceStream[T]) {
 				defer s.pending.Done()
 				chunk, err := childStream.Recv()
 				s.completions <- childRecvCompletion[T]{
@@ -156,7 +158,7 @@ func (s *ChildStreams[T]) ReceiveAnyReady(
 
 			s.receiving[i] = true
 			s.pending.Add(1)
-			go func(childIndex int, childStream ChildStream[T]) {
+			go func(childIndex int, childStream ReduceStream[T]) {
 				defer s.pending.Done()
 				chunk, err := childStream.Recv()
 				s.completions <- childRecvCompletion[T]{

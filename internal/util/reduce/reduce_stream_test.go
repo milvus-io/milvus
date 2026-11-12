@@ -44,6 +44,10 @@ func (s *cancelableChildStream) Close() error {
 	return nil
 }
 
+func (*cancelableChildStream) Interrupt() (int, error) {
+	panic("child receive scheduling must not call Interrupt")
+}
+
 func TestChildStreamsCancelAndClose(t *testing.T) {
 	for _, mode := range []string{"all", "any"} {
 		t.Run(mode, func(t *testing.T) {
@@ -53,7 +57,7 @@ func TestChildStreamsCancelAndClose(t *testing.T) {
 				started: make(chan struct{}), canceled: make(chan struct{}),
 				release: releaseContext.Done(),
 			}
-			streams := NewChildStreams[int]([]ChildStream[int]{child})
+			streams := NewChildStreams[int]([]ReduceStream[int]{child})
 			receive := streams.ReceiveUntilReady
 			if mode == "any" {
 				receive = streams.ReceiveAnyReady

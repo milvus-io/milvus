@@ -61,13 +61,13 @@ Unit fields, excluding result metadata and transport framing; it is not exact
 message size or heap usage. Append a complete Unit before checking `B`: 80 + 30
 bytes with `B=100` emits 110 bytes. A Unit larger than `B` is emitted alone,
 flushing existing output first. gRPC message limits remain independent.
-See [Search sizing](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L224) and
-[Query splitting](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L726).
+See [Search sizing](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L224) and
+[Query splitting](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L726).
 
 ### Reduction and Lifecycle
 
 `NewReduceStream()` selects the policy; `Recv()` returns one Chunk, EOF, or error.
-The [shared receiver](../../../internal/util/reduce/child_streams.go#L78) permits
+The [shared receiver](../../../internal/util/reduce/reduce_stream.go#L78) permits
 one outstanding receive per child and fills empty child Buffers concurrently.
 
 | Policy | Input readiness and reduction |
@@ -188,14 +188,19 @@ See [worker handlers](../../../internal/views/viewquery/server.go#L130) and
 
 ### 2. APIs and Ownership
 
-Search and Query expose parallel typed interfaces, not one interface that mixes
-the two protobuf types. A transport-backed child implements the same contract as
-an in-process reducer. The signatures below retain the existing API names;
-`result` stands for the corresponding protobuf, not a new wrapper type.
+Search and Query share one generic `reduce.ReduceStream[T]` interface. Their
+package-level `ReduceStream` names are aliases specialized for the corresponding
+protobuf result type, preserving compile-time type checking and existing callers.
+Transport-backed children, in-process reducers and stream wrappers implement the
+same contract. `ChildStreams` is a receive scheduler, not another stream type.
 
-Stream implementations and their unit tests live in
+Operation-specific reduction implementations and their unit tests live in
 `internal/util/queryutil/reduce_stream` and
 `internal/util/searchutil/reduce_stream`, both named `reducestream`.
+Their main implementation files are `query_reduce_stream.go` and
+`search_reduce_stream.go`. The shared contract and child scheduling live in
+`internal/util/reduce/reduce_stream.go`; `grpc_reduce_stream.go` in the same
+package owns the shared transport lifecycle with typed Query and Search constructors.
 Callers use the aliases `queryreducestream` and `searchreducestream` below.
 Query streaming imports shared Query helpers from `queryutil`; Batch operators
 remain in that parent package, which does not import the stream subpackage.
@@ -204,12 +209,16 @@ reference alias, preserving the existing private helpers and Batch callers.
 Common receive scheduling and byte sizing remain in `internal/util/reduce`.
 
 ```text
-searchreducestream.ReduceStream: result = *internalpb.SearchResults
-queryreducestream.ReduceStream:  result = *internalpb.RetrieveResults
+reduce.ReduceStream[T]:
+    Recv()      -> (T, error)
+    Close()     -> error
+    Interrupt() -> (T, error)     // currently returns an unimplemented error
 
-Recv()      -> (result, error)
-Close()     -> error
-Interrupt() -> (result, error)     // currently returns an unimplemented error
+searchreducestream.ReduceStream = reduce.ReduceStream[*internalpb.SearchResults]
+queryreducestream.ReduceStream  = reduce.ReduceStream[*internalpb.RetrieveResults]
+
+reduce.NewSearchGRPCReduceStream(ctx, client, request)
+reduce.NewQueryGRPCReduceStream(ctx, client, request)
 
 searchreducestream.NewReduceStream(request, childStreams, chunkBytes)
 searchreducestream.NewShardReduceStream(request, childStreams, chunkBytes)
@@ -222,8 +231,8 @@ factory composes vchannel streams. Query chooses `UnOrderedReduceStream` when
 grouping or aggregation is requested; other eligible Query requests use `OrderedReduceStream`.
 Eligible Search candidate reduction uses `OrderedReduceStream`, including Search
 Group By. Hybrid is decomposed before the factory, not merged as one ANN request.
-Sources: [Search factories](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L369),
-[Query factories](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L224).
+Sources: [Search factories](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L369),
+[Query factories](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L224).
 
 | Owner | Owned objects and responsibility |
 | --- | --- |
@@ -238,9 +247,10 @@ Sources: [Search factories](../../../internal/util/searchutil/reduce_stream/redu
 to interrupt a blocked receive. Buffer mutation is serialized by the reducer's
 `recvMu`; receive goroutines publish completions rather than mutating Buffers.
 There is no additional generic `reduceState` object. Sources:
-[Search contract](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L40),
-[Query contract](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L45),
-[child receive state](../../../internal/util/reduce/child_streams.go#L26).
+[shared contract](../../../internal/util/reduce/reduce_stream.go#L31),
+[Search contract](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L38),
+[Query contract](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L45),
+[child receive state](../../../internal/util/reduce/reduce_stream.go#L46).
 
 ### 3. Unit and Byte Contracts
 
@@ -288,8 +298,8 @@ Calculations use existing field data directly, without constructing a temporary
 one-row result. Nullable-field mappings are reused per input Chunk; variable
 lengths and varint widths are counted where required. The shared implementation
 is in [row sizing](../../../internal/util/reduce/field_data_size.go), with callers in
-[Search](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L72) and
-[Query](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L111).
+[Search](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L72) and
+[Query](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L111).
 
 For threshold `B`, all three policies preserve complete Units:
 
@@ -395,7 +405,7 @@ receives back to the owning reducer. Its capacity is at least the number of
 children, and at most one receive per child is outstanding. The reducer accepts
 and validates a completion before using the data. Ordered metadata-only Chunks
 are accepted without satisfying the need for a row head, so receiving continues.
-Source: [child scheduling](../../../internal/util/reduce/child_streams.go#L37).
+Source: [child scheduling](../../../internal/util/reduce/reduce_stream.go#L37).
 
 The older design's `B + y` prefetch Buffer is not implemented. Current ordered
 receiving refills empty Buffers; there is no configurable low-watermark `y`, nor
@@ -451,14 +461,14 @@ provides `PK=7, timestamp=10` at the end of one Chunk, while another input Chunk
 contains `PK=7, timestamp=20`. The shard reducer continues resolving that PK
 before emitting it. A replacement can change both row bytes and element indexes;
 if it becomes oversized, it is retained and emitted alone on the next call.
-Source: [Query Recv](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L286).
+Source: [Query Recv](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L286).
 
 For `element_filter`, one Unit is still one document row with all matched indexes.
 The requested page length counts elements, not document rows. Proxy assembles
 complete Units, then the existing pagination logic trims the element-index list.
 Nullable scalar/vector validity and element-level flags must survive splitting,
 merging and output assembly. Sources:
-[element validation](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L174),
+[element validation](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L174),
 [Proxy consumption](../../../internal/proxy/dql/task_query.go#L1386).
 
 QueryScan uses the same PK-ordered reduction. Computed columns stay in
@@ -479,7 +489,7 @@ add a separate correctness boundary: when `ShouldStopWhenDrained(reduceType)` is
 true and a drained child reported `HasMoreResult`, the reducer ends this page
 rather than skipping that child's unseen later rows. `HasMoreResult` describes
 rows outside the child's current result, not whether another Chunk is in flight.
-See [getReadyBuffers](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L407).
+See [getReadyBuffers](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L407).
 
 Plain Query ORDER BY cannot emit worker heads immediately. Sorting by another
 column can separate old and new versions of one PK, invalidating rows already
@@ -560,8 +570,8 @@ score convention; Proxy restores metric direction in the final response. The
 shard reducer deduplicates by PK, or `(PK, element_index)` for element results.
 After consuming a duplicate or rejected group candidate, it returns to receiving
 before choosing another head, so an emptied child cannot be ignored.
-Sources: [Recv](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L428),
-[selection](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L622),
+Sources: [Recv](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L428),
+[selection](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L622),
 [response assembly](../../../internal/proxy/dql/task_search.go#L1763).
 
 #### Per-vector skipping versus request completion
@@ -576,7 +586,7 @@ its byte threshold is not reached. Proxy decides not to call `Recv()` again and
 closes the tree. Calling `Recv()` again does not turn that window boundary into
 automatic EOF. Earlier vectors may legitimately have fewer hits; Proxy's final
 vector/window check relies on query-major delivery. Sources:
-[skip/yield logic](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L622),
+[skip/yield logic](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L622),
 [Proxy stop condition](../../../internal/proxy/dql/task_search.go#L1887).
 
 #### Search variants
@@ -600,7 +610,7 @@ matches Batch intermediate pruning; it is not exhaustive global group selection.
 Search aggregation uses the existing hierarchy-derived candidate window and
 group fields. It is not the Query Group By map over all matching rows, and it
 does not compute aggregates over candidates never returned by workers. Sources:
-[group selection](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L685),
+[group selection](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L685),
 [candidate assembly](../../../internal/proxy/dql/task_search.go#L1887),
 [Proxy aggregation](../../../internal/proxy/dql/search_pipeline.go#L668).
 
@@ -656,7 +666,7 @@ Every accepted Buffer's grouped rows are consumed, not just one key/value pair.
 aggregate Buffer; the stream separately combines metadata. The current
 implementation materializes grouped output and its Chunk list after draining,
 so the grouped path is not bounded by one outgoing Chunk in memory.
-Sources: [group Recv](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L553),
+Sources: [group Recv](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L553),
 [GroupAggBuffer](../../../internal/agg/aggregate_reducer.go#L338).
 
 ```text
@@ -738,7 +748,7 @@ currently execute `SearchOnView`/`queryOnView`, split the complete result, then
 send each response Chunk. Sources:
 [shard construction](../../../internal/views/queryclient/shard_client.go#L124),
 [worker handlers](../../../internal/views/viewquery/server.go#L130),
-[gRPC adapter](../../../internal/util/searchutil/reduce_stream/grpc_stream.go#L42).
+[gRPC adapter](../../../internal/util/reduce/grpc_reduce_stream.go#L98).
 
 Hybrid shares one optimized QueryPlan per vchannel and opens a separate stream
 for each non-skipped sub-search on each selected worker. Each sub-search retains
@@ -774,8 +784,8 @@ costs, scanned bytes, feature flags and MVCC information. Each field keeps its
 existing aggregation rule; there is no new generic sum-every-field operation.
 Query `HasMoreResult` is retained after a child's Buffer empties. EOF terminates
 the current stream result, not necessarily the entire logical SDK iterator.
-Sources: [Search metadata](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L552),
-[Query metadata](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L453).
+Sources: [Search metadata](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L552),
+[Query metadata](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L453).
 
 #### Close and cancellation
 
@@ -802,10 +812,10 @@ Close():
 The transport adapter closes its send side and cancels that RPC's context. It
 does not close the shared `grpc.ClientConn`. Natural reducer completion also
 closes its children. Sources:
-[scheduler cleanup](../../../internal/util/reduce/child_streams.go#L196),
-[Search Close](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L925),
-[Query Close](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L815),
-[RPC Close](../../../internal/util/searchutil/reduce_stream/grpc_stream.go#L98).
+[scheduler cleanup](../../../internal/util/reduce/reduce_stream.go#L196),
+[Search Close](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L925),
+[Query Close](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L815),
+[RPC Close](../../../internal/util/reduce/grpc_reduce_stream.go#L163).
 
 #### Retry ownership
 
@@ -853,7 +863,7 @@ their terminal metadata, combine it and release resources. That remains deferred
 it needs handling for in-flight Chunks, errors, cancellation and metadata completion
 before it can replace `Close()`. Bidirectionality alone does not implement it.
 Sources: [reserved messages](../../../pkg/proto/view.proto#L450),
-[adapter behavior](../../../internal/util/queryutil/reduce_stream/grpc_stream.go#L70).
+[adapter behavior](../../../internal/util/reduce/grpc_reduce_stream.go#L146).
 
 ### 10. Configuration and Supported Paths
 
@@ -962,8 +972,8 @@ Smaller Chunks change receive frequency and transport overhead; they do not alon
 cap transport run-ahead. No application credit coordination, static-window tuning
 control or low-watermark prefetch is introduced by this feature. Sources:
 [worker materialization](../../../internal/views/viewquery/server.go#L155),
-[output references](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L46),
-[group output](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L553).
+[output references](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L46),
+[group output](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L553).
 
 ### 12. Validation and Deferred Work
 
@@ -983,9 +993,9 @@ control or low-watermark prefetch is introduced by this feature. Sources:
 | Performance | Same request/data/topology with Batch and Streaming; record fan-in, bytes, Chunk threshold, concurrency, QPS, latency and clearly defined retained/process memory. |
 
 Existing test entry points include the
-[Search reducer suite](../../../internal/util/searchutil/reduce_stream/reduce_stream_test.go),
-[Query reducer suite](../../../internal/util/queryutil/reduce_stream/reduce_stream_test.go),
-[receiver suite](../../../internal/util/reduce/child_streams_test.go),
+[Search reducer suite](../../../internal/util/searchutil/reduce_stream/search_reduce_stream_test.go),
+[Query reducer suite](../../../internal/util/queryutil/reduce_stream/query_reduce_stream_test.go),
+[receiver suite](../../../internal/util/reduce/reduce_stream_test.go),
 [QueryView parity suite](../../../internal/views/queryclient/client_legacy_test.go),
 [Proxy retry suite](../../../internal/proxy/dql/task_query_view_legacy_test.go), and
 [configuration suite](../../../internal/proxy/dql/streaming_config_test.go).

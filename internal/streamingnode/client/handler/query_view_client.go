@@ -7,6 +7,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -83,7 +84,7 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, pchannel types.PCh
 
 func (qvc *queryViewClient) SearchOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.SearchOnViewStream", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (searchreducestream.ReduceStream, error) {
-		return searchreducestream.NewGRPCReduceStream(ctx, client, req)
+		return reduce.NewSearchGRPCReduceStream(ctx, client, req)
 	})
 	return result, err
 }
@@ -97,7 +98,7 @@ func (qvc *queryViewClient) QueryOnView(ctx context.Context, pchannel types.PCha
 
 func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.QueryOnViewStream", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryreducestream.ReduceStream, error) {
-		return queryreducestream.NewGRPCReduceStream(ctx, client, req)
+		return reduce.NewQueryGRPCReduceStream(ctx, client, req)
 	})
 	return result, err
 }
