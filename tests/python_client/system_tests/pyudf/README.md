@@ -87,6 +87,15 @@ not require this option. A snapshot reads PID, started, completed, active and pe
 counts atomically; restarts and missing/decreasing counters fail the gate. This
 does not establish multi-worker aggregate accounting or a latency acceptance SLA.
 
+Batch summaries separate semantic correctness from achieved load. `target_qps`
+is the configured five requests per second; `submitted_requests` and
+`skipped_slots` reconcile against the 150 slots in the 30-second submission
+window. `offered_qps` divides actual submissions by that window, while
+`completed_qps` divides validated completions by elapsed time through the final
+completion, including drain. No requests are submitted after the window closes.
+`semantic_outcome=PASS` does not imply `load_outcome=TARGET_MET`; skipped slots
+produce `load_outcome=UNDER_TARGET` even when every submitted request is correct.
+
 For a shorter runner smoke, set `duration`, `drain`, `replay` in the JSON file.
 Bounds are `0 < duration <= 7200`, `0 <= drain <= 300`, `0 < replay <= 600`
 seconds. Shortened runs do not establish full soak validation. The workload uses

@@ -355,10 +355,11 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None)
             # Retain one baseline per tuple. The two input-layout windows share it.
             queries = checker.queries[:100]
             candidates = []
-            for query in queries:
+            for query_index, query in enumerate(queries):
                 check_stop_file(stop_file)
-                ids = checker.verify_fields(checker.search(checker.client, query, limit=candidate_count))
-                assert len(ids) == candidate_count, f"Expected {candidate_count} baseline candidates, got {len(ids)}"
+                ids = checker.verify_control(
+                    checker.search(checker.client, query, limit=candidate_count), query_index, candidate_count
+                )
                 candidates.append(ids)
             (checker.evidence / f"batch-candidates-{candidate_count}.json").write_text(json.dumps(candidates))
             for nq in (1, 8):
@@ -405,36 +406,63 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None)
                     wire_before = [counter.snapshot() for counter in wire]
                     started = time.monotonic()
                     wall = time.time()
+                    target_qps, submission_window = 5, 30
+                    scheduled_slots = target_qps * submission_window
+                    submit_until = started + submission_window
+                    submitted, skipped = 0, 0
                     results, pending = [], []
                     with ThreadPoolExecutor(max_workers=8) as pool:
                         sequence = 0
-                        while time.monotonic() - started < 30:
+                        while sequence < scheduled_slots:
                             check_stop_file(stop_file)
-                            due = started + sequence / 5
-                            if due >= started + 30:
+                            if time.monotonic() >= submit_until:
+                                skipped += scheduled_slots - sequence
                                 break
+                            due = started + sequence / target_qps
                             time.sleep(max(0, due - time.monotonic()))
                             check_stop_file(stop_file)
                             if len(pending) >= 8:
                                 results.append(pending.pop(0).result(timeout=35))
+                            # Backpressure may have consumed the remaining submission window.
+                            if time.monotonic() >= submit_until:
+                                skipped += scheduled_slots - sequence
+                                break
                             pending.append(pool.submit(invoke, sequence))
+                            submitted += 1
                             sequence += 1
-                            while started + sequence / 5 < time.monotonic():
+                            while sequence < scheduled_slots and started + sequence / target_qps < time.monotonic():
+                                skipped += 1
                                 sequence += 1
+                        # Keep adjacent windows disjoint even when the last request finishes early.
+                        time.sleep(max(0, submit_until - time.monotonic()))
                         results.extend(future.result(timeout=35) for future in pending)
                     check_stop_file(stop_file)
+                    elapsed = time.monotonic() - started
+                    assert results, "No batch requests completed"
+                    assert submitted == len(results) and submitted + skipped == scheduled_slots
                     summary = {
                         "event": "batch_window",
                         "nq": nq,
                         "candidates": candidate_count,
                         "input_layout": mode,
                         "started_unix": wall,
-                        "elapsed": time.monotonic() - started,
+                        "elapsed": elapsed,
                         "requests": len(results),
                         "query_results": len(results) * nq,
-                        "offered_qps": 5,
+                        "target_qps": target_qps,
+                        "scheduled_slots": scheduled_slots,
+                        "submitted_requests": submitted,
+                        "skipped_slots": skipped,
+                        # Offered rate covers [started_unix, submission_ended_unix).
+                        # Completion rate covers start through the final validated result, including drain.
+                        "submission_window_seconds": submission_window,
+                        "submission_ended_unix": wall + submission_window,
+                        "offered_qps": submitted / submission_window,
+                        "completed_qps": len(results) / elapsed,
                         "latency_ms_p50_p95_p99": np.percentile(results, [50, 95, 99]).tolist(),
                         "outcome": "PASS",
+                        "semantic_outcome": "PASS",
+                        "load_outcome": "TARGET_MET" if skipped == 0 else "UNDER_TARGET",
                         "wire": wire_delta(wire, wire_before),
                         "component_timings": "Not captured; no inferred encode/execute/decode spans",
                     }
