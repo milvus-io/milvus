@@ -776,7 +776,6 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         expected_scores,
         expected_nq=None,
         expected_limit=None,
-        score_sign=1.0,
         expected_ids=None,
         expected_rows=None,
     ):
@@ -800,15 +799,12 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             for hit in hits:
                 assert hit["id"] in expected_by_id
                 assert hit["distance"] == pytest.approx(
-                    score_sign * expected_by_id[hit["id"]],
+                    expected_by_id[hit["id"]],
                     rel=1e-5,
                     abs=1e-5,
                 )
             actual_scores = [hit["distance"] for hit in hits]
-            if score_sign > 0:
-                assert all(left >= right - 1e-5 for left, right in zip(actual_scores, actual_scores[1:]))
-            else:
-                assert all(left <= right + 1e-5 for left, right in zip(actual_scores, actual_scores[1:]))
+            assert all(left >= right - 1e-5 for left, right in zip(actual_scores, actual_scores[1:]))
 
     @classmethod
     def _regression_dataset(cls, feature_seed, embedding_seed, query_seed, row_count=None):
@@ -1003,11 +999,10 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                 query_vectors=query_vectors,
                 index_type=index_type,
             )
-            score_sign = -1.0 if self.index_configs[index_type]["metric_type"] == "L2" else 1.0
+            # A FunctionChain score write replaces the metric distance, including L2.
             self._assert_scores_match(
                 result_sets,
                 expected_scores,
-                score_sign=score_sign,
             )
 
             swapped_feature_names = self.feature_names.copy()
@@ -1033,7 +1028,6 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             self._assert_scores_match(
                 swapped_result_sets,
                 swapped_expected,
-                score_sign=score_sign,
             )
         finally:
             try:
