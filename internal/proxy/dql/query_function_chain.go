@@ -35,8 +35,8 @@ func (t *QueryTask) prepareQueryFunctionChains() error {
 	}
 	query := t.plan.GetQuery()
 	if query.GetIsCount() || len(query.GetAggregates()) > 0 || len(query.GetGroupByFieldIds()) > 0 ||
-		len(query.GetOrderByFields()) > 0 || t.queryParams.isIterator {
-		return merr.WrapErrParameterInvalidMsg("Query chains do not support count, aggregation, group-by, order-by or iterator")
+		len(query.GetOrderByFields()) > 0 || t.queryParams.isIterator || t.queryParams.calcDistance != nil {
+		return merr.WrapErrParameterInvalidMsg("Query chains do not support count, aggregation, group-by, order-by, iterator or calc_distance")
 	}
 	chains := t.request.GetFunctionChains()
 	seen := make(map[schemapb.FunctionChainStage]struct{}, len(chains))
