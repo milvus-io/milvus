@@ -29,3 +29,7 @@ const (
 const (
 	invalidIndex = "invalid"
 )
+
+// InvalidIndexType is what GetIndexType answers for params that carry no
+// index_type, e.g. an index whose params have not been read back yet.
+const InvalidIndexType = invalidIndex

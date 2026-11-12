@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -32,6 +34,10 @@ import (
 )
 
 const NullNodeID = -1
+
+// blockedRoundLogInterval bounds how often a round that ends at a task that
+// does not fit is logged: it repeats every round for as long as the task waits.
+const blockedRoundLogInterval = 30 * time.Second
 
 type GlobalScheduler interface {
 	Enqueue(task Task)
@@ -250,7 +256,14 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
+//
+// The method is kept for its callers and tests; the placement itself lives in
+// pickNodeFromHeap so nodePicker can share it as its fallback tier.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return pickNodeFromHeap(slotHeap, taskSlot)
+}
+
+func pickNodeFromHeap(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
@@ -285,9 +298,9 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
-	// Build the node-slot max-heap once per round and reuse it across all picks,
-	// so each task is placed on the currently least-loaded node.
-	slotHeap := newNodeSlotHeap(nodeSlots)
+	// Build the picker once per round and reuse it across all picks, so each
+	// task is placed on the currently least-loaded node.
+	picker := newNodePicker(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -315,8 +328,36 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		// Price once per round and reuse: the placement decision and the log
+		// below must agree, and a family that walks meta on a cache miss would
+		// otherwise pay for the walk twice.
+		//
+		// A family that cannot resolve its inputs yet answers with an upper
+		// bound, not the floor, so the task is always placeable. Waiting for an
+		// exact price instead would strand any task whose inputs are gone for
+		// good: such a task can never resolve, and CreateTaskOnWorker -- the only
+		// code that retires it -- sits behind this point.
+		resource, _ := task.GetTaskResource()
+		// A task the worker bounds to a share of its memory is charged that
+		// bound on each node, not its estimate (NodeMemoryBounded).
+		memoryShare := nodeMemoryShare(task)
+		nodeID := picker.PickBounded(taskSlot, resource, memoryShare)
 		if nodeID == NullNodeID {
+			// The task does not fit the cluster right now. End the round, as the
+			// slot heap always has: tasks behind it are not placed ahead of it, so
+			// the capacity that running tasks release is held for the oldest task
+			// that waits instead of being taken by a stream of smaller ones.
+			//
+			// Everything behind it waits too, so say which task holds the queue
+			// and what each worker had left for it.
+			mlog.RatedInfo(s.ctx, rate.Every(blockedRoundLogInterval),
+				"task does not fit any worker now, scheduling round ends at it",
+				WrapTaskLog(task,
+					mlog.Int64("taskSlot", taskSlot),
+					mlog.Stringer("resource", resource),
+					mlog.Float64("nodeMemoryShare", memoryShare),
+					mlog.Int("pendingBehind", s.pendingTasks.TaskCount()),
+					mlog.Any("resourceNodes", picker.remaining()))...)
 			s.pendingTasks.Push(task)
 			s.mu.RUnlock(taskID)
 			break
@@ -325,7 +366,8 @@ func (s *globalTaskScheduler) schedule() {
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...",
+				WrapTaskLog(task, mlog.Stringer("resource", resource))...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {

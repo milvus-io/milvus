@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,5 +47,10 @@ type Task interface {
 	PostExecute(context.Context) error
 	Reset()
 	GetSlot() int64
+	// GetResource is the cpu/memory DataCoord estimated for this task. The
+	// worker never computes it; it books it on enqueue and releases it when
+	// the task leaves the active set. Zero when the coordinator predates the
+	// field.
+	GetResource() taskcommon.Resource
 	IsVectorIndex() bool
 }

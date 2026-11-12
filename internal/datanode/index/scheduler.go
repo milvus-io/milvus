@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -41,8 +42,10 @@ type TaskQueue interface {
 	PopUnissuedTask() Task
 	AddActiveTask(t Task)
 	PopActiveTask(tName string) Task
+	ReleaseResource(t Task)
 	Enqueue(t Task) error
 	GetTaskNum() (int, int)
+	GetUsingResource() taskcommon.Resource
 	GetUsingSlot() int64
 	GetActiveSlot() int64
 }
@@ -59,6 +62,13 @@ type IndexTaskQueue struct {
 
 	utBufChan chan struct{} // to block scheduler
 	usingSlot atomic.Int64
+
+	// Cpu/memory booked for enqueued and active tasks, the two-dimensional
+	// counterpart of the slot accounting above. DataCoord estimates both and
+	// QuerySlot reports them; nothing on this node admits by them, so they sit
+	// beside the slot ledger rather than inside the admission path.
+	usingCPU    atomic.Int64
+	usingMemory atomic.Int64
 
 	sched *TaskScheduler
 }
@@ -82,6 +92,13 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	if queue.utFull() {
 		return merr.Wrap(merr.ErrServiceResourceInsufficient, "index task queue is full")
 	}
+	// Book cpu/memory before the task becomes visible to the scheduler: once
+	// it is in unissuedTasks it can be popped, run and released by
+	// ReleaseResource at any time, and a release that ran ahead of its booking
+	// would leave the ledger briefly below zero -- reported as an idle node.
+	res := t.GetResource()
+	queue.usingCPU.Add(res.CPU)
+	queue.usingMemory.Add(res.Memory)
 	queue.unissuedTasks.PushBack(t)
 	select {
 	case queue.utBufChan <- struct{}{}:
@@ -147,6 +164,21 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	}
 	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", tName))
 	return nil
+}
+
+// ReleaseResource returns the cpu/memory that addUnissuedTask booked for t.
+//
+// It is released per task, not per name as the slots are: a dropped task
+// whose native build ignores cancellation keeps running while DataCoord
+// dispatches the same clusterID/taskID again. Both executions are booked,
+// and AddActiveTask keeps only the newer one under the name, so a release
+// through activeTasks would return one booking and leak the other. Each
+// enqueued task has one execution, and processTask releases it once, so the
+// ledger returns exactly what was booked.
+func (queue *IndexTaskQueue) ReleaseResource(t Task) {
+	res := t.GetResource()
+	queue.usingCPU.Sub(res.CPU)
+	queue.usingMemory.Sub(res.Memory)
 }
 
 // Enqueue adds a task to TaskQueue.
@@ -260,6 +292,7 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
+	defer sched.TaskQueue.ReleaseResource(t)
 	var (
 		indexTask  *indexBuildTask
 		costCPUNum int64
@@ -339,4 +372,11 @@ func (sched *TaskScheduler) Start() error {
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
+}
+
+func (queue *IndexTaskQueue) GetUsingResource() taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    max(queue.usingCPU.Load(), 0),
+		Memory: max(queue.usingMemory.Load(), 0),
+	}
 }

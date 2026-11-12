@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 )
 
 func TestExternalCollectionManager_Basic(t *testing.T) {
@@ -108,7 +109,7 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	}
 
 	// Submit task
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
@@ -142,7 +143,7 @@ func TestExternalCollectionManager_SubmitTask_DefaultsNoneStateToFinished(t *tes
 		CollectionID: collID,
 	}
 
-	err := manager.SubmitTask(clusterID, req, func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		return &datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateNone,
 		}, nil
@@ -176,7 +177,7 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	}
 
 	// Submit task
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err) // Submit should succeed
 
 	require.Eventually(t, func() bool {
@@ -213,7 +214,7 @@ func TestExternalCollectionManager_MissingExploreManifestFailsTask(t *testing.T)
 			}
 			manager := NewExternalCollectionManager(ctx, 1)
 			defer manager.Close()
-			err := manager.SubmitTask("test-cluster", req, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			err := manager.SubmitTask("test-cluster", req, taskcommon.Resource{}, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 				task := NewRefreshExternalCollectionTask(taskCtx, req)
 				if err := task.PreExecute(taskCtx); err != nil {
 					return nil, err
@@ -265,7 +266,7 @@ func TestExternalCollectionManager_SubmitTask_PanicIsolated(t *testing.T) {
 		return nil, nil
 	}
 
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -306,7 +307,7 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		}
 	}
 
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -403,7 +404,7 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	}
 
 	// Submit first task
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	// Verify task is in progress
@@ -412,7 +413,7 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	assert.Equal(t, indexpb.JobState_JobStateInProgress, info.State)
 
 	// Duplicate submit should be idempotent (no error)
-	err = manager.SubmitTask(clusterID, req, taskFunc)
+	err = manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	// Unblock the task
@@ -448,7 +449,7 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 			}, nil
 		}
 
-		err := manager.SubmitTask(clusterID, req, taskFunc)
+		err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 		assert.NoError(t, err)
 	}
 
@@ -502,7 +503,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 		}, nil
 	}
 
-	err := manager.SubmitTask(clusterID, req, taskFunc)
+	err := manager.SubmitTask(clusterID, req, taskcommon.Resource{}, taskFunc)
 	assert.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -552,4 +553,75 @@ func TestExternalCollectionManager_DeleteNonExistent(t *testing.T) {
 	// Try to delete non-existent task
 	info := manager.Delete(clusterID, taskID)
 	assert.Nil(t, info)
+}
+
+func TestExternalCollectionManager_BooksResourceUntilTheTaskFinishes(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+
+	resource := taskcommon.Resource{CPU: 1, Memory: 1 << 30}
+	req := &datapb.RefreshExternalCollectionTaskRequest{TaskID: 31, CollectionID: 3100}
+	unblock := make(chan struct{})
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		<-unblock
+		return &datapb.RefreshExternalCollectionTaskResponse{State: indexpb.JobState_JobStateFinished}, nil
+	}
+
+	require.NoError(t, manager.SubmitTask("c", req, resource, taskFunc))
+	// Booked from acceptance, while the task runs.
+	assert.Equal(t, resource, manager.Resource())
+
+	// A duplicate dispatch of the same task books nothing more.
+	require.NoError(t, manager.SubmitTask("c", req, resource, taskFunc))
+	assert.Equal(t, resource, manager.Resource())
+
+	close(unblock)
+	require.Eventually(t, func() bool {
+		return manager.Resource() == taskcommon.Resource{}
+	}, time.Second, 10*time.Millisecond)
+
+	// The finished task stays queryable; only its booking is gone.
+	info := manager.Get("c", 31)
+	require.NotNil(t, info)
+	assert.Equal(t, indexpb.JobState_JobStateFinished, info.State)
+}
+
+func TestExternalCollectionManager_ReleasesResourceOfAFailedTask(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{TaskID: 32, CollectionID: 3200}
+	require.NoError(t, manager.SubmitTask("c", req, taskcommon.Resource{CPU: 1, Memory: 1 << 30},
+		func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			return nil, errors.New("refresh failed")
+		}))
+	require.Eventually(t, func() bool {
+		info := manager.Get("c", 32)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed &&
+			manager.Resource() == taskcommon.Resource{}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestExternalCollectionManager_ClosedPoolReleasesResource(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	manager.Close()
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{TaskID: 33, CollectionID: 3300}
+	var ran atomic.Bool
+	require.NoError(t, manager.SubmitTask("c", req, taskcommon.Resource{CPU: 1, Memory: 1 << 30},
+		func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			ran.Store(true)
+			return &datapb.RefreshExternalCollectionTaskResponse{}, nil
+		}))
+	// The closed pool refuses the task, so it never runs and must not stay booked.
+	assert.False(t, ran.Load())
+	assert.Equal(t, taskcommon.Resource{}, manager.Resource())
+}
+
+func TestExternalCollectionManager_ResourceIsNeverNegative(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+	manager.usingCPU.Add(-1)
+	manager.usingMemory.Add(-1)
+	assert.Equal(t, taskcommon.Resource{}, manager.Resource())
 }

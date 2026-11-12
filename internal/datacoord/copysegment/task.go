@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -250,6 +251,11 @@ func (t *Task) GetTaskState() taskcommon.State {
 	return taskcommon.FromCopySegmentState(t.GetState())
 }
 
+// GetTaskResource: copy tasks stream objects and hold little of them.
+func (t *Task) GetTaskResource() (taskcommon.Resource, bool) {
+	return taskresource.Lightweight(), true
+}
+
 // GetTaskSlot returns the number of task slots this task consumes.
 //
 // Used for resource quota enforcement across different task types.
@@ -310,7 +316,8 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		}
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal(), resource)
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)

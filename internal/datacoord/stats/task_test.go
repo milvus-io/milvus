@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
+
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -895,7 +897,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.allocator = ac
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		st.CreateTaskOnWorker(1, cluster)
@@ -913,7 +915,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.statsTaskMeta.catalog = catalog
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		st.CreateTaskOnWorker(1, cluster)
@@ -926,11 +928,18 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.statsTaskMeta.catalog = catalog
 
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *workerpb.CreateStatsRequest, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
 
 		st.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		// The dispatch ships exactly what the scheduler placed the task on.
+		s.Equal(taskresource.Price(st.GetTaskResource()), placed)
 	})
 }
 
@@ -985,7 +994,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifes
 	created := 0
 	cluster := &mockeyStatsCluster{}
 	mockCreateStats := mockey.Mock((*mockeyStatsCluster).CreateStats).To(
-		func(*mockeyStatsCluster, int64, *workerpb.CreateStatsRequest) error {
+		func(*mockeyStatsCluster, int64, *workerpb.CreateStatsRequest, taskcommon.Resource) error {
 			created++
 			return nil
 		}).Build()

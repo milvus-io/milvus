@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -55,6 +56,9 @@ type MemoryAllocator interface {
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
+
+	// Used returns the bytes currently reserved by import and pre-import readers.
+	Used() int64
 }
 
 type memoryAllocator struct {
@@ -179,6 +183,37 @@ func reserveSnapshotRead(ctx context.Context, taskID, preferredRowBuffer int64) 
 		return 0, 0, nil, err
 	}
 	return rowBuffer, budget, func() { allocator.Release(taskID, rowBuffer+budget) }, nil
+}
+
+// boundByImportMemoryLimit caps the memory booked for a task whose readers
+// all reserve from the import allocator at factor times the allocator's limit,
+// dataNode.import.memoryLimitPercentage of the machine. The limit bounds the
+// task's read buffers; factor covers what the task holds outside the
+// allocator -- for an import, the hashed batches waiting for sync, which take
+// dataCoord.taskResource.importMemoryFactor as in DataCoord's estimate; 1 for
+// a pre-import, which syncs nothing. DataCoord charges the task the same share
+// of the machine this node reports in QuerySlot (machine_memory, the same
+// hardware.GetMemoryCount, without the standalone discount) when it places it
+// (taskresource.ImportTaskNodeMemoryShare / ImportNodeMemoryShare). A machine
+// whose memory cannot be read, or a factor of zero or less, leaves the booking
+// as it is.
+func boundByImportMemoryLimit(r taskcommon.Resource, factor float64) taskcommon.Resource {
+	if factor <= 0 {
+		return r
+	}
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	limit := int64(float64(hardware.GetMemoryCount()) * percentage / 100 * factor)
+	if limit > 0 && r.Memory > limit {
+		r.Memory = limit
+	}
+	return r
+}
+
+// Used returns the bytes currently reserved by import and pre-import readers.
+func (ma *memoryAllocator) Used() int64 {
+	ma.mutex.RLock()
+	defer ma.mutex.RUnlock()
+	return ma.usedMemory
 }
 
 // Release releases memory of the specified size

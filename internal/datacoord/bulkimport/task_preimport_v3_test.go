@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -142,8 +143,8 @@ func TestPreImportV3TaskCreateTaskOnWorkerSendsImportFiles(t *testing.T) {
 
 	var captured *datapb.PreImportRequest
 	cluster := session.NewMockCluster(t)
-	cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ int64, req *datapb.PreImportRequest, _ int64) error {
+	cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ int64, req *datapb.PreImportRequest, _ int64, _ taskcommon.Resource) error {
 			captured = req
 			return nil
 		}).Once()
