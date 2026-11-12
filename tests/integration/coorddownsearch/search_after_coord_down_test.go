@@ -55,9 +55,11 @@ var searchCollectionName = ""
 
 func (s *CoordDownSearch) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().LogCfg.Level.Key, "debug")
-	// The test bounds the complete outage/recovery below this window. With
-	// the default 5s window, graceful shutdown alone can expire a Bounded
-	// read's freshness guarantee before the first outage query starts.
+	// The test bounds the complete outage/recovery below this window. Set it
+	// explicitly so the test does not depend on the common.gracefulTime
+	// default: with a short window (e.g. 5s), graceful shutdown alone can
+	// expire a Bounded read's freshness guarantee before the first outage
+	// query starts.
 	s.WithMilvusConfig(paramtable.Get().CommonCfg.GracefulTime.Key,
 		strconv.Itoa(maxAllowedInitTimeInSeconds*1000))
 	s.MiniClusterSuite.SetupSuite()
