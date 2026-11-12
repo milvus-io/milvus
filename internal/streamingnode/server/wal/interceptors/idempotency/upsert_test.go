@@ -57,7 +57,7 @@ func mapUpsert(msg message.MutableMessage, offsets ...uint32) {
 }
 
 func TestUpsertBoundedRetryReturnsOriginalResult(t *testing.T) {
-	interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+	interceptor := newIdempotencyInterceptor(WindowConfig{MaxSize: 1 << 20})
 	defer interceptor.Close()
 	build := func() message.MutableMessage {
 		msg := upsertForTest("p_1v0")
@@ -96,7 +96,7 @@ func TestUpsertBoundedRetryReturnsOriginalResult(t *testing.T) {
 }
 
 func TestUpsertMissingMappingCannotCachePartialResult(t *testing.T) {
-	interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+	interceptor := newIdempotencyInterceptor(WindowConfig{MaxSize: 1 << 20})
 	defer interceptor.Close()
 	msg := upsertForTest("p_1v0")
 	result, err := getInsertResultFromInsertMessage(context.Background(), msg)
@@ -114,7 +114,7 @@ func TestUpsertMissingMappingCannotCachePartialResult(t *testing.T) {
 func TestSequentialKeyedUpsertTransactionUsesBufferedOriginalResult(t *testing.T) {
 	for _, mixed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "Upsert", true: "historical Insert"}[mixed], func(t *testing.T) {
-			interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+			interceptor := newIdempotencyInterceptor(WindowConfig{MaxSize: 1 << 20})
 			defer interceptor.Close()
 			txn := message.TxnContext{TxnID: 10, Keepalive: message.TxnKeepaliveInfinite}
 			body := upsertForTest("p_1v0").WithTxnContext(txn)
@@ -165,7 +165,7 @@ func TestSequentialKeyedUpsertTransactionUsesBufferedOriginalResult(t *testing.T
 
 func TestSequentialKeyedUpsertRejectsMissingBodyResult(t *testing.T) {
 	for _, missingFirst := range []bool{true, false} {
-		interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+		interceptor := newIdempotencyInterceptor(WindowConfig{MaxSize: 1 << 20})
 		txn := message.TxnContext{TxnID: 10, Keepalive: message.TxnKeepaliveInfinite}
 		complete := upsertForTest("p_1v0").WithTxnContext(txn)
 		mapUpsert(complete, 0)
@@ -192,7 +192,7 @@ func TestSequentialKeyedUpsertRejectsMissingBodyResult(t *testing.T) {
 }
 
 func TestInsertV2BoundedRetryReturnsOriginalResult(t *testing.T) {
-	interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+	interceptor := newIdempotencyInterceptor(WindowConfig{MaxSize: 1 << 20})
 	defer interceptor.Close()
 	build := func(key int64) message.MutableMessage {
 		upsert := message.MustAsMutableUpsertMessageV2(upsertForTest("p_1v0"))
