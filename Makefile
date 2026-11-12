@@ -171,9 +171,9 @@ endif
 # only from system/global config, ignoring -c and GIT_CONFIG_COUNT, and the
 # ubuntu20.04 builder used by ARM CI still ships such a git (2.25.1).
 # Every make run parses this line, so write only when `git rev-parse` fails and
-# '*' is not in the global config yet. An unconditional --add appended a duplicate entry to
-# ~/.gitconfig on each run and disabled git's ownership check for all repos on
-# developer machines that never needed it.
+# '*' is not in the global config yet. An unconditional --add appended a
+# duplicate entry to ~/.gitconfig on each run and disabled git's ownership
+# check for all repos on developer machines that never needed it.
 $(shell git rev-parse --git-dir >/dev/null 2>&1 || git config --global --get-all safe.directory 2>/dev/null | grep -qxF '*' || git config --global --add safe.directory '*' 2>/dev/null)
 
 export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
