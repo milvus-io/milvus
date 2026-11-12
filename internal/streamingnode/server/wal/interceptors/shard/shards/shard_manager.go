@@ -250,10 +250,16 @@ type PrimaryKeyDescriptor struct {
 func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
 	c.Schema = schema
 	c.primaryKey = nil
-	c.maxRowsOverride.Store(0)
-	if maxRows, exist, err := common.GetCollectionSegmentMaxRows(schema.GetSchema().GetProperties()); exist && err == nil && maxRows < math.MaxInt64 {
-		c.maxRowsOverride.Store(maxRows + 1)
+	// Store once: the segment alloc worker reads the value without a lock and
+	// must not observe "not set" between two stores.
+	override := int64(0)
+	if maxRows, exist, err := common.GetCollectionSegmentMaxRows(schema.GetSchema().GetProperties()); err != nil {
+		mlog.Warn(context.TODO(), "ignore an invalid collection.segment.maxRows property, dataCoord.segment.maxRows applies",
+			mlog.String("vchannel", c.VChannel), mlog.Err(err))
+	} else if exist && maxRows < math.MaxInt64 {
+		override = maxRows + 1
 	}
+	c.maxRowsOverride.Store(override)
 	if schema == nil || schema.GetSchema() == nil {
 		return
 	}

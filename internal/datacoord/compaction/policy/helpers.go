@@ -119,8 +119,17 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 // The collection property collection.segment.maxRows overrides
 // dataCoord.segment.maxRows; 0 in either turns the cap off. A property that
 // does not parse is ignored (it is rejected when it is set).
+//
+// The row count at which the cap takes over from the byte limit is
+// expectedSize / maxRows bytes per row, so it scales with the byte limit of
+// the collection: 268 B at the default maxSize, 537 B for a collection whose
+// vector indexes are all DiskANN (diskSegmentMaxSize), and more when maxSize is
+// raised. A deployment that raises maxSize should raise maxRows with it.
 func GetSegmentMaxRows(properties map[string]string) int64 {
-	if maxRows, exist, err := common.GetCollectionSegmentMaxRowsFromMap(properties); exist && err == nil {
+	maxRows, exist, err := common.GetCollectionSegmentMaxRowsFromMap(properties)
+	if err != nil {
+		mlog.RatedWarn(context.TODO(), 0.1, "ignore an invalid collection.segment.maxRows property, dataCoord.segment.maxRows applies", mlog.Err(err))
+	} else if exist {
 		return maxRows
 	}
 	return max(Params.DataCoordCfg.SegmentMaxRows.GetAsInt64(), 0)
