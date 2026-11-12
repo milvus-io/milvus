@@ -775,24 +775,41 @@ func TestPrimaryField(t *testing.T) {
 		values[primaryKeyTemplateVar].GetArrayVal().GetStringData().GetData())
 }
 
+// allocBytesPerCall measures the bytes allocated per call of f, amortizing the
+// process-global allocation of concurrent goroutines (notably the config
+// refresher started by paramtable.Init) over many iterations. Measuring a
+// single call with runtime.ReadMemStats is flaky because TotalAlloc is
+// process-global, not per-goroutine.
+func allocBytesPerCall(t *testing.T, f func()) uint64 {
+	t.Helper()
+	const iterations = 20
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for i := 0; i < iterations; i++ {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	return (after.TotalAlloc - before.TotalAlloc) / iterations
+}
+
 func TestCheckAndSetDataDoesNotCopyWholeDataArray(t *testing.T) {
 	// One small row surrounded by a large amount of valid JSON whitespace
 	// isolates the cost of extracting data from row conversion allocations.
 	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
 	schema := &schemapb.CollectionSchema{}
-	_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, false)
-	require.NoError(t, err)
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	rows, _, err := checkAndSetData(body, schema, false)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := allocBytesPerCall(t, func() {
+		_, _, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+	})
+	runtime.KeepAlive(body)
+
+	require.Less(t, alloc, uint64(1<<20),
 		"extracting one row should not copy the entire data array")
 }
 
@@ -805,16 +822,17 @@ func TestSchemaForPathReplaceDoesNotCopyWholeDataArray(t *testing.T) {
 		Path:      "$.name",
 	}}
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	got, err := schemaForPathReplaceOperands(body, schema, ops)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.True(t, proto.Equal(schema, got))
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := allocBytesPerCall(t, func() {
+		_, err := schemaForPathReplaceOperands(body, schema, ops)
+		require.NoError(t, err)
+	})
+	runtime.KeepAlive(body)
+
+	require.Less(t, alloc, uint64(1<<20),
 		"validating path-replace rows should not copy the entire data array")
 }
 
