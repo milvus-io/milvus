@@ -167,9 +167,13 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Must use git config --global because git's ownership check runs before
-# both -c options and GIT_CONFIG_COUNT env vars are processed.
-$(shell git config --global --add safe.directory '*' 2>/dev/null)
+# Persist trust only if trusting this checkout resolves the failure. Keep this
+# before version detection, and never disable ownership checks for other repos.
+$(shell git rev-parse --git-dir >/dev/null 2>&1 || { \
+	repo=$$(pwd -P); \
+	git -c safe.directory="$$repo" rev-parse --git-dir >/dev/null 2>&1 && \
+	git config --global --add safe.directory "$$repo" 2>/dev/null; \
+})
 
 export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
