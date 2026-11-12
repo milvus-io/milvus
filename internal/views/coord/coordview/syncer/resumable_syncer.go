@@ -9,8 +9,10 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // resumableSyncer manages a single gRPC bidirectional stream to a work node.
@@ -62,6 +64,7 @@ func (rs *resumableSyncer) Sync(views []SyncView) {
 func (rs *resumableSyncer) Close() {
 	rs.cancel()
 	rs.wg.Wait()
+	rs.pending.closeTiming()
 }
 
 // DrainPendingIfNodeLost drains all remaining pending views.
@@ -240,7 +243,11 @@ func (rs *resumableSyncer) sendBatched(stream viewpb.ViewSyncService_SyncQueryVi
 				},
 			},
 		}
-		if err := stream.Send(req); err != nil {
+		sendTimer := syncSend.Begin()
+		sendErr := stream.Send(req)
+		sendTimer.End(sendErr)
+		metrics.QueryStageItems.WithLabelValues("coord", "sync", "send", "views").Add(float64(len(batch)))
+		if err := sendErr; err != nil {
 			mlog.Warn(rs.ctx, "ResumableSyncer: stream send failed",
 				mlog.String("node", rs.node.String()), mlog.Err(err))
 			return err
@@ -248,3 +255,5 @@ func (rs *resumableSyncer) sendBatched(stream viewpb.ViewSyncService_SyncQueryVi
 	}
 	return nil
 }
+
+var syncSend = stage.New("coord", "sync", "send")

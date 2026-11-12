@@ -7,12 +7,17 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 type TriggerScope = api.TriggerScope
 
+var triggerWait = stage.New("coord", "reconcile", "trigger_wait")
+
 type triggerQueue struct {
-	mu sync.Mutex
+	queuedAt     time.Time
+	pendingTimer stage.Timer
+	mu           sync.Mutex
 
 	scan        bool
 	dirtyNodes  map[int64]struct{}
@@ -88,6 +93,10 @@ func (q *triggerQueue) add(scopes ...TriggerScope) {
 }
 
 func (q *triggerQueue) notifyLocked() {
+	if q.queuedAt.IsZero() {
+		q.queuedAt = time.Now()
+		q.pendingTimer = triggerWait.Begin()
+	}
 	select {
 	case q.signal <- struct{}{}:
 	default:
@@ -102,6 +111,10 @@ func (q *triggerQueue) takePending() triggerBatch {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	if !q.queuedAt.IsZero() {
+		q.pendingTimer.End(nil)
+		q.queuedAt = time.Time{}
+	}
 	pending := triggerBatch{
 		scan:        q.scan,
 		dirtyNodes:  q.dirtyNodes,

@@ -49,6 +49,7 @@
 #include "folly/coro/BlockingWait.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "monitor/QueryMetrics.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
@@ -641,6 +642,8 @@ ManifestGroupTranslator::get_cells(
 folly::coro::Task<ManifestGroupTranslator::CellResults>
 ManifestGroupTranslator::get_cells_async(
     milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
+    milvus::monitor::QueryStageTimer load_timer(
+        milvus::monitor::QueryStage::ManifestLoadCells);
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
 
@@ -806,6 +809,8 @@ ManifestGroupTranslator::load_group_chunk(
     const std::vector<std::shared_ptr<arrow::Table>>& tables,
     const milvus::cachinglayer::cid_t cid,
     milvus::proto::common::LoadPriority priority) const {
+    milvus::monitor::QueryStageTimer build_timer(
+        milvus::monitor::QueryStage::ManifestBuildChunk);
     assert(!tables.empty());
     // Use the first table's schema as reference for field iteration
     const auto& schema = tables[0]->schema();

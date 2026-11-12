@@ -85,6 +85,10 @@
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
+namespace milvus::monitor {
+class SegmentLoadTiming;
+}
+
 namespace milvus::segcore {
 
 namespace storagev2translator {
@@ -2210,11 +2214,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            FieldId field_id);
 
     void
-    PrepareLoadDiffForReopen(milvus::OpContext* op_ctx,
-                             SegmentLoadInfo& segment_load_info,
-                             LoadDiff& load_diff,
-                             const SealedFieldLayoutPtr& schema_snapshot,
-                             StagedStateCommitter& committer);
+    PrepareLoadDiffForReopen(
+        milvus::OpContext* op_ctx,
+        SegmentLoadInfo& segment_load_info,
+        LoadDiff& load_diff,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        StagedStateCommitter& committer,
+        milvus::monitor::SegmentLoadTiming* timing = nullptr);
 
     void
     FinalizeLoadDiffForReopen(milvus::OpContext* op_ctx,
@@ -2227,7 +2233,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplyLoadDiff(milvus::OpContext* op_ctx,
                   SegmentLoadInfo& segment_load_info,
                   LoadDiff& load_diff,
-                  const SealedFieldLayoutPtr& schema_snapshot);
+                  const SealedFieldLayoutPtr& schema_snapshot,
+                  milvus::monitor::SegmentLoadTiming* timing = nullptr);
 
     void
     ApplyLoadDiff(milvus::OpContext* op_ctx,

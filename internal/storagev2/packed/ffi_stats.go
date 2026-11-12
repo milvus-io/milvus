@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"strconv"
+	"time"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -130,7 +131,17 @@ func GetManifestStats(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) (map[string]ManifestStat, error) {
-	cManifest, err := GetManifestHandle(manifestPath, storageConfig)
+	return getManifestStats(manifestPath, storageConfig, ManifestReadOther)
+}
+
+func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig, origin ManifestReadOrigin) (_ map[string]ManifestStat, err error) {
+	startedAt := time.Now()
+	timing := manifestReadTiming{}
+	defer func() {
+		timing.durations[manifestReadTotal] = time.Since(startedAt)
+		timing.observe(origin, err)
+	}()
+	cManifest, err := getManifestHandleWithTiming(manifestPath, storageConfig, ExternalSpecContext{}, &timing)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
@@ -138,6 +149,9 @@ func GetManifestStats(
 		return nil, merr.WrapErrDataIntegrityMsg("manifest %s returned a nil handle", manifestPath)
 	}
 	defer C.loon_manifest_destroy(cManifest)
+
+	extractStartedAt := time.Now()
+	defer func() { timing.durations[manifestReadExtract] = time.Since(extractStartedAt) }()
 
 	numStats := int(cManifest.stats.num_stats)
 	result := make(map[string]ManifestStat, numStats)

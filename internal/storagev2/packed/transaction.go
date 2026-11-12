@@ -216,7 +216,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	cManifest, err := openManifest(manifest, cProperties)
+	cManifest, err := openManifest(manifest, cProperties, nil)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}

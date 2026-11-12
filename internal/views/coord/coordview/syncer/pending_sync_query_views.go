@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // pendingSyncQueryViews tracks query views dispatched to a single work node
@@ -19,6 +20,7 @@ type pendingSyncQueryViews struct {
 }
 
 type pendingSyncEntry struct {
+	timing   *syncTiming
 	revision uint64
 	view     SyncView
 }
@@ -38,8 +40,20 @@ func (p *pendingSyncQueryViews) Upsert(sv SyncView) {
 
 	p.mu.Lock()
 	p.revision++
+	var timing *syncTiming
+	if old, ok := p.entries[key]; ok {
+		if old.view.View.State() == sv.View.State() {
+			timing = old.timing
+		} else {
+			old.timing.finish(stage.Superseded)
+		}
+	}
+	if timing == nil {
+		timing = newSyncTiming(sv.View.State())
+	}
 	p.entries[key] = pendingSyncEntry{
 		revision: p.revision,
+		timing:   timing,
 		view:     sv,
 	}
 	p.unsent[key] = sv.View.IntoProto()
@@ -62,8 +76,11 @@ func (p *pendingSyncQueryViews) Ready() <-chan struct{} {
 func (p *pendingSyncQueryViews) DrainUnsent() []*viewpb.QueryViewOfShard {
 	p.mu.Lock()
 	protos := make([]*viewpb.QueryViewOfShard, 0, len(p.unsent))
-	for _, view := range p.unsent {
+	for key, view := range p.unsent {
 		protos = append(protos, view)
+		if entry, ok := p.entries[key]; ok && entry.view.View.State() == qviews.QueryViewState(view.GetMeta().GetState()) {
+			entry.timing.queue.End(nil)
+		}
 	}
 	clear(p.unsent)
 	p.mu.Unlock()
@@ -85,18 +102,25 @@ func (p *pendingSyncQueryViews) MatchResponse(pb *viewpb.QueryViewOfShard) {
 
 	p.mu.Lock()
 	entry, ok := p.entries[key]
+	if ok {
+		entry.timing.ack(entry.view.View.State(), view.State())
+	}
 	p.mu.Unlock()
 	if !ok {
 		return
 	}
 
-	if !entry.view.OnSyncResponse(view) {
+	callbackTimer := syncCallback.Begin()
+	complete := entry.view.OnSyncResponse(view)
+	callbackTimer.End(nil)
+	if !complete {
 		return
 	}
 
 	p.mu.Lock()
 	current, ok := p.entries[key]
 	if ok && current.revision == entry.revision {
+		current.timing.finish(stage.Superseded)
 		delete(p.entries, key)
 	}
 	p.mu.Unlock()
@@ -108,6 +132,7 @@ func (p *pendingSyncQueryViews) Drain(node qviews.WorkNode) {
 	p.mu.Lock()
 	drained := make([]SyncView, 0, len(p.entries))
 	for _, sv := range p.entries {
+		sv.timing.finish(stage.Canceled)
 		drained = append(drained, sv.view)
 	}
 	p.entries = make(map[qviews.QueryViewKey]pendingSyncEntry)
@@ -143,4 +168,56 @@ func (p *pendingSyncQueryViews) CollectProtos() []*viewpb.QueryViewOfShard {
 		protos = append(protos, sv.view.View.IntoProto())
 	}
 	return protos
+}
+
+// Timers share pending entries' synchronization and survive reconnects and
+// same-target updates. The interval includes queueing and worker processing.
+type syncTiming struct{ queue, roundtrip stage.Timer }
+
+var (
+	syncPreparing = stage.New("coord", "sync_preparing", "roundtrip")
+	syncUp        = stage.New("coord", "sync_up", "roundtrip")
+	syncCleanup   = stage.New("coord", "sync_cleanup", "roundtrip")
+	syncQueue     = stage.New("coord", "sync", "send_queue")
+	syncCallback  = stage.New("coord", "sync", "callback")
+)
+
+func newSyncTiming(state qviews.QueryViewState) *syncTiming {
+	recorder := syncCleanup
+	switch state {
+	case qviews.QueryViewStatePreparing:
+		recorder = syncPreparing
+	case qviews.QueryViewStateUp:
+		recorder = syncUp
+	}
+	return &syncTiming{queue: syncQueue.Begin(), roundtrip: recorder.Begin()}
+}
+
+func (t *syncTiming) finish(result stage.Result) {
+	if t != nil {
+		t.queue.EndResult(result)
+		t.roundtrip.EndResult(result)
+	}
+}
+
+func (p *pendingSyncQueryViews) closeTiming() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, entry := range p.entries {
+		entry.timing.finish(stage.Canceled)
+	}
+}
+
+func (t *syncTiming) ack(target, reported qviews.QueryViewState) {
+	if reported == qviews.QueryViewStateUnrecoverable {
+		t.finish(stage.Error)
+		return
+	}
+	complete := target == qviews.QueryViewStatePreparing && (reported == qviews.QueryViewStateReady || reported == qviews.QueryViewStateUp) ||
+		target == qviews.QueryViewStateUp && reported == qviews.QueryViewStateUp ||
+		target == qviews.QueryViewStateDown && (reported == qviews.QueryViewStateDown || reported == qviews.QueryViewStateDropped) ||
+		target == qviews.QueryViewStateDropped && reported == qviews.QueryViewStateDropped
+	if complete {
+		t.finish(stage.Success)
+	}
 }

@@ -1,0 +1,955 @@
+{
+  "uid": "milvus-cold-search-stages",
+  "title": "Milvus cold Search stages",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "milvus",
+    "query-view"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$DS_PROMETHEUS"
+        },
+        "query": "label_values(up,instance)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "operation",
+        "type": "custom",
+        "query": "Search,HybridSearch,Query",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "Search",
+          "value": "Search"
+        }
+      },
+      {
+        "name": "path",
+        "type": "custom",
+        "query": "unloaded,loading,ready,disabled,unknown",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "latency_class",
+        "type": "custom",
+        "query": "le1s,gt1s",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 99,
+      "type": "text",
+      "title": "Reading boundaries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Start with request cohorts. Only readiness + execution + retry_wait and exclusive flush reasons are additive. Node/view/segment/batch populations differ; do not sum their P99s. Native cache wait, native manifest details, client/SDK and transport attribution remain incomplete. See the accompanying design/validation document."
+      }
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request stage mean — same completed cohort",
+      "description": "total = readiness + execution + retry_wait for these completed requests. Select gt1s to explain the whole slow cohort. Ready does not mean caches are warm.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (rate(milvus_qv_request_stage_duration_seconds_sum{instance=~\"$instance\",operation=~\"$operation\",path=~\"$path\",latency_class=~\"$latency_class\"}[$__rate_interval])) / sum by (stage) (rate(milvus_qv_request_stage_duration_seconds_count{instance=~\"$instance\",operation=~\"$operation\",path=~\"$path\",latency_class=~\"$latency_class\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Logical request P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99,sum by (le) (rate(milvus_qv_request_stage_duration_seconds_bucket{instance=~\"$instance\",operation=~\"$operation\",path=~\"$path\",latency_class=~\"$latency_class\",stage=\"total\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Request outcomes / second",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(milvus_qv_request_stage_duration_seconds_count{instance=~\"$instance\",operation=~\"$operation\",path=~\"$path\",latency_class=~\"$latency_class\",stage=\"total\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Currently blocked or running stages",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (component,operation,stage) (milvus_qv_stage_inflight{instance=~\"$instance\"})",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Shared auto-load stage P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"coord\",operation=\"auto_load\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Coord reconciliation mean",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (rate(milvus_qv_stage_duration_seconds_sum{instance=~\"$instance\",component=\"coord\",operation=\"reconcile\"}[$__rate_interval])) / sum by (stage) (rate(milvus_qv_stage_duration_seconds_count{instance=~\"$instance\",component=\"coord\",operation=\"reconcile\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Flush pending reasons — exclusive intervals",
+      "description": "Same merged shard cohorts; same_shard_wait + batch_hold + eligible_wait = pending_total apart from recorder overhead. eligible_wait includes NodeScheduler queue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (rate(milvus_qv_stage_duration_seconds_sum{instance=~\"$instance\",component=\"coord\",operation=\"flush\",stage=~\"batch_hold|same_shard_wait|eligible_wait|pending_total\"}[$__rate_interval])) / sum by (stage) (rate(milvus_qv_stage_duration_seconds_count{instance=~\"$instance\",component=\"coord\",operation=\"flush\",stage=~\"batch_hold|same_shard_wait|eligible_wait|pending_total\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Oldest unclaimed flush cohort",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(milvus_qv_flush_oldest_pending_seconds{instance=~\"$instance\"})",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Coord view stages P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"coord\",operation=\"view_load\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "View boundary coverage / second",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(kind) (rate(milvus_qv_stage_items_total{instance=~\"$instance\",component=\"coord\",operation=\"view_load\",stage=\"coverage\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Catalog saves / second",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(milvus_qv_stage_duration_seconds_count{instance=~\"$instance\",component=\"coord\",operation=\"flush\",stage=\"catalog_save\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Persisted view entries per catalog save",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(milvus_qv_stage_items_total{instance=~\"$instance\",component=\"coord\",operation=\"flush\",stage=\"catalog_save\",kind=\"views\"}[$__rate_interval])) / sum(rate(milvus_qv_stage_duration_seconds_count{instance=~\"$instance\",component=\"coord\",operation=\"flush\",stage=\"catalog_save\"}[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Segment load P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"queryNode\",operation=\"segment_load\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Segment creation P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"queryNode\",operation=\"segment_create\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "First load-info snapshot P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"queryNode\",operation=\"load_info\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Manifest FFI phases P99",
+      "description": "Wall time, not pure S3/network time. Native column-group access is a separate path.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"storage\",operation=\"manifest\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "SN query plan P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"streamingNode\",operation=\"query_plan\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Query-time BM25 stats P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 68,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"streamingNode\",operation=\"bm25_stats\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "QN task stages P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"queryNode\",operation=\"search_task\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Output fields / reduction P99",
+      "description": "Each stage retains its own population; nested stages overlap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 76,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (stage,le) (rate(milvus_qv_stage_duration_seconds_bucket{instance=~\"$instance\",component=\"queryNode\",operation=\"reduce\"}[$__rate_interval])))",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Native cache load P99 — existing successful loads",
+      "description": "Existing milvus-common metric. Does not include all waiter time and is not a request-level breakdown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 84,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99,sum by(le,data_type,location)(rate(internal_cache_load_latency_microseconds_bucket{instance=~\"$instance\"}[$__rate_interval])))/1e6",
+          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Slow request summaries / second",
+      "description": "Candidates include slow or unsuccessful requests. Emitted summaries are rate limited; dropped includes logging disabled. Histograms still cover every completed request.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$DS_PROMETHEUS"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 84,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(kind)(rate(milvus_qv_stage_items_total{instance=~\"$instance\",component=\"proxy\",operation=~\"$operation\",stage=\"slow_summary\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "annotations": {
+    "list": []
+  }
+}

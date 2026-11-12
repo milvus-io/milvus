@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -417,8 +418,12 @@ func (c *Collection) NewRetrievePlan(req *querypb.QueryRequest) (*segcore.Retrie
 }
 
 func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
+	lockTimer := createCollectionLock.Begin()
 	c.mu.RLock()
+	lockTimer.End(nil)
 	defer c.mu.RUnlock()
+	holdTimer := createCollectionHold.Begin()
+	defer holdTimer.End(nil)
 
 	if c.ccollection == nil {
 		return nil, merr.WrapErrServiceInternal("create segment on released collection")
@@ -827,3 +832,8 @@ func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID
 		}
 	}
 }
+
+var (
+	createCollectionLock = stage.New("queryNode", "segment_create", "collection_lock_wait")
+	createCollectionHold = stage.New("queryNode", "segment_create", "collection_lock_hold")
+)
