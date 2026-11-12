@@ -547,6 +547,54 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	return nil
 }
 
+// DropSegments keeps the segment records until every binlog-prefix removal
+// succeeds. Exact record deletes are a separate phase: routing them through
+// the prefix API would also delete sibling IDs such as 12 and 123. A failure
+// in either phase is retryable, including after some bounded batches commit.
+func (kc *Catalog) DropSegments(ctx context.Context, segments []*datapb.SegmentInfo) error {
+	if len(segments) == 0 {
+		return nil
+	}
+	limit := kc.MetaKv.MaxTxnOps()
+	if limit <= 0 {
+		return merr.WrapErrServiceInternalMsg("segment GC transaction limit must be positive")
+	}
+	keys := make([]string, 0, len(segments))
+	prefixes := make([]string, 0, 4*len(segments))
+	seen := make(map[string]struct{}, len(segments))
+	for _, segment := range segments {
+		if segment == nil {
+			continue
+		}
+		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+		for _, namespace := range []string{SegmentBinlogPathPrefix, SegmentDeltalogPathPrefix, SegmentStatslogPathPrefix, SegmentBM25logPathPrefix} {
+			prefixes = append(prefixes, fmt.Sprintf("%s/%d/%d/%d/", namespace, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()))
+		}
+	}
+	for start := 0; start < len(prefixes); start += limit {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := kc.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, nil, prefixes[start:min(start+limit, len(prefixes))]); err != nil {
+			return err
+		}
+	}
+	for start := 0; start < len(keys); start += limit {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := kc.MetaKv.MultiRemove(ctx, keys[start:min(start+limit, len(keys))]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
 	key := buildDataViewVersionKey(
 		dataView.GetCollectionId(),
@@ -803,6 +851,27 @@ func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, drop
 	return nil
 }
 
+func (kc *Catalog) DropIndexes(ctx context.Context, indexes []*model.Index) error {
+	keys := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		if index == nil {
+			continue
+		}
+		keys = append(keys, BuildIndexKey(index.CollectionID, index.IndexID))
+	}
+
+	limit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	err := etcd.RemoveByBatchWithLimit(keys, limit, func(partialKeys []string) error {
+		return kc.MetaKv.MultiRemove(ctx, partialKeys)
+	})
+	if err != nil {
+		mlog.Error(ctx, "drop collection index metadata in batch failed",
+			mlog.Int("indexCount", len(indexes)),
+			mlog.Err(err))
+	}
+	return err
+}
+
 func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
 	key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
 	value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
@@ -864,6 +933,32 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	}
 
 	return nil
+}
+
+func (kc *Catalog) DropSegmentIndexes(ctx context.Context, indexes []*model.SegmentIndex) error {
+	keys := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		if index == nil {
+			continue
+		}
+		keys = append(keys, BuildSegmentIndexKey(
+			index.CollectionID,
+			index.PartitionID,
+			index.SegmentID,
+			index.BuildID,
+		))
+	}
+
+	limit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	err := etcd.RemoveByBatchWithLimit(keys, limit, func(partialKeys []string) error {
+		return kc.MetaKv.MultiRemove(ctx, partialKeys)
+	})
+	if err != nil {
+		mlog.Error(ctx, "drop segment index metadata in batch failed",
+			mlog.Int("indexCount", len(indexes)),
+			mlog.Err(err))
+	}
+	return err
 }
 
 func (kc *Catalog) SaveImportJob(ctx context.Context, job *datapb.ImportJob) error {

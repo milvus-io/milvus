@@ -586,11 +586,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) (*met
 func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("DropIndex",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil)
+		catalog.On("DropIndexes", mock.Anything, mock.Anything).Return(nil)
 		m, im := createMetaForRecycleUnusedIndexes(catalog)
 		gc := NewGarbageCollector(m, nil, GcOption{IndexMeta: im})
 		gc.recycleUnusedIndexes(context.TODO(), nil)
@@ -598,11 +594,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("DropIndex",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(errors.New("fail"))
+		catalog.On("DropIndexes", mock.Anything, mock.Anything).Return(errors.New("fail"))
 		m, im := createMetaForRecycleUnusedIndexes(catalog)
 		gc := NewGarbageCollector(m, nil, GcOption{IndexMeta: im})
 		gc.recycleUnusedIndexes(context.TODO(), nil)
@@ -742,13 +734,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		mockChunkManager.EXPECT().RootPath().Return("root")
 		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("DropSegmentIndex",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil)
+		catalog.On("DropSegmentIndexes", mock.Anything, mock.Anything).Return(nil)
 		m, dm := createMetaForRecycleUnusedSegIndexes(catalog)
 		gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{
 			Cli: mockChunkManager,
@@ -764,13 +750,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		mockChunkManager := mocks.NewChunkManager(t)
 		mockChunkManager.EXPECT().RootPath().Return("root")
 		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-		catalog.On("DropSegmentIndex",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(errors.New("fail"))
+		catalog.On("DropSegmentIndexes", mock.Anything, mock.Anything).Return(errors.New("fail"))
 		m, dm := createMetaForRecycleUnusedSegIndexes(catalog)
 		gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{
 			Cli: mockChunkManager,
@@ -790,7 +770,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		)
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 		store := metacache.NewMetaStore(nil)
 		im := &index.IndexMeta{
@@ -826,10 +806,18 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		stale := model.CloneSegmentIndex(latest)
 		stale.IndexState = commonpb.IndexState_InProgress
 		stale.IndexFileKeys = nil
-		mockAll := mockey.Mock((*index.IndexMeta).GetAllSegIndexes).To(func(*index.IndexMeta) map[int64]*model.SegmentIndex {
-			return map[int64]*model.SegmentIndex{buildID: stale}
+		// Let the real range observe the old entry, then publish the new
+		// task during candidate discovery, before GC refreshes by build ID.
+		im.SegmentBuildInfo.Add(stale)
+		refreshed := false
+		refresh := mockey.Mock((*meta.Meta).GetSegment).To(func(_ *meta.Meta, _ context.Context, _ int64) *meta.SegmentInfo {
+			if !refreshed {
+				im.SegmentBuildInfo.Add(latest)
+				refreshed = true
+			}
+			return nil
 		}).Build()
-		defer mockAll.UnPatch()
+		defer refresh.UnPatch()
 
 		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
 		defer mockIsBuildIDBlocked.UnPatch()
@@ -886,10 +874,18 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 
 		stale := model.CloneSegmentIndex(latest)
 		stale.IndexState = commonpb.IndexState_Finished
-		mockAll := mockey.Mock((*index.IndexMeta).GetAllSegIndexes).To(func(*index.IndexMeta) map[int64]*model.SegmentIndex {
-			return map[int64]*model.SegmentIndex{buildID: stale}
+		// Let the real range observe the old entry, then publish the new
+		// task during candidate discovery, before GC refreshes by build ID.
+		im.SegmentBuildInfo.Add(stale)
+		refreshed := false
+		refresh := mockey.Mock((*meta.Meta).GetSegment).To(func(_ *meta.Meta, _ context.Context, _ int64) *meta.SegmentInfo {
+			if !refreshed {
+				im.SegmentBuildInfo.Add(latest)
+				refreshed = true
+			}
+			return nil
 		}).Build()
-		defer mockAll.UnPatch()
+		defer refresh.UnPatch()
 
 		cm := mocks.NewChunkManager(t)
 		gc := NewGarbageCollector(mt, nil, GcTestDomainOption(&snapshot.SnapshotTestMetas{IndexMeta: im, SnapshotMeta: sm}, GcOption{Cli: cm}))
@@ -897,7 +893,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 
 		_, ok := im.SegmentBuildInfo.Get(buildID)
 		assert.True(t, ok)
-		catalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		catalog.AssertNotCalled(t, "DropSegmentIndexes", mock.Anything, mock.Anything)
 		cm.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
 	})
 
@@ -911,7 +907,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		)
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		store := metacache.NewMetaStore(nil)
 		im := &index.IndexMeta{
 			Catalog:          catalog,
@@ -1691,14 +1687,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
-	catalog.On("DropSegment",
+	catalog.On("DropSegments",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
-	catalog.On("DropSegmentIndex",
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
+	catalog.On("DropSegmentIndexes",
 		mock.Anything,
 		mock.Anything,
 	).Return(nil).Maybe()
@@ -2950,9 +2943,10 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 			handler.EXPECT().ListLoadedSegments(mock.Anything).Return(nil, nil).Once()
 
 			recycled := make([]int64, 0, 1)
-			mockRecycle := mockey.Mock((*GarbageCollector).RecycleDroppedSegment).
-				To(func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) {
+			mockRecycle := mockey.Mock((*GarbageCollector).prepareDroppedSegmentGCBatchCandidate).
+				To(func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64, _ *meta.SegmentInfo) (*droppedSegmentGCBatchCandidate, error) {
 					recycled = append(recycled, segmentID)
+					return nil, nil
 				}).Build()
 			defer mockRecycle.UnPatch()
 
@@ -3014,11 +3008,15 @@ func TestGarbageCollector_recycleDroppedSegments_LoadedSegments(t *testing.T) {
 			handler.EXPECT().ListLoadedSegments(mock.Anything).Return(test.loaded, test.err).Once()
 
 			var recycled []int64
-			mockRecycle := mockey.Mock((*GarbageCollector).RecycleDroppedSegment).
-				To(func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) {
-					recycled = append(recycled, segmentID)
-				}).Build()
-			defer mockRecycle.UnPatch()
+			if len(test.recycled) > 0 {
+				catalog.EXPECT().DropSegments(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, segments []*datapb.SegmentInfo) error {
+						for _, segment := range segments {
+							recycled = append(recycled, segment.ID)
+						}
+						return nil
+					}).Once()
+			}
 
 			gc := NewGarbageCollector(mt, handler, GcTestDomainOption(&snapshot.SnapshotTestMetas{IndexMeta: im}, GcOption{StreamingNodeCatalog: checkpointCatalog, DropTolerance: 0}))
 			gc.RecycleDroppedSegments(context.Background(), nil)
@@ -3171,15 +3169,15 @@ func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *t
 	ctx := context.Background()
 	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
 
-	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+	cli := mocks.NewChunkManager(t)
+	cli.EXPECT().RootPath().Return("root").Maybe()
+	cli.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("remove failed")).Maybe()
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
 		StreamingNodeCatalog: checkpointCatalog,
 		Cli:                  cli,
 		DropTolerance:        0,
 	}))
-
-	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(errors.New("remove failed")).Build()
-	defer mockRemoveObjectFiles.UnPatch()
+	defer gc.Close()
 
 	gc.RecycleDroppedSegments(ctx, nil)
 
@@ -3192,18 +3190,22 @@ func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMet
 
 	ctx := context.Background()
 	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	dm.IndexMeta.Catalog = &batchIndexDeleteCatalog{
+		DataCoordCatalog: dm.IndexMeta.Catalog,
+		dropSegmentIndexes: func(context.Context, []*model.SegmentIndex) error {
+			return errors.New("meta failed")
+		},
+	}
 
-	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+	cli := mocks.NewChunkManager(t)
+	cli.EXPECT().RootPath().Return("root").Maybe()
+	cli.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
 		StreamingNodeCatalog: checkpointCatalog,
 		Cli:                  cli,
 		DropTolerance:        0,
 	}))
-
-	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(nil).Build()
-	defer mockRemoveObjectFiles.UnPatch()
-	mockRemoveSegmentIndex := mockey.Mock((*index.IndexMeta).RemoveSegmentIndex).Return(errors.New("meta failed")).Build()
-	defer mockRemoveSegmentIndex.UnPatch()
+	defer gc.Close()
 
 	gc.RecycleDroppedSegments(ctx, nil)
 
@@ -3219,12 +3221,15 @@ func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testi
 	dm.SnapshotMeta = &snapshot.SnapshotMeta{}
 	m.CompactionProtection = dm.SnapshotMeta
 
-	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+	cli := mocks.NewChunkManager(t)
+	cli.EXPECT().RootPath().Return("root").Maybe()
+	cli.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
 		StreamingNodeCatalog: checkpointCatalog,
 		Cli:                  cli,
 		DropTolerance:        0,
 	}))
+	defer gc.Close()
 
 	mockIsSegmentBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsSegmentGCBlocked).Return(false).Build()
 	defer mockIsSegmentBlocked.UnPatch()
@@ -3234,19 +3239,11 @@ func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testi
 		}).Build()
 	defer mockIsBuildIDBlocked.UnPatch()
 
-	removeObjectFilesCalled := false
-	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(
-		func(gc *GarbageCollector, ctx context.Context, logs map[string]struct{}) error {
-			removeObjectFilesCalled = true
-			return nil
-		}).Build()
-	defer mockRemoveObjectFiles.UnPatch()
-
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
 	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
-	assert.False(t, removeObjectFilesCalled)
+	cli.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
 }
 
 func TestGarbageCollector_recycleDroppedSegment_DropSegmentFailure(t *testing.T) {
@@ -3260,7 +3257,7 @@ func TestGarbageCollector_recycleDroppedSegment_DropSegmentFailure(t *testing.T)
 
 	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(nil).Build()
 	defer mockRemoveObjectFiles.UnPatch()
-	mockDropSegment := mockey.Mock((*meta.Meta).DropSegment).Return(errors.New("drop segment failed")).Build()
+	mockDropSegment := mockey.Mock((*meta.Meta).DropSegments).Return(0, errors.New("drop segment failed")).Build()
 	defer mockDropSegment.UnPatch()
 
 	gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), segment.ID)
@@ -3286,8 +3283,12 @@ func TestGarbageCollector_DroppedSegmentIndexHelpers(t *testing.T) {
 	assert.Contains(t, indexFiles, expectedIndexFile)
 
 	assert.Nil(t, (&GarbageCollector{}).getAllSegmentIndexesForDroppedSegment(segment.ID))
-	assert.NoError(t, gc.removeDroppedSegmentIndexMeta(ctx, nil))
-	require.NoError(t, gc.removeDroppedSegmentIndexMeta(ctx, segIndexes))
+	removed, err := dm.IndexMeta.RemoveSegmentIndexes(ctx, nil)
+	require.NoError(t, err)
+	assert.Zero(t, removed)
+	removed, err = dm.IndexMeta.RemoveSegmentIndexes(ctx, segIndexes)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
 	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
 }
 
@@ -3320,10 +3321,10 @@ func TestGarbageCollector_recycleDroppedSegment_CancellationShortCircuit(t *test
 		}))
 
 		var removeCalled atomic.Bool
-		mockRemove := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(
-			func(gc *GarbageCollector, ctx context.Context, files map[string]struct{}) error {
+		mockRemove := mockey.Mock((*GarbageCollector).removeObjectFilesWithResult).To(
+			func(gc *GarbageCollector, ctx context.Context, files []string) []storage.RemoveResult {
 				removeCalled.Store(true)
-				return nil
+				return successfulRemoveResults(files)
 			}).Build()
 		defer mockRemove.UnPatch()
 
@@ -3343,18 +3344,17 @@ func TestGarbageCollector_recycleDroppedSegment_CancellationShortCircuit(t *test
 		}))
 
 		ctx, cancel := context.WithCancel(context.Background())
-		mockRemove := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(
-			func(gc *GarbageCollector, c context.Context, files map[string]struct{}) error {
+		mockRemove := mockey.Mock((*GarbageCollector).removeObjectFilesWithResult).To(
+			func(gc *GarbageCollector, c context.Context, files []string) []storage.RemoveResult {
 				cancel()
-				return nil
+				return successfulRemoveResults(files)
 			}).Build()
 		defer mockRemove.UnPatch()
 
 		var indexMetaCalled atomic.Bool
-		mockIdx := mockey.Mock((*GarbageCollector).removeDroppedSegmentIndexMeta).To(
-			func(gc *GarbageCollector, c context.Context, idx []*model.SegmentIndex) error {
+		mockIdx := mockey.Mock((*GarbageCollector).removeSegmentIndexesInBatches).To(
+			func(gc *GarbageCollector, c context.Context, idx []*model.SegmentIndex) {
 				indexMetaCalled.Store(true)
-				return nil
 			}).Build()
 		defer mockIdx.UnPatch()
 
@@ -4121,8 +4121,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 }
 
 // TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop covers
-// the third ctx.Err() guard (lines 987-988) by canceling ctx inside
-// removeDroppedSegmentIndexMeta so DropSegment must NOT run.
+// cancellation between index metadata deletion and segment metadata deletion.
+// The segment marker must remain available for retry.
 func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing.T) {
 	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-cancel-drop"))
@@ -4136,19 +4136,18 @@ func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var indexMetaCalls atomic.Int32
-	mockIdx := mockey.Mock((*GarbageCollector).removeDroppedSegmentIndexMeta).To(
-		func(gc *GarbageCollector, c context.Context, idx []*model.SegmentIndex) error {
+	mockIdx := mockey.Mock((*GarbageCollector).removeSegmentIndexesInBatches).To(
+		func(gc *GarbageCollector, c context.Context, idx []*model.SegmentIndex) {
 			indexMetaCalls.Inc()
 			cancel()
-			return nil
 		}).Build()
 	defer mockIdx.UnPatch()
 
 	var dropCalls atomic.Int32
-	mockDrop := mockey.Mock((*meta.Meta).DropSegment).To(
-		func(m *meta.Meta, ctx context.Context, sid int64) error {
+	mockDrop := mockey.Mock((*meta.Meta).DropSegments).To(
+		func(m *meta.Meta, ctx context.Context, segments []*meta.SegmentInfo) (int, error) {
 			dropCalls.Inc()
-			return nil
+			return 0, nil
 		}).Build()
 	defer mockDrop.UnPatch()
 
@@ -5023,4 +5022,1023 @@ func TestGarbageCollectorIsPaused(t *testing.T) {
 	_, err = gc.pauseUntil.Insert("t", time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	assert.True(t, gc.IsPaused(2), "a global pause covers every collection")
+}
+
+type batchIndexDeleteCatalog struct {
+	metastore.DataCoordCatalog
+	dropIndexes        func(context.Context, []*model.Index) error
+	dropSegmentIndexes func(context.Context, []*model.SegmentIndex) error
+}
+
+type failingDropSegmentCatalog struct {
+	metastore.DataCoordCatalog
+	err error
+}
+
+func (c *failingDropSegmentCatalog) DropSegments(context.Context, []*datapb.SegmentInfo) error {
+	return c.err
+}
+
+func (c *batchIndexDeleteCatalog) DropIndexes(ctx context.Context, indexes []*model.Index) error {
+	if c.dropIndexes == nil {
+		return nil
+	}
+	return c.dropIndexes(ctx, indexes)
+}
+
+func (c *batchIndexDeleteCatalog) DropSegmentIndexes(ctx context.Context, indexes []*model.SegmentIndex) error {
+	if c.dropSegmentIndexes == nil {
+		return nil
+	}
+	return c.dropSegmentIndexes(ctx, indexes)
+}
+
+func TestGarbageCollector_recycleUnusedIndexesInBatches(t *testing.T) {
+	t.Run("deletes field indexes in one catalog batch", func(t *testing.T) {
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		var calls [][]*model.Index
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropIndexes: func(_ context.Context, indexes []*model.Index) error {
+				calls = append(calls, append([]*model.Index(nil), indexes...))
+				return nil
+			},
+		}
+		m, im := createMetaForRecycleUnusedIndexes(catalog)
+		gc := NewGarbageCollector(m, nil, GcOption{IndexMeta: im})
+
+		gc.recycleUnusedIndexes(context.Background(), nil)
+
+		require.Len(t, calls, 1)
+		assert.Len(t, calls[0], 2)
+		assert.Empty(t, im.GetDeletedIndexes())
+		baseCatalog.AssertNotCalled(t, "DropIndex", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("catalog failure keeps resident field indexes", func(t *testing.T) {
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropIndexes: func(_ context.Context, _ []*model.Index) error {
+				return errors.New("batch metadata delete failed")
+			},
+		}
+		m, im := createMetaForRecycleUnusedIndexes(catalog)
+		gc := NewGarbageCollector(m, nil, GcOption{IndexMeta: im})
+
+		gc.recycleUnusedIndexes(context.Background(), nil)
+
+		assert.Len(t, im.GetDeletedIndexes(), 2)
+		baseCatalog.AssertNotCalled(t, "DropIndex", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("stale field-index candidate is skipped", func(t *testing.T) {
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		var removed []*model.Index
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropIndexes: func(_ context.Context, indexes []*model.Index) error {
+				removed = append(removed, indexes...)
+				return nil
+			},
+		}
+		_, im := createMetaForRecycleUnusedIndexes(catalog)
+		candidates := im.GetDeletedIndexes()
+		require.Len(t, candidates, 2)
+		stale := candidates[0]
+		replacement := model.CloneIndex(stale)
+		im.Indexes[stale.CollectionID][stale.IndexID] = replacement
+
+		count, err := im.RemoveIndexes(context.Background(), candidates)
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		require.Len(t, removed, 1)
+		assert.NotEqual(t, stale.IndexID, removed[0].IndexID)
+		assert.Same(t, replacement, im.Indexes[stale.CollectionID][stale.IndexID])
+	})
+}
+
+type batchRemoveChunkManager struct {
+	storage.ChunkManager
+	rootPath     string
+	remove       func(context.Context, []string) []storage.RemoveResult
+	removePrefix func(context.Context, []string) []storage.RemovePrefixResult
+
+	mu          sync.Mutex
+	calls       [][]string
+	prefixCalls [][]string
+}
+
+func (cm *batchRemoveChunkManager) RootPath() string {
+	return cm.rootPath
+}
+
+func (cm *batchRemoveChunkManager) MultiRemoveWithResult(ctx context.Context, filePaths []string) []storage.RemoveResult {
+	paths := append([]string(nil), filePaths...)
+	cm.mu.Lock()
+	cm.calls = append(cm.calls, paths)
+	cm.mu.Unlock()
+	if cm.remove != nil {
+		return cm.remove(ctx, paths)
+	}
+
+	results := make([]storage.RemoveResult, 0, len(paths))
+	for _, filePath := range paths {
+		results = append(results, storage.RemoveResult{Path: filePath})
+	}
+	return results
+}
+
+func (cm *batchRemoveChunkManager) MultiRemoveWithPrefix(ctx context.Context, prefixes []string) []storage.RemovePrefixResult {
+	paths := append([]string(nil), prefixes...)
+	cm.mu.Lock()
+	cm.prefixCalls = append(cm.prefixCalls, paths)
+	cm.mu.Unlock()
+	if cm.removePrefix != nil {
+		return cm.removePrefix(ctx, paths)
+	}
+
+	results := make([]storage.RemovePrefixResult, len(paths))
+	for i, prefix := range paths {
+		results[i].Prefix = prefix
+	}
+	return results
+}
+
+func setSegmentIndexFileBatchSize(t *testing.T, batchSize int) {
+	t.Helper()
+	params := paramtable.Get()
+	oldBatchSize := params.DataCoordCfg.GCIndexFileBatchSize.GetValue()
+	require.NoError(t, params.Save(params.DataCoordCfg.GCIndexFileBatchSize.Key, strconv.Itoa(batchSize)))
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.DataCoordCfg.GCIndexFileBatchSize.Key, oldBatchSize))
+	})
+}
+
+func TestGarbageCollector_recycleUnusedSegIndexesInBatches(t *testing.T) {
+	t.Run("deletes segment metadata in one catalog batch", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		var calls [][]*model.SegmentIndex
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropSegmentIndexes: func(_ context.Context, indexes []*model.SegmentIndex) error {
+				calls = append(calls, append([]*model.SegmentIndex(nil), indexes...))
+				return nil
+			},
+		}
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		require.Len(t, calls, 1)
+		require.Len(t, calls[0], 2)
+		assert.ElementsMatch(t, []int64{600, 601}, []int64{calls[0][0].BuildID, calls[0][1].BuildID})
+		assert.Empty(t, dm.IndexMeta.SegmentBuildInfo.List())
+		baseCatalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("catalog failure keeps all resident segment metadata", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropSegmentIndexes: func(_ context.Context, _ []*model.SegmentIndex) error {
+				return errors.New("batch metadata delete failed")
+			},
+		}
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		assert.Len(t, dm.IndexMeta.SegmentBuildInfo.List(), 2)
+		baseCatalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("candidate changed after file deletion is skipped", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		var removed []*model.SegmentIndex
+		catalog := &batchIndexDeleteCatalog{
+			DataCoordCatalog: baseCatalog,
+			dropSegmentIndexes: func(_ context.Context, indexes []*model.SegmentIndex) error {
+				removed = append(removed, indexes...)
+				return nil
+			},
+		}
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+				current, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+				require.True(t, ok)
+				updated := model.CloneSegmentIndex(current)
+				updated.IndexFileKeys = append(updated.IndexFileKeys, "new-file")
+				dm.IndexMeta.SegmentBuildInfo.Add(updated)
+
+				results := make([]storage.RemoveResult, len(paths))
+				for i, filePath := range paths {
+					results[i].Path = filePath
+				}
+				return results
+			},
+		}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		require.Len(t, removed, 1)
+		assert.Equal(t, int64(601), removed[0].BuildID)
+		current, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		require.True(t, ok)
+		assert.Contains(t, current.IndexFileKeys, "new-file")
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.False(t, ok)
+	})
+
+	t.Run("newer resident build is not removed with old build metadata", func(t *testing.T) {
+		baseCatalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog := &batchIndexDeleteCatalog{DataCoordCatalog: baseCatalog}
+		_, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		candidate, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		require.True(t, ok)
+		newer := model.CloneSegmentIndex(candidate)
+		newer.BuildID = 700
+		resident, ok := dm.IndexMeta.SegmentIndexes.Get(candidate.SegmentID)
+		require.True(t, ok)
+		resident.Insert(candidate.IndexID, newer)
+
+		count, err := dm.IndexMeta.RemoveSegmentIndexes(context.Background(), []*model.SegmentIndex{candidate})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		current, ok := resident.Get(candidate.IndexID)
+		require.True(t, ok)
+		assert.Equal(t, int64(700), current.BuildID)
+	})
+
+	t.Run("deletes files and metadata across segment indexes in batches", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		require.Len(t, cm.calls, 1)
+		assert.Len(t, cm.calls[0], 4)
+		_, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.False(t, ok)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.False(t, ok)
+	})
+
+	t.Run("limits batches by estimated file references", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 3)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Times(2)
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		require.Len(t, cm.calls, 2)
+		assert.Len(t, cm.calls[0], 2)
+		assert.Len(t, cm.calls[1], 2)
+	})
+
+	t.Run("partial file failure retains only the affected metadata", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		var removed []*model.SegmentIndex
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, indexes []*model.SegmentIndex) error {
+				removed = append(removed, indexes...)
+				return nil
+			}).Once()
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+				results := make([]storage.RemoveResult, 0, len(paths))
+				for _, filePath := range paths {
+					result := storage.RemoveResult{Path: filePath}
+					switch {
+					case strings.Contains(filePath, "/600/"):
+						result.Err = merr.WrapErrIoTooManyRequests(filePath, errors.New("throttled"))
+					case strings.HasSuffix(filePath, "/file1"):
+						result.Err = merr.WrapErrIoKeyNotFound(filePath)
+					}
+					results = append(results, result)
+				}
+				return results
+			},
+		}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		require.Len(t, cm.calls, 1)
+		_, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.True(t, ok, "metadata must remain when any file delete is throttled")
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.False(t, ok, "not-found files are idempotent successes")
+		require.Len(t, removed, 1)
+		assert.Equal(t, int64(601), removed[0].BuildID)
+	})
+
+	t.Run("missing per-file result fails closed", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+				results := make([]storage.RemoveResult, 0, len(paths)-1)
+				for _, filePath := range paths {
+					if strings.Contains(filePath, "/600/") && strings.HasSuffix(filePath, "/file2") {
+						continue
+					}
+					results = append(results, storage.RemoveResult{Path: filePath})
+				}
+				return results
+			},
+		}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		_, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.True(t, ok, "metadata must remain when the backend omits one file result")
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.False(t, ok)
+	})
+
+	t.Run("empty file list removes metadata without storage request", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		empty, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		require.True(t, ok)
+		empty = model.CloneSegmentIndex(empty)
+		empty.IndexFileKeys = nil
+		dm.IndexMeta.SegmentBuildInfo.Add(empty)
+		inProgress, ok := dm.IndexMeta.SegmentBuildInfo.Get(601)
+		require.True(t, ok)
+		inProgress = model.CloneSegmentIndex(inProgress)
+		inProgress.IndexState = commonpb.IndexState_InProgress
+		dm.IndexMeta.SegmentBuildInfo.Add(inProgress)
+
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		assert.Empty(t, cm.calls)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.False(t, ok)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.True(t, ok)
+	})
+
+	t.Run("nonterminal and snapshot-protected candidates are not submitted", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		inProgress, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		require.True(t, ok)
+		inProgress = model.CloneSegmentIndex(inProgress)
+		inProgress.IndexState = commonpb.IndexState_InProgress
+		dm.IndexMeta.SegmentBuildInfo.Add(inProgress)
+
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		mockIsBuildIDBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsBuildIDGCBlocked).To(
+			func(_ *snapshot.SnapshotMeta, _ int64, buildID int64) bool {
+				return buildID == 601
+			}).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		assert.Empty(t, cm.calls)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.True(t, ok)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.True(t, ok)
+		catalog.AssertNotCalled(t, "DropSegmentIndexes", mock.Anything, mock.Anything)
+	})
+
+	t.Run("paused collection is not submitted", func(t *testing.T) {
+		setSegmentIndexFileBatchSize(t, 100)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		meta, dm := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		gc := NewGarbageCollector(meta, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+		pauseRecords := NewGCPauseRecords()
+		_, err := pauseRecords.Insert("test", time.Now().Add(time.Minute))
+		require.NoError(t, err)
+		gc.PausedCollection.Insert(100, pauseRecords)
+
+		gc.RecycleUnusedSegIndexes(context.Background(), nil)
+
+		assert.Empty(t, cm.calls)
+		_, ok := dm.IndexMeta.SegmentBuildInfo.Get(600)
+		assert.True(t, ok)
+		_, ok = dm.IndexMeta.SegmentBuildInfo.Get(601)
+		assert.True(t, ok)
+		catalog.AssertNotCalled(t, "DropSegmentIndexes", mock.Anything, mock.Anything)
+	})
+}
+
+func setDroppedSegmentBatchSize(t *testing.T, batchSize int) {
+	t.Helper()
+	oldBatchSize := Params.DataCoordCfg.GCDroppedSegmentBatchSize.GetValue()
+	require.NoError(t, Params.Save(Params.DataCoordCfg.GCDroppedSegmentBatchSize.Key, strconv.Itoa(batchSize)))
+	t.Cleanup(func() {
+		require.NoError(t, Params.Save(Params.DataCoordCfg.GCDroppedSegmentBatchSize.Key, oldBatchSize))
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsBatchFallbackWithIndexes(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	ctx := context.Background()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	m.DataViewManager = nil
+	dm.SnapshotMeta = nil
+	m.CompactionProtection = nil
+
+	for segmentID := int64(1); segmentID <= 4; segmentID++ {
+		require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+		}}))
+		require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			SegmentID:             segmentID,
+			CollectionID:          1,
+			PartitionID:           1,
+			IndexID:               segmentID,
+			BuildID:               segmentID,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"index-file"},
+		}))
+	}
+
+	chunkManager := mocks.NewChunkManager(t)
+	chunkManager.EXPECT().RootPath().Return("root").Maybe()
+	chunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Times(4)
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  chunkManager,
+		DropTolerance:        0,
+	}))
+	defer gc.Close()
+
+	gc.RecycleDroppedSegments(ctx, nil)
+
+	for segmentID := int64(1); segmentID <= 4; segmentID++ {
+		assert.Nil(t, m.GetSegment(ctx, segmentID))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segmentID))
+	}
+}
+
+func setupDroppedSegmentBatchFixture(t *testing.T, count int) (*meta.Meta, *snapshot.SnapshotTestMetas) {
+	t.Helper()
+	ctx := context.Background()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	m.DataViewManager = nil
+	dm.SnapshotMeta = nil
+	m.CompactionProtection = nil
+	for i := 1; i <= count; i++ {
+		segmentID := int64(i)
+		require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+		}}))
+		require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			SegmentID:             segmentID,
+			CollectionID:          1,
+			PartitionID:           1,
+			IndexID:               1,
+			BuildID:               segmentID,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{fmt.Sprintf("index-file-%d", segmentID)},
+		}))
+	}
+	return m, dm
+}
+
+func TestDroppedSegmentBatchRechecksManifestBeforeDeletion(t *testing.T) {
+	ctx := t.Context()
+	m, dm := setupDroppedSegmentBatchFixture(t, 2)
+	cm := &batchRemoveChunkManager{rootPath: "root"}
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm}))
+	t.Cleanup(gc.Close)
+	io := NewGCManifestReadIO(t)
+	var batch []*droppedSegmentGCBatchCandidate
+	for _, id := range []int64{1, 2} {
+		candidate, err := gc.prepareDroppedSegmentGCBatchCandidate(ctx, io, id, m.GetSegment(ctx, id))
+		require.NoError(t, err)
+		require.NotNil(t, candidate)
+		batch = append(batch, candidate)
+	}
+
+	// A rollback published a new revision after the GC scan planned both deletions.
+	locks := m.GetSegmentManifestLocks()
+	locks.Lock(1)
+	unlockWriter := m.LockSegments(1)
+	updated := m.GetSegment(ctx, 1).Clone()
+	updated.ManifestPath = "root/insert_log/1/1/1/_metadata/manifest_2"
+	m.Segments.SetSegment(1, updated)
+	unlockWriter()
+	locks.Unlock(1)
+
+	cm.remove = func(_ context.Context, paths []string) []storage.RemoveResult {
+		require.Len(t, paths, 1)
+		require.True(t, strings.HasSuffix(paths[0], "index-file-2"))
+		if locks.TryLock(2) {
+			locks.Unlock(2)
+			t.Error("manifest publication could run during deletion")
+		}
+		return []storage.RemoveResult{{Path: paths[0]}}
+	}
+	gc.recycleDroppedSegmentBatch(ctx, batch)
+	require.Len(t, cm.calls, 1)
+	require.Equal(t, updated.GetManifestPath(), m.GetSegment(ctx, 1).GetManifestPath())
+	require.Len(t, dm.IndexMeta.GetAllSegmentIndexes(1), 1)
+	require.Nil(t, m.GetSegment(ctx, 2))
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	t.Run("batches files and both metadata levels", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm := setupDroppedSegmentBatchFixture(t, 3)
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		cm.mu.Lock()
+		require.Len(t, cm.calls, 1)
+		assert.Len(t, cm.calls[0], 3)
+		cm.mu.Unlock()
+		for segmentID := int64(1); segmentID <= 3; segmentID++ {
+			assert.Nil(t, m.GetSegment(ctx, segmentID))
+			assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segmentID))
+		}
+	})
+
+	t.Run("file failure only retains the owning segment", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm := setupDroppedSegmentBatchFixture(t, 2)
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+				results := make([]storage.RemoveResult, len(paths))
+				for i, filePath := range paths {
+					results[i].Path = filePath
+					if strings.HasSuffix(filePath, "index-file-2") {
+						results[i].Err = merr.WrapErrIoTooManyRequests(filePath, errors.New("throttled"))
+					}
+				}
+				return results
+			},
+		}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.Nil(t, m.GetSegment(ctx, 1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+		assert.NotNil(t, m.GetSegment(ctx, 2))
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(2), 1)
+	})
+
+	t.Run("missing file result only retains the owning segment", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm := setupDroppedSegmentBatchFixture(t, 2)
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+				results := make([]storage.RemoveResult, 0, 1)
+				for _, filePath := range paths {
+					if strings.HasSuffix(filePath, "index-file-1") {
+						results = append(results, storage.RemoveResult{Path: filePath})
+					}
+				}
+				return results
+			},
+		}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.Nil(t, m.GetSegment(ctx, 1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+		assert.NotNil(t, m.GetSegment(ctx, 2))
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(2), 1)
+	})
+
+	t.Run("V3 prefix failure only retains the owning segment", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm, err := newMemoryMetaWithSnapshot(t)
+		require.NoError(t, err)
+		m.DataViewManager = nil
+		dm.SnapshotMeta = nil
+		m.CompactionProtection = nil
+		for segmentID := int64(1); segmentID <= 2; segmentID++ {
+			require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:             segmentID,
+				CollectionID:   1,
+				PartitionID:    1,
+				InsertChannel:  "channel-1",
+				State:          commonpb.SegmentState_Dropped,
+				DroppedAt:      uint64(time.Now().Add(-time.Hour).UnixNano()),
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath(fmt.Sprintf("root/insert_log/1/1/%d", segmentID), 1),
+			}}))
+		}
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			removePrefix: func(_ context.Context, prefixes []string) []storage.RemovePrefixResult {
+				results := make([]storage.RemovePrefixResult, len(prefixes))
+				for i, prefix := range prefixes {
+					results[i].Prefix = prefix
+					if prefix == "root/insert_log/1/1/2/" {
+						results[i].Err = merr.WrapErrIoTooManyRequests(prefix, errors.New("throttled"))
+					}
+				}
+				return results
+			},
+		}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.Nil(t, m.GetSegment(ctx, 1))
+		assert.NotNil(t, m.GetSegment(ctx, 2))
+		cm.mu.Lock()
+		require.Len(t, cm.prefixCalls, 1)
+		assert.ElementsMatch(t, []string{"root/insert_log/1/1/1/", "root/insert_log/1/1/2/"}, cm.prefixCalls[0])
+		cm.mu.Unlock()
+	})
+
+	t.Run("V3 prefix results are matched by prefix", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm, err := newMemoryMetaWithSnapshot(t)
+		require.NoError(t, err)
+		m.DataViewManager = nil
+		dm.SnapshotMeta = nil
+		m.CompactionProtection = nil
+		for segmentID := int64(1); segmentID <= 2; segmentID++ {
+			require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:             segmentID,
+				CollectionID:   1,
+				PartitionID:    1,
+				InsertChannel:  "channel-1",
+				State:          commonpb.SegmentState_Dropped,
+				DroppedAt:      uint64(time.Now().Add(-time.Hour).UnixNano()),
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath(fmt.Sprintf("root/insert_log/1/1/%d", segmentID), 1),
+			}}))
+		}
+		cm := &batchRemoveChunkManager{
+			rootPath: "root",
+			removePrefix: func(_ context.Context, _ []string) []storage.RemovePrefixResult {
+				return []storage.RemovePrefixResult{
+					{Prefix: "root/insert_log/1/1/2/"},
+					{Prefix: "root/insert_log/1/1/1/", Err: merr.WrapErrIoTooManyRequests("root/insert_log/1/1/1/", errors.New("throttled"))},
+				}
+			},
+		}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.NotNil(t, m.GetSegment(ctx, 1))
+		assert.Nil(t, m.GetSegment(ctx, 2))
+	})
+
+	t.Run("SegmentIndex batch failure keeps segment metadata", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm := setupDroppedSegmentBatchFixture(t, 1)
+		dm.IndexMeta.Catalog = &batchIndexDeleteCatalog{
+			DataCoordCatalog: dm.IndexMeta.Catalog,
+			dropSegmentIndexes: func(context.Context, []*model.SegmentIndex) error {
+				return errors.New("segment index batch failed")
+			},
+		}
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.NotNil(t, m.GetSegment(ctx, 1))
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(1), 1)
+	})
+
+	t.Run("segment metadata batch failure keeps final marker", func(t *testing.T) {
+		setDroppedSegmentBatchSize(t, 100)
+		ctx := context.Background()
+		m, dm := setupDroppedSegmentBatchFixture(t, 1)
+		m.Catalog = &failingDropSegmentCatalog{
+			DataCoordCatalog: m.Catalog,
+			err:              errors.New("segment batch failed"),
+		}
+		cm := &batchRemoveChunkManager{rootPath: "root"}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.NotNil(t, m.GetSegment(ctx, 1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsBatchFallbackPauseBarrier(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	ctx := context.Background()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	m.DataViewManager = nil
+	dm.SnapshotMeta = nil
+	m.CompactionProtection = nil
+
+	for segmentID := int64(1); segmentID <= 2; segmentID++ {
+		require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: segmentID}},
+			}},
+		}}))
+	}
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	chunkManager := mocks.NewChunkManager(t)
+	chunkManager.EXPECT().RootPath().Return("root").Maybe()
+	chunkManager.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, string) error {
+			started <- struct{}{}
+			<-release
+			return nil
+		},
+	).Times(2)
+
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  chunkManager,
+		DropTolerance:        0,
+	}))
+	defer gc.Close()
+	signal := make(chan gcCmd)
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		gc.RecycleDroppedSegments(ctx, signal)
+	}()
+
+	<-started
+	<-started
+	pauseDone := make(chan error)
+	go func() {
+		signal <- gcCmd{done: pauseDone}
+	}()
+	select {
+	case <-pauseDone:
+		t.Fatal("pause was acknowledged while dropped-segment deletion was still in flight")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-pauseDone:
+	case <-time.After(time.Second):
+		t.Fatal("pause was not acknowledged after the concurrent batch completed")
+	}
+	select {
+	case <-gcDone:
+	case <-time.After(time.Second):
+		t.Fatal("dropped-segment GC did not finish")
+	}
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsBatchPauseBarrier(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	setDroppedSegmentBatchSize(t, 100)
+	ctx := context.Background()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	m.DataViewManager = nil
+	dm.SnapshotMeta = nil
+	m.CompactionProtection = nil
+
+	for segmentID := int64(1); segmentID <= 2; segmentID++ {
+		require.NoError(t, m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "channel-1",
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: segmentID}},
+			}},
+		}}))
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cm := &batchRemoveChunkManager{
+		rootPath: "root",
+		remove: func(_ context.Context, paths []string) []storage.RemoveResult {
+			close(started)
+			<-release
+			results := make([]storage.RemoveResult, len(paths))
+			for i, filePath := range paths {
+				results[i].Path = filePath
+			}
+			return results
+		},
+	}
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+	defer gc.Close()
+	signal := make(chan gcCmd)
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		gc.RecycleDroppedSegments(ctx, signal)
+	}()
+
+	<-started
+	pauseDone := make(chan error)
+	go func() {
+		signal <- gcCmd{done: pauseDone}
+	}()
+	select {
+	case <-pauseDone:
+		t.Fatal("pause was acknowledged while a dropped-segment storage batch was in flight")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-pauseDone:
+	case <-time.After(time.Second):
+		t.Fatal("pause was not acknowledged after the dropped-segment storage batch completed")
+	}
+	select {
+	case <-gcDone:
+	case <-time.After(time.Second):
+		t.Fatal("dropped-segment batch GC did not finish")
+	}
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsBatch_CancellationShortCircuit(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	t.Run("cancel before files step", func(t *testing.T) {
+		m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+		cli := mocks.NewChunkManager(t)
+		cli.EXPECT().RootPath().Return("root").Maybe()
+		cli.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			DropTolerance:        0,
+		}))
+		defer gc.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		cli.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
+		assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+	})
+
+	t.Run("cancel between files and index meta", func(t *testing.T) {
+		m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cli := &batchRemoveChunkManager{
+			rootPath: "root",
+			remove: func(_ context.Context, filePaths []string) []storage.RemoveResult {
+				cancel()
+				results := make([]storage.RemoveResult, len(filePaths))
+				for i, filePath := range filePaths {
+					results[i].Path = filePath
+				}
+				return results
+			},
+		}
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cli, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+		defer gc.Close()
+
+		gc.RecycleDroppedSegments(ctx, nil)
+
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+		assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegmentsBatch_CtxCanceledBeforeSegmentMeta(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var indexMetaCalls atomic.Int32
+	dm.IndexMeta.Catalog = &batchIndexDeleteCatalog{
+		DataCoordCatalog: dm.IndexMeta.Catalog,
+		dropSegmentIndexes: func(context.Context, []*model.SegmentIndex) error {
+			indexMetaCalls.Inc()
+			cancel()
+			return nil
+		},
+	}
+	cli := &batchRemoveChunkManager{rootPath: "root"}
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cli, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
+	defer gc.Close()
+
+	gc.RecycleDroppedSegments(ctx, nil)
+
+	assert.Equal(t, int32(1), indexMetaCalls.Load())
+	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
+	assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
+}
+
+func successfulRemoveResults(paths []string) []storage.RemoveResult {
+	results := make([]storage.RemoveResult, len(paths))
+	for i, path := range paths {
+		results[i].Path = path
+	}
+	return results
 }

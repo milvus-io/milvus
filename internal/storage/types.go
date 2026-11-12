@@ -48,6 +48,31 @@ type ChunkObjectInfo struct {
 	ModifyTime time.Time
 }
 
+// RemoveResult reports the outcome of removing one object. Err is nil when the
+// object was removed successfully or was already absent.
+type RemoveResult struct {
+	Path string
+	Err  error
+}
+
+// RemovePrefixResult reports the outcome of removing every object observed
+// under one input prefix. Err is nil only when listing completed and every
+// listed object was removed successfully or was already absent.
+type RemovePrefixResult struct {
+	Prefix  string
+	Listed  int
+	Removed int
+	Err     error
+}
+
+// BatchRemoveChunkManager is an optional capability for chunk managers that
+// can return one removal result per input path. Keep this separate from
+// ChunkManager so existing implementations and generated mocks do not need to
+// provide batch-result semantics.
+type BatchRemoveChunkManager interface {
+	MultiRemoveWithResult(ctx context.Context, filePaths []string) []RemoveResult
+}
+
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
@@ -97,6 +122,8 @@ type ChunkManager interface {
 	MultiRemove(ctx context.Context, filePaths []string) error
 	// RemoveWithPrefix remove files with same @prefix.
 	RemoveWithPrefix(ctx context.Context, prefix string) error
+	// MultiRemoveWithPrefix removes files for multiple prefixes and reports one result per input prefix.
+	MultiRemoveWithPrefix(ctx context.Context, prefixes []string) []RemovePrefixResult
 	// Copy copies @srcFilePath to @dstFilePath.
 	Copy(ctx context.Context, srcFilePath string, dstFilePath string) error
 }

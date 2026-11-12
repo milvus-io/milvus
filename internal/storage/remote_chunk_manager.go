@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -59,6 +61,13 @@ type ObjectStorage interface {
 	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 	CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error
+}
+
+// BulkObjectStorage is an optional object-storage capability that reports one
+// result per input object. Implementations must fail closed: an object with an
+// unknown outcome is returned with a non-nil error.
+type BulkObjectStorage interface {
+	RemoveObjects(ctx context.Context, bucketName string, objectNames []string) []RemoveResult
 }
 
 // RemoteChunkManager is responsible for read and write data stored in mminio.
@@ -306,7 +315,8 @@ func (mcm *RemoteChunkManager) Remove(ctx context.Context, filePath string) erro
 	return nil
 }
 
-// MultiRemove deletes a objects with @keys.
+// MultiRemove deletes objects with @keys. Keep the existing individual-delete
+// path so callers outside DataCoord do not opt into a new backend request shape.
 func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) error {
 	var el error
 	for _, key := range keys {
@@ -316,6 +326,240 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 		}
 	}
 	return el
+}
+
+// MultiRemoveWithResult deletes objects and returns exactly one result per
+// input key. Object stores with a native bulk API use it; other stores retain
+// the existing individual-delete behavior.
+func (mcm *RemoteChunkManager) MultiRemoveWithResult(ctx context.Context, keys []string) []RemoveResult {
+	if bulkClient, ok := mcm.client.(BulkObjectStorage); ok {
+		start := timerecord.NewTimeRecorder("removeObjects")
+		results := bulkClient.RemoveObjects(ctx, mcm.bucketName, keys)
+
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Add(float64(len(keys)))
+		var success, canceled, failed int
+		for i := range results {
+			if errors.Is(results[i].Err, merr.ErrIoKeyNotFound) {
+				results[i].Err = nil
+			}
+			switch {
+			case results[i].Err == nil:
+				success++
+			case errors.Is(results[i].Err, context.Canceled):
+				canceled++
+			default:
+				failed++
+			}
+		}
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Add(float64(success))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.CancelLabel).Add(float64(canceled))
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.FailLabel).Add(float64(failed))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
+		return results
+	}
+
+	results := make([]RemoveResult, len(keys))
+	var group errgroup.Group
+	concurrency := paramtable.Get().DataCoordCfg.GCRemoveConcurrent.GetAsInt()
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	group.SetLimit(concurrency)
+	for i, key := range keys {
+		i, key := i, key
+		group.Go(func() error {
+			err := mcm.Remove(ctx, key)
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				err = nil
+			}
+			results[i] = RemoveResult{Path: key, Err: err}
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return results
+}
+
+type prefixObject struct {
+	prefixIndex int
+	path        string
+}
+
+type removeOutcome struct {
+	seen bool
+	err  error
+}
+
+// MultiRemoveWithPrefix lists multiple prefixes with bounded concurrency and
+// combines the resulting object paths into bounded exact-key delete batches.
+// There is no portable server-side multi-prefix delete operation, so listing
+// remains one operation per prefix; only the object deletes are coalesced.
+func (mcm *RemoteChunkManager) MultiRemoveWithPrefix(ctx context.Context, prefixes []string) []RemovePrefixResult {
+	results := make([]RemovePrefixResult, len(prefixes))
+	if len(prefixes) == 0 {
+		return results
+	}
+
+	for i, prefix := range prefixes {
+		results[i].Prefix = prefix
+	}
+
+	batchSize := paramtable.Get().DataCoordCfg.GCIndexFileBatchSize.GetAsInt()
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	listConcurrency := paramtable.Get().DataCoordCfg.GCRemoveConcurrent.GetAsInt()
+	if listConcurrency <= 0 {
+		listConcurrency = 1
+	}
+	listConcurrency = min(listConcurrency, len(prefixes))
+
+	jobs := make(chan int)
+	objects := make(chan prefixObject, batchSize)
+	listErrors := make([]error, len(prefixes))
+	processed := make([]bool, len(prefixes))
+
+	var workers sync.WaitGroup
+	workers.Add(listConcurrency)
+	for range listConcurrency {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				processed[index] = true
+				prefix := prefixes[index]
+				if prefix == "" {
+					listErrors[index] = merr.WrapErrIoFailedMsg("refuse to remove an empty object prefix")
+					continue
+				}
+
+				start := timerecord.NewTimeRecorder("walkWithPrefixForBatchRemove")
+				metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
+				stopped := false
+				err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, true, func(object *ChunkObjectInfo) bool {
+					select {
+					case objects <- prefixObject{prefixIndex: index, path: object.FilePath}:
+						return true
+					case <-ctx.Done():
+						stopped = true
+						return false
+					}
+				})
+				if err == nil && stopped {
+					err = ctx.Err()
+				}
+				if err != nil {
+					metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
+					listErrors[index] = merr.Wrapf(
+						mapObjectStorageError(prefix, err),
+						"failed to list object prefix %s",
+						prefix,
+					)
+					continue
+				}
+				metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataWalkLabel).
+					Observe(float64(start.ElapseSpan().Milliseconds()))
+				metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
+			}
+		}()
+	}
+
+	go func() {
+		defer close(jobs)
+		for index := range prefixes {
+			select {
+			case jobs <- index:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		workers.Wait()
+		close(objects)
+	}()
+
+	deleteErrors := make([]error, len(prefixes))
+	pending := make([]prefixObject, 0, batchSize)
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+
+		paths := make([]string, len(pending))
+		expected := make(map[string]struct{}, len(pending))
+		for i, object := range pending {
+			paths[i] = object.path
+			expected[object.path] = struct{}{}
+			results[object.prefixIndex].Listed++
+		}
+
+		outcomes := make(map[string]removeOutcome, len(expected))
+		var batchErr error
+		for _, result := range mcm.MultiRemoveWithResult(ctx, paths) {
+			if result.Path == "" {
+				if result.Err != nil {
+					batchErr = merr.Combine(batchErr, result.Err)
+				}
+				continue
+			}
+			if _, ok := expected[result.Path]; !ok {
+				if result.Err != nil {
+					batchErr = merr.Combine(batchErr, result.Err)
+				}
+				continue
+			}
+
+			outcome := outcomes[result.Path]
+			outcome.seen = true
+			if result.Err != nil && !errors.Is(result.Err, merr.ErrIoKeyNotFound) {
+				outcome.err = merr.Combine(outcome.err, result.Err)
+			}
+			outcomes[result.Path] = outcome
+		}
+
+		for _, object := range pending {
+			outcome := outcomes[object.path]
+			var objectErr error
+			switch {
+			case batchErr != nil:
+				objectErr = batchErr
+			case !outcome.seen:
+				objectErr = merr.WrapErrIoFailedMsg("batch delete returned no result for %s", object.path)
+			case outcome.err != nil:
+				objectErr = outcome.err
+			default:
+				results[object.prefixIndex].Removed++
+			}
+			// One representative error is enough to retain this prefix's metadata
+			// for retry. Avoid retaining an error tree proportional to every object
+			// under a large prefix when a request-wide failure occurs.
+			if objectErr != nil && deleteErrors[object.prefixIndex] == nil {
+				deleteErrors[object.prefixIndex] = objectErr
+			}
+		}
+		pending = pending[:0]
+	}
+
+	for object := range objects {
+		pending = append(pending, object)
+		if len(pending) == batchSize {
+			flush()
+		}
+	}
+	flush()
+
+	for i := range results {
+		if !processed[i] {
+			if err := ctx.Err(); err != nil {
+				listErrors[i] = err
+			} else {
+				listErrors[i] = merr.WrapErrIoFailedMsg("object prefix was not processed: %s", prefixes[i])
+			}
+		}
+		results[i].Err = merr.Combine(listErrors[i], deleteErrors[i])
+	}
+	return results
 }
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.

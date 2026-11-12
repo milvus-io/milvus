@@ -141,16 +141,15 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 
 	dropSegmentCalled := false
 	var droppedSegment *datapb.SegmentInfo
-	mock8 := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
+	mock8 := mockey.Mock((*datacoord.Catalog).DropSegments).To(func(c *datacoord.Catalog, ctx context.Context, segments []*datapb.SegmentInfo) error {
 		dropSegmentCalled = true
-		droppedSegment = segment
+		require.Len(t, segments, 1)
+		droppedSegment = segments[0]
 		return nil
 	}).Build()
 	defer mock8.UnPatch()
 
-	mock9 := mockey.Mock((*gc.GarbageCollector).RemoveObjectFiles).To(func(gcx *gc.GarbageCollector, ctx context.Context, logs map[string]struct{}) error {
-		return nil
-	}).Build()
+	mock9 := mockey.Mock(gc.RemoveObjectFilesWithResultMethodForTest()).To(successfulGCFileRemovals).Build()
 	defer mock9.UnPatch()
 
 	// Execute
@@ -183,7 +182,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	smMeta := &snapshot.SnapshotMeta{}
 
 	// Mock newIndexMeta
-	idxMeta := &index.IndexMeta{}
+	idxMeta := &index.IndexMeta{SegmentBuildInfo: index.NewSegmentIndexBuildInfo()}
 
 	// Create meta
 	im := idxMeta
@@ -214,6 +213,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 		IndexID:      301,
 		BuildID:      401,
 		NodeID:       501,
+		IndexState:   commonpb.IndexState_Finished,
 	}
 	segIdx2 := &model.SegmentIndex{
 		SegmentID:    2002,
@@ -222,7 +222,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 		IndexID:      302,
 		BuildID:      402,
 		NodeID:       502,
+		IndexState:   commonpb.IndexState_Finished,
 	}
+	idxMeta.SegmentBuildInfo.Add(segIdx1)
+	idxMeta.SegmentBuildInfo.Add(segIdx2)
 
 	// Setup mocks
 	// New O(1) API: IsBuildIDGCBlocked encodes both "loaded state" and "is referenced".
@@ -248,14 +251,6 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	}).Build()
 	defer mock4.UnPatch()
 
-	mock5 := mockey.Mock((*index.IndexMeta).GetAllSegIndexes).To(func() map[int64]*model.SegmentIndex {
-		return map[int64]*model.SegmentIndex{
-			segIdx1.BuildID: segIdx1,
-			segIdx2.BuildID: segIdx2,
-		}
-	}).Build()
-	defer mock5.UnPatch()
-
 	mock6 := mockey.Mock((*gc.GarbageCollector).GetAllIndexFilesOfIndex).To(func(gcx *gc.GarbageCollector, segIdx *model.SegmentIndex) map[string]struct{} {
 		return map[string]struct{}{
 			fmt.Sprintf("index_%d", segIdx.BuildID): {},
@@ -264,23 +259,25 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	defer mock6.UnPatch()
 
 	removeCallCount := 0
-	mock7 := mockey.Mock((*gc.GarbageCollector).RemoveObjectFiles).To(func(gcx *gc.GarbageCollector, ctx context.Context, logs map[string]struct{}) error {
+	mock7 := mockey.Mock(gc.RemoveObjectFilesWithResultMethodForTest()).To(func(gcx *gc.GarbageCollector, ctx context.Context, paths []string) []storage.RemoveResult {
 		removeCallCount++
-		return nil
+		return successfulGCFileRemovals(gcx, ctx, paths)
 	}).Build()
 	defer mock7.UnPatch()
 
 	removeSegmentIndexCalled := false
 	removedBuildID := int64(0)
-	mock8 := mockey.Mock((*index.IndexMeta).RemoveSegmentIndex).To(func(ctx context.Context, buildID int64) error {
+	mock8 := mockey.Mock((*index.IndexMeta).RemoveSegmentIndexes).To(func(_ *index.IndexMeta, ctx context.Context, indexes []*model.SegmentIndex) (int, error) {
 		removeSegmentIndexCalled = true
-		removedBuildID = buildID
-		return nil
+		require.Len(t, indexes, 1)
+		removedBuildID = indexes[0].BuildID
+		return len(indexes), nil
 	}).Build()
 	defer mock8.UnPatch()
 
 	// Execute
 	gcx.RecycleUnusedSegIndexes(ctx, nil)
+	assert.Equal(t, 2, mock1.Times(), "snapshot protection must be checked for both build IDs")
 
 	// Verify
 	// Only segIdx2 should have its files removed (segIdx1 is protected by snapshot)
@@ -514,13 +511,13 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	defer mockListSegmentIndexes.UnPatch()
 
 	dropSegmentCalled := false
-	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
+	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegments).To(func(c *datacoord.Catalog, ctx context.Context, segments []*datapb.SegmentInfo) error {
 		dropSegmentCalled = true
 		return nil
 	}).Build()
 	defer mockDropSegment.UnPatch()
 
-	mockRemoveObjectFiles := mockey.Mock((*gc.GarbageCollector).RemoveObjectFiles).Return(nil).Build()
+	mockRemoveObjectFiles := mockey.Mock(gc.RemoveObjectFilesWithResultMethodForTest()).To(successfulGCFileRemovals).Build()
 	defer mockRemoveObjectFiles.UnPatch()
 
 	// Execute - should not panic with nil snapshotMeta
@@ -1469,26 +1466,29 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
-	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
-		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
+	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegments).To(func(c *datacoord.Catalog, ctx context.Context, segments []*datapb.SegmentInfo) error {
+		for _, segment := range segments {
+			droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
+		}
 		return nil
 	}).Build()
 	defer mockDropSegment.UnPatch()
 
-	// Mock RemoveWithPrefix for V3 segment
-	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(
-		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
+	// Mock batch prefix removal for the V3 segment.
+	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).MultiRemoveWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefixes []string) []storage.RemovePrefixResult {
 			removeWithPrefixCalled = true
-			removeWithPrefixArg = prefix
-			return nil
+			require.Len(t, prefixes, 1)
+			removeWithPrefixArg = prefixes[0]
+			return []storage.RemovePrefixResult{{Prefix: prefixes[0]}}
 		}).Build()
 	defer mockRemoveWithPrefix.UnPatch()
 
 	// Mock removeObjectFiles for V1 segment
-	mockRemoveObjectFiles := mockey.Mock((*gc.GarbageCollector).RemoveObjectFiles).To(
-		func(gcx *gc.GarbageCollector, ctx context.Context, logs map[string]struct{}) error {
+	mockRemoveObjectFiles := mockey.Mock(gc.RemoveObjectFilesWithResultMethodForTest()).To(
+		func(gcx *gc.GarbageCollector, ctx context.Context, paths []string) []storage.RemoveResult {
 			removeObjectFilesCalled = true
-			return nil
+			return successfulGCFileRemovals(gcx, ctx, paths)
 		}).Build()
 	defer mockRemoveObjectFiles.UnPatch()
 
@@ -1506,6 +1506,15 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	assert.Contains(t, droppedSegmentIDs, int64(2002))
 	assert.Nil(t, m.GetSegment(ctx, 2001))
 	assert.Nil(t, m.GetSegment(ctx, 2002))
+}
+
+//nolint:revive // A mockey method replacement takes the receiver before the context.
+func successfulGCFileRemovals(_ *gc.GarbageCollector, _ context.Context, paths []string) []storage.RemoveResult {
+	results := make([]storage.RemoveResult, len(paths))
+	for i, filePath := range paths {
+		results[i].Path = filePath
+	}
+	return results
 }
 
 func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {

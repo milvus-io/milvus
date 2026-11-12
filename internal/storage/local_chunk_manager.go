@@ -287,24 +287,43 @@ func (lcm *LocalChunkManager) MultiRemove(ctx context.Context, filePaths []strin
 }
 
 func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	return lcm.removeWithPrefix(ctx, prefix).Err
+}
+
+func (lcm *LocalChunkManager) removeWithPrefix(ctx context.Context, prefix string) RemovePrefixResult {
+	result := RemovePrefixResult{Prefix: prefix}
 	// If the prefix is empty string, the ListWithPrefix() will return all files under current process work folder,
 	// MultiRemove() will delete all these files. This is a danger behavior, empty prefix is not allowed.
 	if len(prefix) == 0 {
 		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
 		mlog.Warn(ctx, errMsg)
-		return merr.WrapErrStorageMsg("%s", errMsg)
+		result.Err = merr.WrapErrStorageMsg("%s", errMsg)
+		return result
 	}
 	var removeErr error
 	if err := lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) bool {
+		result.Listed++
 		err := lcm.MultiRemove(ctx, []string{chunkInfo.FilePath})
 		if err != nil {
 			removeErr = err
+		} else {
+			result.Removed++
 		}
 		return true
 	}); err != nil {
-		return err
+		result.Err = err
+		return result
 	}
-	return removeErr
+	result.Err = removeErr
+	return result
+}
+
+func (lcm *LocalChunkManager) MultiRemoveWithPrefix(ctx context.Context, prefixes []string) []RemovePrefixResult {
+	results := make([]RemovePrefixResult, len(prefixes))
+	for i, prefix := range prefixes {
+		results[i] = lcm.removeWithPrefix(ctx, prefix)
+	}
+	return results
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {

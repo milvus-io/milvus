@@ -19,9 +19,11 @@
 package gc
 
 import (
+	"context"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 )
 
@@ -38,4 +40,8 @@ func NewGCManifestReadIO(t *testing.T) *packed.ManifestIOContext {
 	io := packed.NewManifestIOContext(1)
 	t.Cleanup(io.Close)
 	return io
+}
+
+func RemoveObjectFilesWithResultMethodForTest() func(*GarbageCollector, context.Context, []string) []storage.RemoveResult {
+	return (*GarbageCollector).removeObjectFilesWithResult
 }

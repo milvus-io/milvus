@@ -122,6 +122,11 @@ directory from the output manifest base.
 
 ## GC coverage and limits
 
+DataCoord batches eligible deletions while retaining the existing ownership and
+protection rules. Segment catalog cleanup removes all binlog prefixes before
+exact main-record deletion; partial failures remain retryable. See the
+[batch GC design](../../design-docs/design_docs/20261112-datacoord-batch-gc.md).
+
 - V1/V2: delete recorded files and periodically scan standard layouts for
   orphans, including independent `bm25_stats` files.
 - Dropped V3 segments: remove the manifest base directory, including data and
