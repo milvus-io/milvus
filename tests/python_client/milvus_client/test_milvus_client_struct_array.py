@@ -26,6 +26,7 @@ from pymilvus.bulk_writer import (
     get_import_progress,
 )
 from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.exceptions import ParamError
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -400,6 +401,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             (DataType.FLOAT, {}),
             (DataType.DOUBLE, {}),
             (DataType.VARCHAR, {"max_length": 256}),
+            (DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 10}),
         ],
     )
     def test_create_struct_with_various_scalar_types(self, scalar_type, scalar_params):
@@ -1242,6 +1244,62 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         res, check = self.insert(client, collection_name, data)
         assert check
         assert res["insert_count"] == 5
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
+    def test_struct_array_with_nullable_field(self, nullable_field):
+        """
+        target: allow nullable scalar/vector children in a non-nullable Struct Array
+        method: create independent child nullability and round-trip explicit null and non-null values
+        expected: child nulls survive growing and sealed reads without nulling the parent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(
+            "clip_embedding1",
+            DataType.FLOAT_VECTOR,
+            dim=default_dim,
+            nullable=("clip_embedding1" == nullable_field),
+        )
+        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
+        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+        indexes = client.prepare_index_params()
+        indexes.add_index("normal_vector", index_type="FLAT", metric_type="L2")
+        indexes.add_index("clips[clip_embedding1]", index_type="FLAT", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=indexes)
+        vector = [1.0] + [0.0] * (default_dim - 1)
+        clips = [
+            {"clip_embedding1": vector, "scalar_field": 7, "label": "null_child"},
+            {"clip_embedding1": vector, "scalar_field": 8, "label": "present_child"},
+        ]
+        clips[0][nullable_field] = None
+        self.insert(client, collection_name, [{"id": 0, "normal_vector": vector, "clips": clips}])
+        for sealed in (False, True):
+            if sealed:
+                self.flush(client, collection_name)
+                self.release_collection(client, collection_name)
+                self.load_collection(client, collection_name)
+            rows, _ = self.query(
+                client,
+                collection_name,
+                filter="id == 0",
+                output_fields=["id", "clips"],
+                consistency_level="Strong",
+            )
+            assert rows == [{"id": 0, "clips": clips}]
 
 
 class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
@@ -4606,11 +4664,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
     """Test case of struct array invalid operations and edge cases"""
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("unsupported_type", [DataType.STRUCT, DataType.ARRAY])
+    @pytest.mark.parametrize("unsupported_type", [DataType.STRUCT, DataType._ARRAY_OF_VECTOR])
     def test_nested_struct_array(self, unsupported_type):
         """
         target: test creating struct with unsupported nested types (should fail)
-        method: attempt to create struct with STRUCT, ARRAY, GEOMETRY or TIMESTAMPTZ field
+        method: attempt to create struct with STRUCT or internal ArrayOfVector field
         expected: creation should fail with appropriate error
         """
         client = self._client()
@@ -4618,27 +4676,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
 
-        # Try to add unsupported field type to struct schema (this should fail immediately)
-        try:
-            if unsupported_type == DataType.ARRAY:
-                struct_schema.add_field(
-                    "unsupported_field",
-                    unsupported_type,
-                    element_type=DataType.INT64,
-                    max_capacity=10,
-                )
-            else:
-                struct_schema.add_field("unsupported_field", unsupported_type)
-            assert False, f"Expected ParamError when adding {unsupported_type} field to struct schema"
-        except Exception as e:
-            # Verify the error message indicates the type is not supported
-            error_msg = str(e)
-            # Different error messages for different types
-            assert (
-                "Struct field schema does not support Array, ArrayOfVector or Struct" in error_msg
-                or "is not supported" in error_msg
-                or "not supported for fields in struct" in error_msg
-            )
+        with pytest.raises(ParamError, match="Struct field schema does not support"):
+            struct_schema.add_field("unsupported_field", unsupported_type)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_with_unsupported_vector_field(self):
@@ -4947,45 +4986,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         error = {
             ct.err_code: 65535,
             ct.err_msg: "only fixed dimension vector types are supported",
-        }
-        self.create_collection(
-            client,
-            collection_name,
-            schema=schema,
-            check_task=CheckTasks.err_res,
-            check_items=error,
-        )
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
-    def test_struct_array_with_nullable_field(self, nullable_field):
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-
-        struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1",
-            DataType.FLOAT_VECTOR,
-            dim=default_dim,
-            nullable=("clip_embedding1" == nullable_field),
-        )
-        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
-        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
-
-        schema.add_field(
-            "clips",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=struct_schema,
-            max_capacity=100,
-        )
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually, "
-            f"set nullable on the struct instead",
         }
         self.create_collection(
             client,
