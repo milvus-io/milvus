@@ -1232,9 +1232,9 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 		op3 = meta.UpdateIsImporting(result.GetSegmentId(), true)
 	}
 	operators := []meta.UpdateOperator{func(pack *meta.UpdateSegmentPack) bool {
-		// Recheck under segMu: segment retirement and external manifest
+		// Recheck under the segment writer lock: segment retirement and external manifest
 		// adoption can bypass the manifest lock while indexes are installed.
-		current := pack.Meta.Segments.GetSegment(result.GetSegmentId())
+		current := pack.Peek(result.GetSegmentId())
 		if !meta.IsSegmentHealthy(current) {
 			return pack.Fail(merr.WrapErrSegmentNotFound(result.GetSegmentId()))
 		}

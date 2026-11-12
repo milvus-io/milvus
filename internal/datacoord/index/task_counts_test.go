@@ -571,7 +571,8 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 
 // A scrape holds the gauge vector's read lock while it sends series, and
 // creating or deleting a series waits for it. A publication stuck there must
-// not hold the counters' lock, which manifest installs take under segMu.
+// not hold the counters' lock, which manifest installs take under the segment
+// writer lock.
 func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
 	metrics.DataCoordStoredIndexFilesSize.Reset()
 	ctx := context.Background()

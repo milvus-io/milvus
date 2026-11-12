@@ -139,9 +139,9 @@ func TestManifestIndexRollbackRecordsFirstAndIdleWake(t *testing.T) {
 
 func TestManifestIndexRollbackMissingSegmentStaysPending(t *testing.T) {
 	m, _, _, _ := RollbackFixture(t)
-	m.SegMu.Lock()
+	unlock := m.LockSegments(meta.RestartSegID)
 	m.Segments.DropSegment(meta.RestartSegID)
-	m.SegMu.Unlock()
+	unlock()
 	inspector := NewMigrationRollbackInspector(context.Background(), m)
 	assert.True(t, inspector.runOnce(context.Background()), "orphaned manifest-only records must block readiness and keep retries active")
 	assert.False(t, inspector.ready)

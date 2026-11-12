@@ -83,11 +83,15 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 	segments, err := catalog.ListSegments(ctx, 100)
 	require.NoError(s.T(), err)
 	// Background compaction still reads segment indexes during this simulated restart.
-	s.testServer.meta.SegMu.Lock()
+	segmentIDs := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		segmentIDs = append(segmentIDs, segment.GetID())
+	}
+	unlock := s.testServer.meta.LockSegments(segmentIDs...)
 	for _, segment := range segments {
 		s.testServer.meta.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
 	}
-	s.testServer.meta.SegMu.Unlock()
+	unlock()
 	recovered, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) {
 		return true, nil
 	}, nil, nil, nil)
