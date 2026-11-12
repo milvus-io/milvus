@@ -295,30 +295,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	return nil
 }
 
-// If we enable following checking when loading segments,
-// 1. all segment should always be loaded by streamingnode but not 2.5 querynode, make some search and query failure when upgrading.
-// Otherwise, some search and query result will be wrong when upgrading.
-// We choose to disable this checking for now to promise available search and query when upgrading.
-//
-// Because the L0 management at 2.6 and 2.5 is different, so when upgrading mixcoord,
-// the new mixcoord will make a wrong plan when balancing a segment from one query node to another by 2.5 delegator.
-// We need to balance the 2.5 delegator to 2.6 delegator before balancing any segment by 2.6 mixcoord.
-// func (ex *Executor) checkIfShardLeaderIsStreamingNode(view *meta.DmChannel) error {
-// 	if !streamingutil.IsStreamingServiceEnabled() {
-// 		return nil
-// 	}
-//
-// 	node := ex.nodeMgr.Get(view.Node)
-// 	if node == nil {
-// 		return merr.WrapErrServiceInternalMsg("node %d is not found", view.Node)
-// 	}
-// 	nodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-// 	if !nodes.Contain(view.Node) {
-// 		return merr.WrapErrServiceInternalMsg("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node)
-// 	}
-// 	return nil
-// }
-
 func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()

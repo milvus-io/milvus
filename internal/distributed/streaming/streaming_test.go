@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -31,7 +30,6 @@ var vChannels = []string{
 var collectionName = "test"
 
 func TestMain(m *testing.M) {
-	streamingutil.SetStreamingServiceEnabled()
 	paramtable.Init()
 	m.Run()
 }
@@ -156,7 +154,6 @@ func TestReplicateCreateCollection(t *testing.T) {
 
 func TestStreamingProduce(t *testing.T) {
 	t.Skip("cat not running without streaming service at background")
-	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
 

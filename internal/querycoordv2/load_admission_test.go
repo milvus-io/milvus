@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -139,7 +138,7 @@ func (f *admissionFixture) loadedIn(t *testing.T, collectionID int64, rgNames ..
 	}
 }
 
-// withStreamingQueryNodes turns the streaming service on and makes the
+// withStreamingQueryNodes makes the
 // streaming node manager answer from byRG, so a test can state which resource
 // group holds which streaming query nodes without one running. The
 // cluster-wide set is derived from byRG: the two are the same nodes.
@@ -148,7 +147,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	for _, nodes := range byRG {
 		all.Insert(nodes.Collect()...)
 	}
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
 	byGroup := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDsByResourceGroup).
 		Return(byRG).Build()
 	cluster := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
@@ -156,7 +154,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	return func() {
 		cluster.UnPatch()
 		byGroup.UnPatch()
-		enabled.UnPatch()
 	}
 }
 

@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -62,10 +61,8 @@ func (ob *ReplicaObserver) Start() {
 
 		ob.wg.Add(1)
 		go ob.schedule(ctx)
-		if streamingutil.IsStreamingServiceEnabled() {
-			ob.wg.Add(1)
-			go ob.scheduleStreamingQN(ctx)
-		}
+		ob.wg.Add(1)
+		go ob.scheduleStreamingQN(ctx)
 	})
 }
 

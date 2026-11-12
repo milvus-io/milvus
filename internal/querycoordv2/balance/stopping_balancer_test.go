@@ -316,5 +316,6 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 }
 
 func TestStoppingBalancerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(StoppingBalancerTestSuite))
 }

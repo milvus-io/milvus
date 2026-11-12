@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -287,17 +286,15 @@ func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assig
 // A replica needs stopping balance if it has:
 //  1. Read-only (RO) nodes that need to be drained
 //  2. Read-only streaming query (ROSQ) nodes that need to be drained
-//  3. Channel read-only nodes when streaming service is enabled
+//  3. Channel read-only nodes
 //
 // These replicas need immediate attention to move data off nodes that are being stopped.
 //
 // Returns a slice of replica IDs that need stopping balance operations.
 func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context, collectionID int64) []int64 {
 	filterReplicaWithRONodes := func(replica *meta.Replica, _ int) bool {
-		channelRONodes := make([]int64, 0)
-		if streamingutil.IsStreamingServiceEnabled() {
-			_, channelRONodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-		}
+		_, channelRONodes := utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+
 		return replica.RONodesCount()+replica.ROSQNodesCount() > 0 || len(channelRONodes) > 0
 	}
 
