@@ -66,6 +66,10 @@ var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema
 // object-storage concurrency already used by DataNodes.
 const externalRefreshManifestReadConcurrency = 16
 
+// When row estimation is unavailable, still avoid the 10,000-file default
+// concentrating Function materialization on a single worker.
+const externalRefreshFallbackFilesPerTask = int64(64)
+
 // exploreTempDirForJob returns the root directory for every Explore attempt of
 // one refresh job. Terminal cleanup removes this root and all attempt manifests.
 func exploreTempDirForJob(jobID int64) string {
@@ -956,6 +960,7 @@ func (m *Manager) createTasksForJob(
 	// manifest path. The manifest is written to shared storage so all DataNodes
 	// in the resulting plan can read their assigned ranges.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
+
 	if err != nil {
 		if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, merr.ErrOperationNotSupported) {
 			// Include only the object path: source URLs can carry credentials
@@ -991,11 +996,44 @@ func (m *Manager) createTasksForJob(
 	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
 	}
-	// NOTE: zero-total-rows cannot be detected here. PlainFormat::explore
-	// hardcodes start_index/end_index to -1 as sentinels and never reads
-	// parquet metadata, so FileInfo.NumRows carries -1, not a real row count.
-	// The real guard lives at datanode's balanceFragmentsToSegments, where
-	// fragment RowCount is populated from manifest (endRow - startRow).
+	// Resolve real Parquet row counts before planning; Explore returns -1.
+	// Capture the budget once for the entire attempt.
+	rowsPerTask := int64(0)
+	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
+	collection := m.mt.GetCollection(job.GetCollectionId())
+	if spec.Format == "parquet" && collection != nil && len(collection.Schema.GetFunctions()) > 0 {
+		rowsPerTask = paramtable.Get().DataCoordCfg.ExternalCollectionFunctionRowsPerTask.GetAsInt64()
+		if rowsPerTask < 0 {
+			return nil, merr.WrapErrServiceInternalMsg("external refresh function rows per task must be nonnegative")
+		}
+		if rowsPerTask > 0 {
+			var counts []int64
+			counts, err = packed.FetchExternalFileRowCounts(ctx, spec.Format, allFiles,
+				meta.CreateStorageConfig(), packed.ExternalSpecContext{
+					CollectionID: job.GetCollectionId(), Source: job.GetExternalSource(), Spec: job.GetExternalSpec(),
+				})
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				// Counts only estimate task cost. Do not make an extra metadata
+				// read a new failure gate, or classify opaque native errors here.
+				// DataNode still reads/validates each file through its normal path.
+				log.Warn(ctx, "external refresh row estimates unavailable, using conservative file ranges",
+					mlog.Err(err), mlog.Int64("functionRowsPerTask", rowsPerTask))
+				filesPerTask = min(filesPerTask, externalRefreshFallbackFilesPerTask)
+				rowsPerTask = 0
+			} else {
+				for i := range allFiles {
+					allFiles[i].NumRows = counts[i]
+				}
+			}
+		}
+	}
+
+	// Explore may leave row counts unresolved when the Function row budget
+	// does not apply. The DataNode remains responsible for validating empty
+	// sources after fragment preparation.
 	log.Info(ctx, "explored external files for task splitting",
 		mlog.Int("totalFiles", len(allFiles)),
 		mlog.String("manifestPath", manifestPath))
@@ -1050,13 +1088,13 @@ func (m *Manager) createTasksForJob(
 		mlog.Int("maxConcurrency", externalRefreshManifestReadConcurrency),
 		mlog.Duration("duration", time.Since(manifestReadStart)))
 
-	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
 	taskPlans, ownershipSummary, err := planExternalRefreshOwnership(
 		spec.Format,
 		baselineFormat,
 		allFiles,
 		segmentFragments,
 		filesPerTask,
+		rowsPerTask,
 	)
 	if err != nil {
 		return nil, err
@@ -1065,6 +1103,7 @@ func (m *Manager) createTasksForJob(
 	log.Info(ctx, "splitting refresh job into tasks",
 		mlog.Int("totalFiles", len(allFiles)),
 		mlog.Int64("filesPerTask", filesPerTask),
+		mlog.Int64("functionRowsPerTask", rowsPerTask),
 		mlog.Int("baselineSegments", len(baselineSegments)),
 		mlog.Int("baseNumTasks", ownershipSummary.BaseTaskCount),
 		mlog.Int("numTasks", ownershipSummary.FinalTaskCount),
@@ -1116,6 +1155,9 @@ func (m *Manager) createTasksForJob(
 		rawTasks = append(rawTasks, task)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
 		if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
 			latestJob := m.refreshMeta.GetJob(job.GetJobId())

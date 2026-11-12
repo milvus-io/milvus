@@ -2300,3 +2300,14 @@ func TestCredentialBrokerRejectsInvalidStartupQuery(t *testing.T) {
 		bt.mgr.Close()
 	}
 }
+
+func TestExternalCollectionFunctionRowsPerTask(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	p := &dataCoordConfig{}
+	p.init(base)
+	require.EqualValues(t, 16000000, p.ExternalCollectionFunctionRowsPerTask.GetAsInt64())
+	require.NoError(t, base.Save(p.ExternalCollectionFunctionRowsPerTask.Key, "0"))
+	require.Zero(t, p.ExternalCollectionFunctionRowsPerTask.GetAsInt64())
+	require.NoError(t, base.Save(p.ExternalCollectionFunctionRowsPerTask.Key, "12345"))
+	require.EqualValues(t, 12345, p.ExternalCollectionFunctionRowsPerTask.GetAsInt64())
+}

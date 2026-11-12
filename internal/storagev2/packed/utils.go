@@ -153,6 +153,9 @@ func fetchRowCountsConcurrently(
 	for k, idx := range needInfo {
 		idx := idx
 		futures[k] = pool.Submit(func() (struct{}, error) {
+			if err := ctx.Err(); err != nil {
+				return struct{}{}, err
+			}
 			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
 			if err != nil {
 				return struct{}{}, merr.Wrapf(err, "failed to get file info for %s", fileInfos[idx].FilePath)
@@ -172,6 +175,18 @@ func fetchRowCountsConcurrently(
 		return nil, err
 	}
 	return rowCounts, nil
+}
+
+// FetchExternalFileRowCounts resolves Explore's unknown row counts using the
+// same bounded metadata reads as DataNode fragment preparation. Counts are
+// aligned with files; callers must not treat Explore's -1 sentinel as zero.
+func FetchExternalFileRowCounts(ctx context.Context, format string, files []FileInfo,
+	storageConfig *indexpb.StorageConfig, extfs ExternalSpecContext,
+) ([]int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return fetchRowCountsConcurrently(ctx, format, files, storageConfig, extfs)
 }
 
 // FetchFragmentsFromExternalSourceWithRange reads the explore manifest,

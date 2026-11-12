@@ -65,7 +65,7 @@ func planExternalRefreshOwnership(
 	format, baselineFormat string,
 	files []packed.FileInfo,
 	segmentFragments packed.SegmentFragments,
-	filesPerTask int64,
+	filesPerTask, rowsPerTask int64,
 ) ([]externalRefreshOwnershipTaskPlan, externalRefreshOwnershipSummary, error) {
 	summary := externalRefreshOwnershipSummary{}
 	if len(files) == 0 && format != externalspec.FormatPaimonTable {
@@ -108,12 +108,25 @@ func planExternalRefreshOwnership(
 	}
 
 	fileCount := int64(len(files))
-	// Use filesPerTask to choose the base task count, then rebalance the files
-	// into near-equal chunks instead of leaving one disproportionately small tail.
-	// An empty Paimon snapshot still needs one task to retire its old segments.
-	chunkCount := max(1, int((fileCount-1)/filesPerTask+1))
+	if rowsPerTask < 0 {
+		return nil, summary, merr.WrapErrServiceInternalMsg("external refresh rows per task must be nonnegative")
+	}
+	rowCounts := make([]int64, len(files))
+	for i, file := range files {
+		if rowsPerTask > 0 && file.NumRows < 0 {
+			return nil, summary, merr.WrapErrServiceInternalMsg("external refresh row count is unresolved at file index %d", i)
+		}
+		rowCounts[i] = file.NumRows
+	}
+	boundaries := externalRefreshBaseBoundaries(rowCounts, filesPerTask, rowsPerTask)
+	chunkCount := len(boundaries) - 1
 	summary.BaseTaskCount = chunkCount
-	chunkSize := (fileCount-1)/int64(chunkCount) + 1
+	fileChunks := make([]int, len(files))
+	for chunk := 0; chunk < chunkCount; chunk++ {
+		for i := boundaries[chunk]; i < boundaries[chunk+1]; i++ {
+			fileChunks[i] = chunk
+		}
+	}
 	mergeUntil := make([]int, chunkCount)
 	baselineFilePaths := make(map[string]struct{})
 
@@ -161,8 +174,8 @@ func planExternalRefreshOwnership(
 		firstChunk := 0
 		lastChunk := 0
 		if lastFileIndex >= 0 {
-			firstChunk = int(firstFileIndex / chunkSize)
-			lastChunk = int(lastFileIndex / chunkSize)
+			firstChunk = fileChunks[firstFileIndex]
+			lastChunk = fileChunks[lastFileIndex]
 		}
 		ownerChunks = append(ownerChunks, firstChunk)
 		mergeUntil[firstChunk] = max(mergeUntil[firstChunk], lastChunk)
@@ -184,9 +197,9 @@ func planExternalRefreshOwnership(
 			chunkTasks[chunk] = taskIndex
 		}
 
-		fileIndexEnd := min(int64(lastChunk+1)*chunkSize, fileCount)
+		fileIndexEnd := int64(boundaries[lastChunk+1])
 		tasks = append(tasks, externalRefreshOwnershipTaskPlan{
-			FileIndexBegin: int64(firstChunk) * chunkSize,
+			FileIndexBegin: int64(boundaries[firstChunk]),
 			FileIndexEnd:   fileIndexEnd,
 		})
 		firstChunk = lastChunk + 1
