@@ -23,15 +23,21 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // NewMultiSearchTestProxy starts the real batch scheduler for the REST tests in proxy_test.
@@ -302,5 +308,215 @@ func TestMultiSearchRetriesRateLimitedItem(t *testing.T) {
 		}
 		require.Equal(t, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond}, limitedAttempts)
 		require.Equal(t, []time.Duration{600 * time.Millisecond}, readyAttempts)
+	})
+}
+
+func TestMultiSearchRetriesProxyDQLAdmissionOnly(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		dql, err := scheduler.NewTaskScheduler(t.Context(), nil)
+		require.NoError(t, err)
+		t.Cleanup(dql.Close)
+		dql.DqQueue.SetMaxTaskNum(0)
+		p.sched = dql
+
+		attempts := make(map[string]int)
+		items := []MultiSearchPrepare{
+			multiSearchTestPrepare("admission_recovers"),
+			multiSearchTestPrepare("admission_stays_full"),
+			multiSearchTestPrepare("querynode_rejection"),
+		}
+		start := time.Now()
+		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			name := req.GetCollectionName()
+			attempts[name]++
+			if name == "querynode_rejection" {
+				return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrTooManyRequests(8, "query node queue"))}, nil
+			}
+			if name == "admission_recovers" && attempts[name] > 1 {
+				return &milvuspb.SearchResults{Status: merr.Success()}, nil
+			}
+			return p.Search(ctx, req)
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+		require.True(t, merr.Ok(results[0].GetStatus()))
+		require.ErrorIs(t, merr.Error(results[1].GetStatus()), merr.ErrServiceTooManyRequests)
+		require.Equal(t, merr.Status(merr.WrapErrTooManyRequests(0)), results[1].GetStatus())
+		require.ErrorIs(t, merr.Error(results[2].GetStatus()), merr.ErrServiceTooManyRequests)
+		require.Equal(t, map[string]int{"admission_recovers": 2, "admission_stays_full": 10, "querynode_rejection": 1}, attempts)
+		require.Equal(t, 18*time.Second+200*time.Millisecond, time.Since(start))
+	})
+}
+
+func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		budget   time.Duration
+		attempts []time.Duration
+	}{
+		{"exhausted", 0, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond, 1400 * time.Millisecond,
+			3 * time.Second, 6 * time.Second, 9 * time.Second, 12 * time.Second, 15 * time.Second, 18 * time.Second}},
+		{"next backoff exceeds budget", time.Second, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := NewMultiSearchTestProxy(t, 1, 1)
+				start := time.Now()
+				options := MultiSearchOptions{}
+				if tc.budget != 0 {
+					options.ExecutionDeadline = start.Add(tc.budget)
+				}
+				var attempts []time.Duration
+				var lastStatus *commonpb.Status
+				items := []MultiSearchPrepare{multiSearchTestPrepare("limited")}
+				results, err := p.RunMultiSearch(t.Context(), options, items, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					deadline, _ := ctx.Deadline()
+					if !deadline.Equal(options.ExecutionDeadline) {
+						t.Errorf("attempt deadline = %v, want %v", deadline, options.ExecutionDeadline)
+					}
+					attempts = append(attempts, time.Since(start))
+					lastStatus = merr.Status(merr.WrapErrServiceRateLimit(float64(len(attempts))))
+					lastStatus.ExtraInfo = map[string]string{"quota": "search"}
+					return &milvuspb.SearchResults{Status: lastStatus}, nil
+				})
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				require.Equal(t, tc.attempts, attempts)
+				require.Equal(t, tc.attempts[len(tc.attempts)-1], time.Since(start))
+				require.Same(t, lastStatus, results[0].GetStatus())
+			})
+		})
+	}
+}
+
+func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
+	p := NewMultiSearchTestProxy(t, 1, 1)
+	failures := map[string]error{
+		"force_deny":       merr.WrapErrServiceQuotaExceeded("administrator disabled reads"),
+		"permission":       status.Error(codes.PermissionDenied, "no search privilege"),
+		"invalid":          merr.ErrParameterInvalid,
+		"retryable_status": merr.ErrServiceUnavailable,
+		"marked_input":     merr.WrapErrAsInputError(merr.ErrServiceRateLimit),
+	}
+	attempts := make(map[string]int)
+	items := make([]MultiSearchPrepare, 0, len(failures))
+	codes := make([]int32, 0, len(failures))
+	for name, err := range failures {
+		items = append(items, multiSearchTestPrepare(name))
+		code := merr.Code(err)
+		if name == "permission" {
+			code = merr.Code(merr.ErrPrivilegeNotPermitted)
+		}
+		codes = append(codes, code)
+	}
+	results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		attempts[req.GetCollectionName()]++
+		return nil, failures[req.GetCollectionName()]
+	})
+	require.NoError(t, err)
+	require.Len(t, results, len(failures))
+	for i, result := range results {
+		require.Equal(t, codes[i], result.GetStatus().GetCode())
+	}
+	for name := range failures {
+		require.Equal(t, 1, attempts[name], name)
+	}
+}
+
+func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		finished := make(chan error, 1)
+		attempts := 0
+		go func() {
+			items := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("undispatched")}
+			_, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1}, items, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				attempts++
+				return nil, merr.ErrServiceRateLimit
+			})
+			finished <- err
+		}()
+		synctest.Wait()
+		cancel()
+		require.ErrorIs(t, <-finished, context.Canceled)
+		synctest.Wait()
+		require.Equal(t, 1, attempts)
+	})
+}
+
+func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := trace.NewTracerProvider(trace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(previous)
+
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		unblock := make(chan struct{})
+		releaseLateResult := sync.OnceFunc(func() { close(unblock) })
+		defer releaseLateResult()
+		nodeID := paramtable.GetStringNodeID()
+		success := metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, "success")
+		timeout := metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, "timeout")
+		partial := metrics.ProxyMultiSearchBatchesTotal.WithLabelValues(nodeID, "partial_success")
+		retry := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, "rate_limit")
+		beforeSuccess, beforeTimeout := testutil.ToFloat64(success), testutil.ToFloat64(timeout)
+		beforePartial, beforeRetry := testutil.ToFloat64(partial), testutil.ToFloat64(retry)
+		attempts := 0
+		items := []MultiSearchPrepare{
+			multiSearchTestPrepare("recovers"),
+			multiSearchTestPrepare("late"),
+			multiSearchTestPrepare("undispatched"),
+		}
+		options := MultiSearchOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}
+		results, err := p.RunMultiSearch(t.Context(), options, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			switch req.GetCollectionName() {
+			case "recovers":
+				attempts++
+				if attempts <= 2 {
+					return nil, merr.ErrServiceRateLimit
+				}
+			case "late":
+				<-ctx.Done()
+				<-unblock
+			default:
+				t.Error("started search after its deadline")
+			}
+			return &milvuspb.SearchResults{Status: merr.Success()}, nil
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+		require.Equal(t, beforeSuccess+1, testutil.ToFloat64(success))
+		require.Equal(t, beforeTimeout+2, testutil.ToFloat64(timeout))
+		require.Equal(t, beforePartial+1, testutil.ToFloat64(partial))
+		require.Equal(t, beforeRetry+2, testutil.ToFloat64(retry))
+
+		releaseLateResult()
+		synctest.Wait()
+		require.Equal(t, beforeSuccess+1, testutil.ToFloat64(success))
+		require.Equal(t, beforeTimeout+2, testutil.ToFloat64(timeout))
+		spans := recorder.Ended()
+		require.Len(t, spans, 1)
+		require.Len(t, spans[0].Events(), 3)
+		for i, event := range spans[0].Events() {
+			values := make(map[string]any)
+			for _, attr := range event.Attributes {
+				values[string(attr.Key)] = attr.Value.AsInterface()
+			}
+			require.Equal(t, int64(i), values["index"])
+			if i == 0 {
+				require.Equal(t, "success", values["result"])
+				require.Equal(t, int64(3), values["attempts"])
+				require.Equal(t, int64(2), values["rate_limited_attempts"])
+				require.Equal(t, int64(2), values["deferrals"])
+				require.Equal(t, int64(600), values["backoff_ms"])
+			} else {
+				require.Equal(t, "timeout", values["result"])
+			}
+		}
 	})
 }

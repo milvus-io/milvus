@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -284,4 +285,77 @@ func TestMultiSearchRESTShortWriteFailsTransport(t *testing.T) {
 		_, err = io.ReadAll(response.Body)
 	}
 	require.Error(t, err)
+}
+
+type multiSearchQuotaProxy struct {
+	*multiSearchHTTPProxy
+	limiter types.Limiter
+}
+
+func (p *multiSearchQuotaProxy) GetRateLimiter() (types.Limiter, error) { return p.limiter, nil }
+
+type multiSearchQuotaCache struct{ proxy.Cache }
+
+func (multiSearchQuotaCache) GetDatabaseInfo(_ context.Context, name string) (*metacache.DatabaseInfo, error) {
+	ids := map[string]int64{"catalog_a": 10, "catalog_b": 20}
+	return &metacache.DatabaseInfo{DBID: ids[name]}, nil
+}
+
+func (multiSearchQuotaCache) GetCollectionID(_ context.Context, db, name string) (int64, error) {
+	ids := map[string]int64{"catalog_a/ready": 11, "catalog_b/ready": 21}
+	return ids[db+"/"+name], nil
+}
+
+func (multiSearchQuotaCache) GetPartitionInfo(_ context.Context, db, collection, partition string) (*metacache.PartitionInfo, error) {
+	ids := map[string]int64{"catalog_a/ready/east": 12, "catalog_b/ready/west": 22}
+	return &metacache.PartitionInfo{PartitionID: ids[db+"/"+collection+"/"+partition]}, nil
+}
+
+type multiSearchQuotaCall struct {
+	dbID       int64
+	partitions map[int64][]int64
+	rateType   internalpb.RateType
+	nq         int
+}
+
+type multiSearchQuotaLimiter struct {
+	types.Limiter
+	calls []multiSearchQuotaCall
+}
+
+func (l *multiSearchQuotaLimiter) Check(dbID int64, parts map[int64][]int64, rateType internalpb.RateType, nq int) error {
+	l.calls = append(l.calls, multiSearchQuotaCall{dbID, parts, rateType, nq})
+	if len(l.calls) == 1 {
+		return merr.WrapErrServiceRateLimit(10)
+	}
+	return nil
+}
+
+func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var searched []string
+		p := newMultiSearchHTTPProxy(t, nil, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			searched = append(searched, req.GetDbName())
+			return successfulSearchResult(), nil
+		})
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true"))
+		p.cache = multiSearchQuotaCache{p.cache}
+		limiter := &multiSearchQuotaLimiter{}
+		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{multiSearchHTTPProxy: p, limiter: limiter})
+		payload := `{"maxConcurrency":1,"requests":[
+			{"search":{"dbName":"catalog_a","collectionName":"ready","partitionNames":["east"],"data":[[1,0],[0,1]]}},
+			{"search":{"dbName":"catalog_b","collectionName":"ready","partitionNames":["west"],"ids":[10,20,30]}}]}`
+		status, body := recordMultiSearch(t, handler, strings.NewReader(payload), "")
+		require.Equal(t, http.StatusOK, status)
+		require.Zero(t, body.Code)
+		require.Len(t, body.Data, 2)
+		for _, item := range body.Data {
+			require.Zero(t, item.Search.Code)
+		}
+		first := multiSearchQuotaCall{10, map[int64][]int64{11: {12}}, internalpb.RateType_DQLSearch, 2}
+		second := multiSearchQuotaCall{20, map[int64][]int64{21: {22}}, internalpb.RateType_DQLSearch, 3}
+		require.Equal(t, []multiSearchQuotaCall{first, first, second}, limiter.calls)
+		require.Equal(t, []string{"catalog_a", "catalog_b"}, searched)
+	})
 }
