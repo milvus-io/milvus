@@ -29,6 +29,8 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -390,7 +392,12 @@ func TestProxyWatcher_SnapshotTimeoutAborts(t *testing.T) {
 		cli, service := newProxyRecoveryClient(t, blockUntilTimeout)
 		p := NewProxyWatcher(cli)
 		t.Cleanup(p.Stop)
-		require.ErrorIs(t, p.WatchProxy(context.Background()), context.DeadlineExceeded)
+		err := p.WatchProxy(context.Background())
+		// Depending on which deadline fires first, clientv3 returns the local
+		// context error or the server's gRPC DeadlineExceeded status.
+		if status.Code(err) != codes.DeadlineExceeded {
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		}
 		require.EqualValues(t, 1, service.rangeCalls.Load(), "a snapshot timeout must not be retried")
 	})
 	t.Run("recovery", func(t *testing.T) {

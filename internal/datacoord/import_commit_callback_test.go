@@ -61,7 +61,7 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
 		}})
 	}
-	server := &Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments, MetaStore: metaStore}}
+	server := &Server{importMeta: imports, meta: &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: segments, MetaStore: metaStore}}
 	manager, err := dataview.RecoverManager(t.Context(), catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, server.meta, server.importMeta, view)
@@ -95,8 +95,14 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 	return server, catalog, result
 }
 
+func newLegacyImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, message.BroadcastResultCommitImportMessageV2) {
+	t.Helper()
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
+	return newImportCommitCallbackTest(t)
+}
+
 func TestImportCommitCallbackPublishesPerChannelVisibility(t *testing.T) {
-	server, catalog, result := newImportCommitCallbackTest(t)
+	server, catalog, result := newLegacyImportCommitCallbackTest(t)
 	ctx := context.Background()
 	require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
 	for id, tick := range map[int64]uint64{10: 200, 11: 200, 20: 300} {
@@ -120,7 +126,7 @@ func TestImportCommitCallbackPublishesPerChannelVisibility(t *testing.T) {
 }
 
 func TestImportCommitCallbackRetriesSegmentPersistence(t *testing.T) {
-	server, _, result := newImportCommitCallbackTest(t)
+	server, _, result := newLegacyImportCommitCallbackTest(t)
 	ctx := context.Background()
 	patch := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
 	require.ErrorIs(t, server.ddl.CommitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
@@ -235,7 +241,7 @@ func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
 }
 
 func TestImportCommitCallbackRetriesCompletionAfterRestart(t *testing.T) {
-	server, catalog, result := newImportCommitCallbackTest(t)
+	server, catalog, result := newLegacyImportCommitCallbackTest(t)
 	ctx := context.Background()
 	// All segment metadata succeeds, but the final job write fails.
 	patch := mockey.Mock((*datacoordkv.Catalog).SaveImportJob).
@@ -262,7 +268,7 @@ func TestImportCommitCallbackRetriesCompletionAfterRestart(t *testing.T) {
 }
 
 func TestImportCommitCallbackRejectsTimestampBeforeRows(t *testing.T) {
-	server, _, result := newImportCommitCallbackTest(t)
+	server, _, result := newLegacyImportCommitCallbackTest(t)
 	result.Results["v1"].TimeTick = 99
 	err := server.ddl.CommitImportV2AckCallback(context.Background(), result)
 	require.ErrorIs(t, err, merr.ErrImportSysFailed)
@@ -275,7 +281,7 @@ func TestImportCommitCallbackRejectsTimestampBeforeRows(t *testing.T) {
 }
 
 func TestImportCommitCallbackRetriesCommitPhasePersistence(t *testing.T) {
-	server, _, result := newImportCommitCallbackTest(t)
+	server, _, result := newLegacyImportCommitCallbackTest(t)
 	ctx := context.Background()
 	patch := mockey.Mock((*datacoordkv.Catalog).SaveImportJob).Return(context.DeadlineExceeded).Build()
 	defer patch.UnPatch()
@@ -326,7 +332,7 @@ func TestImportCallbackExcludesControlFromJobChannels(t *testing.T) {
 
 func TestLegacyImportCommitSurvivesRetiredBroadcast(t *testing.T) {
 	ctx := context.Background()
-	server, catalog, result := newImportCommitCallbackTest(t)
+	server, catalog, result := newLegacyImportCommitCallbackTest(t)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	require.NoError(t, server.importMeta.UpdateJob(ctx, 1, func(job bulkimport.ImportJob) {
 		job.(*bulkimport.Job).CommitByCoordinator = false
@@ -370,7 +376,7 @@ func TestLegacyImportCommitSurvivesRetiredBroadcast(t *testing.T) {
 
 func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
 	ctx := context.Background()
-	server, catalog, _ := newImportCommitCallbackTest(t)
+	server, catalog, _ := newLegacyImportCommitCallbackTest(t)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_Importing, internalpb.ImportJobState_Uncommitted, internalpb.ImportJobState_Committing} {
 		require.NoError(t, server.importMeta.UpdateJob(ctx, 1, bulkimport.UpdateJobState(state)))
@@ -394,6 +400,7 @@ func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
 // ImportTaskV3 records, and the same visibility fence (per-channel commit
 // timestamp + is_importing clear) and Completed transition apply.
 func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ctx := context.Background()
 	catalog := &datacoordkv.Catalog{MetaKv: meta.NewMetaMemoryKV()}
 	imports, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
@@ -422,7 +429,7 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 	}, imports, nil, nil)
 	require.NoError(t, imports.AddTask(ctx, v3task))
 
-	server := &Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments, MetaStore: metaStore}}
+	server := &Server{importMeta: imports, meta: &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: segments, MetaStore: metaStore}}
 	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, server.meta, server.importMeta, view)

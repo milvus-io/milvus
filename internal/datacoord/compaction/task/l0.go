@@ -324,6 +324,7 @@ func (t *L0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	excluded := t.meta.UnpublishedSegmentMembers(t.context(), taskProto.GetCollectionID())
 	var flushedSegments []*meta.SegmentInfo
 	if taskProto.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
 		var err error
@@ -334,7 +335,7 @@ func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datap
 	} else {
 		// Ordinary L0 compaction selects bases older than the trigger position.
 		flushedSegments = t.meta.SelectSegments(t.context(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
-			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+			return !excluded.Contain(info.GetID()) && (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
 				info.GetInsertChannel() == taskProto.GetChannel() &&
 				(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
 				!info.GetIsImporting() &&
@@ -562,8 +563,9 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 		// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
 		// the DataView snapshot is reconciled asynchronously from SegmentMeta.
-		if mt, ok := t.meta.(*meta.Meta); ok {
-			mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		{
+			mt := t.meta
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 		}
 		return nil
 	}
@@ -575,8 +577,9 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	// recompute observes the new Manifest version, so the DataView advances
 	// compact_version even though membership is unchanged (L0 is a hard
 	// trigger: a Manifest-version change has no dedicated counter).
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 	return nil
 }
@@ -607,16 +610,10 @@ func (t *L0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalo
 			commits = append(commits, *commit)
 		}
 	}
-	manifestMeta, ok := t.meta.(interface {
-		CommitSegmentManifests(context.Context, []meta.SegmentManifestCommit, ...meta.UpdateOperator) error
-	})
-	if !ok {
-		return merr.WrapErrServiceInternalMsg("L0 StorageV3 batch manifest commit requires DataCoord meta implementation")
-	}
 	// Delegate even when commits is empty: CommitSegmentManifests still publishes
 	// extraOperators through a plain UpdateSegmentsInfo, so the input retirement
 	// lands when every target was skipped mid-plan.
-	return manifestMeta.CommitSegmentManifests(ctx, commits, extraOperators...)
+	return t.meta.CommitSegmentManifests(ctx, commits, extraOperators...)
 }
 
 // buildL0V3ManifestCommit assembles one target's manifest commit, or returns a nil
@@ -683,12 +680,7 @@ func (t *L0CompactionTask) buildL0V3ManifestCommit(ctx context.Context, segmentI
 }
 
 func (t *L0CompactionTask) context() context.Context {
-	if mt, ok := t.meta.(*meta.Meta); ok && mt.Ctx != nil {
-		return mt.Ctx
-	}
-	// Unit-test CompactionMeta implementations do not own the DataCoord
-	// lifecycle context. Production tasks always take the meta context above.
-	return context.Background()
+	return t.meta.CompactionContext()
 }
 
 func (t *L0CompactionTask) GetSlotUsage() int64 {
