@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -49,11 +50,12 @@ type multiSearchItemProgress struct {
 func (b *multiSearchBatch) startAttempt(ctx context.Context, index int, retryReason string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.progress == nil || multiSearchContextErr(ctx) != nil {
+	if b.progress == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 		return false
 	}
 	item := &b.progress[index]
 	item.attempts++
+	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(b.nodeID).Inc()
 	if retryReason != "" {
 		item.finishBackoff(time.Now())
 		metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(b.nodeID, retryReason).Inc()
@@ -79,7 +81,7 @@ func (b *multiSearchBatch) recordRejection(index int, reason string) {
 func (b *multiSearchBatch) startBackoff(ctx context.Context, index int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.progress != nil && multiSearchContextErr(ctx) == nil {
+	if b.progress != nil && contextutil.ErrOrDeadlineExceeded(ctx) == nil {
 		item := &b.progress[index]
 		item.backoffStart = time.Now()
 		item.deferrals++

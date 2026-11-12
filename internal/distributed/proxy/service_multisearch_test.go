@@ -208,6 +208,12 @@ func TestMultiSearchGRPCRejectsInvalidIdentity(t *testing.T) {
 func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	require.NoError(t, proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)) })
+	regexpKey := proxy.Params.ProxyCfg.PartitionNameRegexp.Key
+	require.NoError(t, proxy.Params.Save(regexpKey, "true"))
+	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(regexpKey)) })
+	quotaKey := proxy.Params.QuotaConfig.QuotaAndLimitsEnabled.Key
+	require.NoError(t, proxy.Params.Save(quotaKey, "true"))
+	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(quotaKey)) })
 	const username = "grpc_multisearch_reader"
 	const role = "grpc_multisearch_role"
 	const apiKey = "grpc-multisearch-test"
@@ -221,6 +227,10 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	for i, db := range []string{"header_db", "explicit_db", "denied_db"} {
 		cache.SeedDBInfoForTest(db, &metacache.DatabaseInfo{DBID: int64(i + 11)})
 		cache.SeedCollectionForTest(db, collection, int64(i+101))
+		cache.SeedPartitionCacheForTest(int64(i+101), []*metacache.PartitionInfo{
+			{Name: "part_a", PartitionID: int64(i + 1001)},
+			{Name: "other", PartitionID: int64(i + 2001)},
+		}, false)
 		if db != "denied_db" {
 			require.NoError(t, policy.RefreshPolicyInfo(typeutil.CacheOp{
 				OpType: typeutil.CacheGrantPrivilege,
@@ -266,7 +276,8 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 				itemCtx := metrics.WithIndependentRPCStats(ctx)
 				request, err := prepare(itemCtx)
 				if err != nil {
-					return nil, err
+					results[i] = &milvuspb.SearchResults{Status: merr.Status(err)}
+					continue
 				}
 				result, err := execute(itemCtx, request)
 				if err != nil {
@@ -289,23 +300,31 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 		Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}},
 	}}})
 	require.NoError(t, err)
+	vectorInput := &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder}
 	const budget = 500 * time.Millisecond
 	beforeCall := time.Now()
 	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
 		MaxConcurrency: 2,
 		TimeoutMs:      proto.Int64(budget.Milliseconds()),
 		Requests: []*milvuspb.MultiSearchSubRequest{
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder}}),
-			grpcSearchItem(&milvuspb.SearchRequest{DbName: "explicit_db", CollectionName: collection, SearchInput: &milvuspb.SearchRequest_Ids{
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: vectorInput}),
+			grpcSearchItem(&milvuspb.SearchRequest{DbName: "explicit_db", CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: &milvuspb.SearchRequest_Ids{
 				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
 			}}),
-			grpcSearchItem(&milvuspb.SearchRequest{DbName: "denied_db", CollectionName: collection, Nq: 1}),
+			grpcSearchItem(&milvuspb.SearchRequest{DbName: "denied_db", CollectionName: collection, Nq: 2, SearchInput: vectorInput}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 2, SearchInput: vectorInput, SubReqs: []*milvuspb.SubSearchRequest{{Nq: 2}}}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 1, SearchInput: vectorInput}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: -1, SearchInput: vectorInput}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{}}}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, PartitionNames: []string{"["}, Nq: 2, SearchInput: vectorInput}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 2, SearchInput: vectorInput}),
 		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
-	require.Len(t, response.GetResults(), 3)
-	for i, nq := range []int64{2, 3} {
+	require.Len(t, response.GetResults(), 10)
+	for i, nq := range map[int]int64{0: 2, 1: 3, 9: 2} {
 		result := response.GetResults()[i].GetSearch()
 		require.NoError(t, merr.Error(result.GetStatus()))
 		require.Equal(t, collection, result.GetCollectionName())
@@ -315,15 +334,19 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	}
 	require.ErrorIs(t, merr.Error(response.GetResults()[2].GetSearch().GetStatus()), merr.ErrPrivilegeNotPermitted)
 	require.Nil(t, response.GetResults()[2].GetSearch().GetResults())
-	require.Len(t, charges, 2)
+	for i := 3; i <= 8; i++ {
+		require.ErrorIs(t, merr.Error(response.GetResults()[i].GetSearch().GetStatus()), merr.ErrParameterInvalid, "item %d", i)
+	}
+	require.Len(t, charges, 3)
+	require.Equal(t, charge{11, map[int64][]int64{101: {1001}}, 2}, <-charges)
+	require.Equal(t, charge{12, map[int64][]int64{102: {1002}}, 3}, <-charges)
 	require.Equal(t, charge{11, map[int64][]int64{101: {}}, 2}, <-charges)
-	require.Equal(t, charge{12, map[int64][]int64{102: {}}, 3}, <-charges)
-	require.Len(t, searchAccess, 2)
+	require.Len(t, searchAccess, 3)
 	firstAccess, secondAccess := <-searchAccess, <-searchAccess
 	require.NotNil(t, firstAccess)
 	require.NotNil(t, secondAccess)
 	require.NotSame(t, firstAccess, secondAccess)
-	require.Len(t, hook.searchCalls, 2)
+	require.Len(t, hook.searchCalls, 3)
 	require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, <-hook.searchCalls)
 	require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, <-hook.searchCalls)
 	require.Len(t, hook.authCalls, 1)

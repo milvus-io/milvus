@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type multiSearchReceivedAtKey struct{}
@@ -93,10 +92,7 @@ func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchReque
 func prepareMultiSearchRequest(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchRequest, error) {
 	request := proto.CloneOf(search)
 	request.DbName = proxy.GetCurDBNameFromRequestOrContext(ctx, request)
-	if ids := request.GetIds(); ids != nil {
-		// Charge for the input IDs before Search resolves them into vectors.
-		request.Nq = int64(typeutil.GetSizeOfIDs(ids))
-	} else if _, err := dql.NormalizeSearchNQ(request); err != nil {
+	if err := dql.NormalizeMultiSearchNQ(request); err != nil {
 		return nil, err
 	}
 	return request, nil

@@ -2149,12 +2149,25 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 }
 
 type restSearchError struct {
-	error
-	message string
+	responseError error
+	message       string
+	cause         error
 }
 
 func (err restSearchError) Error() string { return err.message }
-func (err restSearchError) Unwrap() error { return err.error }
+func (err restSearchError) Unwrap() error { return err.responseError }
+
+func abortRESTSearchError(c *gin.Context, err error) error {
+	HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+	// Keep the conversion error used by the ordinary Search request metrics.
+	if searchErr, ok := err.(restSearchError); ok {
+		if searchErr.cause != nil {
+			return searchErr.cause
+		}
+		return searchErr.responseError
+	}
+	return err
+}
 
 func newRESTSearchRequest(ctx context.Context, httpReq *SearchReqV2, dbName string) (*milvuspb.SearchRequest, error) {
 	req := &milvuspb.SearchRequest{
@@ -2168,7 +2181,10 @@ func newRESTSearchRequest(ctx context.Context, httpReq *SearchReqV2, dbName stri
 	consistency, useDefault, err := convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
-		return nil, restSearchError{err, "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error()}
+		return nil, restSearchError{
+			responseError: err,
+			message:       "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
+		}
 	}
 	req.ConsistencyLevel = consistency
 	req.UseDefaultConsistency = useDefault
@@ -2183,12 +2199,18 @@ func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq
 
 	// Primary keys and query vectors are mutually exclusive
 	if hasIDs && hasData {
-		return restSearchError{merr.ErrParameterInvalid, "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both"}
+		return restSearchError{
+			responseError: merr.ErrParameterInvalid,
+			message:       "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
+		}
 	}
 
 	// At least one of ids or data must be provided
 	if !hasIDs && !hasData {
-		return restSearchError{merr.ErrMissingRequiredParameters, "either 'ids' (for primary key search) or 'data' (for vector search) must be provided"}
+		return restSearchError{
+			responseError: merr.ErrMissingRequiredParameters,
+			message:       "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
+		}
 	}
 
 	if httpReq.SearchAggregation != nil {
@@ -2294,12 +2316,12 @@ func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
-			return restSearchError{merr.ErrParameterInvalid, err.Error()}
+			return restSearchError{responseError: merr.ErrParameterInvalid, message: err.Error(), cause: err}
 		}
 	}
 	if len(httpReq.FunctionChains) != 0 {
 		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
-			return restSearchError{merr.ErrParameterInvalid, err.Error()}
+			return restSearchError{responseError: merr.ErrParameterInvalid, message: err.Error(), cause: err}
 		}
 	}
 
@@ -2307,14 +2329,18 @@ func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq
 		// Search by primary keys
 		primaryField, ok := getPrimaryField(collSchema)
 		if !ok {
-			return restSearchError{merr.ErrParameterInvalid, "collection has no primary key field"}
+			return restSearchError{responseError: merr.ErrParameterInvalid, message: "collection has no primary key field"}
 		}
 
 		// Convert ids to schemapb.IDs
 		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert ids to schemapb.IDs failed", mlog.Err(err))
-			return restSearchError{merr.ErrParameterInvalid, merr.ErrParameterInvalid.Error() + ", error: " + err.Error()}
+			return restSearchError{
+				responseError: merr.ErrParameterInvalid,
+				message:       merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
+				cause:         err,
+			}
 		}
 
 		// Set Ids field using the oneof SearchInput field
@@ -2331,7 +2357,11 @@ func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq
 		placeholderGroup, err := generatePlaceholderGroup(ctx, body, collSchema, httpReq.AnnsField)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, search with vector invalid", mlog.Err(err))
-			return restSearchError{merr.ErrIncorrectParameterFormat, merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error()}
+			return restSearchError{
+				responseError: merr.ErrIncorrectParameterFormat,
+				message:       merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+				cause:         err,
+			}
 		}
 		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
 			PlaceholderGroup: placeholderGroup,
@@ -2357,8 +2387,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	httpReq := anyReq.(*SearchReqV2)
 	req, err := newRESTSearchRequest(ctx, httpReq, dbName)
 	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, abortRESTSearchError(c, err)
 	}
 	c.Set(ContextRequest, req)
 
@@ -2369,8 +2398,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	body, _ := c.Get(gin.BodyBytesKey)
 	rawBody, _ := body.([]byte)
 	if err := prepareRESTSearch(ctx, req, httpReq, collSchema, string(rawBody)); err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, abortRESTSearchError(c, err)
 	}
 
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, milvuspb.MilvusService_Search_FullMethodName, true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -2419,7 +2447,11 @@ func buildRESTSearchResponse(ctx context.Context, response *milvuspb.SearchResul
 		body[HTTPReturnTopks] = result.GetTopks()
 	}
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", result), mlog.Err(err))
+		mlog.RatedWarn(ctx, 1, "high level restful api, fail to deal with search result",
+			mlog.Int64("nq", result.GetNumQueries()),
+			mlog.Int64("topK", result.GetTopK()),
+			mlog.Int("fieldCount", len(result.GetFieldsData())),
+			mlog.Err(err))
 		return gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)}, false
 	}
 

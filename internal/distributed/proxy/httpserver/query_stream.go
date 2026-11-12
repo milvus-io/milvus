@@ -28,13 +28,15 @@ import (
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type dqlStreamKey struct{}
 
 type dqlStreamState struct {
-	aborted bool // Owned only by the HTTP handler goroutine, never the worker.
+	receivedAt time.Time
+	aborted    bool // Owned only by the HTTP handler goroutine, never the worker.
 }
 
 // DQLStreamingHTTPHandler must wrap Gin, outside its Recovery middleware.
@@ -42,7 +44,7 @@ type dqlStreamState struct {
 // not as a successful HTTP response containing truncated JSON.
 func DQLStreamingHTTPHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		state := &dqlStreamState{}
+		state := &dqlStreamState{receivedAt: time.Now()}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), dqlStreamKey{}, state)))
 		if state.aborted {
 			panic(http.ErrAbortHandler)
@@ -180,7 +182,7 @@ func dqlResponseMiddleware(handler gin.HandlerFunc, scope dqlTimeoutScope) gin.H
 			}
 		}
 		// Resolve completion/deadline races before leaving the preparation phase.
-		if err := dqlContextErr(ctx); err != nil {
+		if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 			stopRequest(err)
 			return
 		}
@@ -211,7 +213,7 @@ func dqlResponseMiddleware(handler gin.HandlerFunc, scope dqlTimeoutScope) gin.H
 		} else {
 			err = writeDQLJSON(responseCtx, c.Writer, writer.result, dqlJSONBatchRows)
 		}
-		if ctxErr := dqlContextErr(responseCtx); ctxErr != nil {
+		if ctxErr := contextutil.ErrOrDeadlineExceeded(responseCtx); ctxErr != nil {
 			stopRequest(ctxErr)
 		} else if err != nil {
 			mlog.Warn(responseCtx, "failed to encode or write DQL response", mlog.Err(err))
@@ -220,26 +222,23 @@ func dqlResponseMiddleware(handler gin.HandlerFunc, scope dqlTimeoutScope) gin.H
 	}
 }
 
-func dqlContextErr(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
-		return context.DeadlineExceeded
-	}
-	return nil
-}
-
 func writeDQLTransportResponse(ctx context.Context, w http.ResponseWriter, body []byte) error {
-	if err := dqlContextErr(ctx); err != nil {
+	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return err
 	}
-	// Interrupt a blocked write when the transport context ends. Waiting for
-	// the callback keeps it inside the ResponseWriter's request lifetime.
+	// Gin's Flush method drops transport errors. Write through Gin to commit
+	// its headers, then flush the underlying writer with error reporting.
+	transport := w
+	if unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter }); ok {
+		transport = unwrapper.Unwrap()
+	}
+	controller := http.NewResponseController(transport)
+	// Keep cancellation active through both the write and the transport flush.
+	// Wait for the callback so it cannot outlive the ResponseWriter.
 	interrupted := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(interrupted)
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+		_ = controller.SetWriteDeadline(time.Now())
 	})
 	defer func() {
 		if !stop() {
@@ -247,8 +246,11 @@ func writeDQLTransportResponse(ctx context.Context, w http.ResponseWriter, body 
 		}
 	}()
 	n, err := w.Write(body)
-	if err == nil && n != len(body) {
+	if err != nil {
+		return err
+	}
+	if n != len(body) {
 		return io.ErrShortWrite
 	}
-	return err
+	return controller.Flush()
 }

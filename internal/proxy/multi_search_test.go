@@ -57,6 +57,14 @@ func multiSearchTestPrepare(collection string) MultiSearchPrepare {
 	}
 }
 
+func TestMultiSearchMissingPreparerIsSystemError(t *testing.T) {
+	p := NewMultiSearchTestProxy(t, 1, 1)
+	results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{nil}, nil)
+	require.Empty(t, results)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+}
+
 func TestMultiSearchKeepsInputOrder(t *testing.T) {
 	p := NewMultiSearchTestProxy(t, 1, 1)
 	ctx, cancel := context.WithTimeout(metrics.WrapRestfulContext(t.Context(), 123), 5*time.Second)
@@ -464,8 +472,10 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		timeout := metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, "timeout")
 		partial := metrics.ProxyMultiSearchBatchesTotal.WithLabelValues(nodeID, "partial_success")
 		retry := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, "rate_limit")
+		attemptCounter := metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(nodeID)
 		beforeSuccess, beforeTimeout := testutil.ToFloat64(success), testutil.ToFloat64(timeout)
 		beforePartial, beforeRetry := testutil.ToFloat64(partial), testutil.ToFloat64(retry)
+		beforeAttempts := testutil.ToFloat64(attemptCounter)
 		attempts := 0
 		items := []MultiSearchPrepare{
 			multiSearchTestPrepare("recovers"),
@@ -494,6 +504,7 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		require.Equal(t, beforeTimeout+2, testutil.ToFloat64(timeout))
 		require.Equal(t, beforePartial+1, testutil.ToFloat64(partial))
 		require.Equal(t, beforeRetry+2, testutil.ToFloat64(retry))
+		require.Equal(t, beforeAttempts+4, testutil.ToFloat64(attemptCounter))
 
 		releaseLateResult()
 		synctest.Wait()

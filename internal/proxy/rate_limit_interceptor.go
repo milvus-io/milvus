@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -44,13 +45,26 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 // request rate limiting. GetMetaCache is resolved per request so the interceptor observes
 // the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
 func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
+	return rateLimitInterceptor(GetMetaCache, limiter, false)
+}
+
+// MultiSearchRateLimitInterceptor requires a quota scope for every Search
+// attempt when quota is enabled.
+func MultiSearchRateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
+	return rateLimitInterceptor(getMetaCache, limiter, true)
+}
+
+func rateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter, requireQuotaScope bool) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, GetMetaCache(), request)
+		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, getMetaCache(), request)
 		if err != nil {
+			if requireQuotaScope && paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
+				return GetFailedResponse(req, err), nil
+			}
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
 		}
@@ -183,6 +197,14 @@ func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPar
 		if err != nil {
 			return 0, nil, err
 		}
+	}
+
+	if _, isSearch := r.(*milvuspb.SearchRequest); isSearch && len(partitionNames) > 0 && paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool() {
+		parts, err := dql.GetPartitionIDs(ctx, metaCache, r.GetDbName(), r.GetCollectionName(), partitionNames)
+		if err != nil {
+			return 0, nil, err
+		}
+		return db.DBID, map[int64][]int64{collectionID: parts}, nil
 	}
 
 	parts := make([]int64, len(partitionNames))

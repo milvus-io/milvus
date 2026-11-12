@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -35,13 +34,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type MultiSearchReqV2 struct {
@@ -68,8 +67,6 @@ func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
 	return stdjson.Unmarshal(body, req)
 }
 
-type multiSearchReceivedAtKey struct{}
-
 func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
 	handle := dqlResponseMiddleware(next, dqlExplicitTransportTimeout)
 	handleWithMetrics := restfulSizeMiddleware(func(c *gin.Context) {
@@ -77,15 +74,12 @@ func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
 		handle(c)
 	}, true)
 	return func(c *gin.Context) {
-		receivedAt := time.Now()
 		if p, ok := h.proxy.(multiSearchProxy); ok {
 			if err := p.CheckMultiSearchAdmission(); err != nil {
 				rejectQueueFullBeforeDecode(c, err)
 				return
 			}
 		}
-		ctx := context.WithValue(c.Request.Context(), multiSearchReceivedAtKey{}, receivedAt)
-		c.Request = c.Request.WithContext(ctx)
 		handleWithMetrics(c)
 	}
 }
@@ -119,8 +113,8 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	if len(req.Requests) == 0 {
 		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
 	}
-	receivedAt := ctx.Value(multiSearchReceivedAtKey{}).(time.Time)
-	deadline, err := proxy.MultiSearchExecutionDeadline(receivedAt, req.TimeoutMs)
+	state := ctx.Value(dqlStreamKey{}).(*dqlStreamState)
+	deadline, err := proxy.MultiSearchExecutionDeadline(state.receivedAt, req.TimeoutMs)
 	if err != nil {
 		return fail(err)
 	}
@@ -179,10 +173,18 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fallbackDB string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
 	httpReq := SearchReqV2{Limit: 100}
 	if err := stdjson.Unmarshal(body, &httpReq); err != nil {
-		return nil, nil, restSearchError{merr.ErrIncorrectParameterFormat, merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error()}
+		return nil, nil, restSearchError{
+			responseError: merr.ErrIncorrectParameterFormat,
+			message:       merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+			cause:         err,
+		}
 	}
 	if err := binding.Validator.ValidateStruct(&httpReq); err != nil {
-		return nil, nil, restSearchError{merr.ErrMissingRequiredParameters, merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error()}
+		return nil, nil, restSearchError{
+			responseError: merr.ErrMissingRequiredParameters,
+			message:       merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
+			cause:         err,
+		}
 	}
 	dbName := httpReq.GetDbName()
 	if dbName == "" {
@@ -203,11 +205,8 @@ func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fa
 	if err := prepareRESTSearch(ctx, req, &httpReq, schema.CollectionSchema, string(body)); err != nil {
 		return nil, nil, err
 	}
-	// Every converted query contributes one placeholder value. Search by
-	// primary key charges for the requested IDs before vector lookup.
-	req.Nq = int64(len(httpReq.Data))
-	if ids := req.GetIds(); ids != nil {
-		req.Nq = int64(typeutil.GetSizeOfIDs(ids))
+	if err := dql.NormalizeMultiSearchNQ(req); err != nil {
+		return nil, nil, err
 	}
 	return req, schema.CollectionSchema, nil
 }

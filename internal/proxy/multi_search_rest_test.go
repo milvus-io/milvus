@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -59,8 +62,9 @@ type multiSearchRESTResponse struct {
 	}
 }
 
-func newMultiSearchRESTHandler(p types.ProxyComponent) http.Handler {
+func newMultiSearchRESTHandler(p types.ProxyComponent, middleware ...gin.HandlerFunc) http.Handler {
 	router := gin.New()
+	router.Use(middleware...)
 	group := router.Group("/v2/vectordb", func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "root")
 	})
@@ -264,6 +268,79 @@ func TestMultiSearchRESTTransportDeadlineEndsCall(t *testing.T) {
 	})
 }
 
+func TestMultiSearchRESTBudgetStartsBeforeAuthentication(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newMultiSearchHTTPProxy(t, nil, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			t.Error("Search started after the batch execution deadline")
+			return successfulSearchResult(), nil
+		})
+		handler := newMultiSearchRESTHandler(p, func(c *gin.Context) {
+			time.Sleep(20 * time.Millisecond)
+			c.Next()
+		})
+		payload := `{"timeoutMs":10,"requests":[` + readySearch + `]}`
+		status, body := recordMultiSearch(t, handler, strings.NewReader(payload), "")
+		require.Equal(t, http.StatusOK, status)
+		require.Zero(t, body.Code)
+		require.Len(t, body.Data, 1)
+		require.Equal(t, merr.TimeoutCode, body.Data[0].Search.Code)
+	})
+}
+
+func TestRESTSearchReportsOriginalVectorErrorCause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newMultiSearchHTTPProxy(t, nil, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			t.Error("Search ran after placeholder generation failed")
+			return successfulSearchResult(), nil
+		})
+		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+		rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "default", "ready")
+		before := testutil.ToFloat64(rejected)
+		req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", strings.NewReader(
+			`{"collectionName":"ready","annsField":"absent","data":[[1,0]]}`))
+		response := httptest.NewRecorder()
+		newMultiSearchRESTHandler(p).ServeHTTP(response, req)
+		var body struct {
+			Code    int32
+			Message string
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Equal(t, merr.Code(merr.ErrIncorrectParameterFormat), body.Code)
+		require.Equal(t, merr.ErrIncorrectParameterFormat.Error()+", error: "+
+			merr.WrapErrFieldNotFound("absent", "cannot find a vector field").Error(), body.Message)
+		require.Equal(t, before+1, testutil.ToFloat64(rejected))
+	})
+}
+
+type blockedMultiSearchResponseWriter struct {
+	*httptest.ResponseRecorder
+	interrupted chan struct{}
+}
+
+func (w blockedMultiSearchResponseWriter) SetWriteDeadline(time.Time) error {
+	close(w.interrupted)
+	return nil
+}
+
+func (w blockedMultiSearchResponseWriter) FlushError() error {
+	<-w.interrupted
+	return context.DeadlineExceeded
+}
+
+func TestMultiSearchRESTTransportDeadlineInterruptsFlush(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, 1, 1))
+		req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(
+			`{"requests":[{"search":{}}],"timeoutMs":0}`))
+		req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "1")
+		response := blockedMultiSearchResponseWriter{httptest.NewRecorder(), make(chan struct{})}
+		require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+			handler.ServeHTTP(response, req)
+		})
+		require.Equal(t, http.StatusOK, response.Code)
+	})
+}
+
 type shortMultiSearchResponseWriter struct{ http.ResponseWriter }
 
 func (w shortMultiSearchResponseWriter) Write(p []byte) (int, error) {
@@ -306,9 +383,24 @@ func (multiSearchQuotaCache) GetCollectionID(_ context.Context, db, name string)
 	return ids[db+"/"+name], nil
 }
 
-func (multiSearchQuotaCache) GetPartitionInfo(_ context.Context, db, collection, partition string) (*metacache.PartitionInfo, error) {
-	ids := map[string]int64{"catalog_a/ready/east": 12, "catalog_b/ready/west": 22}
-	return &metacache.PartitionInfo{PartitionID: ids[db+"/"+collection+"/"+partition]}, nil
+func (c multiSearchQuotaCache) GetPartitionInfo(ctx context.Context, db, collection, partition string) (*metacache.PartitionInfo, error) {
+	partitions, err := c.GetPartitions(ctx, db, collection)
+	if err != nil {
+		return nil, err
+	}
+	id, ok := partitions[partition]
+	if !ok {
+		return nil, merr.WrapErrPartitionNotFound(partition)
+	}
+	return &metacache.PartitionInfo{PartitionID: id}, nil
+}
+
+func (multiSearchQuotaCache) GetPartitions(_ context.Context, db, collection string) (map[string]int64, error) {
+	partitions := map[string]map[string]int64{
+		"catalog_a/ready": {"east": 12, "south": 13},
+		"catalog_b/ready": {"west": 22, "south": 23},
+	}
+	return partitions[db+"/"+collection], nil
 }
 
 type multiSearchQuotaCall struct {
@@ -340,12 +432,15 @@ func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 		})
 		params := paramtable.Get()
 		require.NoError(t, params.Save(params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true"))
+		regexpKey := params.ProxyCfg.PartitionNameRegexp.Key
+		require.NoError(t, params.Save(regexpKey, "true"))
+		t.Cleanup(func() { require.NoError(t, params.Reset(regexpKey)) })
 		p.cache = multiSearchQuotaCache{p.cache}
 		limiter := &multiSearchQuotaLimiter{}
 		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{multiSearchHTTPProxy: p, limiter: limiter})
 		payload := `{"maxConcurrency":1,"requests":[
-			{"search":{"dbName":"catalog_a","collectionName":"ready","partitionNames":["east"],"data":[[1,0],[0,1]]}},
-			{"search":{"dbName":"catalog_b","collectionName":"ready","partitionNames":["west"],"ids":[10,20,30]}}]}`
+			{"search":{"dbName":"catalog_a","collectionName":"ready","partitionNames":["e.*"],"data":[[1,0],[0,1]]}},
+			{"search":{"dbName":"catalog_b","collectionName":"ready","partitionNames":["w.*"],"ids":[10,20,30]}}]}`
 		status, body := recordMultiSearch(t, handler, strings.NewReader(payload), "")
 		require.Equal(t, http.StatusOK, status)
 		require.Zero(t, body.Code)

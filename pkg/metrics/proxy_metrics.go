@@ -485,6 +485,14 @@ var (
 			Help:      "number of MultiSearch subrequests by terminal result",
 		}, []string{nodeIDLabelName, "result"})
 
+	ProxyMultiSearchAttemptsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "multisearch_attempts_total",
+			Help:      "number of MultiSearch subrequest attempts started",
+		}, []string{nodeIDLabelName})
+
 	ProxyMultiSearchRetriesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -627,6 +635,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyMultiSearchBatchesTotal)
 	registry.MustRegister(ProxyMultiSearchSubrequestsTotal)
+	registry.MustRegister(ProxyMultiSearchAttemptsTotal)
 	registry.MustRegister(ProxyMultiSearchRetriesTotal)
 	registry.MustRegister(ProxyMaterializeFallbackTotal)
 	registry.MustRegister(ProxyMaterializeShardTotal)

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -93,6 +94,10 @@ func newMultiSearchScheduler(ctx context.Context, capacity int) *multiSearchSche
 }
 
 func (s *multiSearchScheduler) start(workers int) {
+	nodeID := paramtable.GetStringNodeID()
+	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(nodeID)
+	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryRateLimit)
+	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryQueueFull)
 	for range workers {
 		s.workers.Go(func() {
 			for run := s.dequeue(); run != nil; run = s.dequeue() {
@@ -175,7 +180,7 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	}
 	for i, prepare := range items {
 		if prepare == nil {
-			return nil, merr.WrapErrParameterInvalidMsg("requests[%d] requires a search", i)
+			return nil, merr.WrapErrServiceInternalMsg("MultiSearch requests[%d] has no preparer", i)
 		}
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -185,7 +190,7 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	if s == nil || execute == nil {
 		return nil, merr.WrapErrServiceInternalMsg("MultiSearch scheduler or Search entry is unavailable")
 	}
-	if err := multiSearchContextErr(ctx); err != nil {
+	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return nil, err
 	}
 
@@ -219,8 +224,8 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	case <-executionCtx.Done():
 	}
 	s.remove(entry)
-	batchResults := batch.finish(ctx, multiSearchContextErr(executionCtx))
-	if err := multiSearchContextErr(ctx); err != nil {
+	batchResults := batch.finish(ctx, contextutil.ErrOrDeadlineExceeded(executionCtx))
+	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return nil, err
 	}
 	if s.ctx.Err() != nil {
@@ -248,11 +253,11 @@ func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items
 	var group errgroup.Group
 	group.SetLimit(concurrency)
 	for i, prepare := range items {
-		if multiSearchContextErr(ctx) != nil {
+		if contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 			break
 		}
 		group.Go(func() error {
-			if multiSearchContextErr(ctx) == nil {
+			if contextutil.ErrOrDeadlineExceeded(ctx) == nil {
 				itemCtx := metrics.WithIndependentRPCStats(ctx)
 				b.complete(ctx, i, b.runItem(itemCtx, i, prepare, execute))
 			}
@@ -267,7 +272,7 @@ func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items
 func (b *multiSearchBatch) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if result == nil || b.results == nil || multiSearchContextErr(ctx) != nil {
+	if result == nil || b.results == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 		return
 	}
 	b.results[i] = result
@@ -297,17 +302,6 @@ func (b *multiSearchBatch) finish(ctx context.Context, unfinished error) []*milv
 		progress[i].observe(ctx, b.nodeID, i, b.startedAt, result.GetStatus())
 	}
 	return results
-}
-
-func multiSearchContextErr(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	// Deadline timers may not have run yet when a result races with expiry.
-	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
-		return context.DeadlineExceeded
-	}
-	return nil
 }
 
 type multiSearchDQLAdmissionKey struct{}

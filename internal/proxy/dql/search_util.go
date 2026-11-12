@@ -711,20 +711,56 @@ func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
 }
 
 func getNq(req *milvuspb.SearchRequest) (int64, error) {
-	if req.GetNq() == 0 {
-		// keep compatible with older client version.
-		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
-		if err != nil {
-			return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group")
-		}
-		total := int64(0)
-		for _, h := range x.GetPlaceholders() {
-			total += int64(len(h.Values))
-		}
-		return total, nil
+	if req.GetNq() != 0 {
+		return req.GetNq(), nil
 	}
-	return req.GetNq(), nil
+	// Keep compatibility with older clients that omit NQ.
+	return getPlaceholderGroupNQ(req.GetPlaceholderGroup())
+}
+
+func getPlaceholderGroupNQ(data []byte) (int64, error) {
+	group := &commonpb.PlaceholderGroup{}
+	if err := proto.Unmarshal(data, group); err != nil {
+		return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group")
+	}
+	var nq int64
+	for _, placeholder := range group.GetPlaceholders() {
+		nq += int64(len(placeholder.GetValues()))
+	}
+	return nq, nil
+}
+
+// NormalizeMultiSearchNQ validates a plain Search and sets its quota cost
+// from the actual input before any attempt enters the Search path.
+func NormalizeMultiSearchNQ(request *milvuspb.SearchRequest) error {
+	if len(request.GetSubReqs()) != 0 {
+		return merr.WrapErrParameterInvalidMsg("MultiSearch supports only ordinary Search requests")
+	}
+	declared := request.GetNq()
+	if declared < 0 {
+		return merr.WrapErrParameterInvalidMsg("nq must be nonnegative, got %d", declared)
+	}
+	if input, ok := request.GetSearchInput().(*milvuspb.SearchRequest_Ids); ok {
+		// Charge input IDs before Search resolves them into vectors.
+		nq := int64(typeutil.GetSizeOfIDs(input.Ids))
+		if nq == 0 {
+			return merr.WrapErrParameterInvalidMsg("search by primary key requires at least one ID")
+		}
+		request.Nq = nq
+		return nil
+	}
+	nq, err := getPlaceholderGroupNQ(request.GetPlaceholderGroup())
+	if err != nil {
+		return err
+	}
+	if err := validateNQLimit(nq); err != nil {
+		return err
+	}
+	if declared != 0 && declared != nq {
+		return merr.WrapErrParameterInvalidMsg("nq %d does not match the number of query vectors %d", declared, nq)
+	}
+	request.Nq = nq
+	return nil
 }
 
 // NormalizeSearchNQ fills NQ for requests from older clients and checks that

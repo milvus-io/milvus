@@ -482,7 +482,7 @@ func newExternalUnaryInterceptor(component types.ProxyComponent, getMetaCache fu
 		accesslog.UnaryAccessLogInterceptor,
 		authorize,
 		hook,
-		rateLimit,
+		proxy.MultiSearchRateLimitInterceptor(getMetaCache, limiter),
 		accesslog.UnaryUpdateAccessInfoInterceptor,
 		proxy.TraceLogInterceptor,
 	)
