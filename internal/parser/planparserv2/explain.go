@@ -163,9 +163,12 @@ type PlanExplanation struct {
 	// UnknownNodeCount counts expression nodes, value kinds, and plan node
 	// kinds this version does not recognize, whether they decode as a Go type
 	// this version has no case for or, when the plan comes from a newer
-	// planpb, as unknown fields on an otherwise empty union. Zero means every
-	// node of the plan was recognized; it says nothing about the plan fields
-	// listed above as outside the contract.
+	// planpb, as unknown fields on an otherwise empty union. Only those three
+	// unions (Expr, GenericValue, PlanNode) are checked: a field a newer
+	// planpb adds to any other plan message, QueryInfo or ColumnInfo for
+	// example, is left out of the explanation without being counted. Zero
+	// means every node of the plan was recognized; it says nothing about such
+	// fields or about the plan fields listed above as outside the contract.
 	UnknownNodeCount int `json:"unknown_node_count"`
 	// Detail says why PlanType is "unknown": the Go type of an unrecognized
 	// plan node kind, the unknown field numbers it arrived under, or that
@@ -1080,19 +1083,23 @@ func (e *explainer) value(v *planpb.GenericValue, template string) any {
 	if v == nil {
 		return nil
 	}
+	// Decoded even when the result is elided: genericValue is what counts a
+	// kind this version does not recognize, and redaction hides the value,
+	// not the fact that it is unknown.
+	decoded := e.genericValue(v)
 	if e.opts.RedactTemplateValues && template != "" {
 		return fmt.Sprintf("<template %s elided>", template)
 	}
-	return e.genericValue(v)
+	return decoded
 }
 
 func (e *explainer) values(vs []*planpb.GenericValue, template string) []any {
-	if e.opts.RedactTemplateValues && template != "" && len(vs) > 0 {
-		return []any{fmt.Sprintf("<template %s elided, %d values>", template, len(vs))}
-	}
 	out := make([]any, 0, len(vs))
 	for _, v := range vs {
 		out = append(out, e.genericValue(v))
+	}
+	if e.opts.RedactTemplateValues && template != "" && len(vs) > 0 {
+		return []any{fmt.Sprintf("<template %s elided, %d values>", template, len(vs))}
 	}
 	return out
 }
@@ -1189,7 +1196,8 @@ func interval(iv *planpb.Interval) *IntervalExplanation {
 }
 
 // decodeSearchParams turns the caller-written search_params JSON into a value
-// that re-encodes as the same document. Numbers stay as written (json.Number)
+// that re-encodes with the same keys and values, not the same bytes: keys come
+// out sorted and whitespace is dropped. Numbers stay as written (json.Number)
 // rather than passing through float64, which would round integers above 2^53.
 // Anything that is not valid JSON is kept verbatim as a string.
 func decodeSearchParams(raw string) any {
