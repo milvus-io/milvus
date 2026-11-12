@@ -217,6 +217,7 @@ tools/bin/revive: tools/check/go.mod
 cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
+	@cmake -DWORK_DIR=$(PWD)/cmake_build/compile-checks -P $(PWD)/internal/core/unittest/check_compile_options.cmake
 
 rustfmt:
 	@echo  "Running cargo format"

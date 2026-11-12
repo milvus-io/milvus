@@ -214,7 +214,10 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             expected_size += static_cast<int64_t>(
                 row_group_metadata_vector.Get(row_group_idx).memory_size());
         }
-        auto usage = translator->estimated_loading_usage({i}).resident;
+        auto usage =
+            translator
+                ->estimated_loading_usage({static_cast<cachinglayer::cid_t>(i)})
+                .resident;
         if (use_mmap) {
             EXPECT_EQ(usage.file_bytes, expected_size);
         } else {
@@ -453,7 +456,10 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     for (size_t cid = 0; cid < translator->num_cells(); ++cid) {
-        auto usage = translator->estimated_loading_usage({cid}).resident;
+        auto usage = translator
+                         ->estimated_loading_usage(
+                             {static_cast<cachinglayer::cid_t>(cid)})
+                         .resident;
 
         // Calculate expected size by summing all row groups in this cell
         auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())
