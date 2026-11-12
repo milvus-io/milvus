@@ -293,7 +293,7 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 				defer patch.UnPatch()
 			}
 			readPatch := mockey.Mock(GetManifestStats).
-				To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+				To(func(_ string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 					if stage == "stats" {
 						return nil, failure
 					}
@@ -387,7 +387,7 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				// refresh. Fail any read other than the old, retained snapshot.
 				reads := 0
 				readPatch := mockey.Mock(GetManifestStats).
-					To(func(manifest string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+					To(func(manifest string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 						reads++
 						require.Equal(t, oldManifest, manifest)
 						if manifest != oldManifest {
@@ -542,7 +542,7 @@ func TestRefreshMilvusTableManifestPreparationFailureDoesNotCommit(t *testing.T)
 				stats, err := GetManifestStats(oldManifest, cfg)
 				require.NoError(t, err)
 				readPatch := mockey.Mock(GetManifestStats).
-					To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+					To(func(_ string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 						cancel()
 						return stats, nil
 					}).Build()
