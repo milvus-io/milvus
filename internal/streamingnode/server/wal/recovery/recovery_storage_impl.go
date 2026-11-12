@@ -532,26 +532,33 @@ func shouldAdvanceConsumePoint(current, next utility.WALCheckpoint) bool {
 }
 
 // observeMessage observes a message and update the recovery storage.
-func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Scoped query progress follows the ordered prefix. Only persisted
 	// confirmations enter the recovery tracker and dirty a snapshot.
 	defer func() {
+		if err != nil {
+			return
+		}
 		r.observeQueryBarriers(ctx, msg)
 		if r.consumedThrough != nil && messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
 			r.consumedThrough(msg.TimeTick())
 		}
 	}()
 	if !msg.IsPersisted() {
-		return
+		return nil
 	}
 	owner := r.ackTracker.Track(msg)
 	r.refreshRecoveryTail()
 	r.metrics.ObserveObservedTimeTick(msg.TimeTick())
 	dispatch := owner.Clone()
-	r.observeModulesMessage(ctx, dispatch)
+	err = r.observeModulesMessage(ctx, dispatch)
 	dispatch.Release()
+	if err != nil {
+		owner.Release()
+		return err
+	}
 	r.updatePChannelControl(msg)
 	r.broadcastAck.Accept(owner)
 	completed := r.ackTracker.CompletedPoint()
@@ -561,6 +568,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
 		r.notifyPersist()
 	}
+	return nil
 }
 
 func (r *recoveryStorageImpl) refreshRecoveryTail() {
@@ -574,7 +582,7 @@ func (r *recoveryStorageImpl) refreshRecoveryTail() {
 func (r *recoveryStorageImpl) observeModulesMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-) {
+) error {
 	if r.vchannelManager == nil {
 		panic("recovery modules are not initialized")
 	}
@@ -587,16 +595,16 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 	// resource events. Keep Tracker/Summary coverage without a shard-wide fanout.
 	msg := retained.Message()
 	if msg.MessageType() == message.MessageTypeTimeTick {
-		return
+		return nil
 	}
 	// Old WALs may contain empty transactions. They have no resource or query
 	// effects, but their Summary/AckTracker progress must still be consumed.
 	if msg.MessageType() == message.MessageTypeTxn && message.AsImmutableTxnMessage(msg).Size() == 0 {
-		return
+		return nil
 	}
 	// RecoveryBarrier and persisted MVCCBarrier still retain their complete-prefix
 	// effects. The extra scoped query-plan progress is dispatched separately.
-	r.vchannelManager.ObserveMessage(ctx, retained)
+	return r.vchannelManager.ObserveMessage(ctx, retained)
 }
 
 // startLiveScanner continues the same stream after its startup barrier.
@@ -626,7 +634,12 @@ func (r *recoveryStorageImpl) runLiveScanner(rs RecoveryStream) {
 				}
 				return
 			}
-			r.observeMessage(ctx, msg)
+			if err := r.observeMessage(ctx, msg); err != nil {
+				if ctx.Err() == nil && r.onFatal != nil {
+					r.onFatal(merr.Wrap(err, "WAL recovery dispatch stopped"))
+				}
+				return
+			}
 		}
 	}
 }

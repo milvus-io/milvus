@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -41,6 +42,38 @@ import (
 
 func upsertPackingSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true}, {FieldID: 102, Name: "payload", DataType: schemapb.DataType_VarChar}}}
+}
+
+func TestPackInsertRowsSizesOriginalPartitionSelections(t *testing.T) {
+	source, result := newIdempotentRepackInsertMsg(10)
+	selected := []int{1, 4, 7, 9}
+	for _, test := range []struct {
+		name       string
+		indexes    []uint32
+		partitions []int64
+		local      []uint32
+		selections [][]int64
+	}{
+		{"fixed partition", nil, []int64{300}, nil, [][]int64{{1, 4, 7, 9}}},
+		{"interleaved partitions", []uint32{0, 2, 0, 0, 0, 0, 0, 2, 0, 1}, []int64{302, 300, 301}, []uint32{0, 1, 0, 2}, [][]int64{{1, 7}, {4}, {9}}},
+		{"one routed partition", []uint32{0, 2, 0, 0, 2, 0, 0, 2, 0, 2}, []int64{302}, nil, [][]int64{{1, 4, 7, 9}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows, assignments, err := packInsertRows(source, result.IDs, selected, "key", []int64{300, 301, 302}, test.indexes, source.InsertRequest)
+			require.NoError(t, err)
+			sizes, err := fastpb.UpsertPartitionSizes(source.InsertRequest, test.selections)
+			require.NoError(t, err)
+			require.Equal(t, test.local, rows.PartitionIndexes)
+			require.Equal(t, []uint32{1, 4, 7, 9}, rows.RequestRowMapping.RowOffsets)
+			require.Equal(t, []int64{source.RowIDs[1], source.RowIDs[4], source.RowIDs[7], source.RowIDs[9]}, rows.GetRowIds().Data)
+			require.Len(t, assignments, len(test.partitions))
+			for index, assignment := range assignments {
+				require.Equal(t, test.partitions[index], assignment.PartitionId)
+				require.Equal(t, uint64(len(test.selections[index])), assignment.Rows)
+				require.Equal(t, sizes[index], assignment.BinarySize)
+			}
+		})
+	}
 }
 
 func TestInsertOrUpsertPackingMultiplePartitionsAndOriginalOffsets(t *testing.T) {
@@ -62,6 +95,25 @@ func TestInsertOrUpsertPackingMultiplePartitionsAndOriginalOffsets(t *testing.T)
 			}
 			require.NoError(t, err)
 			require.Len(t, msgs, 1, "partitions must not split a VChannel write")
+			accountingHeader, err := message.ReadInsertOrUpsertHeader(msgs[0])
+			require.NoError(t, err)
+			accountingProjection, err := message.ReadInsertOrUpsertProjection(t.Context(), msgs[0])
+			require.NoError(t, err)
+			accountingSelections, err := message.ValidateInsertOrUpsertWithSelections(accountingHeader, accountingProjection, upsertPackingSchema().Fields[0])
+			require.NoError(t, err)
+			var accountingRows *message.InsertRows
+			if typ == message.MessageTypeInsert {
+				accountingRows = message.MustAsMutableInsertMessageV2(msgs[0]).MustBody().Rows
+			} else {
+				accountingRows = message.MustAsMutableUpsertMessageV2(msgs[0]).MustBody().Rows
+			}
+			accountingFields := append(append([]*schemapb.FieldData(nil), accountingRows.Columns...), message.UpsertPrimaryKeyColumn(upsertPackingSchema().Fields[0], accountingRows.PrimaryKeys))
+			expectedSizes, err := fastpb.UpsertPartitionSizes(&msgpb.InsertRequest{NumRows: uint64(len(accountingRows.GetRowIds().Data)), RowIDs: accountingRows.GetRowIds().Data, Timestamps: make([]uint64, len(accountingRows.GetRowIds().Data)), FieldsData: accountingFields}, accountingSelections)
+			require.NoError(t, err)
+			for index, partition := range accountingHeader.Partitions {
+				require.Equal(t, expectedSizes[index], partition.BinarySize)
+			}
+
 			require.Equal(t, typ, msgs[0].MessageType())
 			var rows *messagespb.InsertRows
 			switch typ {

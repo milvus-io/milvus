@@ -93,7 +93,7 @@ L1 and L0 independently: completion on one side cannot suppress missing work on
 the other. Message completion joins all required effects before checkpoint
 publication. Transactions recover successful body counts and lightweight effects
 classification, without retaining complete members for Commit revalidation.
-Native apply errors stop progress; no whole-unit predecode or rollback is added.
+Insert batch dispatch errors poison the outer message and return through startup recovery or the live fatal handler, before query/L0 observation. Native apply errors stop progress; no whole-unit predecode or rollback is added.
 See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 
 ## Key Packages

@@ -458,8 +458,9 @@ func TestRecoveryStoragePreservesTxnAcrossCheckpoint(t *testing.T) {
 	stream.ch <- barrier
 	defer stream.Close()
 	var observed []message.ImmutableMessage
-	patch := mockey.Mock((*recoveryStorageImpl).observeMessage).To(func(_ *recoveryStorageImpl, _ context.Context, msg message.ImmutableMessage) {
+	patch := mockey.Mock((*recoveryStorageImpl).observeMessage).To(func(_ *recoveryStorageImpl, _ context.Context, msg message.ImmutableMessage) error {
 		observed = append(observed, msg)
+		return nil
 	}).Build()
 	defer patch.UnPatch()
 	_, err = storage.runBoundedRecovery(t.Context(), &recordingRecoveryStreamBuilder{stream: stream}, barrier)

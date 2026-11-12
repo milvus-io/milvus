@@ -51,7 +51,8 @@ func TestMVCCBarrierConsumptionIsPassiveAndScoped(t *testing.T) {
 
 func TestPersistedMVCCBarrierKeepsCompletePrefixDispatch(t *testing.T) {
 	mockey.PatchConvey("persisted MVCCBarrier retains complete-prefix resource effects", t, func() {
-		ordinary := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) {
+		ordinary := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) error {
+			return nil
 		}).Build()
 		r := &recoveryStorageImpl{vchannelManager: &vchannel.PChannelRecoveryManager{}, summaryManager: walsummary.NewManager(walsummary.ManagerConfig{})}
 		msg := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().MustBuildMutable().WithTimeTick(110).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(1))
@@ -69,7 +70,9 @@ func TestPersistedMVCCBarrierKeepsCompletePrefixDispatch(t *testing.T) {
 
 func TestTimeTickAdvancesRecoveryWithoutVChannelDispatch(t *testing.T) {
 	mockey.PatchConvey("ordinary TimeTick remains PChannel progress", t, func() {
-		dispatch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) {}).Build()
+		dispatch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) error {
+			return nil
+		}).Build()
 		r := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 			MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10,
 		})
@@ -90,7 +93,9 @@ func TestTimeTickAdvancesRecoveryWithoutVChannelDispatch(t *testing.T) {
 
 func TestEmptyTransactionAdvancesRecoveryWithoutVChannelDispatch(t *testing.T) {
 	mockey.PatchConvey("historical empty commit has no query resource effects", t, func() {
-		dispatch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) {}).Build()
+		dispatch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, _ context.Context, _ message.RetainedImmutableMessage) error {
+			return nil
+		}).Build()
 		r := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 		t.Cleanup(r.metrics.Close)
 		t.Cleanup(r.taskScheduler.Close)

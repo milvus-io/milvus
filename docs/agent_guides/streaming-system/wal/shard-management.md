@@ -53,7 +53,12 @@ policy before fencing the surviving partitions. Flush metrics are recorded only
 when a growing segment first becomes flushed; a later fence/drop also removes
 segments with pending async Flush messages without recording them again.
 
-Insert V2/Upsert admission reuses one decoded body within each attempt for function
-materialization, writeback and exact partition sizing. This is local ownership, not
-a mutable body cache: redo starts a fresh attempt. Header-only segment assignment
+Proxy incrementally calculates per-partition logical size during row packing,
+then finalizes protobuf framing without another row scan or sizing selections. Insert V2/Upsert
+admission independently verifies/recomputes size: unchanged single-partition
+writes use projection column framing plus logical PK/RowID sizes; sparse-vector and nullable-mask
+normalization, multi-partition writes and changed function outputs retain exact
+decoded sizing. When decoding is needed, admission reuses one body within each
+attempt for function materialization, writeback and partition sizing. This is
+local ownership, not a mutable body cache: redo starts a fresh attempt. Header-only segment assignment
 does not change the rows. Function outputs are encoded only when changed.

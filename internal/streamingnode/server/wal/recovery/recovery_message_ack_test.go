@@ -61,9 +61,11 @@ func installRetainingManager(t *testing.T, storage *recoveryStorageImpl, retaine
 		_ *vchannel.PChannelRecoveryManager,
 		_ context.Context,
 		retainedMessage message.RetainedImmutableMessage,
-	) {
+	) error {
 		retained.message = retainedMessage.Message()
 		retained.handle = retainedMessage.Clone()
+
+		return nil
 	}).Build()
 	t.Cleanup(func() { mock.UnPatch() })
 }
@@ -459,12 +461,14 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 	t.Cleanup(storage.metrics.Close)
 	storage.summaryManager = walsummary.NewManager(walsummary.ManagerConfig{})
 	observed := false
-	patch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, ctx context.Context, retained message.RetainedImmutableMessage) {
+	patch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, ctx context.Context, retained message.RetainedImmutableMessage) error {
 		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
 		require.NoError(t, err)
 		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
 		require.Len(t, batch.Entries, 1)
 		observed = true
+
+		return nil
 	}).Build()
 	defer patch.UnPatch()
 	storage.observeMessage(context.Background(), newRecoveryTestDeleteMessage(t, "v1", 20))

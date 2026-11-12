@@ -60,7 +60,9 @@ L:
 			// Filter after scanner ordering and transaction assembly so older txn
 			// fragments can still contribute to a commit beyond the checkpoint.
 			if msg.TimeTick() > recoveryTimeTick {
-				r.observeMessage(ctx, msg)
+				if err := r.observeMessage(ctx, msg); err != nil {
+					return nil, merr.Wrap(err, "failed to dispatch recovery message")
+				}
 			}
 			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
 				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {

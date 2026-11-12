@@ -19,10 +19,12 @@ package message
 import (
 	"context"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -32,7 +34,7 @@ import (
 
 // ReadInsertOrUpsertProjection reads PK, RowID, partition indexes, delete effects,
 // request row mapping, CAS and column descriptors without decoding ordinary
-// column values. Descriptors contain only field IDs. The returned projection
+// column values. Descriptors contain only field IDs and data types. The returned projection
 // is read-only and does not retain the plaintext payload.
 func ReadInsertOrUpsertProjection(ctx context.Context, msg BasicMessage) (*InsertOrUpsertProjection, error) {
 	if msg == nil || !IsInsertOrUpsertMessage(msg) {
@@ -80,7 +82,8 @@ func cachedInsertOrUpsertProjection(ctx context.Context, msg interface {
 		if err != nil {
 			return nil, 0, err
 		}
-		body, err := decodeInsertOrUpsertProjection(payload, msg.MessageType() == MessageTypeUpsert)
+		projection, err := decodeInsertOrUpsertProjectionWithSizes(payload, msg.MessageType() == MessageTypeUpsert)
+		body := projection.UpsertMessageBody
 		if err != nil {
 			return nil, 0, errors.Wrap(ErrMalformedBody, err.Error())
 		}
@@ -91,7 +94,7 @@ func cachedInsertOrUpsertProjection(ctx context.Context, msg interface {
 			size += 8*UpsertPrimaryKeyCount(effect.GetPrimaryKeys()) + 64
 		}
 		size += 4 * len(body.GetRows().GetRequestRowMapping().GetRowOffsets())
-		return &InsertOrUpsertProjection{UpsertMessageBody: body}, size, nil
+		return projection, size, nil
 	})
 	if err != nil {
 		return nil, err
@@ -118,7 +121,13 @@ func upsertWireFields(payload []byte, visit func(protowire.Number, protowire.Typ
 }
 
 func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessageBody, error) {
-	body := &UpsertMessageBody{}
+	projection, err := decodeInsertOrUpsertProjectionWithSizes(payload, upsert)
+	return projection.UpsertMessageBody, err
+}
+
+func decodeInsertOrUpsertProjectionWithSizes(payload []byte, upsert bool) (*InsertOrUpsertProjection, error) {
+	projection := &InsertOrUpsertProjection{UpsertMessageBody: &UpsertMessageBody{}}
+	body := projection.UpsertMessageBody
 	merge := proto.UnmarshalOptions{Merge: true}
 	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
 		if number == 1 {
@@ -132,7 +141,7 @@ func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessage
 			if body.Rows == nil {
 				body.Rows = &InsertRows{}
 			}
-			return decodeInsertRowsProjection(raw, body.Rows)
+			return decodeInsertRowsProjection(raw, body.Rows, &projection.columnBytes, &projection.columnErr, &projection.hasNullableColumns)
 		}
 		if upsert && (number == 2 || number == 3) {
 			return merge.Unmarshal(encoded, body)
@@ -142,10 +151,10 @@ func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessage
 	if err == nil {
 		err = fastpb.NormalizeInsertOrUpsertBody(body)
 	}
-	return body, err
+	return projection, err
 }
 
-func decodeInsertRowsProjection(payload []byte, rows *InsertRows) error {
+func decodeInsertRowsProjection(payload []byte, rows *InsertRows, columnBytes *uint64, columnErr *error, hasNullableColumns *bool) error {
 	merge := proto.UnmarshalOptions{Merge: true}
 	return upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
 		switch number {
@@ -157,9 +166,12 @@ func decodeInsertRowsProjection(payload []byte, rows *InsertRows) error {
 			if n < 0 {
 				return protowire.ParseError(n)
 			}
+			if *columnErr == nil {
+				*columnErr = validateColumnWire(raw, (&schemapb.FieldData{}).ProtoReflect().Descriptor(), hasNullableColumns)
+			}
 			column := &schemapb.FieldData{}
 			if err := upsertWireFields(raw, func(field protowire.Number, _ protowire.Type, encoded, _ []byte) error {
-				if field == 5 {
+				if field == 1 || field == 5 {
 					return merge.Unmarshal(encoded, column)
 				}
 				return nil
@@ -167,6 +179,7 @@ func decodeInsertRowsProjection(payload []byte, rows *InsertRows) error {
 				return err
 			}
 			rows.Columns = append(rows.Columns, column)
+			*columnBytes += uint64(len(encoded))
 		case 1, 2, 3, 5, 7:
 			return merge.Unmarshal(encoded, rows)
 		}
@@ -249,11 +262,14 @@ func (m *messageImpl) replaceUpsertPayload(payload []byte) error {
 // retains ordinary column values or plaintext. Eviction releases derived mappings too.
 type InsertOrUpsertProjection struct {
 	*UpsertMessageBody
-	mu           sync.Mutex
-	placementKey string
-	rows         [][]int64
-	placementErr error
-	compact      map[int64][]int64
+	columnBytes        uint64
+	columnErr          error
+	hasNullableColumns bool
+	mu                 sync.Mutex
+	placementKey       string
+	rows               [][]int64
+	placementErr       error
+	compact            map[int64][]int64
 }
 
 func insertOrUpsertProjectionOf(ctx context.Context, msg BasicMessage) (*InsertOrUpsertProjection, *InsertOrUpsertHeader, error) {
@@ -332,4 +348,78 @@ func ReadInsertOrUpsertCompactRows(ctx context.Context, msg BasicMessage, fieldI
 	}
 	projection.compact[fieldID] = positions
 	return positions, nil
+}
+
+// SinglePartitionBinarySize uses canonical producer column framing and logical
+// PK/RowID representations. It excludes routing, request mapping and delete effects.
+// Call after validation, and only for a single partition selecting all rows.
+func (p *InsertOrUpsertProjection) SinglePartitionBinarySize(primary *schemapb.FieldSchema) (uint64, bool, error) {
+	if p.columnErr != nil {
+		return 0, false, merr.Wrap(errors.Mark(p.columnErr, ErrMalformedBody), "invalid column encoding")
+	}
+	// Nullable encodings may store validity in either or both locations; the
+	// logical encoder normalizes those masks, so raw framing need not match.
+	if p.hasNullableColumns {
+		return 0, false, nil
+	}
+	for _, column := range p.GetRows().GetColumns() {
+		// Selected sparse vectors recompute dimensions during encoding. Their
+		// next logical encoding can differ from the current wire framing.
+		if column.GetType() == schemapb.DataType_SparseFloatVector {
+			return 0, false, nil
+		}
+	}
+	rowIDs := &InsertRows{RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: p.GetRows().GetRowIds()}}
+	pkSize := proto.Size(UpsertPrimaryKeyColumn(primary, p.GetRows().GetPrimaryKeys()))
+	return p.columnBytes + uint64(proto.Size(rowIDs)+protowire.SizeTag(4)+protowire.SizeBytes(pkSize)), true, nil
+}
+
+// validateColumnWire checks protobuf framing while borrowing packed/vector bytes.
+// It avoids allocating column values, but preserves malformed-body rejection at admission.
+func validateColumnWire(payload []byte, descriptor protoreflect.MessageDescriptor, hasNullableColumns *bool) error {
+	return upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, _ []byte, value []byte) error {
+		field := descriptor.Fields().ByNumber(number)
+		if field == nil {
+			return nil
+		}
+		if field.Name() == "valid_data" {
+			*hasNullableColumns = true
+		}
+		if kind == protowire.BytesType {
+			raw, n := protowire.ConsumeBytes(value)
+			if n < 0 {
+				return protowire.ParseError(n)
+			}
+			switch field.Kind() {
+			case protoreflect.MessageKind:
+				return validateColumnWire(raw, field.Message(), hasNullableColumns)
+			case protoreflect.StringKind:
+				if !utf8.Valid(raw) {
+					return merr.WrapErrServiceInternalMsg("column contains invalid UTF-8")
+				}
+			case protoreflect.BytesKind:
+			default:
+				// Packed primitives have no nested protobuf framing.
+				switch field.Kind() {
+				case protoreflect.FloatKind, protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind:
+					if len(raw)%4 != 0 {
+						return merr.WrapErrServiceInternalMsg("invalid packed fixed32 column")
+					}
+				case protoreflect.DoubleKind, protoreflect.Fixed64Kind, protoreflect.Sfixed64Kind:
+					if len(raw)%8 != 0 {
+						return merr.WrapErrServiceInternalMsg("invalid packed fixed64 column")
+					}
+				default:
+					for len(raw) > 0 {
+						_, n := protowire.ConsumeVarint(raw)
+						if n < 0 {
+							return protowire.ParseError(n)
+						}
+						raw = raw[n:]
+					}
+				}
+			}
+		}
+		return nil
+	})
 }

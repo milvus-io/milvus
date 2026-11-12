@@ -271,7 +271,9 @@ func legacySchemaNativeObserve(t *testing.T, module *vchannel.VChannelRecoveryMo
 	t.Helper()
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	dispatch := owner.Clone()
-	require.True(t, module.ObserveMessage(context.Background(), dispatch))
+	observed, observeErr := module.ObserveMessage(context.Background(), dispatch)
+	require.NoError(t, observeErr)
+	require.True(t, observed)
 	dispatch.Release()
 	owner.Release()
 }

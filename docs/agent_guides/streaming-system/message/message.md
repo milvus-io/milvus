@@ -74,7 +74,7 @@ decoding. Function-output materialization remains outside Body decoding.
 ## Insert/Upsert projections and selected rows
 
 `ReadInsertOrUpsertProjection` reads PKs, RowIDs, partition indexes, explicit delete effects,
-request mapping, CAS, and column descriptors from nested rows and operation fields. It skips ordinary column values.
+request mapping, CAS, and column descriptors (field IDs and data types) from nested rows and operation fields. It skips materializing ordinary column values. Column framing sizes and deferred column-wire errors support single-partition admission accounting without retaining the payload.
 Immutable readers share the projection through the bounded body cache. Derived
 row selections and nullable-vector positions share its lifetime and accounting.
 Mutable payload replacement invalidates the projection. Header-only assignment

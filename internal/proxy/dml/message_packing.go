@@ -81,6 +81,7 @@ func packInsertOrUpsertMessages(ctx context.Context, cache Cache, channels []str
 		}
 	}
 	viewSource := &msgpb.InsertRequest{NumRows: source.GetNumRows(), RowIDs: source.GetRowIDs(), Timestamps: source.GetTimestamps(), FieldsData: columns, Version: msgpb.InsertDataVersion_ColumnBased}
+	sizingSource := &msgpb.InsertRequest{NumRows: source.GetNumRows(), RowIDs: source.GetRowIDs(), FieldsData: append(append([]*schemapb.FieldData(nil), columns...), message.UpsertPrimaryKeyColumn(pk, ids)), Version: msgpb.InsertDataVersion_ColumnBased}
 	// Current Proxy deletes refer to preserved existing keys. Group their
 	// occurrences by VChannel in original delete order.
 	deleteOffsets, err := matchUpsertDeletes(ids, deleted, source.HashValues)
@@ -93,7 +94,7 @@ func packInsertOrUpsertMessages(ctx context.Context, cache Cache, channels []str
 		if len(selected) == 0 {
 			continue
 		}
-		rows, assignments, err := packInsertRows(source, ids, selected, key, partitions, partitionIndexes)
+		rows, assignments, err := packInsertRows(source, ids, selected, key, partitions, partitionIndexes, sizingSource)
 		if err != nil {
 			return nil, err
 		}
@@ -185,8 +186,9 @@ func resolveInsertPartitions(ctx context.Context, cache Cache, source *msgstream
 	return partitions, indexes, nil
 }
 
-// packInsertRows selects row identity and builds this VChannel's partition table.
-func packInsertRows(source *msgstream.InsertMsg, ids *schemapb.IDs, selected []int, key message.IdempotencyKey, partitions []int64, partitionIndexes []uint32) (*messagespb.InsertRows, []*message.PartitionSegmentAssignment, error) {
+// packInsertRows selects row identity and builds this VChannel's partition table
+// and logical sizes in the same pass over original source offsets.
+func packInsertRows(source *msgstream.InsertMsg, ids *schemapb.IDs, selected []int, key message.IdempotencyKey, partitions []int64, partitionIndexes []uint32, sizingSource *msgpb.InsertRequest) (*messagespb.InsertRows, []*message.PartitionSegmentAssignment, error) {
 	keys, err := idsByOffsets(ids, selected)
 	if err != nil {
 		return nil, nil, err
@@ -195,32 +197,52 @@ func packInsertRows(source *msgstream.InsertMsg, ids *schemapb.IDs, selected []i
 	if key != "" {
 		rows.RequestRowMapping = &messagespb.RequestRowMapping{RowOffsets: make([]uint32, len(selected))}
 	}
+	sizer, err := fastpb.NewInsertRowsSizer(sizingSource)
+	if err != nil {
+		return nil, nil, err
+	}
+	var assignments []*message.PartitionSegmentAssignment
+	var localIndexes map[uint32]uint32
+	if partitionIndexes == nil {
+		assignments = []*message.PartitionSegmentAssignment{{PartitionId: partitions[0]}}
+		sizer.AddPartition()
+	} else {
+		localIndexes = make(map[uint32]uint32)
+	}
 	for index, row := range selected {
 		rows.GetRowIds().Data[index] = source.GetRowIDs()[row]
 		if rows.RequestRowMapping != nil {
 			rows.RequestRowMapping.RowOffsets[index] = uint32(row)
 		}
-	}
-	if partitionIndexes == nil {
-		return rows, []*message.PartitionSegmentAssignment{{PartitionId: partitions[0], Rows: uint64(len(selected))}}, nil
-	}
-	var assignments []*message.PartitionSegmentAssignment
-	localIndexes := make(map[uint32]uint32)
-	for index, row := range selected {
-		partition := partitionIndexes[row]
-		local, exists := localIndexes[partition]
-		if !exists {
-			local = uint32(len(assignments))
-			localIndexes[partition] = local
-			assignments = append(assignments, &message.PartitionSegmentAssignment{PartitionId: partitions[partition]})
-			if local == 1 {
-				rows.PartitionIndexes = make([]uint32, len(selected))
+		local := uint32(0)
+		if partitionIndexes != nil {
+			partition := partitionIndexes[row]
+			var exists bool
+			local, exists = localIndexes[partition]
+			if !exists {
+				local = uint32(len(assignments))
+				localIndexes[partition] = local
+				assignments = append(assignments, &message.PartitionSegmentAssignment{PartitionId: partitions[partition]})
+				sizer.AddPartition()
+				if local == 1 {
+					rows.PartitionIndexes = make([]uint32, len(selected))
+				}
 			}
 		}
 		assignments[local].Rows++
+		if err := sizer.AddRow(row, int(local)); err != nil {
+			return nil, nil, err
+		}
 		if rows.PartitionIndexes != nil {
 			rows.PartitionIndexes[index] = local
 		}
+	}
+	sizes, err := sizer.Sizes()
+	if err != nil {
+		return nil, nil, err
+	}
+	for index, assignment := range assignments {
+		assignment.BinarySize = sizes[index]
 	}
 	return rows, assignments, nil
 }

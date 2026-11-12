@@ -321,7 +321,7 @@ func TestInsertOrUpsertAdmissionDecodesBodyOncePerAttempt(t *testing.T) {
 				}
 				manager := &upsertMaterializationManager{materialize: func(_ context.Context, _ int64, _ string, _ int32, insert function.InsertMessage) (bool, error) {
 					if !materialize {
-						return false, nil // No runner outputs: sizing must still read once.
+						return false, nil // No runner outputs: projection sizing must not read Body.
 					}
 					body := insert.MustBody()
 					require.True(t, proto.Equal(body, insert.MustBody()))
@@ -344,11 +344,15 @@ func TestInsertOrUpsertAdmissionDecodesBodyOncePerAttempt(t *testing.T) {
 				}
 				_, err := interceptor.handleInsertOrUpsert(t.Context(), msg, appendOp)
 				require.ErrorIs(t, err, redo.ErrRedo)
-				require.Equal(t, 1, reads)
+				expectedReads := 0
+				if materialize {
+					expectedReads = 1
+				}
+				require.Equal(t, expectedReads, reads)
 				require.Zero(t, appends)
 				_, err = interceptor.handleInsertOrUpsert(t.Context(), msg, appendOp)
 				require.NoError(t, err)
-				require.Equal(t, 2, reads, "redo must get a fresh attempt-local body")
+				require.Equal(t, 2*expectedReads, reads, "redo must get a fresh attempt-local body only when needed")
 				require.Equal(t, 1, appends)
 			})
 		}

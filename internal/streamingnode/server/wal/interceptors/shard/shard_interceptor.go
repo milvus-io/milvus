@@ -597,8 +597,9 @@ func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg mess
 		return nil, status.NewUnrecoverableError("row-write CAS marker and proof differ")
 	}
 	mutable.primary = primary
+	materialized := false
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
-		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutable)
+		materialized, err = function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutable)
 		if err != nil {
 			var preparation *function.PreparationRequiredError
 			if errors.As(err, &preparation) {
@@ -611,18 +612,36 @@ func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg mess
 			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
 		}
 	}
-	content, err := mutable.readRows(ctx)
-	if err != nil {
-		return nil, insertOrUpsertBodyDecodeError(err)
-	}
-	// Borrow all columns for exact selected-row sizing. The view encoder does not
-	// copy vectors or materialize partition-sized FieldData objects.
-	primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
-	fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
-	source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds().GetData())), RowIDs: content.GetRowIds().GetData(), Timestamps: make([]uint64, len(content.GetRowIds().GetData())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
-	sizes, err := fastpb.UpsertPartitionSizes(source, selections)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// One partition selects every row: projection already knows canonical column
+	// framing, so validate producer accounting without decoding ordinary values.
+	// Multiple partitions still use exact selected-row sizing.
+	sizes := []uint64(nil)
+	if len(header.GetPartitions()) == 1 && !materialized {
+		size, exact, err := body.SinglePartitionBinarySize(primary)
+		if err != nil {
+			return nil, insertOrUpsertBodyDecodeError(err)
+		}
+		if exact {
+			sizes = []uint64{size}
+		}
+	}
+	if sizes == nil {
+		content, err := mutable.readRows(ctx)
+		if err != nil {
+			return nil, insertOrUpsertBodyDecodeError(err)
+		}
+		// Borrow all columns for exact selected-row sizing. The view encoder does not
+		// copy vectors or materialize partition-sized FieldData objects.
+		primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
+		fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
+		source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds().GetData())), RowIDs: content.GetRowIds().GetData(), Timestamps: make([]uint64, len(content.GetRowIds().GetData())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+		sizes, err = fastpb.UpsertPartitionSizes(source, selections)
+		if err != nil {
+			return nil, err
+		}
 	}
 	session := txn.GetTxnSessionFromContext(ctx)
 	requests := make([]*shards.AssignSegmentRequest, len(header.GetPartitions()))
