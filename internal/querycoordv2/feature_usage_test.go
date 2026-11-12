@@ -20,101 +20,50 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (suite *ServiceSuite) TestFeatureUsageEntries() {
-	ctx := context.Background()
-	server := suite.server
-
-	// Nothing loaded: the group is still present, with zeros.
-	got := indexFeatureEntries(server.FeatureUsageEntries(ctx, featureusage.CollectionContext{}))
-	suite.Require().Contains(got, featureusage.GroupLoaded+"/"+featureusage.LoadedCollections)
-	suite.EqualValues(0, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCollections].Value)
-
-	// Fully loaded, 2 replicas, default resource group only.
-	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
-		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1000, ReplicaNumber: 2, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100, 101, 102}},
-	}))
-	suite.Require().NoError(suite.meta.Put(ctx,
-		meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 1000, ResourceGroup: meta.DefaultResourceGroupName}),
-		meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 1000, ResourceGroup: meta.DefaultResourceGroupName}),
-	))
-	// Partial load, 1 replica in a custom resource group.
-	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
-		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1001, ReplicaNumber: 1, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100}},
-	}))
-	suite.Require().NoError(suite.meta.Put(ctx,
-		meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 1001, ResourceGroup: "rg_custom"}),
-	))
-
-	cc := featureusage.CollectionContext{FieldCount: map[int64]int{1000: 3, 1001: 3}}
-	entries := server.FeatureUsageEntries(ctx, cc)
-	got = indexFeatureEntries(entries)
-	suite.EqualValues(2, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCollections].Value)
-	suite.EqualValues(1, got[featureusage.GroupLoaded+"/"+featureusage.LoadedFieldsSubset].Value)
-	suite.EqualValues(1, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCustomResourceGroups].Value)
-	replicaBuckets := 0
-	for _, e := range entries {
-		if e.Group == featureusage.GroupDist && e.Name == featureusage.DistLoadedReplicaNumber {
-			replicaBuckets++
-			suite.NotEmpty(e.Bucket)
-		}
-		suite.NotContains(e.Name, "rg_custom", "resource group names never appear in the report")
-		suite.NotContains(e.Bucket, "rg_custom")
+func TestQueryViewFeatureUsageEntries(t *testing.T) {
+	s, up := newHandoffServer(t)
+	store := s.qviewsRuntime.loadConfigStore
+	cfg := store.GetConfig(1).Clone()
+	cfg.RequiredFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}, {FieldId: 103}}
+	cfg.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}
+	cfg.Replicas[0].ResourceGroup = "custom"
+	require.NoError(t, store.Put(t.Context(), cfg))
+	check := func(loaded, partial, custom int64, cc featureusage.CollectionContext) {
+		got := indexFeatureEntries(s.FeatureUsageEntries(t.Context(), cc))
+		require.EqualValues(t, loaded, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCollections].Value)
+		require.EqualValues(t, partial, got[featureusage.GroupLoaded+"/"+featureusage.LoadedFieldsSubset].Value)
+		require.EqualValues(t, custom, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCustomResourceGroups].Value)
 	}
-	suite.Equal(2, replicaBuckets, "replica numbers 1 and 2 land in two buckets")
-}
-
-// The loaded group resolves collections against the RootCoord snapshot when
-// one is given: a recovered QueryCoord holds no schema, and a collection being
-// dropped is still here but no longer there.
-func (suite *ServiceSuite) TestFeatureUsageEntriesWithCollectionContext() {
-	ctx := context.Background()
-	server := suite.server
-	loaded := func(id int64, fields []int64, status querypb.LoadStatus) {
-		suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: id, ReplicaNumber: 1, Status: status, LoadFields: fields},
-			// No Schema: this is what CollectionManager.Recover leaves behind.
-		}))
-	}
-	loaded(2000, []int64{100}, querypb.LoadStatus_Loaded)           // partial load, recovered
-	loaded(2001, []int64{100, 101, 102}, querypb.LoadStatus_Loaded) // full load, recovered
-	loaded(2002, nil, querypb.LoadStatus_Loaded)                    // full load, no list
-	loaded(2003, []int64{100}, querypb.LoadStatus_Loading)          // still loading
-	loaded(2004, []int64{100}, querypb.LoadStatus_Loaded)           // dropped in RootCoord
-
-	key := featureusage.GroupLoaded + "/"
-	// Without a snapshot the recovered partial load is invisible.
-	got := indexFeatureEntries(server.FeatureUsageEntries(ctx, featureusage.CollectionContext{}))
-	suite.EqualValues(4, got[key+featureusage.LoadedCollections].Value, "loading excluded, dropped not knowable")
-	suite.EqualValues(0, got[key+featureusage.LoadedFieldsSubset].Value)
-
-	cc := featureusage.CollectionContext{FieldCount: map[int64]int{2000: 3, 2001: 3, 2002: 3, 2003: 3}}
-	got = indexFeatureEntries(server.FeatureUsageEntries(ctx, cc))
-	suite.EqualValues(3, got[key+featureusage.LoadedCollections].Value, "loading and dropped excluded")
-	suite.EqualValues(1, got[key+featureusage.LoadedFieldsSubset].Value, "the recovered partial load counts")
-}
-
-func TestIsLoadFieldsSubset(t *testing.T) {
-	assert.False(t, isLoadFieldsSubset(nil, 3), "no list is a full load")
-	assert.False(t, isLoadFieldsSubset([]int64{1, 2, 3}, 3))
-	assert.True(t, isLoadFieldsSubset([]int64{1}, 3))
-	assert.False(t, isLoadFieldsSubset([]int64{1}, 0), "unknown schema never counts")
-	assert.Equal(t, 0, loadableFieldCount(nil))
-	assert.Equal(t, 3, loadableFieldCount(&schemapb.CollectionSchema{
-		Fields:            []*schemapb.FieldSchema{{FieldID: 0}, {FieldID: 1}, {FieldID: 100}, {FieldID: 101}},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Fields: []*schemapb.FieldSchema{{FieldID: 102}}}},
-	}), "system fields are not loadable; struct sub-fields are")
+	cc := featureusage.CollectionContext{}
+	check(0, 0, 0, cc) // Up views still use the old configuration.
+	up("v0", 1)
+	check(0, 0, 0, cc) // The complete vchannel set is required.
+	up("v1", 1)
+	check(1, 1, 1, cc)                                                          // RequiredFields includes dynamic and flattened struct fields.
+	check(0, 0, 0, featureusage.CollectionContext{FieldCount: map[int64]int{}}) // Dropped in RootCoord.
+	cfg = cfg.Clone()
+	cfg.LoadFields = nil // Empty hints mean full preload.
+	require.NoError(t, store.Put(t.Context(), cfg))
+	up("v0", 1)
+	up("v1", 1)
+	check(1, 0, 1, cc)
+	cfg = cfg.Clone()
+	cfg.Replicas = append(cfg.Replicas, &loadmgr.ReplicaAssignment{ReplicaID: 12, ResourceGroup: "custom"})
+	require.NoError(t, store.Put(t.Context(), cfg))
+	up("v0", 1)
+	up("v1", 1)
+	check(0, 0, 0, cc) // A replica with no registry entries is not loaded.
 }
 
 func (suite *ServiceSuite) TestCollectQueryNodeFeatureUsage() {

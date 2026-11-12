@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -168,19 +169,18 @@ func TestBootstrapPermanentFailureIsUnrecoverable(t *testing.T) {
 			defer manager.Close()
 			patch := mockey.Mock((*versionedQueryRuntimeModule).Prepare).Return(tc.err).Build()
 			defer patch.UnPatch()
-			rejected, ready := false, false
+			var rejected, ready atomic.Bool
 			meta, key := testManagerQueryViewMetaAndKey(1)
 			manager.AcquireLocked(snview.AcquireResource{
 				Key: key, Meta: meta,
-				OnReady: func() { ready = true }, OnUnrecoverable: func() { rejected = true },
+				OnReady: func() { ready.Store(true) }, OnUnrecoverable: func() { rejected.Store(true) },
 			}, testManagerViewBuilder)
 			runtime := manager.runtime
 			err := scheduler.task.Execute(context.Background())
 			require.ErrorIs(t, err, tc.err)
 			require.NotErrorIs(t, err, nodescheduler.ErrDelay)
-			require.NoError(t, scheduler.task.Execute(context.Background()))
-			require.True(t, rejected)
-			require.False(t, ready)
+			require.Eventually(t, rejected.Load, time.Second, time.Millisecond)
+			require.False(t, ready.Load())
 			require.Equal(t, queryRuntimeClosed, runtime.state)
 			require.Nil(t, manager.runtime)
 			require.Nil(t, manager.task)
@@ -191,7 +191,7 @@ func TestBootstrapPermanentFailureIsUnrecoverable(t *testing.T) {
 
 func TestResolvedEmptyLoadScopeIsNotUnrestricted(t *testing.T) {
 	manager := NewManager(Config{LoadInfoProvider: fakeLoadInfoProvider{}})
-	view, err := manager.resolveLoadInfo(context.Background(), walview.VChannelWALView{LoadInfoVersion: 1})
+	view, err := manager.resolveLoadInfo(context.Background(), walview.VChannelWALView{LoadInfoVersion: 1, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}}}})
 	require.NoError(t, err)
 	require.NotNil(t, view.PartitionIDs)
 	require.Empty(t, view.PartitionIDs)

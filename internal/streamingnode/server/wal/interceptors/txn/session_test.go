@@ -110,7 +110,7 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageDoneAndKeepalive(0)
+	session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 	// Test Commit.
 	err = session.RequestCommitAndWait(ctx, 0, 0)
@@ -176,6 +176,8 @@ func TestManager(t *testing.T) {
 			}, 0)
 			switch i % 3 {
 			case 0:
+				require.NoError(t, session.AddNewMessage(context.Background(), 0))
+				session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 				err := session.RequestCommitAndWait(context.Background(), 0, 0)
 				session.CommitDone()
 				assert.NoError(t, err)
@@ -244,6 +246,12 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(1)))
 
 	m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+	insertOnly, err := m.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	require.True(t, insertOnly.IsInsertOnly(), "replayed Insert bodies preserve commit classification")
+	empty, err := m.GetSessionOfTxn(2)
+	require.NoError(t, err)
+	require.False(t, empty.IsInsertOnly())
 	select {
 	case <-m.RecoverDone():
 		t.Errorf("txn manager should not be recovered")
@@ -281,6 +289,8 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 		cleanupCalled.Inc()
 	}, 0)
 
+	require.NoError(t, session.AddNewMessage(context.Background(), 10))
+	session.AddNewMessageDoneAndKeepalive(10, message.MessageTypeInsert)
 	err := session.RequestCommitAndWait(context.Background(), 11, 0)
 	require.NoError(t, err)
 
@@ -293,6 +303,89 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 		session.Cleanup()
 	})
 	require.Equal(t, int32(1), cleanupCalled.Load())
+}
+
+func TestCommitRejectsEmptyTransactionAfterPendingAppends(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending bool
+		success bool
+	}{
+		{"empty", false, false},
+		{"failed-body", true, false},
+		{"successful-body", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics := metricsutil.NewTxnMetrics("empty-commit-test")
+			defer metrics.Close()
+			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+			defer session.Cleanup()
+			cleaned := atomic.NewInt32(0)
+			session.RegisterCleanup(func() { cleaned.Inc() }, 10)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if tc.pending {
+				require.NoError(t, session.AddNewMessage(ctx, 11))
+			}
+			done := make(chan error, 1)
+			go func() { done <- session.RequestCommitAndWait(ctx, 12, 0) }()
+			if tc.pending {
+				require.Eventually(t, func() bool { return session.State() == message.TxnStateOnCommit }, time.Second, time.Millisecond)
+				select {
+				case <-done:
+					t.Fatal("commit must wait for the admitted body")
+				default:
+				}
+				if tc.success {
+					session.AddNewMessageDoneAndKeepalive(11, message.MessageTypeInsert)
+				} else {
+					session.AddNewMessageFail()
+				}
+			}
+			err := <-done
+			if tc.success {
+				require.NoError(t, err)
+				require.True(t, session.IsInsertOnly())
+				session.CommitDone()
+			} else {
+				require.ErrorContains(t, err, "cannot commit an empty transaction")
+				require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, status.AsStreamingError(err).Code)
+				require.Equal(t, message.TxnStateRollbacked, session.State())
+			}
+			require.EqualValues(t, 1, cleaned.Load())
+		})
+	}
+}
+
+func TestSuccessfulBodiesDetermineInsertOnlyCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bodies     []message.MessageType
+		insertOnly bool
+	}{
+		{"insert-only", []message.MessageType{message.MessageTypeInsert, message.MessageTypeInsert}, true},
+		{"insert-delete", []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete}, false},
+		{"delete-insert", []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, false},
+		{"delete-only", []message.MessageType{message.MessageTypeDelete}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics := metricsutil.NewTxnMetrics("commit-classification-test")
+			defer metrics.Close()
+			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+			defer session.Cleanup()
+			for _, typ := range tc.bodies {
+				require.NoError(t, session.AddNewMessage(t.Context(), 11))
+				session.AddNewMessageDoneAndKeepalive(11, typ)
+			}
+			// A failed append must not change the committed body classification.
+			require.NoError(t, session.AddNewMessage(t.Context(), 12))
+			session.AddNewMessageFail()
+			require.NoError(t, session.RequestCommitAndWait(t.Context(), 13, 0))
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly())
+			session.CommitDone()
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly(), "ACK projection retains classification after session cleanup")
+		})
+	}
 }
 
 func TestFailAllTransactions(t *testing.T) {
@@ -359,6 +452,8 @@ func TestFailAllTransactions(t *testing.T) {
 		session2.RegisterCleanup(func() {
 			cleanupCalled.Inc()
 		}, 0)
+		require.NoError(t, session2.AddNewMessage(context.Background(), 0))
+		session2.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 		err = session2.RequestCommitAndWait(context.Background(), 0, 0)
 		assert.NoError(t, err)
 		session2.CommitDone()
@@ -371,7 +466,7 @@ func TestFailAllTransactions(t *testing.T) {
 		}, 0)
 		err = session3.AddNewMessage(context.Background(), 0)
 		assert.NoError(t, err)
-		session3.AddNewMessageDoneAndKeepalive(0)
+		session3.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 		// Rollback all in-flight transactions
 		m.FailTxnAtVChannel("")

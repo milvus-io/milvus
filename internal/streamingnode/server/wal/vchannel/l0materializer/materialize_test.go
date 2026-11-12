@@ -43,7 +43,7 @@ func testMaterializer(t *testing.T, initial uint64, writeErrors ...*error) (*L0M
 	scheduler := nodescheduler.New(1)
 	t.Cleanup(scheduler.Close)
 	tasks := []nodescheduler.Task{}
-	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle {
+	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 		tasks = append(tasks, task)
 		return nil
 	}).Build()

@@ -8,10 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -23,24 +26,26 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	version := &viewpb.DataVersion{StreamingVersion: 1}
-	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3, 4}, SegmentManifestVersions: []int64{7, 0}}}}}}
+	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3, 4, 5}, SegmentManifestVersions: []int64{7, 0, 9}}}}}}
 	patch := mockey.Mock((*catalogkv.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{view}, nil).Build()
 	defer patch.UnPatch()
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
 	require.NoError(t, err)
 	store := metacache.NewMetaStore(nil)
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
+	s := &Server{dataViewManager: manager, meta: &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	for _, id := range []int64{3, 4} {
-		s.meta.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: packed.MarshalManifestPath("segments", 9)}))
+	current := packed.CommittedManifestPath("segments", 9, 4096, "remote")
+	for _, id := range []int64{3, 4, 5} {
+		s.meta.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: current}))
 	}
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
-	require.Len(t, resp.GetBm25Resources(), 2)
+	require.Len(t, resp.GetBm25Resources(), 3)
 	require.Equal(t, packed.MarshalManifestPath("segments", 7), resp.Bm25Resources[0].GetManifestPath(), "historical view must not read latest manifest")
-	require.Equal(t, packed.MarshalManifestPath("segments", 9), resp.Bm25Resources[1].GetManifestPath(), "version zero resolves current metadata")
-	require.Equal(t, packed.MarshalManifestPath("segments", 9), s.meta.GetSegment(ctx, 3).GetManifestPath(), "shared metadata stays immutable")
+	require.Equal(t, current, resp.Bm25Resources[1].GetManifestPath(), "version zero resolves current metadata")
+	require.Equal(t, current, resp.Bm25Resources[2].GetManifestPath(), "pinning the current revision keeps its recorded size")
+	require.Equal(t, current, s.meta.GetSegment(ctx, 3).GetManifestPath(), "shared metadata stays immutable")
 	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: &viewpb.DataVersion{StreamingVersion: 100}})
 	require.NoError(t, err)
 	require.Error(t, merr.Error(resp.GetStatus()))
@@ -57,9 +62,9 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	require.NoError(t, err)
 	logs := []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 42}, {LogID: 43, LogPath: "existing/path/43"}}}}
 	store := metacache.NewMetaStore(nil)
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
+	s := &Server{dataViewManager: manager, meta: &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
+	s.meta.Segments.SetSegment(3, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
@@ -72,4 +77,34 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	require.Empty(t, logs[0].Binlogs[0].LogPath, "RPC must not mutate shared metadata")
 	resp.Bm25Resources[0].Bm25Binlogs[0].Binlogs[1].LogPath = "caller-owned"
 	require.Equal(t, "existing/path/43", logs[0].Binlogs[1].LogPath)
+	// A V3 base resolves stats from its manifest, even when legacy descriptors
+	// remain in metadata. Do not expand or transmit those unused paths.
+	s.meta.Segments.SetSegment(3, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segments", 9), Bm25Statslogs: logs}))
+	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Empty(t, resp.Bm25Resources[0].GetBm25Binlogs())
+	require.Equal(t, packed.MarshalManifestPath("segments", 9), resp.Bm25Resources[0].GetManifestPath())
+}
+
+func TestQueryViewCollectionIndexInfosResolveExactIDs(t *testing.T) {
+	im := &index.IndexMeta{Indexes: map[int64]map[int64]*model.Index{
+		1: {
+			100: {CollectionID: 1, FieldID: 10, IndexID: 100, IndexName: "old", IsDeleted: true},
+			101: {CollectionID: 1, FieldID: 10, IndexID: 101, IndexName: "new"},
+			102: {CollectionID: 1, FieldID: 10, IndexID: 102, IndexName: "another-path"},
+		},
+	}}
+	s := &Server{meta: &meta.Meta{IndexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
+	current := s.GetQueryViewCollectionIndexInfos(1)
+	require.Len(t, current, 2)
+	require.EqualValues(t, 101, current[0].GetIndexID())
+	exact := s.GetQueryViewCollectionIndexInfos(1, 100, 102)
+	require.Len(t, exact, 2)
+	require.EqualValues(t, 100, exact[0].GetIndexID())
+	require.EqualValues(t, 102, exact[1].GetIndexID())
+	exact[0].IndexName = "caller-owned"
+	require.Equal(t, "old", s.GetQueryViewCollectionIndexInfos(1, 100)[0].IndexName)
+	require.Empty(t, s.GetQueryViewCollectionIndexInfos(1, 999))
+	require.Empty(t, s.GetQueryViewCollectionIndexInfos(2, 100))
 }

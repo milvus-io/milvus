@@ -151,7 +151,7 @@ func (j *reader) Init() error {
 }
 
 func (j *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(j.schema)
+	insertData, err := storage.NewInsertDataBuilder(j.schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}
@@ -162,6 +162,7 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		if _, err := j.dec.Token(); err != nil && !errors.Is(err, io.EOF) {
 			return nil, wrapDecodeError(err, "read json records")
 		}
+		j.parser.IgnoredStructKeys().LogOnce(j.ctx, j.filePath)
 		return nil, io.EOF
 	}
 
@@ -284,6 +285,9 @@ func (j *reader) Size() (int64, error) {
 }
 
 func (j *reader) Close() {
+	if j.parser != nil {
+		j.parser.IgnoredStructKeys().LogOnce(j.ctx, j.filePath)
+	}
 	if j.cmr != nil {
 		j.cmr.Close()
 	}

@@ -32,7 +32,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 		)
 		for _, msg := range body {
 			session.AddNewMessage(context.Background(), msg.TimeTick())
-			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+			session.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
 		}
 		sessions[session.TxnContext().TxnID] = session
 		recoveredSessions[session.TxnContext().TxnID] = struct{}{}

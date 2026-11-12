@@ -43,7 +43,7 @@ func TestWALMaterializerRegistrationErrors(t *testing.T) {
 			scheduler := nodescheduler.New(1)
 			t.Cleanup(scheduler.Close)
 			var tasks []nodescheduler.Task
-			submit := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle {
+			submit := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 				tasks = append(tasks, task)
 				return nil
 			}).Build()

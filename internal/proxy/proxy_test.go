@@ -53,10 +53,12 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -64,6 +66,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -927,6 +931,10 @@ func TestProxy(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
+	// QueryView sealed resources require committed StorageV3 manifests.
+	previousLoonFFI := params.CommonCfg.UseLoonFFI.GetValue()
+	require.NoError(t, params.Save(params.CommonCfg.UseLoonFFI.Key, "true"))
+	t.Cleanup(func() { _ = params.Save(params.CommonCfg.UseLoonFFI.Key, previousLoonFFI) })
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
@@ -958,6 +966,10 @@ func TestProxy(t *testing.T) {
 
 	mlog.Info(context.TODO(), "Initialize parameter table of Proxy")
 
+	// Background quota RPCs may arrive as soon as a worker registers.
+	// Install its WAL accessor before starting any server.
+	streaming.Init()
+
 	mix := runMixCoord(ctx, localMsg)
 	mlog.Info(context.TODO(), "running MixCoord ...")
 
@@ -971,8 +983,6 @@ func TestProxy(t *testing.T) {
 	mlog.Info(context.TODO(), "running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
-
-	streaming.Init()
 
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
@@ -1023,6 +1033,15 @@ func TestProxy(t *testing.T) {
 	err = proxy.Init()
 	assert.NoError(t, err)
 
+	// This test constructs the Proxy component directly, bypassing the gRPC
+	// server bootstrap which normally installs the QueryView client.
+	viewSN := streaming.WAL().QueryViewClient()
+	viewQN := querynodehandler.NewClient(etcdcli)
+	viewResolver := resolver.NewShardResolverImpl(proxy)
+	proxy.SetViewQueryClient(queryclient.NewLegacyViewQueryClient(
+		queryclient.ViewQueryClientConfig{LoadInfoClient: rootCoordClient}, viewSN,
+		queryclient.NewCompositeViewQueryServiceClient(viewSN, viewQN.QueryViewClient()), viewResolver))
+
 	err = proxy.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
@@ -1032,6 +1051,9 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
+		proxy.ViewQueryClient().Close()
+		viewResolver.Close()
+		viewQN.Close()
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
@@ -4628,6 +4650,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {

@@ -38,7 +38,7 @@ func RecordToInsertData(
 	schema *schemapb.CollectionSchema,
 	requiredFields typeutil.Set[int64],
 ) (*InsertData, error) {
-	insertData, err := NewInsertDataWithFunctionOutputField(schema)
+	insertData, err := NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,17 @@ func RecordToInsertData(
 		}
 
 		for i := 0; i < numRows; i++ {
-			val, err := entry.deserialize(col, i, elementType, dim, true /* shouldCopy */, field.GetElementNullable())
+			var val any
+			var err error
+			if dt == schemapb.DataType_Array && typeutil.IsNativeListArrayField(field) {
+				var row *schemapb.ScalarField
+				row, err = DeserializeNativeArrayRow(col, i, field)
+				if row != nil {
+					val = row
+				}
+			} else {
+				val, err = entry.deserialize(col, i, elementType, dim, true /* shouldCopy */, field.GetElementNullable())
+			}
 			if err != nil {
 				return nil, merr.Wrapf(err, "deserialize field %s row %d",
 					field.GetName(), i)

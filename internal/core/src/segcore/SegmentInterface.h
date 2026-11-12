@@ -60,7 +60,6 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/SkipIndex.h"
 #include "segcore/indexing/FieldIndexCapability.h"
-#include "segcore/indexing/IndexPin.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
@@ -143,10 +142,6 @@ class SegmentReadSnapshot {
     // state. Consumers that require element-to-row conversion must check it.
     virtual std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const = 0;
-
-    // Must return a non-null schema from the same captured state as the columns.
-    virtual SchemaPtr
-    get_schema_snapshot() const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -241,6 +236,23 @@ class SegmentInterface {
     virtual SchemaPtr
     get_schema_snapshot() const = 0;
 
+    virtual bool
+    RequiresExplicitReadSchema() const {
+        return false;
+    }
+
+    // Physical descriptors do not select a logical query schema.
+    virtual FieldMeta
+    get_field_meta(FieldId id) const {
+        return get_schema_snapshot()->operator[](id);
+    }
+
+    virtual bool
+    is_primary_field(FieldId id) const {
+        const auto primary = get_schema_snapshot()->get_primary_field_id();
+        return primary.has_value() && primary->get() == id.get();
+    }
+
     virtual int64_t
     get_deleted_count() const = 0;
 
@@ -295,15 +307,15 @@ class SegmentInterface {
     virtual std::vector<IndexRegistration>
     IndexRegistrations(FieldId field_id) const = 0;
 
-    // Sealed index pinning. Missing keys return an empty pin; cache loading
-    // failures propagate. The reader remains uniquely owned by its cache cell.
-    virtual IndexPin
-    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const = 0;
+    // Creates a sealed request reader. Missing keys return nullptr;
+    // initialization failures propagate. The reader retains its Index version.
+    virtual index::IIndexReaderBasePtr
+    CreateIndexReader(milvus::OpContext* op_ctx, const IndexKey& key) const = 0;
 
-    // Growing publication is independent from sealed cache pinning. One pin
+    // Growing publication is independent from sealed reader creation. One pin
     // binds an immutable reader generation to its contiguous covered row end.
     virtual index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId field_id) const = 0;
+    PinGrowingIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -644,6 +656,18 @@ class SegmentInternalInterface : public SegmentInterface {
              int64_t size,
              const folly::CancellationToken& cancel_token) const override;
 
+    // Materialize only PK and timestamp for rows surviving Grep, independently
+    // of the output projection. IDs, offsets and timestamp preserve row order.
+    // The take gate applies only to the local identity projection.
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    RetrieveIdentitiesByOffsets(
+        tracer::TraceContext* trace_ctx,
+        const query::RetrievePlan* plan,
+        const int64_t* offsets,
+        int64_t size,
+        bool take_for_output_allowed,
+        const folly::CancellationToken& cancel_token = {}) const;
+
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
@@ -660,7 +684,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     // Projects whether IndexCapability contains a JsonFlat or JSON-cast entry;
-    // it does not pin the reader. Default false covers segment types that do
+    // it does not create a reader. Default false covers segment types that do
     // not install sealed JSON indexes, such as growing segments.
     virtual bool
     HasJsonIndex(FieldId field_id) const {
@@ -669,6 +693,10 @@ class SegmentInternalInterface : public SegmentInterface {
 
     int64_t
     get_real_count() const override;
+
+    // Sum field averages under the lock required by growing-segment statistics.
+    int64_t
+    get_fields_avg_size(const std::vector<FieldId>& field_ids) const;
 
     // The caller must hold mutex_ when concurrent updates are possible.
     int64_t
@@ -792,7 +820,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * Sort all candidates in ascending order, and then return the limit smallest.
@@ -840,7 +870,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillOrderByResult(
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-        RetrieveResult& retrieveResult) const;
+        RetrieveResult& retrieveResult,
+        milvus::OpContext* op_ctx) const;
 
     void
     FillTargetEntry(
@@ -859,6 +890,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::unique_ptr<DataArray>
     bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t row_begin,
+                                   int64_t count,
+                                   const IStructElementOffsets& offsets) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   const int64_t* row_ids,
                                    int64_t count) const;
 
  protected:

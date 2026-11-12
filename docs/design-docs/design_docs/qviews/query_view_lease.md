@@ -2,6 +2,13 @@
 
 ## Purpose and scope
 
+[Schema handoff](schema_evolution.md) is wired into the Coordinator publication
+path: prepare the target LoadInfo/DataView and serving Views, publish the read
+schema durably, then request retirement of prior read generations. Phase 1
+selects an exact-schema Up View. The local lease/reference protocol below drains
+the old serving resources after that publication decision; it does not replace
+the Coordinator's prepare/publish obligation.
+
 Keep an accessed SN QueryView in Up long enough for Phase 1 plans to reach
 Phase 2 during normal view replacement. This is an SN-local, renewable serving
 lease, separate from the existing call-scoped QueryView reference and physical
@@ -9,7 +16,7 @@ segment handles. Only Up accepts new tasks; Down does not become queryable.
 
 ## Configuration and renewal
 
-`queryView.leaseDuration` defaults to `60s` and is not refreshable.
+`queryView.leaseDuration` defaults to `5s` and is not refreshable.
 The duration is captured when the PChannel handler is created and inherited by
 its shard handlers. Non-positive durations disable timed retention while
 preserving active call references. A duration is not a maximum request execution
@@ -23,8 +30,9 @@ Coord state pushes, and repeated Down requests do not renew the deadline.
 The Search ignore-growing fast path does not access an Up view and grants no
 lease. A view never accessed by a query has no timed retention.
 
-GetQueryPlan continues selecting the highest Up version. Older Up versions
-remain accessible to explicit-version Phase 2 requests, and those accesses can
+GetQueryPlan selects the highest Up version matching the request's exact
+SchemaVersion, including version zero. It does not fall back to a newer schema.
+Older Up versions remain accessible to explicit-version Phase 2 requests, and those accesses can
 continue renewing them without a hard lifetime cap. Continuous reuse of an old
 plan can therefore delay resource reclamation indefinitely.
 
@@ -72,7 +80,10 @@ The serving deadline and pending Down intent are process-local and are not
 persisted. The clock uses Go's monotonic time component. A crash or WAL ownership
 change invalidates the continuity guarantee; callers retry through existing
 view/WAL errors. Recovery rebuilds persisted views as UpRecovering without a
-new lease; Coord re-delivers its desired state.
+new lease; Coord re-delivers its desired state. Queries for a recovering view
+wait on local state notifications with the caller context. Recovery completion,
+failure, teardown and shutdown wake waiters to recheck state; waiting alone does
+not grant a serving lease.
 
 A missing query runtime or one closed during MVCC waiting/handle acquisition
 returns `VIEW_INVALIDATED`; a WAL that rejects MVCC acquisition during shutdown
@@ -99,5 +110,38 @@ active references across expiry, no resurrection after expiry, forced cleanup,
 and recovery without inherited deadlines. Unit tests must cover the Coord Down
 gate as well as SN lifetime behavior. A real SN RPC experiment must continue
 SearchOnView/QueryOnView while Down is pending, then stop renewal and observe
-Down followed by rejection. The current extraction uses explicit ViewSync;
-this does not claim end-to-end automatic Coord scheduling or Proxy integration.
+Down followed by rejection. Production QueryCoord scheduling and Proxy
+QueryViewClient routing use this protocol. Component tests exercise explicit
+ViewSync; claims about automatic handoff additionally require cluster evidence.
+
+## Explicit collection teardown control
+
+Balancer attaches `QueryViewMeta.control.preempt_serving_lease` to Down when
+collection load intent has been withdrawn. Replica removal or suspension with
+collection intent still present uses ordinary Down. DDL callbacks only withdraw
+intent and wait for cleanup; they do not change Views directly.
+
+Coordinator's `EnterDownWithControl` handles both Up -> Down and an already
+published Down. Strengthening control persists and resends Down even without a
+state change. Repeating the same control or an ordinary Down is a no-op.
+
+On receiving controlled Down, SN closes that View's serving lease: disable
+future grants/renewal, clear the deadline, and stop its timer. The existing
+pending-Down check then waits only for call references to reach zero. The closed
+lease cannot reopen on a delayed ordinary push. Existing leases can release
+normally, but cannot renew; new acquisition is rejected and the View is removed
+from replica discovery while its existing calls drain.
+
+This control introduces no per-call cancellation context or separate recovery
+protocol. Active calls retain their original caller context and reference
+lifetime. SN's deadline and closed-lease bit are local; after restart Coordinator
+re-delivers its persisted Down/control through the existing sync protocol.
+Once Down completes, the existing Dropping/resource cleanup protocol runs.
+Execution handles retain their resources through actual native completion and
+conversion; an operation guard delays View resource cleanup until those handles
+are returned. The control never clears operation references.
+
+Empty control preserves normal handoff. Older workers ignoring the optional
+control keep their existing lease delay. Verify freshly renewed long leases,
+pending-Down upgrades and duplicate pushes, final-reference release, no renewal
+or reacquisition after closure, normal handoff, and synchronous resource drain.

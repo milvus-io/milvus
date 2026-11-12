@@ -28,6 +28,10 @@
 #include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
 
+namespace arrow {
+class ListArray;
+}
+
 namespace milvus {
 
 // Heap-backed storage for one logical Array value. The root value is described
@@ -52,8 +56,21 @@ CreateArrayValueStorageFromProto(
 // the immutable heap buffer and its child Chunk tree. Unlike a sealed
 // ColumnarArrayChunk, the single root value stores length directly and does not
 // materialize the redundant root offsets [0, length].
+//
+// Segments do not keep ArrayValues: growing chunks hold one ArrayValueView per
+// row into per-batch ColumnarArrayChunks and sealed segments hold
+// ColumnarArrayChunks, so stored rows are read as ArrayValueView. An ArrayValue
+// exists only as an element of FieldData<ArrayValue> while binlogs are read or
+// written or a growing segment is loaded, and as an owned sealed Take result
+// (RawTakeResult::GetOwn); growing inserts build blocks from the protobuf rows
+// directly. ConcurrentVector<ArrayValue> and
+// VariableLengthChunk<ArrayValue> use the type only as a tag.
 class ArrayValue {
     friend class ArrayValueView;
+    friend std::vector<ArrayValue>
+    ArrowListToArrayValues(
+        const arrow::ListArray& rows,
+        std::shared_ptr<const proto::schema::TypeSchema> type);
 
  public:
     ArrayValue() = default;
@@ -130,6 +147,14 @@ class ArrayValue {
         return *storage_->type;
     }
 
+    // The type above as the shared, immutable object this value holds, for
+    // callers that keep it beyond the value's lifetime.
+    const std::shared_ptr<const proto::schema::TypeSchema>&
+    shared_type() const {
+        assert(storage_ != nullptr && storage_->type != nullptr);
+        return storage_->type;
+    }
+
     const Chunk&
     child() const {
         assert(storage_ != nullptr && storage_->child != nullptr);
@@ -198,6 +223,13 @@ class ArrayValueView {
         return element_type() == DataType::ARRAY;
     }
 
+    bool
+    is_valid(size_t index) const {
+        AssertInfo(
+            index < size(), "array element {} out of range {}", index, size());
+        return child_->isValid(static_cast<int>(begin_ + index));
+    }
+
     ArrayValueView
     array_at(size_t index) const {
         assert(type_ != nullptr && child_ != nullptr);
@@ -229,6 +261,65 @@ class ArrayValueView {
                    length);
         return ColumnarArrayChunk::ReadScalarElement<T>(
             *type_, *child_, static_cast<size_t>(begin_ + index));
+    }
+
+    // Whether this scalar Array equals the literal. Null is an ordinary value
+    // and a literal cannot spell it, so a value holding a null element never
+    // equals one. Mirrors ArrayView::is_same_array.
+    bool
+    is_same_array(const proto::plan::Array& literal) const {
+        const auto length = size();
+        if (static_cast<size_t>(literal.array_size()) != length) {
+            return false;
+        }
+        if (length == 0) {
+            return true;
+        }
+        if (!literal.same_type()) {
+            return false;
+        }
+        const auto type = element_type();
+        const auto expected_val_case =
+            array_detail::ExpectedLiteralValCase(type);
+        if (expected_val_case ==
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET) {
+            return false;
+        }
+        for (size_t i = 0; i < length; ++i) {
+            const auto& expected = literal.array(static_cast<int>(i));
+            if (!is_valid(i) || expected.val_case() != expected_val_case) {
+                return false;
+            }
+            bool same = false;
+            switch (type) {
+                case DataType::BOOL:
+                    same = get_data_unchecked<bool>(i) == expected.bool_val();
+                    break;
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                case DataType::INT64:
+                    same =
+                        get_data_unchecked<int64_t>(i) == expected.int64_val();
+                    break;
+                case DataType::FLOAT:
+                    same = get_data_unchecked<float>(i) ==
+                           static_cast<float>(expected.float_val());
+                    break;
+                case DataType::DOUBLE:
+                    same =
+                        get_data_unchecked<double>(i) == expected.float_val();
+                    break;
+                default:
+                    same = get_data_unchecked<std::string_view>(i) ==
+                           expected.string_val();
+                    break;
+            }
+            if (!same) {
+                return false;
+            }
+        }
+        return true;
     }
 
     void

@@ -20,14 +20,16 @@ are split by responsibility:
 - [VChannel Recovery Module](vchannel_view_module.md)
 - [Segment View Component](segment_view_module.md)
 - [L0 Materializer](l0_materializer.md)
-- [TransformLog Subscription Adaptor](transform_log.md) (future integration)
+- [TransformLog Subscription Adaptor](transform_log.md)
 - [WALSummary](summary.md)
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
 **Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
 handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
-is retained for future QueryView wiring; the two implementations are not run together.
+is retained as an unwired alternative; QueryView resource preparation and
+execution already use the summary-backed subscription adaptor independently of
+L0 materialization. The two L0 implementations are not run together.
 
 ## 1. Goals
 
@@ -65,7 +67,18 @@ Asynchronous recovery tasks share the process-level NodeScheduler, which owns
 execution concurrency and delayed retries. Each RecoveryStorage keeps a scoped
 task tracker only to cancel and wait for its own tasks during shutdown; it has
 no per-PChannel concurrency limit or separate pending queue. Scheduling fairness
-between PChannels is future work in NodeScheduler.
+between PChannels is future work in NodeScheduler. The scoped tracker forwards
+submission priority and `PriorityTaskHandle.SetPriority` to the shared executor;
+this does not interrupt running work or advance delayed retries. NodeScheduler
+provides task-level starvation protection within cumulative worker limits,
+not PChannel shares. ACK uses priority 20, QueryView release 5, build/ready 0,
+and ordinary data work -5 (promoted to 5 under recovery-tail pressure).
+ACK tasks yield with ErrDelay when Broadcast.Ack
+fails or reaches its 100ms timeout. The preceding legacy import completion RPC has no
+additional timeout, but remains cancelable during shutdown. Standalone QueryView
+notifications use independent goroutines.
+See the
+[NodeScheduler contract](../../../../pkg/util/nodescheduler/README.md).
 
 ## 3. One Global Checkpoint
 
@@ -99,9 +112,9 @@ The checkpoint is the only:
 
 There is no Meta checkpoint, Data checkpoint, DataBarrier, or recovery mode.
 `Metrics().RecoveryTimeTick` currently reports Tracker completion, which can be
-ahead of Summary confirmation and published progress. The compatibility
-DataCoord VChannel checkpoint updater reports flush progress, not a second WAL
-recovery cursor.
+ahead of Summary confirmation and published progress. There is no periodic
+DataCoord VChannel checkpoint reporter. Streaming Flush completes through
+consuming-side acknowledgements, independently of global checkpoint publication.
 
 ## 4. Component Snapshot Checkpoints
 
@@ -155,6 +168,16 @@ when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
 The barrier is delivered once, and no second logical scanner is opened.
 
+The sync operator publishes QueryMVCC from the complete ACK prefix before
+appending its confirmation to WAL and WAB. The acknowledged data is already
+durable; queries still wait for runtime consumption to reach their granted
+Growing/Transform targets. Consequently WAL and WAB consumers cannot dispatch a
+Flush and expose its new DataView/QueryView before the corresponding query
+frontiers are published. RecoveryStorage adds no per-message publication wait.
+MVCCManager remains owned by WAL initialization. After bounded recovery, the
+opener registers recovered live channels at the opening fence before append
+admission and live replay resume.
+
 WAB protects the live suffix from construction onward. RecoveryStorage marks
 only the complete prefix it has observed and dispatched as evictable, after each
 confirmation. Actual eviction retains the original capacity/TTL policy.
@@ -195,7 +218,7 @@ raw WAL message M
        -> PChannel/VChannel metadata
        -> affected SegmentViews and L1 materialization bound
        -> WALMaterializer.ObserveMessage retains Delete/explicit Flush handles
-       -> QueryRuntime plain immutable event (future integration)
+       -> QueryRuntime ordered immutable live event
   -> D.Release()
   -> BroadcastAck.Accept(O)
   -> all retained work and Coordinator Ack succeed without poison
@@ -262,4 +285,4 @@ feature branch receives a reader, writer, migration path, or fallback.
 12. Summary installs readable records before VChannel observation; this does not
     require Summary persistence.
 13. The current L0 consumer rebuilds unfinished Delete handles from WAL replay.
-    Only the future Summary consumer needs a barrier to expose pre-checkpoint Deletes.
+    The alternative Summary L0 consumer needs a barrier to expose pre-checkpoint Deletes.

@@ -91,6 +91,11 @@ class PhyExistsFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override;
 

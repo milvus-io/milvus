@@ -152,7 +152,7 @@ func TestStore_PutCollectionAndGet(t *testing.T) {
 		VChannelNames: []string{"ch-0", "ch-1"},
 		Properties:    map[string]string{"ttl": "3600"},
 	}
-	s.PutCollection(info)
+	collectionsOf(s).Put(info)
 
 	got, ok := s.GetCollection(100)
 	assert.True(t, ok)
@@ -164,8 +164,8 @@ func TestStore_PutCollectionAndGet(t *testing.T) {
 
 func TestStore_RemoveCollection(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "c"}})
-	s.RemoveCollection(100)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "c"}})
+	collectionsOf(s).Remove(100)
 
 	_, ok := s.GetCollection(100)
 	assert.False(t, ok)
@@ -173,8 +173,8 @@ func TestStore_RemoveCollection(t *testing.T) {
 
 func TestStore_PutCollectionOverwrites(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v1"}})
-	s.PutCollection(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v2"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v1"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v2"}})
 
 	got, ok := s.GetCollection(100)
 	assert.True(t, ok)
@@ -184,8 +184,8 @@ func TestStore_PutCollectionOverwrites(t *testing.T) {
 
 func TestStore_GetCollections(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
-	s.PutCollection(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
 
 	result := s.GetCollections()
 	assert.Len(t, result, 2)
@@ -204,8 +204,8 @@ func TestStore_GetCollections_Empty(t *testing.T) {
 
 func TestStore_GetCollectionIDs(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
-	s.PutCollection(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
 
 	ids := s.GetCollectionIDs()
 	assert.ElementsMatch(t, []int64{100, 200}, ids)
@@ -217,40 +217,49 @@ func TestStore_GetCollectionIDs_Empty(t *testing.T) {
 	assert.Len(t, ids, 0)
 }
 
-// TestStore_RemoveSegmentDeletesEmptyIndexBuckets pins that the secondary
-// indexes shed their per-collection and per-channel buckets once the last
-// segment leaves, rather than accumulating empty maps. Asserting only that a
-// lookup returns nothing cannot see the difference -- an empty bucket and an
-// absent one both answer "no segments" -- so this reaches into the index maps
-// directly. Without it, every dropped collection leaks two map entries for the
-// lifetime of the process.
+// TestStore_RemoveSegmentDeletesEmptyIndexBuckets pins that the segment table
+// sheds a collection's shard and a channel's bucket once their last segment
+// leaves, rather than accumulating empty entries. Asserting only that a lookup
+// returns nothing cannot see the difference -- an empty bucket and an absent
+// one both answer "no segments" -- so this reaches into the table directly.
+// Without it, every dropped collection leaks its entries for the lifetime of
+// the process.
 func TestStore_RemoveSegmentDeletesEmptyIndexBuckets(t *testing.T) {
 	s := NewMetaStore(nil).(*metaStore)
 	s.PutSegment(&datapb.SegmentInfo{ID: 1, CollectionID: 100, InsertChannel: "ch-0"})
 	s.PutSegment(&datapb.SegmentInfo{ID: 2, CollectionID: 100, InsertChannel: "ch-0"})
 	s.PutSegment(&datapb.SegmentInfo{ID: 3, CollectionID: 200, InsertChannel: "ch-1"})
 
-	require.Len(t, s.segCollIdx, 2)
-	require.Len(t, s.segChanIdx, 2)
+	table := s.segments.Load()
+	require.Equal(t, 2, table.shards.Len())
+	require.Len(t, table.channels, 2)
 
-	// Collection 200 / ch-1 lose their only segment: both buckets must go.
+	// Collection 200 / ch-1 lose their only segment: both entries must go.
+	retired, _ := table.shards.Get(200)
 	s.RemoveSegment(3)
-	_, collStillThere := s.segCollIdx[200]
-	assert.False(t, collStillThere, "an emptied collection bucket must be deleted, not left empty")
-	_, chanStillThere := s.segChanIdx["ch-1"]
-	assert.False(t, chanStillThere, "an emptied channel bucket must be deleted, not left empty")
+	assert.False(t, table.shards.Contain(200), "an emptied collection shard must be removed, not left empty")
+	assert.True(t, retired.retired, "a removed shard must be retired for writers still holding it")
+	_, chanStillThere := table.channels["ch-1"]
+	assert.False(t, chanStillThere, "an emptied channel bucket must be removed, not left empty")
 
-	// Collection 100 still holds segments 1 and 2, so its buckets stay.
-	assert.Len(t, s.segCollIdx[100], 2)
-	assert.Len(t, s.segChanIdx["ch-0"], 2)
+	// Collection 100 still holds segments 1 and 2, so its entries stay.
+	shard, ok := table.shards.Get(100)
+	require.True(t, ok)
+	assert.Len(t, shard.ids, 2)
+	assert.Len(t, shard.byChannel["ch-0"], 2)
 
 	// Dropping one of the two shrinks the bucket but must not delete it.
 	s.RemoveSegment(1)
-	assert.Len(t, s.segCollIdx[100], 1)
-	assert.Len(t, s.segChanIdx["ch-0"], 1)
+	assert.Len(t, shard.ids, 1)
+	assert.Len(t, shard.byChannel["ch-0"], 1)
 
-	// The last one takes the buckets with it.
+	// The last one takes the entries with it.
 	s.RemoveSegment(2)
-	assert.Empty(t, s.segCollIdx)
-	assert.Empty(t, s.segChanIdx)
+	assert.Equal(t, 0, table.shards.Len())
+	assert.Empty(t, table.channels)
+
+	// A later write of the collection gets a fresh shard.
+	s.PutSegment(&datapb.SegmentInfo{ID: 4, CollectionID: 100, InsertChannel: "ch-0"})
+	assert.Len(t, s.GetSegments(100), 1)
+	assert.Len(t, s.GetSegmentsByChannel("ch-0"), 1)
 }

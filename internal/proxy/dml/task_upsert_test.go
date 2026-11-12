@@ -527,6 +527,7 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockCache := NewMockCache(t)
 	ctx := context.Background()
 
@@ -1806,6 +1807,7 @@ func (c *upsertMessageTestCipher) Decrypt(data []byte) ([]byte, error) {
 }
 
 func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	const (
 		existingPK  = int64(10)
 		generatedPK = int64(1001)
@@ -2028,6 +2030,10 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.req.FieldOps[0].Op = schemapb.FieldPartialUpdateOp_REPLACE
 	task.node.(*mockUpsertNode).tsoAllocator = &mockTsoAllocator{}
@@ -2642,6 +2648,10 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 }
 
 func TestRetrieveByPKs_Success(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, partitionKeyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
@@ -2694,6 +2704,10 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 }
 
 func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	const beginTS = uint64(200)
 	var captured *dql.QueryTask
 
@@ -2827,6 +2841,7 @@ func TestQueryPreExecuteFullAutoIDRejectsMalformedResults(t *testing.T) {
 }
 
 func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -3476,6 +3491,10 @@ func TestPrepareUpsertFullAutoIDRejectsAllocatedIDCollision(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -3511,6 +3530,10 @@ func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, scenario := range []string{"missing", "zero", "query_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
@@ -3595,6 +3618,10 @@ func TestBindPartialUpdateReadTimestampsRequiresCompleteAttempt(t *testing.T) {
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	expectedErr := merr.WrapErrParameterInvalidMsg("primary field not found")
 	patch := mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(nil, expectedErr).Build()
 	defer patch.UnPatch()
@@ -3831,6 +3858,7 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_Success(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Run("mocked dependencies", func(t *testing.T) {
 		patch1 := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		defer patch1.UnPatch()
@@ -3896,6 +3924,7 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	m := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
@@ -3951,6 +3980,7 @@ func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
 		schema := createTestSchema()
 		schema.HasPartitionKeyField = true
@@ -3971,6 +4001,7 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
 		schema := createTestSchema()
 		mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
@@ -3996,6 +4027,7 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Run("mocked dependencies", func(t *testing.T) {
 		schema := createTestSchema()
 		patch1 := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
@@ -4375,6 +4407,7 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 }
 
 func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Skip("TODO: end-to-end query channel assertion needs rework in dml package")
 	for _, scenario := range []struct {
 		name      string
@@ -5647,6 +5680,34 @@ func assertProtoSlicesEqual[T proto.Message](t *testing.T, want, got []T) {
 	}
 }
 
+func TestValidateWholeStructFieldDataForPartialUpdateOmittedNullableChild(t *testing.T) {
+	structSchema := &schemapb.StructArrayFieldSchema{
+		FieldID: 200, Name: "profile", Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true},
+			{FieldID: 202, Name: "profile[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true, ElementNullable: true},
+		},
+	}
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	ref := structElementCountTestScalarArray("age", []int32{1, 2})
+	fieldData := &schemapb.FieldData{
+		FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{ref}}},
+	}
+	require.NoError(t, fillOmittedStructSubFields(structSchema, fieldData.GetStructArrays(), 1))
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(schemaHelper, structSchema, fieldData, 1))
+	require.Len(t, fieldData.GetStructArrays().GetFields(), 2)
+	assert.Equal(t, int64(202), fieldData.GetStructArrays().GetFields()[1].GetFieldId())
+	assert.Equal(t, []bool{false, false}, fieldData.GetStructArrays().GetFields()[1].GetScalars().GetArrayData().GetData()[0].GetValidData())
+
+	merged := &schemapb.FieldData{FieldName: "profile", FieldId: 200, Type: schemapb.DataType_ArrayOfStruct}
+	typeutil.AppendFieldDataByColumn(merged, fieldData, []int64{0})
+	require.Len(t, merged.GetStructArrays().GetFields(), 2)
+	assert.Equal(t, int64(202), merged.GetStructArrays().GetFields()[1].GetFieldId())
+}
+
 func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
 	typeSchema := &schemapb.TypeSchema{
 		Kind: &schemapb.TypeSchema_ArrayElement{
@@ -6339,6 +6400,7 @@ func TestUpsertTask_NoDuplicatePK(t *testing.T) {
 // 3. Columns a and b have 10 rows of data, column c has FieldData but empty data array
 // 4. Verifies both nullable and non-nullable scenarios for column c
 func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	numRows := 10
 	dim := 128
 
@@ -7618,6 +7680,10 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 }
 
 func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, name := range []string{"invalid_name", "lookup_error"} {
 		t.Run(name, func(t *testing.T) {
 			task := createTestUpdateTask()
@@ -7647,6 +7713,10 @@ func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
 }
 
 func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -7720,6 +7790,7 @@ func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
 
 // Rejected request preparation must not reach the new Strong read or publish DML.
 func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	for _, stage := range []string{"valid_data", "collection_info", "text_storage", "field_ops", "namespace", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "insert", "delete", "implicit_partial_namespace"} {
 		t.Run(stage, func(t *testing.T) {
 			task := createTestUpdateTask()

@@ -19,8 +19,8 @@ package extension
 import "github.com/milvus-io/milvus-proto/go-api/v3/hook"
 
 // SetCipher installs a compiled-in cipher: the Go half of the cipher plug-in
-// pair, which hookutil prefers over cipherPlugin.soPathGo and refuses beside
-// it. Only that half: the C++ half is still loaded by the core from
+// pair, which hookutil uses in place of cipherPlugin.soPathGo, ignoring that
+// path with a warning when it is configured. Only that half: the C++ half is still loaded by the core from
 // cipherPlugin.soPathCpp, and that path stays the deployment's declaration
 // that encryption is on - a compiled-in cipher with no soPathCpp is left
 // idle, exactly as no plug-in would be loaded. Call it before milvus starts;

@@ -73,7 +73,7 @@ func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuil
 			callbacks[0](scheduled)
 		}
 	}
-	scheduled.handle = scheduler.Submit(task)
+	scheduled.handle = scheduler.Submit(task, nodescheduler.WithPriority(0))
 	return scheduled
 }
 
@@ -89,36 +89,40 @@ func (t *scheduledBuild) Result() (*QueryRuntime, error) {
 
 var _ nodescheduler.Task = (*resourceBuildTask)(nil)
 
-type resourceCallbackTask func()
-
-func (t resourceCallbackTask) Execute(context.Context) error {
-	t()
-	return nil
-}
-
-var _ nodescheduler.Task = resourceCallbackTask(nil)
-
 type resourceReadyTask struct {
+	ref     queryViewRef
+	runtime *QueryRuntime
 	manager *Manager
 	key     qviews.QueryViewKey
 	onReady func()
 }
 
 func (t resourceReadyTask) Execute(ctx context.Context) error {
-	return t.manager.prepareReady(ctx, t.key, t.onReady)
+	return t.manager.prepareViewRef(ctx, t.key, t.ref, t.runtime, t.onReady)
 }
 
 var _ nodescheduler.Task = resourceReadyTask{}
 
 // Retaining the callback retains the old DataView's files until subtraction finishes.
 type resourceReleaseTask struct {
-	runtime   *QueryRuntime
-	version   qviews.DataVersion
-	onDropped func()
+	resources    *viewResources
+	closeRuntime bool
+	runtime      *QueryRuntime
+	version      qviews.DataVersion
+	onDropped    func()
 }
 
 func (t resourceReleaseTask) Execute(ctx context.Context) error {
-	if err := t.runtime.BeforeRelease(ctx, t.version); err != nil {
+	if err := t.resources.release(); err != nil {
+		return err
+	}
+	var err error
+	if t.closeRuntime {
+		err = t.runtime.tryClose()
+	} else {
+		err = t.runtime.BeforeRelease(ctx, t.version)
+	}
+	if err != nil {
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	if t.onDropped != nil {

@@ -114,7 +114,7 @@ class SealedJsonTakeTest
                         std::make_shared<arrow::fs::LocalFileSystem>(),
                         arrow_schema,
                         path,
-                        *properties);
+                        properties);
                 ASSERT_TRUE(writer_result.ok())
                     << writer_result.status().ToString();
                 auto writer = std::move(writer_result).ValueOrDie();

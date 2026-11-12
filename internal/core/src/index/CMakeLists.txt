@@ -13,6 +13,18 @@ add_source_at_current_directory_recursively()
 # Test helpers have ordinary .cpp names but belong only to index_tests.
 list(FILTER SOURCE_FILES EXCLUDE REGEX "^test_utils/")
 
+# Match Knowhere's layout for the inline reservation release used by empty
+# embedding lists, without changing unrelated consumers' header definitions.
+# Its source-specific definitions and target features differ from the target's
+# PCH, so compile this translation unit without the shared precompiled header.
+set_source_files_properties(vector/VectorMemBuilder.cpp
+    PROPERTIES COMPILE_DEFINITIONS NOT_COMPILE_FOR_SWIG
+               SKIP_PRECOMPILE_HEADERS ON)
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set_property(SOURCE vector/VectorMemBuilder.cpp APPEND
+        PROPERTY COMPILE_OPTIONS -msse4.2)
+endif()
+
 # These files intentionally define matching translation-unit-local helpers
 # (e.g. kEmptyEmbListOffsets). Keep them separate when the target uses unity
 # builds. NOTE: milvus_index is not in src/CMakeLists.txt's unity target list

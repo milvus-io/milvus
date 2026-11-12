@@ -38,14 +38,19 @@ import (
 func TestCatalog_Update_Atomic(t *testing.T) {
 	metakv := mocks.NewMetaKv(t)
 	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var removals []string
 	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Once()
+		RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
+			removals = keys
+			return nil
+		}).Once()
 	c := NewCatalog(metakv, "", "")
 	seg := &datapb.SegmentInfo{ID: 1, CollectionID: 1, PartitionID: 1, State: commonpb.SegmentState_Flushed}
 	err := c.Update(context.TODO(),
 		metastore.AddSegment(seg),
-		metastore.MarkChannelDropped("ch-1"))
+		metastore.DropChannelFlag("ch-1"))
 	assert.NoError(t, err)
+	assert.Contains(t, removals, buildChannelRemovePath("ch-1"))
 }
 
 func TestCatalog_Update_Empty(t *testing.T) {
@@ -487,12 +492,51 @@ func TestCatalog_Update_SegmentIndexRejectsNilAndUnsupportedType(t *testing.T) {
 	err := c.Update(context.TODO(), metastore.DropSegmentIndex(nil))
 	assert.Error(t, err)
 
-	// Only deletion is supported for segment-index entries.
+	assert.Error(t, c.Update(context.TODO(), metastore.SaveSegmentIndex(nil)))
+	// PUT uses ActionUpdate; a separate create-only action is unsupported.
 	err = c.Update(context.TODO(), metastore.UpdateAction{
-		Type:  metastore.ActionUpdate,
+		Type:  metastore.ActionAdd,
 		Entry: metastore.SegmentIndexEntry{SegmentIndex: &model.SegmentIndex{BuildID: 1}},
 	})
 	assert.Error(t, err)
+}
+
+func TestCatalog_Update_IndexRollbackEncodingAndAtomicity(t *testing.T) {
+	ctx := context.TODO()
+	record := &model.SegmentIndex{
+		CollectionID: 2, PartitionID: 3, SegmentID: 1, IndexID: 10, BuildID: 11,
+		IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"file"},
+		IndexVersion: 7, NumRows: 100, CreatedUTCTime: 123, FinishedUTCTime: 456,
+	}
+	legacyKV := mocks.NewMetaKv(t)
+	var legacy map[string]string
+	legacyKV.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, values map[string]string) error {
+		legacy = values
+		return nil
+	}).Once()
+	assert.NoError(t, NewCatalog(legacyKV, "", "").AlterSegmentIndexes(ctx, []*model.SegmentIndex{record}))
+	for _, limit := range []int{1, 128} {
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().MaxTxnOps().Return(limit).Maybe()
+		if limit > 1 {
+			kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, values map[string]string, removals []string, _ ...predicates.Predicate) error {
+					assert.Len(t, values, 2)
+					assert.Empty(t, removals)
+					assert.Equal(t, legacy[BuildSegmentIndexKey(2, 3, 1, 11)], values[BuildSegmentIndexKey(2, 3, 1, 11)])
+					assert.Contains(t, values, buildSegmentPath(2, 3, 1))
+					return nil
+				}).Once()
+		}
+		err := NewCatalog(kv, "", "").Update(ctx,
+			metastore.UpdateSegment(&datapb.SegmentInfo{ID: 1, CollectionID: 2, PartitionID: 3, State: commonpb.SegmentState_Dropped}),
+			metastore.SaveSegmentIndex(record))
+		if limit == 1 {
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		} else {
+			assert.NoError(t, err)
+		}
+	}
 }
 
 // The revision that retracts an index artifact and the removal of the record

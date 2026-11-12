@@ -19,6 +19,7 @@ package externalspec
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// Azure account names are interpolated into Blob/DFS hostnames.
+var azureAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
+
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
 const (
@@ -37,6 +41,7 @@ const (
 	FormatLanceTable   = specutil.FormatLanceTable
 	FormatVortex       = specutil.FormatVortex
 	FormatIcebergTable = specutil.FormatIcebergTable
+	FormatPaimonTable  = specutil.FormatPaimonTable
 	FormatMilvusTable  = specutil.FormatMilvusTable
 )
 
@@ -62,6 +67,7 @@ const (
 	ExtfsKeyUseSSL                  = specutil.ExtfsKeyUseSSL
 	ExtfsKeyUseVirtualHost          = specutil.ExtfsKeyUseVirtualHost
 	ExtfsKeyLoadFrequency           = specutil.ExtfsKeyLoadFrequency
+	ExtfsKeyCredentialEndpoint      = specutil.ExtfsKeyCredentialEndpoint
 	ExtfsKeyAzureClientID           = specutil.ExtfsKeyAzureClientID
 	ExtfsKeyAzureTenantID           = specutil.ExtfsKeyAzureTenantID
 	ExtfsKeyAzureCredentialEndpoint = specutil.ExtfsKeyAzureCredentialEndpoint
@@ -158,6 +164,21 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 		return nil, merr.Wrap(err, "parse external spec")
 	}
 	return spec, nil
+}
+
+// MarshalCollectionSchema normalizes external_spec before sending a schema to
+// native readers. It also handles historical schemas without mutating the
+// caller's shared schema or rewriting persisted metadata.
+func MarshalCollectionSchema(schema *schemapb.CollectionSchema) ([]byte, error) {
+	normalized, err := specutil.NormalizeExternalSpec(schema.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	if normalized != schema.GetExternalSpec() {
+		schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+		schema.ExternalSpec = normalized
+	}
+	return proto.Marshal(schema)
 }
 
 func sortedKeys(m map[string]bool) []string {
@@ -282,7 +303,8 @@ func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, err
 // ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
 // Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
-func ValidateSourceAndSpec(externalSource, externalSpec string) error {
+// Omitting the server-owned policy denies every credential Broker.
+func ValidateSourceAndSpec(externalSource, externalSpec string, policies ...*specutil.BrokerPolicy) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
 		return merr.Wrap(err, "external_source is invalid")
 	}
@@ -293,7 +315,11 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
 	}
-	return nil
+	var policy *specutil.BrokerPolicy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	return policy.Validate(spec.Extfs)
 }
 
 // RedactExternalSource returns a log-safe external source. Normal storage URIs
@@ -400,7 +426,20 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
-	hasAzureBroker := extfs[ExtfsKeyAzureClientID] != "" ||
+	brokerEndpoint, err := specutil.ResolveBrokerEndpoint(extfs)
+	if err != nil {
+		return err
+	}
+	hasS3Broker := brokerEndpoint != "" && cp != CloudProviderAzure
+	if hasS3Broker {
+		if rawCP == "" {
+			return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required for credential broker")
+		}
+		if err := validateS3Broker(cp, extfs); err != nil {
+			return err
+		}
+	}
+	hasAzureBroker := cp == CloudProviderAzure && brokerEndpoint != "" || extfs[ExtfsKeyAzureClientID] != "" ||
 		extfs[ExtfsKeyAzureTenantID] != "" ||
 		extfs[ExtfsKeyAzureCredentialEndpoint] != ""
 	if hasAzureBroker {
@@ -415,7 +454,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}{
 			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
 			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
-			{ExtfsKeyAzureCredentialEndpoint, extfs[ExtfsKeyAzureCredentialEndpoint]},
+			{ExtfsKeyCredentialEndpoint, brokerEndpoint},
 			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
 			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
 		} {
@@ -424,17 +463,17 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 					"extfs.%s is required for Azure credential broker mode", required.key)
 			}
 		}
+	}
 
-		brokerEndpoint, err := url.Parse(extfs[ExtfsKeyAzureCredentialEndpoint])
-		if err != nil || brokerEndpoint.Host == "" ||
-			(brokerEndpoint.Scheme != "http" && brokerEndpoint.Scheme != "https") {
-			return merr.WrapErrParameterInvalidMsg(
-				"extfs.%s must be a valid HTTP(S) URL", ExtfsKeyAzureCredentialEndpoint)
-		}
+	// Azure uses access_key_id as the storage account name even when the
+	// pod's workload identity supplies credentials instead of a shared key.
+	hasAzureIAM := cp == CloudProviderAzure && extfs[ExtfsKeyUseIAM] == "true"
+	if hasAzureIAM && extfs[ExtfsKeyAccessKeyID] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.access_key_id is required as the storage account name for Azure workload identity")
 	}
 
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
-	hasAKOnly := !hasAzureBroker &&
+	hasAKOnly := !hasAzureBroker && !hasAzureIAM &&
 		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
 	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
@@ -480,6 +519,10 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 	if cp == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
 		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
+	}
+
+	if account := extfs[ExtfsKeyAccessKeyID]; cp == CloudProviderAzure && account != "" && !azureAccountNamePattern.MatchString(account) {
+		return merr.WrapErrParameterInvalidMsg("extfs.access_key_id must be an Azure storage account name containing 3-24 lowercase letters or digits")
 	}
 
 	// Two-form URI contract: Milvus-form (scheme://endpoint/bucket/key) has
@@ -683,5 +726,37 @@ func redactExtfsSecrets(spec map[string]json.RawMessage) error {
 		return err
 	}
 	spec["extfs"] = redactedExtfs
+	return nil
+}
+
+// validateS3Broker validates the effective mode before ordinary credential counting.
+func validateS3Broker(cp string, extfs map[string]string) error {
+	if cp != CloudProviderAWS && cp != CloudProviderAliyun && cp != CloudProviderTencent {
+		return merr.WrapErrParameterInvalidMsg("credential broker requires cloud_provider=aws, aliyun, tencent or azure")
+	}
+	if extfs[ExtfsKeyRegion] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.region is required for credential broker")
+	}
+	if extfs[ExtfsKeyUseIAM] != "true" && extfs[ExtfsKeyRoleARN] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.role_arn is required for credential broker AssumeRole")
+	}
+	forbidden := []string{ExtfsKeyAccessKeyID, ExtfsKeyAccessKeyValue, ExtfsKeyGCPTargetServiceAccount, ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID}
+	if extfs[ExtfsKeyUseIAM] == "true" {
+		forbidden = append(forbidden, ExtfsKeyRoleARN, ExtfsKeyExternalID, ExtfsKeySessionName)
+	}
+	for _, key := range forbidden {
+		if extfs[key] != "" {
+			return merr.WrapErrParameterInvalidMsg("extfs.%s conflicts with credential broker mode", key)
+		}
+	}
+	if extfs[ExtfsKeyAnonymous] == "true" {
+		return merr.WrapErrParameterInvalidMsg("anonymous conflicts with credential broker mode")
+	}
+	if value := extfs[ExtfsKeyLoadFrequency]; value != "" {
+		duration, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || duration < 900 || duration > 3600 {
+			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for credential broker")
+		}
+	}
 	return nil
 }

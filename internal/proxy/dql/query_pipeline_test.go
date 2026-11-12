@@ -18,6 +18,7 @@ package dql
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func testSchema() *schemapb.CollectionSchema {
@@ -587,4 +589,112 @@ func TestNewQueryPipeline_GroupByOrderBy_InvalidField(t *testing.T) {
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestQueryPipelineFinalizesEmptyAggregates(t *testing.T) {
+	operators, err := agg.NewAggregate("count", 500, "count(*)", 0)
+	require.NoError(t, err)
+	aggregates := agg.AggregatesToPB(operators)
+	for _, grouped := range []bool{false, true} {
+		for _, ordered := range []bool{false, true} {
+			var groups []int64
+			var groupNames []string
+			names := []string{"count(*)"}
+			if grouped {
+				groups = []int64{101}
+				groupNames = []string{"val"}
+				names = []string{"val", "count(*)"}
+			}
+			outputMap, err := agg.NewAggregationFieldMap(names, groupNames, operators)
+			require.NoError(t, err)
+			var orderFields []*orderby.OrderByField
+			if ordered {
+				orderFields = []*orderby.OrderByField{orderby.NewOrderByField(500, "count(*)", schemapb.DataType_Int64)}
+			}
+			pipeline, err := NewQueryPipeline(testSchema(), 10, 0, reduce.IReduceNoOrder, orderFields, groups, aggregates, outputMap, nil)
+			require.NoError(t, err)
+			reducer := agg.NewGroupAggReducer(groups, aggregates, -1, testSchema())
+			empty, err := reducer.EncodePartial(&agg.PartialAggregationResult{})
+			require.NoError(t, err)
+			result, err := pipeline.Execute(t.Context(), []*internalpb.RetrieveResults{empty, {}})
+			require.NoError(t, err)
+			require.Len(t, result.FieldsData, len(names))
+			for _, field := range result.FieldsData {
+				if grouped {
+					require.Empty(t, field.GetScalars().GetLongData().GetData())
+				} else {
+					require.Equal(t, []int64{0}, field.GetScalars().GetLongData().GetData())
+				}
+			}
+		}
+	}
+}
+
+func computedQueryInput(ids []int64) *internalpb.RetrieveResults {
+	return &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(ids), FieldsData: []*schemapb.FieldData{makeTestInt64Field(100, "pk", ids)},
+		ComputedResults: []*schemapb.FieldData{makeTestInt64Field(0, "matches", ids)},
+	}
+}
+
+func TestQueryPipelineComputedColumnsStayAligned(t *testing.T) {
+	for _, offset := range []int64{1, 100} {
+		pipeline, err := NewQueryPipeline(testSchema(), 1, offset, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+		require.NoError(t, err)
+		result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{computedQueryInput([]int64{1, 3}), computedQueryInput([]int64{2, 4})})
+		require.NoError(t, err)
+		require.Len(t, result.FieldsData, 2)
+		require.Equal(t, "matches", result.FieldsData[1].GetFieldName())
+		values := result.FieldsData[1].GetScalars().GetLongData().Data
+		if offset == 1 {
+			require.Equal(t, []int64{2}, values)
+			require.Equal(t, values, result.FieldsData[0].GetScalars().GetLongData().Data)
+		} else {
+			require.Empty(t, values)
+		}
+	}
+}
+
+func TestQueryPipelineReturnsComputedResultsWithoutSizeCheck(t *testing.T) {
+	paramtable.Init()
+	item := &paramtable.Get().QuotaConfig.MaxOutputSize
+	previous := item.GetValue()
+	defer paramtable.Get().Save(item.Key, previous)
+	input := computedQueryInput([]int64{1})
+	column := input.ComputedResults[0]
+	column.Type = schemapb.DataType_VarChar
+	column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{strings.Repeat("x", 4096)}}}}}
+	require.NoError(t, paramtable.Get().Save(item.Key, "1"))
+	pipeline, err := NewQueryPipeline(testSchema(), 1, 0, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+	require.NoError(t, err)
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{input})
+	require.NoError(t, err)
+	require.Equal(t, input.ComputedResults, result.FieldsData[1:])
+}
+
+// Preserve opaque JSON computed data from workers without rechecking its size.
+func TestQueryPipelineReturnsJSONComputedResults(t *testing.T) {
+	input := computedQueryInput([]int64{1})
+	column := input.ComputedResults[0]
+	column.Type = schemapb.DataType_JSON
+	column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`[{"content":"foo","starts":[0],"ends":[3]}]`)}}}}}
+	pipeline, err := NewQueryPipeline(testSchema(), 1, 0, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+	require.NoError(t, err)
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{input})
+	require.NoError(t, err)
+	require.Equal(t, input.ComputedResults, result.FieldsData[1:])
+}
+
+func TestQueryComputedColumnsSurviveStructReconstruction(t *testing.T) {
+	schema := testSchemaWithStructArray()
+	pipeline, err := NewQueryPipeline(schema, 1, 0, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+	require.NoError(t, err)
+	input := computedQueryInput([]int64{1})
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{input})
+	require.NoError(t, err)
+	result.OutputFields = []string{"pk"}
+	reconstructStructFieldDataForQuery(result, schema)
+	require.Len(t, result.FieldsData, 2)
+	require.Equal(t, "pk", result.FieldsData[0].FieldName)
+	require.Equal(t, input.ComputedResults, result.FieldsData[1:])
 }

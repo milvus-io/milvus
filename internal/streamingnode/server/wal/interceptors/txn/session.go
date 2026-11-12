@@ -48,6 +48,7 @@ type TxnSession struct {
 	doneWait         chan struct{}                // The channel for waiting the transaction committed.
 	rollback         bool                         // The flag indicates the transaction is rollbacked.
 	cleanupCallbacks []func()                     // The cleanup callbacks function for the session.
+	hasNonInsert     bool                         // A successful body requires Transform consumption.
 	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
 }
 
@@ -80,9 +81,12 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 
 // AddNewMessageDoneAndKeepalive decreases the in flight count of the session and keepalive the session.
 // notify the committedWait channel if the in flight count is 0 and committed waited.
-func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64) {
+func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64, typ message.MessageType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if typ != message.MessageTypeInsert {
+		s.hasNonInsert = true
+	}
 
 	// make a refresh lease here.
 	if s.lastTimetick < timetick {
@@ -93,6 +97,14 @@ func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64) {
 	if s.doneWait != nil && s.inFlightCount == 0 {
 		close(s.doneWait)
 	}
+}
+
+// IsInsertOnly is stable after RequestCommitAndWait succeeds. Record successful
+// body types before releasing their in-flight slots, including recovered bodies.
+func (s *TxnSession) IsInsertOnly() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bodyCount > 0 && !s.hasNonInsert
 }
 
 // AddNewMessageFail decreases the in flight count of the session but not refresh the lease.
@@ -157,6 +169,13 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64, 
 			s.state = message.TxnStateRollbacked
 			s.cleanup()
 			return status.NewTransactionExpired("txn %d body count mismatch: expected %d, appended %d", s.txnContext.TxnID, bodyCnt, s.bodyCount)
+		}
+		// Classify only after all admitted appends finish: an in-flight body
+		// may still succeed, and a failed append does not make a transaction nonempty.
+		if s.bodyCount == 0 {
+			s.state = message.TxnStateRollbacked
+			s.cleanup()
+			return status.NewInvalidArgument("cannot commit an empty transaction")
 		}
 		return nil
 	}

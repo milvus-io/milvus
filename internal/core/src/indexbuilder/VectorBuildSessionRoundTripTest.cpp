@@ -133,7 +133,7 @@ TEST_P(VectorBuildSessionRoundTripTest, PublishedBinlogIndexCanSearch) {
     search_params.metric_type_ = metric;
     search_params.search_params_ = search;
     SearchResult result;
-    reader->Search(queries, search_params, nullptr, nullptr, result);
+    reader->Search(queries, search_params, nullptr, result);
     EXPECT_EQ(result.total_nq_, nq);
     EXPECT_EQ(result.unity_topK_, topk);
     EXPECT_EQ(result.distances_.size(), nq * topk);

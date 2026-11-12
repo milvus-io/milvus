@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -16,6 +17,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestGenerateAlterLoadConfigMessageUsesControlChannelWithoutAckSyncUp(t *testing.T) {
+	msg, err := GenerateAlterLoadConfigMessage(context.Background(), &AlterLoadConfigRequest{
+		CollectionInfo: &metacache.CollectionInfo{
+			DatabaseID: 10,
+			ID:         100,
+			Schema:     &schemapb.CollectionSchema{},
+		},
+		Expected: ExpectedLoadConfig{
+			ExpectedPartitionIDs:  []int64{20},
+			ExpectedReplicaNumber: map[string]int{},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.Empty(t, msg.BroadcastHeader().VChannels)
+	assert.False(t, msg.BroadcastHeader().AckSyncUp)
+}
 
 // These two tests pin the reconciliation the load-placement seam upstream of
 // them depends on. The seam's whole job is to hand this function the second

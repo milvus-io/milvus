@@ -1,0 +1,1087 @@
+package index
+
+import (
+	"math"
+	"strconv"
+	"testing"
+
+	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty
+	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+
+	// startup
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+
+	// add node
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MinimalIndexVersion: 5},
+		},
+	})
+	assert.Equal(t, int32(10), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(5), m.GetMinimalIndexEngineVersion())
+
+	// update
+	m.Update(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 2},
+		},
+	})
+	assert.Equal(t, int32(5), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(2), m.GetMinimalIndexEngineVersion())
+
+	// remove
+	m.RemoveNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 3},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_IndexStorePathVersionCapabilityFromSessionVersion(t *testing.T) {
+	// the collection-rooted layout is opt-in; this test covers the session-version half of the gate.
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+
+	m := NewIndexEngineVersionManager()
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {
+			Version: common.Version,
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.AddNode(&sessionutil.Session{
+		Version: common.Version,
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.6.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 3,
+		},
+	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+}
+
+func Test_IndexEngineVersionManager_IndexStorePathVersionConfigGate(t *testing.T) {
+	key := Params.DataCoordCfg.IndexStorePathVersion.Key
+	defer paramtable.Get().Reset(key)
+
+	// a fully upgraded cluster, so only the config decides the layout
+	m := NewIndexEngineVersionManager()
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {
+			Version:    common.Version,
+			SessionRaw: sessionutil.SessionRaw{ServerID: 1},
+		},
+	})
+
+	// default: legacy layout, so an upgrade never silently writes files an older binary cannot read
+	assert.Equal(t, "0", Params.DataCoordCfg.IndexStorePathVersion.GetValue())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// opted in
+	paramtable.Get().Save(key, "1")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// refreshable, and turning it back off is safe because the layout is recorded per SegmentIndex
+	paramtable.Get().Save(key, "0")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// a malformed value must fall back to the legacy layout, not to the opt-in one
+	paramtable.Get().Save(key, "not-a-number")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	// an out-of-range value is not a layout this binary knows, so it must not be read as opting in
+	paramtable.Get().Save(key, "2")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	paramtable.Get().Save(key, "-1")
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
+}
+
+func Test_IndexEngineVersionManager_GetMergedScalarIndexVersion(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty
+	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
+
+	// startup
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetMinimalScalarIndexEngineVersion())
+
+	// add node
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MinimalIndexVersion: 5},
+		},
+	})
+	assert.Equal(t, int32(10), m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(5), m.GetMinimalScalarIndexEngineVersion())
+
+	// update
+	m.Update(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 2},
+		},
+	})
+	assert.Equal(t, int32(5), m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(2), m.GetMinimalScalarIndexEngineVersion())
+
+	// remove
+	m.RemoveNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 3},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetMinimalScalarIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_GetIndexNoneEncoding(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty
+	assert.False(t, m.GetIndexNonEncoding())
+
+	// startup
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 0},
+				IndexNonEncoding:         false,
+			},
+		},
+	})
+	assert.False(t, m.GetIndexNonEncoding())
+
+	// add node
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MinimalIndexVersion: 5},
+			IndexNonEncoding:         true,
+		},
+	})
+	// server1 is still use int8 encoding, the global index encoding must be int8
+	assert.False(t, m.GetIndexNonEncoding())
+
+	// update
+	m.Update(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 2},
+			IndexNonEncoding:         true,
+		},
+	})
+	assert.False(t, m.GetIndexNonEncoding())
+
+	// remove
+	m.RemoveNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           1,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MinimalIndexVersion: 3},
+		},
+	})
+	// after removing server1, then global none encoding should be true
+	assert.True(t, m.GetIndexNonEncoding())
+}
+
+func Test_IndexEngineVersionManager_StartupWithOfflineNodeCleanup(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// First startup with initial nodes
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 10},
+			},
+		},
+		"2": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           2,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MinimalIndexVersion: 5},
+			},
+		},
+	})
+
+	// Verify both nodes are present
+	assert.Equal(t, int32(15), m.GetCurrentIndexEngineVersion()) // min of 20 and 15
+	assert.Equal(t, int32(10), m.GetMinimalIndexEngineVersion()) // max of 10 and 5
+
+	// Second startup with only one node online (node 2 is offline)
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 25, MinimalIndexVersion: 12},
+			},
+		},
+	})
+
+	// Verify offline node 2 is cleaned up and only node 1 remains
+	assert.Equal(t, int32(25), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(12), m.GetMinimalIndexEngineVersion())
+
+	// Verify that node 2's data is actually removed from internal maps
+	vm := m.(*VersionManagerImpl)
+	_, exists := vm.versions[2]
+	assert.False(t, exists, "offline node should be removed from versions map")
+	_, exists = vm.scalarIndexVersions[2]
+	assert.False(t, exists, "offline node should be removed from scalarIndexVersions map")
+	_, exists = vm.indexNonEncoding[2]
+	assert.False(t, exists, "offline node should be removed from indexNonEncoding map")
+}
+
+func Test_IndexEngineVersionManager_StartupWithNewAndOfflineNodes(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// First startup
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 10},
+			},
+		},
+		"2": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           2,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MinimalIndexVersion: 5},
+			},
+		},
+	})
+
+	// Second startup: node 2 offline, node 3 comes online, node 1 still online
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 22, MinimalIndexVersion: 11},
+			},
+		},
+		"3": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           3,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 18, MinimalIndexVersion: 8},
+			},
+		},
+	})
+
+	// Verify node 2 is cleaned up and node 3 is added
+	assert.Equal(t, int32(18), m.GetCurrentIndexEngineVersion()) // min of 22 and 18
+	assert.Equal(t, int32(11), m.GetMinimalIndexEngineVersion()) // max of 11 and 8
+
+	vm := m.(*VersionManagerImpl)
+	// Node 1 should still exist
+	_, exists := vm.versions[1]
+	assert.True(t, exists, "online node 1 should remain")
+	// Node 2 should be removed
+	_, exists = vm.versions[2]
+	assert.False(t, exists, "offline node 2 should be removed")
+	// Node 3 should be added
+	_, exists = vm.versions[3]
+	assert.True(t, exists, "new online node 3 should be added")
+}
+
+func Test_IndexEngineVersionManager_StartupWithEmptySession(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// First startup with nodes
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 10},
+			},
+		},
+	})
+
+	assert.Equal(t, int32(20), m.GetCurrentIndexEngineVersion())
+
+	// Second startup with no nodes (all offline)
+	m.Startup(map[string]*sessionutil.Session{})
+
+	// Should return default values when no nodes are online
+	assert.Equal(t, int32(0), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+
+	vm := m.(*VersionManagerImpl)
+	assert.Empty(t, vm.versions, "all nodes should be cleaned up")
+	assert.Empty(t, vm.scalarIndexVersions, "all nodes should be cleaned up")
+	assert.Empty(t, vm.indexNonEncoding, "all nodes should be cleaned up")
+}
+
+func Test_IndexEngineVersionManager_removeNodeByID(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// Add some nodes first
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 1,
+			IndexEngineVersion:       sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 10},
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MinimalIndexVersion: 5},
+			IndexNonEncoding:         true,
+		},
+	})
+
+	vm := m.(*VersionManagerImpl)
+
+	// Verify node is added
+	_, exists := vm.versions[1]
+	assert.True(t, exists)
+	_, exists = vm.scalarIndexVersions[1]
+	assert.True(t, exists)
+	_, exists = vm.indexNonEncoding[1]
+	assert.True(t, exists)
+
+	// Remove node by ID
+	vm.removeNodeByID(1)
+
+	// Verify node is completely removed
+	_, exists = vm.versions[1]
+	assert.False(t, exists, "node should be removed from versions map")
+	_, exists = vm.scalarIndexVersions[1]
+	assert.False(t, exists, "node should be removed from scalarIndexVersions map")
+	_, exists = vm.indexNonEncoding[1]
+	assert.False(t, exists, "node should be removed from indexNonEncoding map")
+}
+
+func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty - should return zero version
+	assert.Equal(t, semver.Version{}, m.GetMinimalSessionVer())
+
+	// startup with single node
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.6.0"), m.GetMinimalSessionVer())
+
+	// add node with lower version - should return the lower one
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.5.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// add node with higher version - should still return the lowest
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.7.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 3,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// update node 2 to higher version - should now return 2.6.0
+	m.Update(&sessionutil.Session{
+		Version: semver.MustParse("2.8.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.6.0"), m.GetMinimalSessionVer())
+
+	// remove node 1 - should return 2.7.0 (min of 2.8.0 and 2.7.0)
+	m.RemoveNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.7.0"), m.GetMinimalSessionVer())
+
+	// verify sessionVersion map is correctly updated
+	vm := m.(*VersionManagerImpl)
+	_, exists := vm.sessionVersion[1]
+	assert.False(t, exists, "removed node should not exist in sessionVersion map")
+	_, exists = vm.sessionVersion[2]
+	assert.True(t, exists, "node 2 should exist in sessionVersion map")
+	_, exists = vm.sessionVersion[3]
+	assert.True(t, exists, "node 3 should exist in sessionVersion map")
+}
+
+func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty - returns MaxInt32 (no upper bound)
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+
+	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MaximumIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetMaximumIndexEngineVersion())
+
+	// mix of old QN (Max=0) and new QN (Max=30) - old QN current constrains cluster max
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MaximumIndexVersion: 30},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetMaximumIndexEngineVersion())
+
+	// add another new QN with lower Max - old QN current still constrains cluster max
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           3,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 18, MaximumIndexVersion: 25},
+		},
+	})
+	assert.Equal(t, int32(20), m.GetMaximumIndexEngineVersion())
+
+	// remove the node with lower Max - old QN current still constrains cluster max
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
+	assert.Equal(t, int32(20), m.GetMaximumIndexEngineVersion())
+
+	// remove old QN - remaining new QN reports max directly
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
+	assert.Equal(t, int32(30), m.GetMaximumIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// empty - returns MaxInt32
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// all nodes report Maximum=0 (old QNs) - falls back to current version as max
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
+
+	// new QN with Maximum set - old QN current constrains cluster max
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+		},
+	})
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
+
+	// another QN with lower Maximum - old QN current still constrains cluster max
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 3,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 3},
+		},
+	})
+	assert.Equal(t, int32(2), m.GetMaximumScalarIndexEngineVersion())
+
+	// remove old QN - remaining new QNs report max directly
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
+	assert.Equal(t, int32(3), m.GetMaximumScalarIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_ResolveVecIndexVersion(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("no target override", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "-1")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		assert.Equal(t, int32(10), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("target override without force rebuild", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "15")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// max(current=10, target=15) = 15
+		assert.Equal(t, int32(15), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("force rebuild with target in safe range", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=5 is within [minimal=3, max=20], use directly
+		assert.Equal(t, int32(5), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("force rebuild with target below cluster minimal - clamped to minimal", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 8, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=5 < clusterMinimal=8, clamped to 8
+		assert.Equal(t, int32(8), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("target exceeds maximum - clamped", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "25")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// target=25 > max=20, clamped to 20
+		assert.Equal(t, int32(20), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("multi-node force rebuild clamped to cluster minimal", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		// QN1: Min=5, QN2: Min=8 => cluster minimal = MAX(5,8) = 8
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 5, CurrentIndexVersion: 15, MaximumIndexVersion: 25},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           2,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 8, CurrentIndexVersion: 12, MaximumIndexVersion: 30},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "6")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=6 < clusterMinimal=8, clamped to 8
+		// clusterMax = MIN(25,30) = 25
+		assert.Equal(t, int32(8), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("target below current without force", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// max(current=10, target=5) = 10
+		assert.Equal(t, int32(10), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("all old QNs - no upper bound check", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 10, MaximumIndexVersion: 0},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "15")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// old QN (Max=0) => use CurrentIndexVersion as upper clamp
+		assert.Equal(t, int32(10), m.ResolveVecIndexVersion())
+	})
+}
+
+func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("no target override", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("target override without force rebuild", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+
+		// max(current=2, target=3) = 3
+		assert.Equal(t, int32(3), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("force rebuild with target in safe range", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "2")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=2 is within [minimal=1, max=5], use directly
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("force rebuild with target below cluster minimal - clamped to minimal", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 2, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=1 < clusterMinimal=2, clamped to 2
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("target exceeds maximum - clamped", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "10")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// target=10 > max=5, clamped to 5
+		assert.Equal(t, int32(5), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("multi-node force rebuild clamped to cluster minimal", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		// QN1: Min=1, QN2: Min=2 => cluster minimal = MAX(1,2) = 2
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 2,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 2, CurrentIndexVersion: 4, MaximumIndexVersion: 6},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=1 < clusterMinimal=2, clamped to 2
+		// clusterCurrent = MIN(3,4) = 3, clusterMax = MIN(5,6) = 5
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("old QN without maximum constrains target by current", func(t *testing.T) {
+		m := NewIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 2, MaximumIndexVersion: 0},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 2,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 3, MaximumIndexVersion: 3},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// old QN (Max=0) => use CurrentIndexVersion as upper clamp
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+}
+
+func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T) {
+	m := NewIndexEngineVersionManager()
+
+	// First startup with initial nodes
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+		"2": {
+			Version: semver.MustParse("2.5.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 2,
+			},
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// Second startup with only node 1 online (node 2 is offline)
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.5"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+
+	// Verify offline node 2 is cleaned up
+	assert.Equal(t, semver.MustParse("2.6.5"), m.GetMinimalSessionVer())
+
+	vm := m.(*VersionManagerImpl)
+	_, exists := vm.sessionVersion[2]
+	assert.False(t, exists, "offline node should be removed from sessionVersion map")
+}
+
+// installForm turns this test's binary into a form, and turns it back into a
+// stock binary when the test ends.
+func installForm(t *testing.T) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	ext.SetForm()
+}
+
+// A stock binary with no QueryNode session answers exactly what master does:
+// version 0, no upper bound, and an operator override written through. The
+// current version is the MIN over every QueryNode's; with none registered
+// there is nothing to take it over, and a coordinator that came up first in a
+// rolling upgrade must not build indexes an older QueryNode cannot load.
+func TestAStockBinaryAnswersZeroWithNoSession(t *testing.T) {
+	paramtable.Init()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	m := NewIndexEngineVersionManager()
+
+	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// With no upper bound, an override above what this image can load is
+	// written through - master's behavior, kept on a stock binary.
+	p := paramtable.Get()
+	compiledInVec := segcore.GetIndexEngineInfo().CurrentIndexVersion
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(compiledInVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+	assert.Equal(t, compiledInVec+5, m.ResolveVecIndexVersion(),
+		"with no session a stock binary writes an override through, as it always has")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion+5, m.ResolveScalarIndexVersion())
+}
+
+// With a form installed, an empty session set is the resting state and the
+// versions come from this process's own engine - the same values the absent
+// query nodes, running this same image, would have reported. Version zero here
+// is what misroutes disk indexes in knowhere, so the assertion pins non-zero
+// as well as source equality. The store-path gate keeps its native reading
+// regardless: no session means no evidence any reader is on an older layout,
+// but the coordinator's own engine version is not that evidence either.
+func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
+	installForm(t)
+	m := NewIndexEngineVersionManager()
+
+	vec := m.GetCurrentIndexEngineVersion()
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, vec,
+		"the fallback must be this binary's own knowhere version")
+	assert.NotZero(t, vec, "version zero is the misrouting answer the fallback exists to avoid")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
+
+	// The lower bound comes from this binary too. The assumption that a
+	// QueryNode started later runs this image covers the floor the same way
+	// it covers the ceiling: an override below what this image's segcore can
+	// load would build an index this same image cannot read.
+	assert.Equal(t, segcore.GetIndexEngineInfo().MinIndexVersion, m.GetMinimalIndexEngineVersion())
+
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		m.GetClusterMinIndexStorePathVersion())
+}
+
+// A query node that IS reporting always wins over the no-session fallback:
+// the fallback is about an empty set, never about overriding a session that
+// exists.
+func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
+	installForm(t)
+	m := NewIndexEngineVersionManager()
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 1,
+			IndexEngineVersion:       sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+		}},
+	})
+
+	assert.Equal(t, int32(1), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(1), m.GetCurrentScalarIndexEngineVersion())
+}
+
+// TestEmptySessionSetBoundsAnOverrideByThisBinary is the other half of the
+// form's no-session fallback. The clamp at the end of the resolve functions is
+// what stops dataCoord.targetVecIndexVersion from asking for an index nothing
+// in the cluster can load; with no QueryNode session the upper bound is
+// MaxInt32 on a stock binary, so the clamp does nothing and the override is
+// written through whatever it says. The bound with no session is the same
+// assumption the form's current version makes: a QueryNode started later runs
+// this image.
+func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	p := paramtable.Get()
+	m := NewIndexEngineVersionManager()
+
+	info := segcore.GetIndexEngineInfo()
+	loadableVec := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	assert.Equal(t, loadableVec, m.GetMaximumIndexEngineVersion(),
+		"with no session the ceiling is the highest version this image can load")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetMaximumScalarIndexEngineVersion())
+
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(loadableVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.Equal(t, loadableVec, m.ResolveVecIndexVersion(),
+		"an override above what this image can load must be clamped to it")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.ResolveScalarIndexVersion())
+}
+
+// An override BELOW the bound is untouched: the clamp is a ceiling, not a
+// rewrite, and asking for an older index version is a legitimate thing to do.
+func TestEmptySessionSetLeavesAnOverrideBelowThisBinaryAlone(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	p := paramtable.Get()
+	m := NewIndexEngineVersionManager()
+
+	p.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "1")
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "0")
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.EqualValues(t, 1, m.ResolveVecIndexVersion())
+	assert.EqualValues(t, 0, m.ResolveScalarIndexVersion())
+}
+
+// The bound with no session must be the same figure a registered QueryNode
+// running this image would give: every session is read as max(Current,
+// Maximum), so answering with the current version alone would bound an
+// operator's target lower during a restart than a moment later, and clamp
+// index builds to a version this very image can read past. The fallback is
+// also still only about an EMPTY set: one session replaces it.
+func TestTheNoSessionBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := NewIndexEngineVersionManager()
+
+	info := segcore.GetIndexEngineInfo()
+	loadable := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	assert.Equal(t, loadable, m.GetMaximumIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, info.CurrentIndexVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
+}
+
+// The scalar side of TestTheNoSessionBoundIsWhatThisImageCanLoad: with no
+// query node session the bound is what this image can load, read the same
+// way a registered node's scalar triple is. Both constants are equal today,
+// so this pins the shape rather than a difference.
+func TestTheNoSessionScalarBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := NewIndexEngineVersionManager()
+
+	loadable := max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion)
+	assert.Equal(t, loadable, m.GetMaximumScalarIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, common.CurrentScalarIndexEngineVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumScalarIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
+}
+
+// The compiled-in version is read only when it is the answer: a form installed
+// and no QueryNode session. Reading it is three cgo calls under the manager's
+// lock, and GetMaximumIndexEngineVersion is asked for every segment index a
+// compaction checks, so it must not be read when the sessions answer, or on a
+// stock binary, which never uses it.
+func TestTheCompiledInVersionIsReadOnlyWhenItIsTheAnswer(t *testing.T) {
+	paramtable.Init()
+	reads := 0
+	var origin func() segcore.IndexEngineInfo
+	counting := mockey.Mock(segcore.GetIndexEngineInfo).To(func() segcore.IndexEngineInfo {
+		reads++
+		return origin()
+	}).Origin(&origin).Build()
+	defer counting.UnPatch()
+
+	withSession := func(m IndexEngineVersionManager) {
+		m.Startup(map[string]*sessionutil.Session{
+			"qn1": {SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 3, MaximumIndexVersion: 4},
+			}},
+		})
+	}
+
+	t.Run("stock binary, no session", func(t *testing.T) {
+		ext.ResetForTest()
+		t.Cleanup(ext.ResetForTest)
+		m := NewIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		m.GetCurrentIndexEngineVersion()
+		assert.Zero(t, reads, "a stock binary answers without this image's version")
+	})
+
+	t.Run("form installed, a session registered", func(t *testing.T) {
+		installForm(t)
+		m := NewIndexEngineVersionManager()
+		withSession(m)
+		reads = 0
+		assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion())
+		assert.EqualValues(t, 3, m.GetCurrentIndexEngineVersion())
+		assert.Zero(t, reads, "the sessions answer, so this image's version is not read")
+	})
+
+	t.Run("form installed, no session", func(t *testing.T) {
+		installForm(t)
+		m := NewIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		assert.Equal(t, 1, reads, "with nothing registered, this image's version is the answer")
+		m.GetCurrentIndexEngineVersion()
+		assert.Equal(t, 2, reads)
+	})
+}

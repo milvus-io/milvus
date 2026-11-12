@@ -42,6 +42,7 @@ func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.Sub
 		ReqID:                   parent.GetReqID(),
 		DbID:                    parent.GetDbID(),
 		CollectionID:            parent.GetCollectionID(),
+		SchemaVersion:           parent.GetSchemaVersion(),
 		OutputFieldsId:          parent.GetOutputFieldsId(),
 		MvccTimestamp:           parent.GetMvccTimestamp(),
 		GuaranteeTimestamp:      parent.GetGuaranteeTimestamp(),

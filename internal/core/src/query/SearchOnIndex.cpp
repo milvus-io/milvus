@@ -34,7 +34,6 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const index::IVectorReader& reader,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
-              milvus::OpContext* op_context,
               SearchResult& search_result,
               bool is_sparse) {
     auto num_queries = search_dataset.num_queries;
@@ -113,14 +112,13 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      reader,
-                                                      op_context)) {
+                                                      reader)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter = CachedSearchIterator(
-            reader, dataset, search_conf, search_bitset, op_context);
+        auto iter =
+            CachedSearchIterator(reader, dataset, search_conf, search_bitset);
         iter.NextBatch(search_conf, search_result);
         return;
     }
@@ -128,7 +126,6 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     reader.Search(dataset,
                   milvus::exec::ProjectVectorSearchParams(search_conf),
                   search_bitset,
-                  op_context,
                   search_result);
 }
 

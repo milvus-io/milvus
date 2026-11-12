@@ -12,7 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -61,7 +61,7 @@ func TestQueryViewSyncClientAssignmentMigration(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.PChannelInfo{Name: "p", Term: term, AccessMode: types.AccessModeRW}, channel)
 			if term == 1 {
-				return nil, status.NewGRPCStatusFromStreamingError(status.NewChannelNotExist("moved")).Err()
+				return nil, viewerror.ConvertViewError(viewpb.ViewSyncService_SyncQueryView_FullMethodName, viewerror.NewGRPCStatusFromViewError(viewerror.NewNotPrimaryError("moved")).Err())
 			}
 			return stream, nil
 		}).Build()
@@ -89,5 +89,21 @@ func TestQueryViewSyncClientServiceFailureAndCancellation(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, stream)
 		require.Equal(t, 1, service.Times())
+	})
+}
+
+func TestQueryViewSyncClientDoesNotRetryViewRequestError(t *testing.T) {
+	mockey.PatchConvey("invalid sync requests must not wait for another assignment", t, func() {
+		failure := viewerror.ConvertViewError(viewpb.ViewSyncService_SyncQueryView_FullMethodName,
+			viewerror.NewGRPCStatusFromViewError(viewerror.NewUnknownError("invalid pchannel metadata")).Err())
+		mockey.Mock((*analyzerWatcher).Get).Return(&types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: 1, AccessMode: types.AccessModeRW}}).Build()
+		wait := mockey.Mock((*analyzerWatcher).Watch).Return(context.Canceled).Build()
+		mockey.Mock((*syncViewService).GetService).Return(&syncViewRPC{}, nil).Build()
+		rpc := mockey.Mock((*syncViewRPC).SyncQueryView).Return(nil, failure).Build()
+		client := &queryViewSyncClient{owner: &handlerClientImpl{watcher: &analyzerWatcher{}}, viewSyncService: &syncViewService{}}
+		_, err := client.SyncQueryView(t.Context(), "p")
+		require.Same(t, failure, err)
+		require.Equal(t, 1, rpc.Times())
+		require.Zero(t, wait.Times())
 	})
 }

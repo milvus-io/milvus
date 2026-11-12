@@ -23,10 +23,7 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 	assignmentsMap := make(map[int64]*streamingpb.StreamingNodeAssignment)
 	for _, relation := range param.Relations {
 		if assignmentsMap[relation.Node.ServerID] == nil {
-			assignmentsMap[relation.Node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     types.NewProtoFromStreamingNodeInfo(relation.Node),
-				Channels: make([]*streamingpb.PChannelInfo, 0),
-			}
+			assignmentsMap[relation.Node.ServerID] = newStreamingNodeAssignment(relation.Node)
 		}
 		assignmentsMap[relation.Node.ServerID].Channels = append(
 			assignmentsMap[relation.Node.ServerID].Channels, types.NewProtoFromPChannelInfo(relation.Channel))
@@ -34,10 +31,7 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 	for _, node := range nodes {
 		if assignmentsMap[node.ServerID] == nil {
 			// if current streaming node is not assigned to any channel, add it to the assignments with empty assignments.
-			assignmentsMap[node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     types.NewProtoFromStreamingNodeInfo(node.StreamingNodeInfo),
-				Channels: make([]*streamingpb.PChannelInfo, 0),
-			}
+			assignmentsMap[node.ServerID] = newStreamingNodeAssignment(node.StreamingNodeInfo)
 		}
 	}
 	assignments := make([]*streamingpb.StreamingNodeAssignment, 0, len(assignmentsMap))
@@ -66,6 +60,13 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 			},
 		},
 	})
+}
+
+func newStreamingNodeAssignment(node types.StreamingNodeInfo) *streamingpb.StreamingNodeAssignment {
+	return &streamingpb.StreamingNodeAssignment{
+		Node:     types.NewProtoFromStreamingNodeInfo(node),
+		Channels: make([]*streamingpb.PChannelInfo, 0),
+	}
 }
 
 // SendCloseResponse sends the close response to client.

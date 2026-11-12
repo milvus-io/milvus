@@ -63,6 +63,9 @@
 
 namespace milvus::storage {
 
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes);
+
 // Controls how parent-valid external dense-vector rows with a mixture of
 // valid and null child elements are normalized. All-null child ranges are
 // always normalized to a row-level null when the field is nullable.
@@ -100,6 +103,9 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
 
 std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta);
+
+std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type,
                    DataType element_type,
                    int dim,
@@ -120,6 +126,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
@@ -420,6 +429,15 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
 
+// Reads a complete non-null dense column into caller-owned memory. Unsupported
+// layouts return nullopt before allocating; ordinary visitors supply defaults,
+// nullable compaction and external-column normalization.
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
+
 // Visits manifest data on the calling thread in source order. Stop prevents
 // further ReadNext calls, decode submissions, and callbacks. Decode work
 // already submitted within the bounded input-byte window is still joined via
@@ -647,6 +665,14 @@ GetFieldIDList(FieldId column_group_id,
                const std::string& filepath,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
+
+// Returns the PARQUET:field_id of every column stored in a packed file, in
+// column order, reading only the file footer. Throws a SegcoreError carrying
+// the storage error code on a failed read, and DataFormatBroken when a column
+// has no valid field id.
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath);
 
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.

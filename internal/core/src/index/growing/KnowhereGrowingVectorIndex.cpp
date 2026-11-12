@@ -448,11 +448,11 @@ KnowhereGrowingVectorIndex<T>::PublishAccepted() {
                "cannot publish an unbuilt growing vector engine");
     // The reader shares the live engine -- including its append-only IdMap --
     // but freezes this generation's public row prefix and vector count.
-    auto reader = std::make_unique<VectorIndexReader>(*engine_,
-                                                      accepted_row_end_,
-                                                      accepted_physical_count_,
-                                                      search_defaults_);
-    PublishSnapshot(std::move(reader), accepted_row_end_);
+    auto index = std::make_shared<VectorIndex>(*engine_,
+                                               accepted_row_end_,
+                                               accepted_physical_count_,
+                                               search_defaults_);
+    PublishSnapshot(std::move(index), accepted_row_end_);
     publication_pending_ = false;
 }
 

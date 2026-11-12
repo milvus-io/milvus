@@ -26,7 +26,7 @@ class LogConfig:
         if not os.path.isdir(str(log_path)):
             print(f"[create_path] folder({log_path}) is not exist.")
             print("[create_path] create path now...")
-            os.makedirs(log_path)
+            os.makedirs(log_path, exist_ok=True)
 
     def get_default_config(self):
         """Make sure the path exists"""

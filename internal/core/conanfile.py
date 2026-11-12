@@ -1,10 +1,13 @@
-required_conan_version = ">=2.0"
+import json
+import os
 
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
 from conan.tools.files import copy
-import os
+from milvus_tsan import MANIFEST, dependency_manifest
+
+required_conan_version = ">=2.0"
 
 
 class MilvusConan(ConanFile):
@@ -29,7 +32,7 @@ class MilvusConan(ConanFile):
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
-        "milvus-common/1.0.0-45fca32@milvus/dev#ac7e38699c9dcc9a83d5be95e8227900",
+        "milvus-common/1.0.0-a88c21f@milvus/dev#0eb9a7f2f5d5fe0e7d37f45f3f9a38ea",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
         "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
@@ -50,6 +53,7 @@ class MilvusConan(ConanFile):
         "aws-crt-cpp/*:shared": True,
         "aws-c-*/*:shared": True,
         "aws-checksums/*:shared": True,
+        "s2n/*:shared": True,
         "openssl/*:shared": True,
         "openssl/*:no_apps": True,
         "libevent/*:shared": True,
@@ -129,11 +133,17 @@ class MilvusConan(ConanFile):
         # In Conan 2.x, force=True must be explicit.
         self.requires("boost/1.83.0#4e8a94ac1b88312af95eded83cd81ca8", force=True)
         self.requires("openssl/3.3.2#9f9f130d58e7c13e76bb8a559f0a6a8b", force=True)
-        self.requires("protobuf/5.27.0@milvus/dev#42f031a96d21c230a6e05bcac4bdd633", force=True)
-        self.requires("grpc/1.67.1@milvus/dev#efeaa484b59bffaa579004d5e82ec4fd", force=True)
+        self.requires(
+            "protobuf/5.27.0@milvus/dev#42f031a96d21c230a6e05bcac4bdd633", force=True
+        )
+        self.requires(
+            "grpc/1.67.1@milvus/dev#efeaa484b59bffaa579004d5e82ec4fd", force=True
+        )
         self.requires("zlib/1.3.1#8045430172a5f8d56ba001b14561b4ea", force=True)
         self.requires("libcurl/8.10.1#a3113369c86086b0e84231844e7ed0a9", force=True)
-        self.requires("nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d", force=True)
+        self.requires(
+            "nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d", force=True
+        )
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
         self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
         # libbson only (BSON C library) for JSON stats — NOT the full mongo-c-driver.
@@ -142,13 +152,25 @@ class MilvusConan(ConanFile):
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.
-        self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
-        self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
+        self.requires(
+            "azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137",
+            force=True,
+        )
+        self.requires(
+            "aws-sdk-cpp/1.11.921@milvus/dev#0b229410d5498d3bacc19ccf57334b30",
+            force=True,
+        )
         # Tests call CRT APIs directly. A direct requirement exposes its link
         # libraries even when the shared SDK hides transitive libraries.
         # Keep this version in sync with the SDK recipe; do not force it, so
         # an incompatible SDK upgrade produces a Conan dependency conflict.
-        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750")
+        self.requires("aws-crt-cpp/0.44.3#43f6408847655d35224320f4774bfcb9")
+        # milvus-storage uses native CRT APIs directly. Shared SDK libraries
+        # do not expose their transitive link dependencies to consumers.
+        self.requires("aws-c-auth/1.0.2#f587952f127cc579b90265a0f35056df")
+        self.requires("aws-c-io/1.1.1#2dd777871cf93ce4f35ba714a1ba87ef")
+        self.requires("aws-c-http/1.1.1#4ebd9cad4c949ed136f95419ce0ceee3")
+        self.requires("aws-c-s3/1.5.1#41f018ea69dd13668a2ffe76d0731742")
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
@@ -156,14 +178,13 @@ class MilvusConan(ConanFile):
         # Pin rapidjson to the newest cci snapshot. Arrow 17 pulls an older
         # rapidjson transitively, which fails to compile under clang 19 (libc++ 19).
         # force=True overrides Arrow's transitive version.
-        self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
+        self.requires(
+            "rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True
+        )
         if self.settings.os == "Linux":
             self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
-        # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
-        if self.settings.os in ["Linux", "FreeBSD"]:
-            self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
 
     def validate(self):
         # Profiles and command-line options can override default_options.
@@ -175,12 +196,18 @@ class MilvusConan(ConanFile):
                 )
 
     def generate(self):
+        manifest = None
+        if self.conf.get("user.milvus:tsan_runtime_dependencies", default=False):
+            manifest = dependency_manifest(self.dependencies.host.values())
         deps = CMakeDeps(self)
         # Set cmake file names to match what downstream projects expect
         deps.set_property("libavrocpp", "cmake_file_name", "libavrocpp")
         deps.set_property("libavrocpp", "cmake_target_name", "libavrocpp::libavrocpp")
         deps.generate()
         tc = CMakeToolchain(self)
+        tc.variables["MILVUS_CONAN_SANITIZER"] = self.conf.get(
+            "user.milvus:sanitizer", default="none"
+        )
         tc.generate()
         # Copy shared libraries (replaces imports() from Conan 1)
         # In Conan 1, imports() dst="lib" was relative to the build dir (cmake_build/).
@@ -188,13 +215,36 @@ class MilvusConan(ConanFile):
         build_dir = os.path.join(self.generators_folder, "..")
         for dep in self.dependencies.values():
             if dep.package_folder:
-                copy(self, "*.so*", src=os.path.join(dep.package_folder, "lib"),
-                     dst=os.path.join(build_dir, "lib"))
-                copy(self, "*.dylib", src=os.path.join(dep.package_folder, "lib"),
-                     dst=os.path.join(build_dir, "lib"))
-                copy(self, "*.dll", src=os.path.join(dep.package_folder, "lib"),
-                     dst=os.path.join(build_dir, "lib"))
-                copy(self, "*", src=os.path.join(dep.package_folder, "bin"),
-                     dst=os.path.join(build_dir, "bin"))
-                copy(self, "*.proto", src=os.path.join(dep.package_folder, "include"),
-                     dst=os.path.join(build_dir, "include"))
+                copy(
+                    self,
+                    "*.so*",
+                    src=os.path.join(dep.package_folder, "lib"),
+                    dst=os.path.join(build_dir, "lib"),
+                )
+                copy(
+                    self,
+                    "*.dylib",
+                    src=os.path.join(dep.package_folder, "lib"),
+                    dst=os.path.join(build_dir, "lib"),
+                )
+                copy(
+                    self,
+                    "*.dll",
+                    src=os.path.join(dep.package_folder, "lib"),
+                    dst=os.path.join(build_dir, "lib"),
+                )
+                copy(
+                    self,
+                    "*",
+                    src=os.path.join(dep.package_folder, "bin"),
+                    dst=os.path.join(build_dir, "bin"),
+                )
+                copy(
+                    self,
+                    "*.proto",
+                    src=os.path.join(dep.package_folder, "include"),
+                    dst=os.path.join(build_dir, "include"),
+                )
+        if manifest is not None:
+            with open(os.path.join(build_dir, "lib", MANIFEST), "w") as output:
+                json.dump(manifest, output, indent=2)

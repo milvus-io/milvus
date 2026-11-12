@@ -3,6 +3,7 @@ package adaptor
 import (
 	"context"
 	"math"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	streamingtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -164,7 +166,7 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
 			released := make(chan struct{})
 			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
-			mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
 			entered := make(chan struct{})
 			mockey.Mock((*roWALAdaptorImpl).Channel).Return(streamingtypes.PChannelInfo{AccessMode: streamingtypes.AccessModeRW}).Build()
 			mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "BarrierUntil")).To(func(ctx context.Context, _ uint64) error {
@@ -209,4 +211,42 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			require.Zero(t, ensured.Times(), "canceled allocator wait must not enqueue shared sync work")
 		})
 	}
+}
+
+func TestQueryPlanBarrierReusesCompletePrefix(t *testing.T) {
+	resource.InitForTest(t)
+	mockey.PatchConvey("a complete prefix proves the absence of transform events", t, func() {
+		manager := mvcc.NewMVCCManager(100)
+		manager.ApplyRecoveryBarrier("v", 100)
+		mockey.Mock((*roWALAdaptorImpl).Channel).Return(streamingtypes.PChannelInfo{AccessMode: streamingtypes.AccessModeRW}).Build()
+		ensured := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "EnsureBarrier")).Return(nil).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
+		publish := func(ts uint64, kind message.MessageType, through uint64) {
+			msg := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(kind), 10), "_vc": "v"}).WithTimeTick(ts)
+			tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(through)
+			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{msg.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
+		}
+		publish(200, message.MessageTypeInsert, 250)
+		for _, tc := range []struct{ barrier, growing, transform uint64 }{
+			{90, 90, 90}, {150, 150, 100}, {200, 200, 100}, {225, 200, 100}, {250, 200, 100},
+		} {
+			got, err := w.resolveBarrierMVCC(t.Context(), "v", tc.barrier)
+			require.NoError(t, err)
+			require.EqualValues(t, tc.growing, got.GrowingTimetick)
+			require.EqualValues(t, tc.transform, got.TransformingTimetick)
+		}
+		require.Zero(t, ensured.Times())
+		// A later page still reads at B=150, even after a Delete above B.
+		publish(300, message.MessageTypeDelete, 350)
+		got, err := w.resolveBarrierMVCC(t.Context(), "v", 150)
+		require.NoError(t, err)
+		require.EqualValues(t, 150, got.GrowingTimetick)
+		require.EqualValues(t, 150, got.TransformingTimetick)
+		require.Zero(t, ensured.Times())
+		publish(400, message.MessageTypeDropCollection, 450)
+		got, err = w.resolveBarrierMVCC(t.Context(), "v", 150)
+		require.Nil(t, got)
+		require.True(t, viewerror.AsViewError(err).IsViewNotFound())
+		require.Zero(t, ensured.Times(), "a dropped channel must not be revived by a barrier")
+	})
 }

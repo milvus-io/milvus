@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -204,7 +205,10 @@ func openFFIPackedReader(
 	cNeededColumnArray, cNumColumns, cleanupNeededColumns := newCNeededColumns(neededColumns)
 	defer cleanupNeededColumns()
 
-	cExternalSource, cExternalSpec, cleanupExternalContext := newCExternalContext(extfs.Source, extfs.Spec)
+	cExternalSource, cExternalSpec, cleanupExternalContext, err := newCExternalContext(extfs.Source, extfs.Spec)
+	if err != nil {
+		return nil, err
+	}
 	defer cleanupExternalContext()
 
 	status := open(
@@ -322,21 +326,25 @@ func newCNeededColumns(neededColumns []string) (**C.char, C.int64_t, func()) {
 	return (**C.char)(unsafe.Pointer(&cNeededColumn[0])), C.int64_t(len(cNeededColumn)), cleanup
 }
 
-func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func()) {
+func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func(), error) {
 	if externalSource == "" {
-		return nil, nil, func() {}
+		return nil, nil, func() {}, nil
+	}
+	normalizedSpec, err := specutil.NormalizeExternalSpec(externalSpec)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	cExternalSource := C.CString(externalSource)
 	var cExternalSpec *C.char
 	if externalSpec != "" {
-		cExternalSpec = C.CString(externalSpec)
+		cExternalSpec = C.CString(normalizedSpec)
 	}
 	return cExternalSource, cExternalSpec, func() {
 		C.free(unsafe.Pointer(cExternalSource))
 		if cExternalSpec != nil {
 			C.free(unsafe.Pointer(cExternalSpec))
 		}
-	}
+	}, nil
 }
 
 func resolveFFIReaderFragments(
@@ -429,39 +437,21 @@ func GetManifestHandleWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) (loonManifestHandle *C.LoonManifest, err error) {
-	var cManifestHandle *C.LoonManifest
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
-		return cManifestHandle, err
+		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
-	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
+	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return cManifestHandle, err
+		return nil, err
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return cManifestHandle, merr.Wrap(err, "inject extfs")
+		return nil, merr.Wrap(err, "inject extfs")
 	}
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	err = HandleLoonFFIResult(result)
-	if err != nil {
-		return cManifestHandle, err
-	}
-	defer C.loon_transaction_destroy(cTransactionHandle)
-
-	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifestHandle)
-	err = HandleLoonFFIResult(result)
-	if err != nil {
-		return cManifestHandle, err
-	}
-
-	return cManifestHandle, nil
+	return openManifest(manifest, cProperties)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface

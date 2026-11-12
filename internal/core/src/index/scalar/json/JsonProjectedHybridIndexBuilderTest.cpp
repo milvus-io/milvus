@@ -36,6 +36,7 @@
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "indexbuilder/BuildInputMaterializer.h"
+#include "knowhere/build_scheduler.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus::index::test {
@@ -89,6 +90,7 @@ BuildProjectedIndex(const std::vector<std::string>& raw,
     auto materializer = indexbuilder::MakeScalarBuildInputMaterializer(
         DataType::JSON, value_type, raw.size(), adapted.family, adapted.params);
     materializer->Add(RawJsonFieldData(raw));
+    EXPECT_TRUE(materializer->TryReserveBuild());
     auto artifact = std::move(*materializer).Build();
     EXPECT_NE(artifact, nullptr);
     if (!artifact) {
@@ -117,10 +119,10 @@ TEST(JsonProjectedHybridIndexBuilderTest, LowCardinalityStringsSelectBitmap) {
     ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::BITMAP));
     const auto& backend = ScalarReaderBackends().Get<std::string_view>(
         "JsonProjectedHybridVarchar");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/x"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/x"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);
@@ -136,6 +138,8 @@ TEST(JsonProjectedHybridIndexBuilderTest, LowCardinalityStringsSelectBitmap) {
 }
 
 TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
+    auto reservation = knowhere::BuildScheduler::Instance().TryReserve();
+    ASSERT_TRUE(reservation.has_value());
     std::vector<std::string> raw;
     raw.reserve(1000);
     for (size_t i = 0; i < 1000; ++i) {
@@ -147,10 +151,10 @@ TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
         ExpectSelector(persisted, ScalarIndexType::STLSORT));
     const auto& backend =
         ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/n"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/n"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);
@@ -177,10 +181,10 @@ TEST(JsonProjectedHybridIndexBuilderTest,
     ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::BITMAP));
     const auto& backend =
         ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/v"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/v"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);
@@ -272,7 +276,7 @@ CheckProjectedArrayIndexes(std::string_view type_name,
                         dynamic_cast<const INullReader*>(resolved.get());
                     ASSERT_NE(nulls, nullptr);
                     ExpectHits(nulls->IsNotNull(), raw.size(), {0, 1, 2, 6, 7});
-                    ExpectHits(nulls->IsNull(), raw.size(), {3, 4, 5});
+                    ExpectHits(nulls->IsNull(), raw.size(), {3, 4, 5, 8});
                     ExpectHits(
                         predicate->NotIn(1, &first), raw.size(), {1, 2, 7});
                 }
@@ -283,6 +287,8 @@ CheckProjectedArrayIndexes(std::string_view type_name,
 
 TEST(JsonProjectedHybridIndexBuilderTest,
      ArrayCastsSelectBitmapAndSortWithParentRows) {
+    // The last row is valid but its stored bytes are empty: it has no
+    // document, so no array either.
     CheckProjectedArrayIndexes<bool>("Bool",
                                      DataType::BOOL,
                                      "ARRAY_BOOL",
@@ -293,7 +299,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
                                       R"({"a":null})",
                                       R"({"a":3})",
                                       R"({"a":[false,3,"ignored",null,{}]})",
-                                      R"({"a":[null,{},[]]})"},
+                                      R"({"a":[null,{},[]]})",
+                                      ""},
                                      false,
                                      true);
     CheckProjectedArrayIndexes<double>(
@@ -307,7 +314,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
          R"({"a":null})",
          R"({"a":true})",
          R"({"a":[1.0,false,"ignored",null,{}]})",
-         R"({"a":[null,{},[]]})"},
+         R"({"a":[null,{},[]]})",
+         ""},
         1,
         100);
     CheckProjectedArrayIndexes<std::string_view>(
@@ -321,7 +329,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
          R"({"a":null})",
          R"({"a":true})",
          R"({"a":["a",false,3,null,{}]})",
-         R"({"a":[null,{},[]]})"},
+         R"({"a":[null,{},[]]})",
+         ""},
         "a",
         "z");
 }

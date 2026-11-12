@@ -233,10 +233,9 @@ func (s *Store) ReadIdempotencySection(
 //
 // A chunk is a pchannel-wide object carrying every vchannel written in the same
 // span, and the section refs only locate a slice inside a payload that is
-// fetched whole -- object storage here has no range read. Recovery reads one
-// vchannel at a time, so without this a chunk covering V vchannels would be
-// downloaded V times: on a pchannel near its retention budget with a dozen
-// vchannels that is gigabytes of transfer while the channel is unwritable.
+// fetched whole -- object storage here has no range read. Batch callers can
+// decode all requested vchannels after one download rather than downloading
+// the same object once per vchannel.
 func (s *Store) ReadIdempotencySectionsOfChunk(
 	ctx context.Context,
 	generation uint64,

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -21,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -36,6 +38,7 @@ var (
 
 type handlerClientImpl struct {
 	queryViewSyncClient        QueryViewSyncClient
+	queryViewClient            QueryViewClient
 	newTransformLogEventStream func(context.Context, *transformlogclient.EventStreamOptions, streamingpb.StreamingNodeHandlerServiceClient) (*transformlogclient.EventStream, error)
 	lifetime                   *typeutil.Lifetime
 	service                    lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
@@ -328,7 +331,9 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		if pchannel == "" || assign != nil {
 			createResult, err := create(callCtx, assign)
 			if err == nil {
-				logger.Info(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				if mlog.LevelEnabled(mlog.DebugLevel) {
+					logger.Debug(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				}
 				return createResult, nil
 			}
 			logger.Warn(ctx, "create handler failed", mlog.Any("assignment", assign), mlog.Err(err))
@@ -337,9 +342,17 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			// a secondary cluster) won't change by retrying the same WAL role. Surface
 			// them immediately so callers get a typed error within RTT instead of
 			// retrying until their context deadline. Unsupported RPCs on older nodes
-			// must also return immediately.
-			if status.AsStreamingError(err).IsUnrecoverable() || grpcstatus.Code(err) == codes.Unimplemented {
+			// must also return immediately. A gRPC message-size failure is deterministic
+			// for this payload and limit, so retrying cannot make progress.
+			if status.AsStreamingError(err).IsUnrecoverable() || grpcstatus.Code(err) == codes.Unimplemented || isGRPCMessageSizeError(err) {
 				logger.Warn(ctx, "create handler failed with unrecoverable error, stop retrying", mlog.Err(err))
+				return nil, err
+			}
+
+			// View services have their own protocol. Only ownership/readiness and
+			// transport-unavailable errors belong in this assignment retry loop.
+			var viewStatus *viewerror.ViewClientStatus
+			if errors.As(err, &viewStatus) && !queryViewRPCNeedsWaitForReady(err) {
 				return nil, err
 			}
 
@@ -365,6 +378,22 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 	}
 }
 
+// isGRPCMessageSizeError recognizes grpc-go's transport size checks. gRPC uses
+// ResourceExhausted for both size limits and transient pressure, with no typed
+// size detail, so the code alone must not disable retries (e.g. rate limiting).
+func isGRPCMessageSizeError(err error) bool {
+	st := grpcstatus.Convert(err)
+	if st.Code() != codes.ResourceExhausted {
+		return false
+	}
+	message := st.Message()
+	return strings.HasPrefix(message, "trying to send message larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message larger than max length allowed on current machine (") ||
+		strings.HasPrefix(message, "grpc: message after decompression larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message after decompression larger than max ")
+}
+
 // waitForNextBackoff waits for next backoff.
 func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel string, assign *types.PChannelInfoAssigned, nextBackoff time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, nextBackoff, errWaitNextBackoff)
@@ -386,6 +415,7 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
 	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
+	// Owners close resumable clients before joining physical stream acquisition.
 	hc.lifetime.Wait()
 
 	hc.watcher.Close()
@@ -402,6 +432,10 @@ func isPermanentFailureUntilNewAssignment(err error) bool {
 	}
 	// The error is reported by grpc balancer at client that the sub connection is not exist (remote server is down at view of session).
 	if picker.IsErrSubConnNoExist(err) {
+		return true
+	}
+	// View services report stale WAL ownership using their own protocol.
+	if viewerror.AsViewError(err).IsNotPrimary() {
 		return true
 	}
 	// The error is reported by remote server that the wal is not exist at remote server.

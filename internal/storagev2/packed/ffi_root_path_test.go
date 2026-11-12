@@ -42,6 +42,7 @@ func TestMakePropertiesFromStorageConfig_RootPath(t *testing.T) {
 			require.NoError(t, err)
 			defer FreeProperties(props)
 			assert.Equal(t, tc.expected, loonPropertyString(props, PropertyFSRootPath))
+			assert.Equal(t, "false", loonPropertyString(props, PropertyFSS3UseCRT))
 		})
 	}
 }

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "storage/loon_ffi/util.h"
 #include <gtest/gtest.h>
 
 #include <aws/core/http/HttpClientFactory.h>
@@ -159,7 +160,7 @@ CheckGcpRegistration(const bool legacy_first, const bool use_iam) {
 
 class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
  public:
-    enum class Mode { kToken, kNoToken, kEmptyHeader, kThrow };
+    enum class Mode { kToken, kNoToken, kEmptyHeader, kThrow, kHmac };
 
     explicit FakeGcpCredentialProvider(Mode mode) : mode_(mode) {
     }
@@ -172,6 +173,7 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
                 return std::make_pair(std::string("Authorization"),
                                       std::string("Bearer fake-token"));
             case Mode::kNoToken:
+            case Mode::kHmac:
                 return std::nullopt;
             case Mode::kEmptyHeader:
                 return std::make_pair(std::string(), std::string());
@@ -185,6 +187,22 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
     MaybeSignConditionalWrite(
         const std::shared_ptr<Aws::Http::HttpRequest>&) override {
         return arrow::Status::OK();
+    }
+
+    bool
+    IssuesBearerToken() const override {
+        return mode_ != Mode::kHmac;
+    }
+
+    std::string
+    Identity() const override {
+        return "fake";
+    }
+
+    void
+    Reset(Mode mode) {
+        mode_ = mode;
+        calls_ = 0;
     }
 
     int
@@ -202,11 +220,29 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
 static std::shared_ptr<FakeGcpCredentialProvider>
 RegisterFakeProvider(const std::string& endpoint,
                      const std::string& bucket,
-                     FakeGcpCredentialProvider::Mode mode) {
-    auto provider = std::make_shared<FakeGcpCredentialProvider>(mode);
-    milvus_storage::GcpCredentialRegistry::Instance().Register(
-        {milvus_storage::NormalizeGcpEndpoint(endpoint, true), bucket},
-        provider);
+                     FakeGcpCredentialProvider::Mode mode,
+                     bool trusted_endpoint = false) {
+    if (trusted_endpoint) {
+        AddGcsEndpointForCredentials(endpoint, true);
+    }
+    auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
+    const auto address = endpoint.find("://") == std::string::npos
+                             ? "https://" + endpoint
+                             : endpoint;
+    // Register retains the provider for an existing identity across repeats.
+    auto provider = std::dynamic_pointer_cast<FakeGcpCredentialProvider>(
+        registry.Lookup(Aws::Http::URI((address + "/" + bucket).c_str())));
+    if (provider == nullptr) {
+        provider = std::make_shared<FakeGcpCredentialProvider>(mode);
+    }
+    provider->Reset(mode);
+    EXPECT_TRUE(
+        registry
+            .Register(
+                {milvus_storage::NormalizeGcpEndpoint(endpoint, true), bucket},
+                provider,
+                trusted_endpoint)
+            .ok());
     return provider;
 }
 
@@ -215,8 +251,7 @@ RegisterFakeProvider(const std::string& endpoint,
 static std::shared_ptr<FakeGcpCredentialProvider>
 RegisterMilvusProvider(const std::string& bucket,
                        FakeGcpCredentialProvider::Mode mode) {
-    AddGcsEndpointForCredentials("gcs-factory-test.invalid", true);
-    return RegisterFakeProvider("gcs-factory-test.invalid", bucket, mode);
+    return RegisterFakeProvider("gcs-factory-test.invalid", bucket, mode, true);
 }
 
 static std::shared_ptr<Aws::Http::HttpRequest>
@@ -251,6 +286,10 @@ CheckMilvusBucketKeepsItsProvider() {
     Aws::Client::ClientConfiguration client_config;
     client_config.region = "europe-west3";
     client_config.endpointOverride = "storage.googleapis.com:443";
+    auto previous_external =
+        RegisterFakeProvider("storage.googleapis.com",
+                             "milvus-own-bucket",
+                             FakeGcpCredentialProvider::Mode::kToken);
     manager.BuildGoogleCloudClient(storage_config, client_config);
 
     auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
@@ -258,15 +297,16 @@ CheckMilvusBucketKeepsItsProvider() {
         "https://storage.googleapis.com/milvus-own-bucket/key");
     const auto milvus_provider = registry.Lookup(own_uri);
     ASSERT_NE(milvus_provider, nullptr);
+    EXPECT_NE(milvus_provider, previous_external);
 
-    // milvus-storage registers another identity for the same bucket, as for
-    // an external table on it. Milvus' own requests keep Milvus' provider.
+    // An external identity cannot replace the operator's registered identity.
     const milvus_storage::GcpBucketKey own_key{
         milvus_storage::NormalizeGcpEndpoint(storage_config.address, true),
         storage_config.bucket_name};
     auto replacement = std::make_shared<FakeGcpCredentialProvider>(
         FakeGcpCredentialProvider::Mode::kToken);
-    registry.Register(own_key, replacement);
+    EXPECT_TRUE(registry.Register(own_key, replacement).IsInvalid());
+    EXPECT_EQ(registry.Lookup(own_uri), milvus_provider);
     for (const auto* uri :
          {"https://storage.googleapis.com/milvus-own-bucket/key",
           "https://milvus-own-bucket.storage.googleapis.com/key"}) {
@@ -354,17 +394,35 @@ TEST(GoogleHttpClientFactoryTest, AuthenticatesGcsEndpointsOnly) {
         EXPECT_EQ(lookalike->calls(), 0) << host;
     }
 
-    // A configured endpoint is matched by host, whatever its port.
-    AddGcsEndpointForCredentials("gcs-port-test.invalid:443", true);
+    // Operator trust is scoped to the configured scheme and port.
     auto configured =
         RegisterFakeProvider("gcs-port-test.invalid",
                              "factory-port-bucket",
-                             FakeGcpCredentialProvider::Mode::kToken);
+                             FakeGcpCredentialProvider::Mode::kToken,
+                             true);
     EXPECT_EQ(CreateGoogleRequest(
                   "https://gcs-port-test.invalid/factory-port-bucket/k")
                   ->GetHeaderValue("Authorization"),
               "Bearer fake-token");
     EXPECT_EQ(configured->calls(), 1);
+
+    auto other_port =
+        RegisterFakeProvider("gcs-port-test.invalid:8443",
+                             "factory-port-bucket",
+                             FakeGcpCredentialProvider::Mode::kToken);
+    EXPECT_FALSE(CreateGoogleRequest(
+                     "https://gcs-port-test.invalid:8443/factory-port-bucket/k")
+                     ->HasHeader("Authorization"));
+    EXPECT_EQ(other_port->calls(), 0);
+
+    auto insecure_google =
+        RegisterFakeProvider("http://storage.googleapis.com",
+                             "factory-insecure-bucket",
+                             FakeGcpCredentialProvider::Mode::kToken);
+    EXPECT_FALSE(CreateGoogleRequest(
+                     "http://storage.googleapis.com/factory-insecure-bucket/k")
+                     ->HasHeader("Authorization"));
+    EXPECT_EQ(insecure_google->calls(), 0);
 
     // Google's own endpoints need no configuration.
     auto google = RegisterFakeProvider("storage.googleapis.com",
@@ -398,6 +456,15 @@ TEST(GoogleHttpClientFactoryTest, TokenFailureDoesNotThrow) {
         EXPECT_FALSE(request->HasHeader(""));
         EXPECT_EQ(provider->calls(), 1);
     }
+}
+
+TEST(GoogleHttpClientFactoryTest, HmacProviderDoesNotIssueBearerTokens) {
+    auto provider = RegisterMilvusProvider(
+        "factory-hmac-bucket", FakeGcpCredentialProvider::Mode::kHmac);
+    auto request = CreateGoogleRequest(
+        "https://gcs-factory-test.invalid/factory-hmac-bucket/k");
+    EXPECT_FALSE(request->HasHeader("Authorization"));
+    EXPECT_EQ(provider->calls(), 0);
 }
 
 // Each case execs a fresh process: neither AWS InitAPI nor storage's call_once
@@ -455,6 +522,34 @@ TEST(GcpChunkManagerRegistrationDeathTest, MilvusBucketKeepsItsProvider) {
         },
         ::testing::ExitedWithCode(0),
         "");
+}
+
+TEST(GoogleHttpClientFactoryTest, BrokerDoesNotInheritGcpCredentials) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        ::InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    auto provider =
+        RegisterFakeProvider("broker.example.com",
+                             "v1",
+                             FakeGcpCredentialProvider::Mode::kToken,
+                             true);
+    milvus::storage::GoogleHttpClientFactory factory;
+    auto request = factory.CreateHttpRequest(
+        Aws::String(endpoint.c_str()),
+        Aws::Http::HttpMethod::HTTP_POST,
+        Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+    EXPECT_FALSE(request->HasHeader("Authorization"));
+    EXPECT_EQ(provider->calls(), 0);
+    auto ordinary = factory.CreateHttpRequest(
+        Aws::String((endpoint + "/object").c_str()),
+        Aws::Http::HttpMethod::HTTP_GET,
+        Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+    EXPECT_EQ(ordinary->GetHeaderValue("Authorization"), "Bearer fake-token");
+    EXPECT_EQ(provider->calls(), 1);
 }
 
 }  // namespace milvus::storage

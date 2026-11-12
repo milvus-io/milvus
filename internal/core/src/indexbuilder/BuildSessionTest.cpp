@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -32,6 +34,7 @@
 #include "index/contracts/query/ITextMatchReader.h"
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/IndexBuildCapiAdapter.h"
+#include "knowhere/version.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
@@ -168,19 +171,94 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                      {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, 7},
                      {PROPERTY_FS_TALON_MODE, 0}}) {
                 auto actual =
-                    milvus_storage::api::GetValue<uint32_t>(*props, key);
+                    milvus_storage::api::GetValue<uint32_t>(props, key);
                 ASSERT_TRUE(actual.ok()) << key;
                 EXPECT_EQ(*actual, value) << key;
             }
             auto coordinator = milvus_storage::api::GetValue<std::string>(
-                *props, PROPERTY_FS_TALON_COORDINATOR);
+                props, PROPERTY_FS_TALON_COORDINATOR);
             ASSERT_TRUE(coordinator.ok());
             EXPECT_EQ(*coordinator, "coordinator:1234");
             auto external = milvus_storage::api::GetValue<std::string>(
-                *props, "milvus.talon.external_mode");
+                props, "milvus.talon.external_mode");
             ASSERT_TRUE(external.ok());
             EXPECT_EQ(*external, external_enabled ? "2" : "0");
         }
+    }
+}
+
+TEST_F(BuildSessionTest, ResidentVectorsBuildAfterLoading) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    auto info = BuildInfo(schemapb::DataType::FloatVector,
+                          knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                          rows,
+                          3);
+    info.set_dim(dim);
+    info.set_current_index_version(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto* metric = info.add_index_params();
+    metric->set_key(index::METRIC_TYPE);
+    metric->set_value("L2");
+    info.add_insert_files(InsertPath());
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+    prepared.request.staging_parent = remote_->Path();
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    std::vector<float> values(rows * dim, 1.0F);
+    data->FillFieldData(values.data(), rows);
+    WriteInsert(prepared.file_manager_context, data);
+    BuildSession session(prepared.request, prepared.file_manager_context);
+    session.LoadData();
+    ASSERT_NO_THROW(session.Build());
+    EXPECT_FALSE(session.Publish().Files().empty());
+}
+
+TEST_F(BuildSessionTest, AllNullVectorsReleasePreparedAllocation) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    for (const auto* type : {knowhere::IndexEnum::INDEX_HNSW,
+                             knowhere::IndexEnum::INDEX_DISKANN}) {
+        auto info = BuildInfo(schemapb::DataType::FloatVector, type, rows, 3);
+        info.set_dim(dim);
+        info.set_current_index_version(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        info.mutable_field_schema()->set_nullable(true);
+        auto* metric = info.add_index_params();
+        metric->set_key(index::METRIC_TYPE);
+        metric->set_value("L2");
+        info.add_insert_files(InsertPath());
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+        prepared.request.staging_parent = remote_->Path();
+        auto data = storage::CreateFieldData(
+            DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+        std::vector<float> values(rows * dim);
+        const std::vector<uint8_t> validity((rows + 7) / 8, 0);
+        data->FillFieldData(values.data(), validity.data(), rows, 0);
+        WriteInsert(prepared.file_manager_context, data);
+        BuildSession session(prepared.request, prepared.file_manager_context);
+        session.LoadData();
+        ASSERT_NO_THROW(session.Build());
+        // All-null input still publishes its row-validity metadata.
+        EXPECT_FALSE(session.Publish().Files().empty());
+    }
+}
+
+TEST_F(BuildSessionTest, EmptyVectorSourceSkipsPersistence) {
+    for (const auto* type : {knowhere::IndexEnum::INDEX_HNSW,
+                             knowhere::IndexEnum::INDEX_DISKANN}) {
+        SCOPED_TRACE(type);
+        auto info = BuildInfo(schemapb::DataType::FloatVector, type, 0, 3);
+        info.set_dim(4);
+        info.set_current_index_version(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        auto* metric = info.add_index_params();
+        metric->set_key(index::METRIC_TYPE);
+        metric->set_value("L2");
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+        prepared.request.staging_parent = remote_->Path();
+        BuildSession session(prepared.request, prepared.file_manager_context);
+        ASSERT_NO_FATAL_FAILURE(ExpectSkippedPublication(session));
     }
 }
 
@@ -243,12 +321,16 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
         auto loader =
             index::LoaderRegistry::Instance().Lookup(index::families::kText);
         ASSERT_TRUE(static_cast<bool>(loader));
-        auto reader = loader.Load(
-            {index::IndexFiles{prepared.file_manager_context,
-                               {stats.Files()[0].file_name},
-                               index::PackedIndexStorageConfig{
-                                   storage::ArtifactStorageNamespace::TextLog}},
-             options});
+        auto reader =
+            loader
+                .Load({index::IndexFiles{
+                           prepared.file_manager_context,
+                           {stats.Files()[0].file_name},
+                           index::PackedIndexStorageConfig{
+                               storage::ArtifactStorageNamespace::TextLog}},
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);
         EXPECT_EQ(reader->Count(), texts.size());

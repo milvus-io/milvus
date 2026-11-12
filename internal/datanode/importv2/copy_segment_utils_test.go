@@ -1505,6 +1505,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexID:               10,
 				BuildID:               1001,
 				IndexName:             "idx_v0",
+				IndexType:             "HNSW_SQ",
 				IndexVersion:          1,
 				SerializedSize:        1024,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
@@ -1537,6 +1538,8 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+	assert.Equal(t, "HNSW_SQ", indexInfos[2001].GetIndexType())
+	assert.Empty(t, indexInfos[2002].GetIndexType())
 }
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
@@ -3790,13 +3793,21 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	assert.Equal(t, int64(2), entry.IndexVersion)
 	assert.Equal(t, int64(4096), entry.NumRows)
 	assert.Equal(t, []string{"a", "b"}, entry.IndexFileKeys)
-	assert.Equal(t, "16", entry.Properties["M"])
-	assert.Equal(t, "HNSW", entry.Properties[common.IndexTypeKey])
+	assert.Empty(t, entry.Properties, "ignore collection parameters even from older coordinators")
 
 	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/insert_log/100/200/300/_index/888/2")
 	assert.NoError(t, err)
 	assert.Equal(t, expectedPath, entry.Path)
 	assert.Equal(t, "888/2", entry.Path)
+	indexInfos[888].IndexType = "HNSW_SQ"
+	entries, err = buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "HNSW_SQ", entries[0].IndexType)
+	assert.Empty(t, entries[0].Properties)
+	assert.Equal(t, "vec_idx", entries[0].IndexName)
+	assert.Equal(t, "HNSW", target.TargetIndexes[0].IndexType)
+	assert.NotContains(t, target.TargetIndexes[0].Properties, common.IndexTypeKey)
 }
 
 func TestBuildTargetManifestIndexes_NoTargetDefinition(t *testing.T) {

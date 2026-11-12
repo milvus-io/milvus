@@ -31,7 +31,7 @@ func (*refreshSource) RefreshDataView(context.Context, int64) (*viewpb.DataVersi
 func TestReadinessResourceIntegration(t *testing.T) {
 	r := managementResources(t)
 	r.RefreshVersions = &sync.Map{}
-	r.LoadManager = loadmgr.NewCollectionLoadManager(r.LoadConfigs, nil)
+	r.LoadManager = loadmgr.NewCollectionLoadManager(r.LoadConfigs, nil, nil)
 	r.Reconciler = &refreshSource{}
 	ready := false
 	var duringSnapshot func()
@@ -70,11 +70,13 @@ func TestReadinessResourceIntegration(t *testing.T) {
 	require.ErrorIs(t, loadstatus.Wait(ctx, r.LoadConfigs, r.ShardViews, r.Readiness, 1, channels, 1, qviews.DataVersion{}), context.DeadlineExceeded)
 	cfg := r.LoadConfigs.GetConfig(1)
 	duringSnapshot = func() {
+		r.LoadConfigs.StopPlanning(1)
 		require.NoError(t, r.LoadConfigs.Remove(t.Context(), 1))
 		require.NoError(t, r.LoadConfigs.Put(t.Context(), cfg))
 	}
 	require.ErrorIs(t, loadstatus.WaitAtSchema(t.Context(), r.LoadConfigs, r.ShardViews, r.Readiness, 1, channels, 0), merr.ErrCollectionNotLoaded, "coalesced release/reload invalidates the earlier waiter")
 	duringSnapshot = nil
+	r.LoadConfigs.StopPlanning(1)
 	require.NoError(t, r.LoadConfigs.Remove(t.Context(), 1))
 	require.NoError(t, r.WaitDataVersion(t.Context(), 1, qviews.DataVersion{StreamingVersion: 3}))
 	require.NoError(t, r.AddPartition(t.Context(), 1, 11), "partition creation must not reload a released collection")

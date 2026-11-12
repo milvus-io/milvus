@@ -19,13 +19,14 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // GetPublishedManifestPaths snapshots current segment manifest descriptors across
 // all collections, including unloaded ones. It enumerates live segment references,
 // not snapshot references (snapshot-protected dropped segments are filtered out).
-// Callers resolve/stat descriptors only after releasing segMu.
+// Callers resolve/stat descriptors after the read.
 func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -36,18 +37,16 @@ func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error
 	if s.meta == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("DataCoord metadata unavailable")
 	}
-	s.meta.segMu.RLock()
-	defer s.meta.segMu.RUnlock()
 	manifests := make([]string, 0)
-	for _, segment := range s.meta.segments.GetSegments() {
+	for _, segment := range s.meta.Segments.GetSegments() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !isSegmentHealthy(segment) || segment.GetIsImporting() || segment.GetIsInvisible() || segment.GetManifestPath() == "" {
+		if !meta.IsSegmentHealthy(segment) || segment.GetIsImporting() || segment.GetIsInvisible() || segment.GetManifestPath() == "" {
 			continue
 		}
 		// Growing/Flushing and L0 segments can already have published manifests.
-		// The resolver rejects the version-zero placeholder outside this lock.
+		// The resolver rejects the version-zero placeholder after the read.
 		manifests = append(manifests, segment.GetManifestPath())
 	}
 	return manifests, nil

@@ -16,36 +16,59 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
+#include <vector>
+
+#include "arrow/array/array_nested.h"
 
 #include "common/Types.h"
 #include "pb/schema.pb.h"
-#include "storage/MmapChunkManager.h"
 
 namespace milvus {
 
 class ArrayValue;
 class ColumnarArrayChunk;
 
-// Builds one immutable columnar recursive ARRAY block directly in growing mmap
-// storage. The returned Chunk tree is a read-only view over the allocation;
-// the descriptor must outlive the returned Chunk.
-std::shared_ptr<const ColumnarArrayChunk>
-CreateMmapColumnarArrayChunkFromProtoRows(
-    std::span<const ScalarFieldProto* const> rows,
-    const proto::schema::TypeSchema& type,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor);
+// Count logical leaf elements in one scalar ARRAY row, including null leaves.
+size_t
+GetLeafElementCount(const ScalarFieldProto& row, DataType data_type);
 
-// Builds one columnar recursive ARRAY block from existing heap-backed
-// ArrayValues.
-// An empty valid_data span means all rows are valid; otherwise it contains one
-// byte per row.
+// Copy native-list rows directly into owning ArrayValues without materializing
+// intermediate ScalarFieldProto rows.
+std::vector<ArrayValue>
+ArrowListToArrayValues(const arrow::ListArray& rows,
+                       std::shared_ptr<const proto::schema::TypeSchema> type);
+
+// Materialize Arrow native-list rows using the same validity and placeholder
+// rules as ColumnarArrayChunk::OutputRange.
+std::vector<ScalarFieldProto>
+ArrowListToScalarFieldProto(const arrow::ListArray& rows,
+                            const proto::schema::TypeSchema& type);
+
+// Returns `bytes` bytes for one serialized block. The caller owns the memory
+// and must keep it in place for longer than the Chunk built over it.
+using ColumnarArrayBlockAllocator = std::function<char*(size_t bytes)>;
+
+// Builds one immutable columnar recursive ARRAY block from growing rows. The
+// block is written into one allocation from `allocate`, and the returned
+// Chunk tree is a read-only view over it. The Chunk shares `type` rather than
+// copying it, so every block of a column holds the same immutable object.
 std::shared_ptr<const ColumnarArrayChunk>
-CreateMmapColumnarArrayChunkFromValues(
-    std::span<const ArrayValue> values,
-    std::span<const uint8_t> valid_data,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor);
+CreateColumnarArrayChunkFromProtoRows(
+    std::span<const ScalarFieldProto* const> rows,
+    std::shared_ptr<const proto::schema::TypeSchema> type,
+    const ColumnarArrayBlockAllocator& allocate);
+
+// Same, from existing heap-backed ArrayValues; the block shares the type of
+// the first value. An empty valid_data span means all rows are valid;
+// otherwise it contains one byte per row.
+std::shared_ptr<const ColumnarArrayChunk>
+CreateColumnarArrayChunkFromValues(std::span<const ArrayValue> values,
+                                   std::span<const uint8_t> valid_data,
+                                   const ColumnarArrayBlockAllocator& allocate);
 
 }  // namespace milvus

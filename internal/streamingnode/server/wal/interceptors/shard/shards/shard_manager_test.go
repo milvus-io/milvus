@@ -1013,6 +1013,11 @@ func TestAlterCollectionSchemaChange(t *testing.T) {
 		m := newShardManagerWithGrowingSegment(t, collID, partID, segID)
 		defer m.Close()
 
+		// Real collections already carry their CreateCollection schema.
+		m.collections[collID].setSchema(&streamingpb.CollectionSchemaOfVChannel{
+			Schema: schemaV1, CheckpointTimeTick: 100,
+			State: streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		})
 		// AlterCollection with a non-schema mask (e.g. properties only).
 		segmentIDs, err := m.AlterCollection(buildAlterMsg([]string{"properties"}, nil, 21))
 		assert.NoError(t, err)

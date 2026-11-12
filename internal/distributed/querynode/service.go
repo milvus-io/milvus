@@ -27,6 +27,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -243,6 +245,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			// otelgrpc.UnaryServerInterceptor(opts...),
 			mlog.UnaryServerInterceptor(typeutil.QueryNodeRole),
+			streamingserviceinterceptor.NewServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -254,6 +257,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			// otelgrpc.StreamServerInterceptor(opts...),
 			mlog.StreamServerInterceptor(typeutil.QueryNodeRole),
+			streamingserviceinterceptor.NewServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -268,6 +272,7 @@ func (s *Server) startGrpcLoop() {
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("QueryNode"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
+	s.registerQueryViewServers()
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
@@ -415,6 +420,29 @@ func (s *Server) QueryStreamSegments(req *querypb.QueryRequest, srv querypb.Quer
 
 func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return s.querynode.QuerySegments(ctx, req)
+}
+
+func (s *Server) Materialize(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	replyUncompressed(ctx)
+	return s.querynode.Materialize(ctx, req)
+}
+
+func (s *Server) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	replyUncompressed(ctx)
+	return s.querynode.MaterializeSegments(ctx, req)
+}
+
+// replyUncompressed sends a Materialize reply without gRPC compression: its
+// body carries its own (queryNode.materialize.codec). The request keeps the
+// caller's compressor, and gRPC would otherwise answer with it. ctx without a
+// gRPC stream (an in-process call) has nothing to set.
+func replyUncompressed(ctx context.Context) {
+	if grpc.ServerTransportStreamFromContext(ctx) == nil {
+		return
+	}
+	if err := grpc.SetSendCompressor(ctx, encoding.Identity); err != nil {
+		mlog.Warn(ctx, "failed to send the Materialize reply uncompressed", mlog.Err(err))
+	}
 }
 
 // SyncReplicaSegments syncs replica segment information to shard leader

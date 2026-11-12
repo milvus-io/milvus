@@ -20,13 +20,17 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -254,6 +258,61 @@ class SortedStorageView<std::string_view> {
 
 }  // namespace sorted_reader_detail
 
+/** @brief Keeps sorted values, validity and reverse offsets in one cache cell. */
+template <typename T>
+struct SortedIndexStorage {
+    struct OpenArgs {
+        sorted_reader_detail::SortedReaderState state;
+        typename sorted_reader_detail::SortedStorageView<T>::OpenArgs storage;
+    };
+
+    explicit SortedIndexStorage(OpenArgs args);
+
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
+    sorted_reader_detail::SortedReaderState state;
+    sorted_reader_detail::SortedStorageView<T> values;
+    std::shared_ptr<const TargetBitmap> json_exists;
+};
+
+template <typename T>
+class SortedIndexReader;
+
+/** @brief Owns a sorted storage version shared by request readers. */
+template <typename T>
+class SortedIndex final : public IIndex,
+                          public std::enable_shared_from_this<SortedIndex<T>> {
+ public:
+    explicit SortedIndex(typename SortedIndexStorage<T>::OpenArgs args);
+    explicit SortedIndex(std::shared_ptr<const SortedIndexStorage<T>> storage);
+    SortedIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<SortedIndexStorage<T>>> slot,
+        IndexMetadata metadata);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class SortedIndexReader<T>;
+    friend class JsonPathIndex;
+    std::shared_ptr<const SortedIndexStorage<T>>
+    PinStorage(milvus::OpContext* op_ctx) const;
+
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<SortedIndexStorage<T>>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const SortedIndexStorage<T>>, CachedStorage>
+        storage_;
+};
+
 template <typename T>
 class SortedIndexReader final
     : public IIndexReaderBase,
@@ -265,14 +324,16 @@ class SortedIndexReader final
     static_assert(std::is_arithmetic_v<T> ||
                   std::is_same_v<T, std::string_view>);
 
-    struct OpenArgs {
-        sorted_reader_detail::SortedReaderState state;
-        typename sorted_reader_detail::SortedStorageView<T>::OpenArgs storage;
-    };
+    using OpenArgs = typename SortedIndexStorage<T>::OpenArgs;
 
     explicit SortedIndexReader(OpenArgs args);
 
     ~SortedIndexReader() override;
+
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
 
     ReaderCaps
     Caps() const override;
@@ -285,12 +346,6 @@ class SortedIndexReader final
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     TargetBitmap
     In(size_t n, const T* values) const override;
@@ -320,6 +375,10 @@ class SortedIndexReader final
     IsNotNull() const override;
 
  private:
+    friend class SortedIndex<T>;
+    SortedIndexReader(std::shared_ptr<const SortedIndex<T>> index,
+                      milvus::OpContext* op_ctx);
+
     template <typename Derived, typename U, bool DelegateShouldUseForOp>
     friend class PatternMatchReaderAdapter;
 
@@ -327,11 +386,22 @@ class SortedIndexReader final
               std::enable_if_t<std::is_same_v<U, std::string_view>, int> = 0>
     TargetBitmap
     PatternMatchImpl(std::string_view pattern, PatternOp op) const {
-        return storage_.PatternMatch(state_.total_num_rows, pattern, op);
+        const auto& storage = GetStorage();
+        return storage->values.PatternMatch(
+            storage->state.total_num_rows, pattern, op);
     }
 
-    sorted_reader_detail::SortedReaderState state_;
-    sorted_reader_detail::SortedStorageView<T> storage_;
+    const std::shared_ptr<const SortedIndexStorage<T>>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
+
+    std::shared_ptr<const SortedIndex<T>> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const SortedIndexStorage<T>> storage_;
 };
 
 }  // namespace milvus::index

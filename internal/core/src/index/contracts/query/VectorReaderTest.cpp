@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -35,6 +37,8 @@
 #include "index/contracts/query/IVectorReader.h"
 #include "index/test_utils/TestArtifactIO.h"
 #include "index/vector/VectorIndexReader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/CacheSlot.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/artifact/LoadOptions.h"
@@ -84,8 +88,11 @@ LoadFloatVectors(const VectorBuildInput<float>& input, bool vector_array) {
     storage::LoadOptions options;
     options.params = adapted.params;
     auto entry = LoaderRegistry::Instance().Lookup(adapted.family);
-    return entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+    return entry
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+               options,
+               milvus::index::test::TestIndexCacheConfig()})
+        ->CreateReader(nullptr);
 }
 
 IIndexReaderBasePtr
@@ -104,6 +111,147 @@ OpenFloatVectors(bool all_null) {
         .parent_validity = ValidityView::FromExpanded(valid.data()),
     };
     return LoadFloatVectors(input, false);
+}
+
+TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    IndexCacheConfig config{
+        "vector-engine-lifetime-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    int loads = 0;
+    auto load =
+        [&](OpContext*) -> folly::coro::Task<std::unique_ptr<KnowhereEngine>> {
+        ++loads;
+        auto engine = std::make_unique<KnowhereEngine>(
+            DataType::VECTOR_FLOAT,
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_HNSW,
+            knowhere::metric::L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
+        engine->SetDim(kDim);
+        const std::array<float, 6> rows{0, 0, 1, 1, 2, 2};
+        const knowhere::Json params{
+            {"metric_type", "L2"}, {"M", 16}, {"efConstruction", 64}};
+        EXPECT_EQ(
+            engine->native_index.Build(
+                knowhere::GenDataSet(3, kDim, rows.data()), params, false),
+            knowhere::Status::success);
+        co_return engine;
+    };
+    std::weak_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<cachinglayer::CacheSlot<KnowhereEngine>>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                config, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<VectorIndex>(slot,
+                                             DataType::VECTOR_FLOAT,
+                                             knowhere::IndexEnum::INDEX_HNSW,
+                                             knowhere::metric::L2);
+    };
+    auto index = make_index();
+    OpContext ctx;
+    auto reader = index->CreateReader(&ctx);
+    EXPECT_EQ(loads, 0);
+    EXPECT_EQ(reader->Count(), 3);
+    EXPECT_EQ(loads, 1);
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    reader = index->CreateReader(&ctx);
+    const auto* vector = dynamic_cast<const IVectorReader*>(reader.get());
+    ASSERT_NE(vector, nullptr);
+    reader->Prefetch();
+    EXPECT_EQ(loads, 2);
+    const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    reader->Prefetch();
+    EXPECT_EQ(loads, 2);
+    const std::array<float, 2> query{0, 0};
+    auto iterators = vector->Iterators(GenDataset(1, kDim, query.data()),
+                                       {{"metric_type", "L2"}, {"ef", 64}},
+                                       BitsetView{});
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 1);
+    EXPECT_EQ(loads, 2);
+    EXPECT_EQ(ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
+    index.reset();
+    reader.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    const auto has_next = iterators.value().front()->HasNext();
+    ASSERT_TRUE(has_next.has_value());
+    ASSERT_TRUE(has_next.value());
+    auto hit = iterators.value().front()->Next();
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit.value().first, 0);
+    iterators.value().clear();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(VectorIndexOwnershipTest, IteratorRetainsEngineAfterReadersAreReleased) {
+    KnowhereEngine engine(
+        DataType::VECTOR_FLOAT,
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_HNSW,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false);
+    engine.SetDim(kDim);
+    const std::array<float, 6> rows{0, 0, 1, 1, 2, 2};
+    const knowhere::Json config{
+        {"metric_type", "L2"}, {"M", 16}, {"efConstruction", 64}};
+    ASSERT_EQ(engine.native_index.Build(
+                  knowhere::GenDataSet(3, kDim, rows.data()), config, false),
+              knowhere::Status::success);
+    auto owned_engine =
+        std::make_shared<const KnowhereEngine>(std::move(engine));
+    std::weak_ptr<const KnowhereEngine> lifetime = owned_engine;
+    auto index = std::make_shared<VectorIndex>(std::move(owned_engine));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 3);
+    const auto* vectors = dynamic_cast<const IVectorReader*>(second.get());
+    ASSERT_NE(vectors, nullptr);
+    const std::array<float, 2> query{0, 0};
+    auto iterators = vectors->Iterators(GenDataset(1, kDim, query.data()),
+                                        {{"metric_type", "L2"}, {"ef", 64}},
+                                        BitsetView{});
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 1);
+    auto iterator = std::move(iterators.value().front());
+    ASSERT_NE(iterator, nullptr);
+    index.reset();
+    first.reset();
+    second.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto has_next = iterator->HasNext();
+    ASSERT_TRUE(has_next.has_value());
+    ASSERT_TRUE(has_next.value());
+    const auto hit = iterator->Next();
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit.value().first, 0);
+    EXPECT_FLOAT_EQ(hit.value().second, 0);
+    iterator.reset();
+    EXPECT_TRUE(lifetime.expired());
 }
 
 TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
@@ -135,16 +283,15 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     const auto prepared = vectors->PrepareSearchParams(params);
     EXPECT_TRUE(prepared.is_object());
     const auto dataset = GenDataset(1, kDim, query.data());
-    auto iterators =
-        vectors->Iterators(dataset, prepared, BitsetView{}, nullptr);
+    auto iterators = vectors->Iterators(dataset, prepared, BitsetView{});
     if (iterators.has_value()) {
         EXPECT_EQ(iterators.value().size(), 1);
     } else {
         EXPECT_EQ(iterators.error(), knowhere::Status::not_implemented);
     }
     const int64_t refine_id = 2;
-    auto refined = vectors->CalcDistByIDs(
-        dataset, BitsetView{}, &refine_id, 1, false, nullptr);
+    auto refined =
+        vectors->CalcDistByIDs(dataset, BitsetView{}, &refine_id, 1, false);
     if (refined.has_value()) {
         EXPECT_EQ(refined.value()->GetRows(), 1);
     } else {
@@ -152,11 +299,8 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
         EXPECT_EQ(refined.error(), knowhere::Status::not_implemented);
     }
     SearchResult result;
-    vectors->Search(GenDataset(1, kDim, query.data()),
-                    params,
-                    BitsetView{},
-                    nullptr,
-                    result);
+    vectors->Search(
+        GenDataset(1, kDim, query.data()), params, BitsetView{}, result);
     ASSERT_EQ(result.seg_offsets_.size(), 3);
     ASSERT_EQ(result.distances_.size(), 3);
     EXPECT_EQ(result.total_nq_, 1);
@@ -168,20 +312,16 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     VectorSearchParams zero_topk = params;
     zero_topk.topk_ = 0;
     SearchResult invalid_result;
+    EXPECT_ANY_THROW(
+        vectors->Search(dataset, zero_topk, BitsetView{}, invalid_result));
     EXPECT_ANY_THROW(vectors->Search(
-        dataset, zero_topk, BitsetView{}, nullptr, invalid_result));
-    EXPECT_ANY_THROW(vectors->Search(GenDataset(1, 1, query.data()),
-                                     params,
-                                     BitsetView{},
-                                     nullptr,
-                                     invalid_result));
+        GenDataset(1, 1, query.data()), params, BitsetView{}, invalid_result));
 
     const std::array<uint8_t, 1> excluded{1U};
     SearchResult filtered;
     vectors->Search(GenDataset(1, kDim, query.data()),
                     params,
                     BitsetView(excluded.data(), kLogicalRows),
-                    nullptr,
                     filtered);
     ASSERT_EQ(filtered.seg_offsets_.size(), 3);
     EXPECT_EQ(filtered.seg_offsets_[0], 2);
@@ -292,11 +432,8 @@ TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
         .topk_ = 2,
     };
     SearchResult result;
-    vectors->Search(GenDataset(1, kDim, query.data()),
-                    params,
-                    BitsetView{},
-                    nullptr,
-                    result);
+    vectors->Search(
+        GenDataset(1, kDim, query.data()), params, BitsetView{}, result);
     ASSERT_EQ(result.seg_offsets_.size(), 2);
     EXPECT_EQ(result.seg_offsets_[0], INVALID_SEG_OFFSET);
     EXPECT_EQ(result.seg_offsets_[1], INVALID_SEG_OFFSET);
@@ -306,8 +443,7 @@ TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
     const auto iterators =
         vectors->Iterators(GenDataset(1, kDim, query.data()),
                            vectors->PrepareSearchParams(params),
-                           BitsetView{},
-                           nullptr);
+                           BitsetView{});
     ASSERT_TRUE(iterators.has_value());
     ASSERT_EQ(iterators.value().size(), 1);
 }
@@ -423,8 +559,10 @@ TEST(VectorReaderContractTest, SparseRetrievalRespectsRuntimeCapability) {
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+            .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vectors, nullptr);
@@ -488,8 +626,10 @@ TEST(VectorReaderContractTest, AllNullSparseIndexAcceptsEmptyRetrieval) {
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+            .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vectors, nullptr);

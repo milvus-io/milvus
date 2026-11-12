@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RetrieveSuite struct {
@@ -98,7 +99,6 @@ func (suite *RetrieveSuite) SetupTest() {
 		},
 	)
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
-	loader := NewLoader(suite.ctx, suite.manager, suite.chunkManager)
 
 	binlogs, statslogs, err := mock_segcore.SaveBinLog(suite.ctx,
 		suite.collectionID,
@@ -130,10 +130,6 @@ func (suite *RetrieveSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 
-	bfs, err := loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID, &sealLoadInfo, SegmentTypeSealed)
-	suite.Require().NoError(err)
-	suite.sealed.SetPKCandidate(bfs)
-
 	for _, binlog := range binlogs {
 		err = suite.sealed.(*LocalSegment).LoadFieldData(suite.ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
@@ -159,9 +155,6 @@ func (suite *RetrieveSuite) SetupTest() {
 		Level:         datapb.SegmentLevel_Legacy,
 	}
 
-	// allow growing segment use the bloom filter
-	paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue("false")
-
 	suite.growing, err = NewSegment(suite.ctx,
 		suite.collection,
 		suite.manager.Segment,
@@ -170,10 +163,6 @@ func (suite *RetrieveSuite) SetupTest() {
 		&growingLoadInfo,
 	)
 	suite.Require().NoError(err)
-
-	bfs, err = loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID, &growingLoadInfo, SegmentTypeGrowing)
-	suite.Require().NoError(err)
-	suite.growing.SetPKCandidate(bfs)
 
 	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
@@ -233,7 +222,6 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 		//  seg2 [0, 1]
 		//  ...
 		//  seg10 [0, 1, 2, ..., 9]
-		loader := NewLoader(suite.ctx, suite.manager, suite.chunkManager)
 		for i := range 10 {
 			segid := int64(i + 1)
 			msgLen := i + 1
@@ -267,11 +255,6 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			)
 			suite.Require().NoError(err)
 
-			bfs, err := loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID,
-				&sealLoadInfo, SegmentTypeSealed)
-			suite.Require().NoError(err)
-			sealseg.SetPKCandidate(bfs)
-
 			suite.manager.Segment.Put(suite.ctx, SegmentTypeSealed, sealseg)
 		}
 
@@ -287,10 +270,19 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		// PK filtering now happens at the delegator layer, not at the worker layer.
 		// All requested segments are returned regardless of the expression.
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-		suite.NoError(err)
-		suite.Len(res, 10)
-		suite.manager.Segment.Unpin(segments)
+		for _, candidateCount := range []int{1, len(req.GetSegmentIDs())} {
+			suite.Run(fmt.Sprintf("RetrieveAllSegmentsWith%dCandidates", candidateCount), func() {
+				for _, segmentID := range req.GetSegmentIDs()[:candidateCount] {
+					segment := suite.manager.Segment.GetWithType(segmentID, SegmentTypeSealed)
+					suite.Require().NotNil(segment)
+					setNonMatchingWorkerCandidate(suite.T(), segment, 1, 2, 3)
+				}
+				res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+				suite.NoError(err)
+				suite.Len(res, 10)
+				suite.manager.Segment.Unpin(segments)
+			})
+		}
 
 		// remove the segs
 		for i := range 10 {
@@ -330,7 +322,6 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilterDoesNotPruneGrowing() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 	growingSegIDs := make([]int64, 0, 10)
 	for i := range 10 {
 		segID := int64(i + 3000)
@@ -364,9 +355,9 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilterDoesNotPruneGrowing() {
 		)
 		suite.Require().NoError(err)
 
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeGrowing)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
+		if i == 0 {
+			setNonMatchingWorkerCandidate(suite.T(), seg, 1, 2, 3)
+		}
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
@@ -418,7 +409,6 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilterDoesNotPruneGrowing() {
 
 func (suite *RetrieveSuite) TestRetrieveWithFilterDoesNotPruneGrowing() {
 	ctx := context.Background()
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 
 	growingSegIDs := make([]int64, 0, 10)
 	for i := range 10 {
@@ -453,9 +443,9 @@ func (suite *RetrieveSuite) TestRetrieveWithFilterDoesNotPruneGrowing() {
 		)
 		suite.Require().NoError(err)
 
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeGrowing)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
+		if i == 0 {
+			setNonMatchingWorkerCandidate(suite.T(), seg, 1, 2, 3)
+		}
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
@@ -544,7 +534,6 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 	defer cancel()
 
 	// create more sealed segments for testing
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 	for i := range 10 {
 		segID := int64(i + 2000)
 		msgLen := i + 1
@@ -578,9 +567,9 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 		)
 		suite.Require().NoError(err)
 
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
+		if i == 0 {
+			setNonMatchingWorkerCandidate(suite.T(), seg, 1, 2, 3)
+		}
 
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
@@ -746,6 +735,48 @@ func TestRetrieveOnSegmentsCountWithEmptyResult(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 	})
+}
+
+// RetrieveSelectedSegments (a task's ExecuteOnSegments) honors
+// WithArrowTransport as Retrieve does: a materialize task's segments take the
+// Arrow path whatever zeroCopy says.
+func TestRetrieveSelectedSegments_ArrowTransport(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key)
+
+	collectionID := int64(100)
+	schema := mock_segcore.GenTestCollectionSchema("test-retrieve-selected-arrow", schemapb.DataType_Int64, true)
+	coll, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: collectionID,
+		Schema:       schema,
+		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
+	})
+	require.NoError(t, err)
+	defer coll.Release()
+	plan, err := mock_segcore.GenSimpleRetrievePlan(coll)
+	require.NoError(t, err)
+	defer plan.Delete()
+	req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: collectionID, Limit: typeutil.Unlimited}}
+
+	for _, useArrow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("arrow=%v", useArrow), func(t *testing.T) {
+			seg := NewMockSegment(t)
+			seg.EXPECT().Type().Return(SegmentTypeSealed).Maybe()
+			seg.EXPECT().DatabaseName().Return("default").Maybe()
+			seg.EXPECT().ResourceGroup().Return("rg").Maybe()
+			var opts []RetrieveOption
+			if useArrow {
+				opts = append(opts, WithArrowTransport())
+				seg.EXPECT().RetrieveArrow(mock.Anything, mock.Anything).Return(&segcorepb.RetrieveResults{}, nil, nil)
+			} else {
+				seg.EXPECT().Retrieve(mock.Anything, mock.Anything).Return(&segcorepb.RetrieveResults{}, nil)
+			}
+			res, err := RetrieveSelectedSegments(context.TODO(), plan, req, []Segment{seg}, opts...)
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+		})
+	}
 }
 
 func TestShouldEnableIgnoreNonPkWithGroupBy(t *testing.T) {

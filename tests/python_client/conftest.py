@@ -1,3 +1,19 @@
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import functools
 import logging
 import os
@@ -27,6 +43,29 @@ delete_timeout = 60
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--struct-max-array-capacity",
+        type=int,
+        default=None,
+        help="Explicit verified proxy.maxArrayCapacity for isolated L3 StructArray boundary tests",
+    )
+    parser.addoption(
+        "--struct-storage-mode",
+        choices=["v3-gsf", "v3", "v2"],
+        default=None,
+        help="Run L3 StructArray configuration contracts against an independently verified storage mode",
+    )
+    parser.addoption(
+        "--run-pyudf-disabled",
+        action="store_true",
+        default=False,
+        help="Run PyUDF-disabled cases against a dedicated deployment with function.pyUDF.enabled=false",
+    )
+    parser.addoption(
+        "--pyudf-management-endpoint",
+        default=None,
+        help="Coordinator management URL for PyUDF L3 cases, e.g. http://standalone:9091",
+    )
     parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
@@ -49,6 +88,18 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
+    )
+    parser.addoption(
+        "--xgboost-proxy-sync",
+        action="store_true",
+        default=False,
+        help="enable L3 XGBoost L2-rerank tests after verifying Proxy FileResource synchronization",
+    )
+    parser.addoption(
+        "--xgboost-proxy-uri",
+        action="append",
+        default=[],
+        help="direct Proxy Pod URI for the L3 multi-Proxy case; repeat for each independent Proxy",
     )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")

@@ -125,6 +125,16 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
+CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes) {
+    try {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetS3CrtQueueSizes(crt_queue_sizes);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 void
 SetArrowFileSystemChunkManagerEnabled(bool enable) {
     milvus::storage::SetUseArrowFileSystemChunkManager(enable);
@@ -420,4 +430,19 @@ UnRefPluginContext(CPluginContext c_plugin_context) {
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json) {
+    try {
+        const auto status = ::InitCredentialBrokerPolicy(
+            std::string(endpoints_json ? endpoints_json : "[]"));
+        if (!status.ok()) {
+            return milvus::FailureCStatus(milvus::ConfigInvalid,
+                                          status.ToString().c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }

@@ -30,6 +30,9 @@ type WritePathRecoveryModuleSnapshot struct {
 	GrowingSegments map[int64]SegmentWritePathRecoveryState
 }
 
+// VChannelWritePathRecoveryState captures the state used for write admission.
+// Schema is shared with recovery history; it and its nested values must remain
+// immutable. Schema changes must use a new snapshot.
 type VChannelWritePathRecoveryState struct {
 	VChannel       string
 	CollectionID   int64
@@ -76,7 +79,7 @@ type Runtime struct {
 }
 
 type AsyncTaskScheduler interface {
-	Submit(task nodescheduler.Task) nodescheduler.TaskHandle
+	Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle
 }
 
 type ModuleNotifier interface {

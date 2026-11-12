@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"math"
 	"strconv"
 	"strings"
@@ -42,6 +43,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -145,7 +147,16 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	}
 }
 
+// InitS3CrtQueueSizes publishes node-local tuning for per-job storage configurations.
+func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
+	status := C.InitS3CrtQueueSizes(C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()))
+	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
+}
+
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if err := InitCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
 	}
@@ -182,6 +193,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -243,6 +255,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -317,6 +330,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -588,7 +602,9 @@ var loonReaderConfigMu sync.Mutex
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
-// round). Both default to 0 = pre-existing sequential behavior.
+// round). -1 resolves both from the hardware on a DataNode, see
+// ResolveLoonReaderThreadPoolSize and ResolveIndexBuildReadWindowBytes; 0 is
+// the pre-existing sequential behavior.
 //
 // Both values are validated before either is applied. Resizing the global
 // reader pool is not revertible through config (it cannot be destroyed at
@@ -598,17 +614,13 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 	loonReaderConfigMu.Lock()
 	defer loonReaderConfigMu.Unlock()
 
-	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
-	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
-			maxStorageReaderThreadPoolSize, poolSize)
+	poolSize, err := ResolveLoonReaderThreadPoolSize(params)
+	if err != nil {
+		return err
 	}
-	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
-	if window < 0 || window > maxIndexBuildReadWindowBytes {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
-			maxIndexBuildReadWindowBytes, window)
+	window, err := ResolveIndexBuildReadWindowBytes(params)
+	if err != nil {
+		return err
 	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
@@ -749,6 +761,13 @@ func SetupCoreConfigChangelCallback() {
 			UpdateLowPriorityThreadCoreCoefficient(coefficient)
 			return nil
 		})
+
+		fanoutRatio := &paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio
+		paramtable.Get().Watch(fanoutRatio.Key, config.NewHandler("querynode.searchfanout.poolsize", func(event *config.Event) {
+			if event.HasUpdated {
+				UpdateSearchFanoutThreadCoreCoefficient(fanoutRatio.GetAsFloat())
+			}
+		}))
 
 		paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)
@@ -1030,4 +1049,16 @@ func InitPluginLoader() error {
 
 func CleanPluginLoader() {
 	C.CleanPluginLoader()
+}
+
+// InitCredentialBrokerPolicy publishes the immutable startup allowlist to native readers.
+func InitCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	data, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	value := C.CString(string(data))
+	defer C.free(unsafe.Pointer(value))
+	status := C.InitCredentialBrokerPolicy(value)
+	return HandleCStatus(&status, "InitCredentialBrokerPolicy failed")
 }

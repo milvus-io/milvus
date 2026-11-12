@@ -26,7 +26,8 @@ var errGracefulShutdown = errors.New("graceful shutdown")
 
 // ProducerOptions is the options for creating a producer.
 type ProducerOptions struct {
-	PChannel string
+	OnSchemaVersionMismatch func(vchannel string)
+	PChannel                string
 }
 
 type ProduceOption struct {
@@ -139,6 +140,9 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		}
 		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler, msg)
 		produceResult, err := producerHandler.Append(appendCtx, msg)
+		if sErr := status.AsStreamingError(err); sErr != nil && sErr.IsSchemaVersionMismatch() && p.opts.OnSchemaVersionMismatch != nil {
+			p.opts.OnSchemaVersionMismatch(msg.VChannel())
+		}
 		if span != nil {
 			if err != nil {
 				span.RecordError(err)

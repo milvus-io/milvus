@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
@@ -155,21 +157,25 @@ struct PublishedConsumerIndex {
             index::LoaderRegistry::Instance().Lookup(type.family);
         AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
         if (packed) {
-            return loader.Load(
-                {index::IndexFiles{std::move(context),
-                                   Files(),
-                                   index::PackedIndexStorageConfig{}},
-                 std::move(options)});
+            return loader
+                .Load({index::IndexFiles{std::move(context),
+                                         Files(),
+                                         index::PackedIndexStorageConfig{}},
+                       std::move(options),
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         }
-        return loader.Load(
-            {index::IndexFiles{
-                 std::move(context),
-                 Files(),
-                 index::LegacyIndexStorageConfig{
-                     type.family == index::families::kVectorDisk
-                         ? storage::V1SourceLayout::DiskFiles
-                         : storage::V1SourceLayout::MemoryEntries}},
-             std::move(options)});
+        return loader
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       Files(),
+                       index::LegacyIndexStorageConfig{
+                           type.family == index::families::kVectorDisk
+                               ? storage::V1SourceLayout::DiskFiles
+                               : storage::V1SourceLayout::MemoryEntries}},
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     }
 };
 
@@ -260,6 +266,7 @@ PublishDiskResident(const storage::FileManagerContext& context,
         adapted.value_type,
         context.indexMeta.dim,
         data->IsNullable(),
+        context.fieldDataMeta.field_schema.element_nullable(),
         data->get_num_rows(),
         adapted.family,
         adapted.params);
@@ -521,15 +528,21 @@ TEST_F(DiskAnnFileManagerTest, OpenInputStreamUsesBasenameForIndexPath) {
 
     const std::string local_path =
         fm->GetLocalIndexObjectPrefix() + "index_data";
-    auto output = fm->OpenOutputStream(local_path);
     const uint64_t expected = 0x1020304050607080ULL;
-    output->Write(expected);
-    output->Close();
+    for (bool use_memory : {false, true}) {
+        SCOPED_TRACE(use_memory);
+        milvus::FileManager& manager = *fm;
+        auto output = manager.OpenOutputStream(
+            local_path, {.expected_size = 1, .use_memory = use_memory});
+        output->Write(expected);
+        output->Close();
 
-    auto input = fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
-    uint64_t actual = 0;
-    input->Read(actual);
-    EXPECT_EQ(actual, expected);
+        auto input =
+            fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
+        uint64_t actual = 0;
+        input->Read(actual);
+        EXPECT_EQ(actual, expected);
+    }
 
     boost::filesystem::remove_all(conf.root_path);
 }
@@ -2193,6 +2206,9 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
     auto adapted = DiskConsumerType(file_manager_context, num_rows, config);
+    // Only an embedding-list metric keeps the list layout; an element-level
+    // metric would see no element at all and skip the build.
+    adapted.params[index::METRIC_TYPE] = knowhere::metric::MAX_SIM_L2;
     indexbuilder::BuildRequest request;
     request.family = adapted.family;
     request.params = adapted.params;
@@ -2225,19 +2241,48 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
 
     index::VectorSearchParams search_info;
     search_info.search_params_ = milvus::Config::object();
-    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_L2;
     search_info.topk_ = 2;
 
     SearchResult search_result;
-    vector.Search(query_dataset,
-                  search_info,
-                  milvus::BitsetView{},
-                  nullptr,
-                  search_result);
+    vector.Search(
+        query_dataset, search_info, milvus::BitsetView{}, search_result);
     EXPECT_EQ(search_result.total_nq_, num_rows);
     ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
     for (auto offset : search_result.seg_offsets_) {
         EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+
+    // Before element-level metrics became ordinary vector input, an
+    // element-level (L2, IP, COSINE) build of these lists took the same
+    // embedding-list path and persisted the same empty-list offsets, which
+    // carry no metric. Such an index must load and answer element-level
+    // searches with no hits.
+    for (const auto* metric : {knowhere::metric::L2,
+                               knowhere::metric::IP,
+                               knowhere::metric::COSINE}) {
+        SCOPED_TRACE(metric);
+        auto legacy_reader = published.Open(file_manager_context,
+                                            {{index::METRIC_TYPE, metric}});
+        const auto& legacy =
+            dynamic_cast<const index::IVectorReader&>(*legacy_reader);
+        EXPECT_EQ(legacy_reader->Count(), 0);
+        EXPECT_EQ(legacy.Dim(), dim);
+        auto element_query = knowhere::GenDataSet(1, dim, vec_data.data());
+        index::VectorSearchParams element_search;
+        element_search.search_params_ = {{index::DISK_ANN_QUERY_LIST, 8}};
+        element_search.metric_type_ = metric;
+        element_search.topk_ = 2;
+        SearchResult element_result;
+        legacy.Search(element_query,
+                      element_search,
+                      milvus::BitsetView{},
+                      element_result);
+        EXPECT_EQ(element_result.total_nq_, 1);
+        ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);
+        for (auto offset : element_result.seg_offsets_) {
+            EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+        }
     }
 
     auto files = published.Files();

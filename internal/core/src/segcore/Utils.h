@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -56,6 +57,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
 CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateNullStructSubFieldDataArray(
+    const FieldMeta& field_meta,
+    const int32_t* lengths,
+    int64_t count,
+    const std::function<bool(int64_t)>& row_valid);
 
 void
 SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,

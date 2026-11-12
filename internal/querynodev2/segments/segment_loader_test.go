@@ -21,22 +21,29 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -130,6 +137,291 @@ func (eofRecordReader) Next() (storage.Record, error) {
 
 func (eofRecordReader) Close() error {
 	return nil
+}
+
+type reopenTestCore struct{ segcore.CSegment }
+
+type reopenDeltaReader struct {
+	record storage.Record
+	read   bool
+}
+
+func (r *reopenDeltaReader) Next() (storage.Record, error) {
+	if r.read {
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *reopenDeltaReader) Close() error {
+	r.record.Release()
+	return nil
+}
+
+func newReopenTestSegment(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo) *LocalSegment {
+	return &LocalSegment{
+		baseSegment: baseSegment{
+			collection: NewCollectionWithoutSegcoreForTest(info.GetCollectionID(), schema),
+			loadInfo:   atomic.NewPointer(info),
+		},
+		ptrLock:            state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:           &reopenTestCore{},
+		lastDeltaTimestamp: atomic.NewUint64(0),
+		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+	}
+}
+
+func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	statsKey := params.CommonCfg.EnabledJSONKeyStats.Key
+	statsValue := params.CommonCfg.EnabledJSONKeyStats.GetValue()
+	require.NoError(t, params.Save(statsKey, "false"))
+	t.Cleanup(func() { require.NoError(t, params.Save(statsKey, statsValue)) })
+	for _, scenario := range []struct {
+		name      string
+		virtualPK bool
+		failure   string
+		permanent bool
+	}{
+		{name: "real_pk_success", failure: "none"},
+		{name: "virtual_pk_success", virtualPK: true, failure: "none"},
+		{name: "reopen_failure", failure: "reopen"},
+		{name: "read_failure", failure: "read"},
+		{name: "apply_failure", failure: "apply"},
+		{name: "permanent_read_failure", failure: "read", permanent: true},
+		{name: "permanent_apply_failure", failure: "apply", permanent: true},
+		{name: "virtual_pk_read_failure", virtualPK: true, failure: "read"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			failure := scenario.failure
+			ctx := context.Background()
+			manager := NewManager()
+			schema := milvusTableCollectionSchema(scenario.virtualPK)
+			schema.ExternalSource = "s3://source-bucket/snapshots/100/metadata/200.json"
+			manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+			oldInfo := &querypb.SegmentLoadInfo{
+				CollectionID: 1000, SegmentID: 3000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 1),
+			}
+			newInfo := &querypb.SegmentLoadInfo{
+				CollectionID: 1000, SegmentID: 3000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 2),
+			}
+			segment := newReopenTestSegment(schema, oldInfo)
+			// Deletes from the old manifest were already applied; replay only
+			// reads the newly added deltalog.
+			segment.lastDeltaTimestamp.Store(50)
+			manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+			loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+			resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+			defer resourcePatch.UnPatch()
+			freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+			defer freePatch.UnPatch()
+
+			injected := merr.Wrap(merr.ErrIoTooManyRequests, "injected reopen failure")
+			if scenario.permanent {
+				injected = merr.Wrap(merr.ErrParameterInvalid, "injected permanent failure")
+			}
+			var calls []string
+			failed := false
+			expectedInfo := oldInfo
+			failOnce := func(stage string) error {
+				calls = append(calls, stage)
+				assert.Same(t, expectedInfo, segment.LoadInfo(), "load info must not be published before replay completes")
+				if failure == stage && !failed {
+					failed = true
+					return injected
+				}
+				return nil
+			}
+			corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+				func(_ *reopenTestCore, _ context.Context, req *segcore.ReopenRequest) error {
+					assert.Same(t, newInfo, req.LoadInfo)
+					return failOnce("reopen")
+				}).Build()
+			defer corePatch.UnPatch()
+			sourcePath := "s3://source-bucket/files/insert_log/1/_delta/100"
+			manifestPatch := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).To(
+				func(path string, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+					assert.Equal(t, newInfo.ManifestPath, path)
+					return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{
+						{LogPath: "s3://source-bucket/files/insert_log/1/_delta/40", TimestampTo: 40, EntriesNum: 1},
+						{LogPath: sourcePath, TimestampTo: 100, EntriesNum: 1},
+					}}}, nil
+				}).Build()
+			defer manifestPatch.UnPatch()
+			pathsPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+				func(path string, _ *indexpb.StorageConfig) ([]string, error) {
+					assert.Equal(t, newInfo.ManifestPath, path)
+					return []string{sourcePath}, nil
+				}).Build()
+			defer pathsPatch.UnPatch()
+			readerPatch := mockey.Mock(storage.NewDeltalogReader).To(
+				func(_ context.Context, _ schemapb.DataType, paths []string, _ ...storage.RwOption) (storage.RecordReader, error) {
+					assert.Equal(t, []string{sourcePath}, paths, "applied deltalogs are skipped")
+					if err := failOnce("read"); err != nil {
+						return nil, err
+					}
+					builder := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{
+						{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+						{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+					}, nil))
+					defer builder.Release()
+					builder.Field(0).(*array.Int64Builder).Append(42)
+					builder.Field(1).(*array.Int64Builder).Append(100)
+					return &reopenDeltaReader{record: storage.NewSimpleArrowRecord(builder.NewRecord(), map[storage.FieldID]int{0: 0, 1: 1})}, nil
+				}).Build()
+			defer readerPatch.UnPatch()
+			var applied bool
+			applyPatch := mockey.Mock((*LocalSegment).LoadDeltaData).To(
+				func(_ *LocalSegment, _ context.Context, data *storage.DeltaData) error {
+					require.EqualValues(t, 1, data.DeleteRowCount())
+					assert.Equal(t, storage.NewInt64PrimaryKey(42), data.DeletePks().Get(0))
+					assert.Equal(t, []uint64{100}, data.DeleteTimestamps())
+					if err := failOnce("apply"); err != nil {
+						return err
+					}
+					applied = true
+					return nil
+				}).Build()
+			defer applyPatch.UnPatch()
+
+			err := loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo})
+			if failure != "none" {
+				require.ErrorIs(t, err, injected)
+				assert.Equal(t, merr.Code(injected), merr.Code(err))
+				assert.Equal(t, !scenario.permanent, merr.Status(err).GetRetriable())
+				// The old load info stays reported, so QueryCoord retries the reopen.
+				require.Same(t, oldInfo, segment.LoadInfo())
+				require.False(t, applied)
+				switch failure {
+				case "reopen":
+					assert.Equal(t, []string{"reopen"}, calls)
+				case "read":
+					assert.Equal(t, []string{"reopen", "read"}, calls)
+				case "apply":
+					assert.Equal(t, []string{"reopen", "read", "apply"}, calls)
+				}
+				calls = nil
+				err = loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo})
+			}
+			require.NoError(t, err)
+			assert.True(t, applied)
+			assert.Equal(t, []string{"reopen", "read", "apply"}, calls)
+			assert.Same(t, newInfo, segment.LoadInfo())
+		})
+	}
+}
+
+func TestReopenSegmentsNonMilvusTableSkipsReplay(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	manager := NewManager()
+	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+	schema.ExternalSource = "s3://bucket/data"
+	schema.ExternalSpec = `{"format":"parquet"}`
+	schema.Fields[0].ExternalField = "id"
+	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	defer resourcePatch.UnPatch()
+	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+	defer freePatch.UnPatch()
+	coreCalls := 0
+	corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+		func(_ *reopenTestCore, _ context.Context, _ *segcore.ReopenRequest) error {
+			coreCalls++
+			return nil
+		}).Build()
+	defer corePatch.UnPatch()
+	statsPatch := mockey.Mock((*LocalSegment).syncFieldJSONStatsFromLoadInfo).Return().Build()
+	defer statsPatch.UnPatch()
+	replayPatch := mockey.Mock((*segmentLoader).loadDeltalogs).To(
+		func(_ *segmentLoader, _ context.Context, _ Segment, _ *querypb.SegmentLoadInfo) error {
+			t.Fatal("non-milvus-table reopen must not load deltalogs")
+			return nil
+		}).Build()
+	defer replayPatch.UnPatch()
+	info := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 1}
+	segment := newReopenTestSegment(schema, info)
+	manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+	newInfo := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 1}
+	require.NoError(t, loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo}))
+	assert.Equal(t, 1, coreCalls)
+	assert.Same(t, newInfo, segment.LoadInfo())
+}
+
+func TestReopenSegmentsSkipsReplayForUnchangedDeltaSource(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	manager := NewManager()
+	schema := milvusTableCollectionSchema(false)
+	schema.ExternalSource = "s3://source-bucket/snapshot"
+	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	defer resourcePatch.UnPatch()
+	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+	defer freePatch.UnPatch()
+	coreCalls := 0
+	corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+		func(_ *reopenTestCore, _ context.Context, _ *segcore.ReopenRequest) error {
+			coreCalls++
+			return nil
+		}).Build()
+	defer corePatch.UnPatch()
+	statsPatch := mockey.Mock((*LocalSegment).syncFieldJSONStatsFromLoadInfo).Return().Build()
+	defer statsPatch.UnPatch()
+	replays := 0
+	replayPatch := mockey.Mock((*segmentLoader).loadDeltalogs).To(
+		func(_ *segmentLoader, _ context.Context, _ Segment, _ *querypb.SegmentLoadInfo) error {
+			replays++
+			return nil
+		}).Build()
+	defer replayPatch.UnPatch()
+
+	manifest := packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 2)
+	deltalogs := func(path string) []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path, TimestampTo: 100}}}}
+	}
+	current := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: manifest, Deltalogs: deltalogs("delta/1")}
+	segment := newReopenTestSegment(schema, current)
+	manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+
+	for _, test := range []struct {
+		name     string
+		mutate   func(*querypb.SegmentLoadInfo)
+		replayed bool
+	}{
+		{name: "index_only", mutate: func(i *querypb.SegmentLoadInfo) {
+			i.IndexInfos = []*querypb.FieldIndexInfo{{FieldID: 101, IndexID: 10}}
+		}},
+		{name: "manifest_changed", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.ManifestPath = packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 3)
+		}},
+		{name: "deltalogs_changed", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.Deltalogs = deltalogs("delta/2")
+		}},
+		{name: "child_manifests", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.ChildManifestPaths = []string{"child"}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			segment.loadInfo.Store(current)
+			coreCalls, replays = 0, 0
+			incoming := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: manifest, Deltalogs: deltalogs("delta/1")}
+			test.mutate(incoming)
+			require.NoError(t, loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{incoming}))
+			assert.Equal(t, 1, coreCalls)
+			if test.replayed {
+				assert.Equal(t, 1, replays)
+			} else {
+				assert.Zero(t, replays)
+			}
+		})
+	}
 }
 
 type deltaLoadTestSegment struct {
@@ -404,6 +696,42 @@ func (suite *SegmentLoaderSuite) TestLoadFail() {
 	suite.Error(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
+	for _, stage := range []string{"data", "delta"} {
+		suite.Run(stage, func() {
+			ctx := context.Background()
+			loader := suite.loader.(*segmentLoader)
+			loadErr := errors.New("injected load failure")
+			var captured *LocalSegment
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).To(
+				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo) error {
+					captured = segment.(*LocalSegment)
+					suite.Nil(captured.pkCandidate)
+					if stage == "data" {
+						return loadErr
+					}
+					return nil
+				}).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(loadErr).Build()
+			defer loadDeltas.UnPatch()
+
+			loaded, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+				SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			})
+			suite.Require().ErrorIs(err, loadErr)
+			suite.Empty(loaded)
+			suite.Require().NotNil(captured)
+			suite.False(captured.ptrLock.PinIfNotReleased())
+			suite.NotPanics(func() { captured.Release(ctx) })
+			suite.Nil(loader.manager.Segment.GetWithType(suite.segmentID, SegmentTypeSealed))
+			suite.False(loader.loadingSegments.Contain(suite.segmentID))
+			suite.True(loader.committedResource.IsZero())
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
@@ -435,15 +763,10 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Will load bloom filter with sealed segments
+	// Regular sealed workers do not load PK candidates.
+	suite.Require().Len(segments, suite.segmentNum)
 	for _, segment := range segments {
-		for pk := 0; pk < 100; pk++ {
-			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.Require().True(pkReady)
-			exist := segment.MayPkExist(lc)
-			suite.Require().True(exist)
-		}
+		suite.False(segment.PkCandidateExist())
 	}
 
 	// Load growing
@@ -706,6 +1029,137 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	}
 }
 
+func TestLoadGrowingStatsPreservesBloomFilterBehavior(t *testing.T) {
+	type statsChunkManager struct{ storage.ChunkManager }
+	paramtable.Init()
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema("growing-stats", schemapb.DataType_Int64, false)
+	pkField := GetPkField(schema)
+	const bm25FieldID int64 = 200
+	pkStats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(schemapb.DataType_Int64), 1)
+	require.NoError(t, err)
+	pkStats.Update(storage.NewInt64PrimaryKey(42))
+	writer := &storage.StatsWriter{}
+	require.NoError(t, writer.Generate(pkStats))
+	bm25Stats := storage.NewBM25Stats()
+	bm25Stats.Append(map[uint32]float32{1: 2})
+	bm25Bytes, err := bm25Stats.Serialize()
+	require.NoError(t, err)
+	injected := errors.New("stats unavailable")
+
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		skip      bool
+		failStage string
+	}{
+		{name: "BF enabled", enabled: true},
+		{name: "skip growing BF", enabled: true, skip: true},
+		{name: "global BF disabled"},
+		{name: "global BF disabled and skip growing BF", skip: true},
+		{name: "BF read fails", enabled: true, failStage: "bf"},
+		{name: "BF read fails with global BF disabled", failStage: "bf"},
+		{name: "BF read fails with skip growing BF", enabled: true, skip: true, failStage: "bf"},
+		{name: "BM25 read fails with global BF enabled", enabled: true, failStage: "bm25"},
+		{name: "BM25 read fails with global BF disabled", failStage: "bm25"},
+		{name: "BM25 path resolution fails with global BF disabled", failStage: "paths"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			oldEnabled := params.CommonCfg.BloomFilterEnabled.SwapTempValue(fmt.Sprint(tc.enabled))
+			defer params.CommonCfg.BloomFilterEnabled.SwapTempValue(oldEnabled)
+			oldSkip := params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(fmt.Sprint(tc.skip))
+			defer params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(oldSkip)
+			info := &querypb.SegmentLoadInfo{
+				CollectionID: 100, PartitionID: 10, SegmentID: 1,
+				InsertChannel: "by-dev-rootcoord-dml_0_100v0",
+				Statslogs: []*datapb.FieldBinlog{{
+					FieldID: pkField.GetFieldID(),
+					Binlogs: []*datapb.Binlog{{LogPath: "bf/100"}},
+				}},
+				Bm25Logs: []*datapb.FieldBinlog{{
+					FieldID: bm25FieldID,
+					Binlogs: []*datapb.Binlog{{LogPath: "bm25/100"}},
+				}},
+			}
+			collection := NewCollectionWithoutSegcoreForTest(100, schema)
+			base, err := newBaseSegment(collection, SegmentTypeGrowing, 0, info)
+			require.NoError(t, err)
+			// Preserve the existing behavior: both switches leave initial BF loading unchanged.
+			assert.Equal(t, tc.skip, base.skipGrowingBF)
+			require.NotNil(t, base.pkCandidate)
+			segment := &LocalSegment{
+				baseSegment: base, manager: NewManager().Segment,
+				bm25StatsHolder: newBM25StatsHolder(),
+				relatedDataSize: atomic.NewInt64(0), binlogSize: atomic.NewInt64(0),
+			}
+			defer segment.Refund()
+			loadData := mockey.Mock((*LocalSegment).Load).Return(nil).Build()
+			defer loadData.UnPatch()
+			cm := &statsChunkManager{}
+			var reads []string
+			read := mockey.Mock((*statsChunkManager).MultiRead).To(
+				func(_ *statsChunkManager, _ context.Context, paths []string) ([][]byte, error) {
+					require.Len(t, paths, 1)
+					reads = append(reads, paths[0])
+					switch paths[0] {
+					case "bf/100":
+						if tc.failStage == "bf" {
+							return nil, injected
+						}
+						return [][]byte{writer.GetBuffer()}, nil
+					case "bm25/100":
+						if tc.failStage == "bm25" {
+							return nil, injected
+						}
+						return [][]byte{bm25Bytes}, nil
+					default:
+						t.Fatalf("unexpected stats path %q", paths[0])
+						return nil, nil
+					}
+				}).Build()
+			defer read.UnPatch()
+			if tc.failStage == "paths" {
+				paths := mockey.Mock((*packed.StatsResolver).BM25StatsPaths).Return(nil, injected).Build()
+				defer paths.UnPatch()
+			}
+			loader := &segmentLoader{cm: cm}
+			err = loader.LoadSegment(ctx, segment, info)
+			wantReads := []string{"bf/100"}
+			if tc.failStage != "bf" && tc.failStage != "paths" {
+				wantReads = append(wantReads, "bm25/100")
+			}
+			assert.Equal(t, wantReads, reads)
+			if tc.failStage != "" {
+				require.ErrorIs(t, err, injected)
+				assert.Empty(t, segment.GetBM25Stats())
+				return
+			}
+			require.NoError(t, err)
+			stats := segment.GetBM25Stats()
+			require.Contains(t, stats, bm25FieldID)
+			assert.Equal(t, int64(1), stats[bm25FieldID].NumRow())
+			assert.Equal(t, int64(2), stats[bm25FieldID].NumToken())
+			assert.True(t, segment.PkCandidateExist())
+			segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(84)})
+			segment.baseSegment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(85)})
+			// SkipGrowingSegmentBF only bypasses subsequent maintenance and filtering.
+			for _, pk := range []int64{84, 85} {
+				assert.Equal(t, !tc.skip, segment.pkCandidate.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
+			for _, pk := range []int64{42, 84, 85} {
+				assert.True(t, segment.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
+			missing := storage.NewInt64PrimaryKey(1000)
+			assert.Equal(t, tc.skip, segment.MayPkExist(storage.NewLocationsCache(missing)))
+			assert.Equal(t, []bool{tc.skip}, segment.BatchPkExist(storage.NewBatchLocationsCache([]storage.PrimaryKey{missing})))
+			assert.True(t, segment.PkCandidateExist())
+			require.NotNil(t, segment.pkCandidate)
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadWithoutBloomFilter() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
@@ -806,6 +1260,11 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
+	for _, field := range suite.schema.GetFields() {
+		if !field.GetIsPrimaryKey() && field.GetFieldID() >= common.StartOfUserFieldID {
+			field.ExternalField = field.GetName()
+		}
+	}
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	msgLength := 100
@@ -839,6 +1298,155 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	suite.Require().NoError(err)
 	suite.Require().Len(segments, 1)
 	suite.Equal(int64(msgLength-2), segments[0].RowNum())
+	suite.False(segments[0].PkCandidateExist())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() {
+	ctx := context.Background()
+	loadInfo, _, _ := suite.makeExternalRealPKBFLoadInfo(ctx)
+	pkField := GetPkField(suite.schema)
+	pkField.ExternalField = pkField.GetName()
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+
+	loader := suite.loader.(*segmentLoader)
+	// Isolate candidate loading from segcore and delta-file I/O.
+	loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+	defer loadData.UnPatch()
+	loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+	defer loadDeltas.UnPatch()
+	readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+		Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+	defer readBF.UnPatch()
+
+	segments, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.Require().NoError(err)
+	suite.Require().Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+	suite.Zero(readBF.Times())
+}
+
+func TestDetectVirtualPKCollisions(t *testing.T) {
+	const segmentID int64 = 42
+	const collidingID int64 = segmentID + 1<<32
+	for _, tc := range []struct {
+		name string
+		ids  []int64
+		want []int64
+	}{
+		{name: "empty batch"},
+		{name: "same segment", ids: []int64{segmentID}},
+		{name: "different truncated IDs", ids: []int64{segmentID, segmentID + 1}},
+		{name: "one collision", ids: []int64{segmentID, collidingID}, want: []int64{collidingID}},
+		{name: "multiple collisions", ids: []int64{collidingID, segmentID + 1, collidingID + 1<<32}, want: []int64{collidingID, collidingID + 1<<32}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range tc.ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{SegmentID: id})
+			}
+			assert.Equal(t, tc.want, detectVirtualPKCollisions(segmentID, infos))
+		})
+	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadVirtualPKCollisionWarnings() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseSchema := proto.Clone(suite.schema).(*schemapb.CollectionSchema)
+	for i, tc := range []struct {
+		name          string
+		format        string
+		realPK        bool
+		distinctIDs   bool
+		disableBF     bool
+		alreadyLoaded bool
+		wantWarnings  bool
+	}{
+		{name: "virtual milvus-table", format: "milvus-table", wantWarnings: true},
+		{name: "virtual parquet", format: "parquet", wantWarnings: true},
+		{name: "BF disabled", format: "milvus-table", disableBF: true, wantWarnings: true},
+		{name: "distinct truncated IDs", format: "milvus-table", distinctIDs: true},
+		{name: "internal collection"},
+		{name: "real PK milvus-table", format: "milvus-table", realPK: true},
+		{name: "already loaded segment excluded", format: "milvus-table", alreadyLoaded: true},
+	} {
+		suite.Run(tc.name, func() {
+			t := suite.T()
+			schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+			if tc.format != "" {
+				schema.ExternalSource = "s3://bucket/source"
+				schema.ExternalSpec = fmt.Sprintf(`{"format":%q}`, tc.format)
+				for _, field := range schema.GetFields() {
+					if field.GetIsPrimaryKey() && !tc.realPK {
+						field.Name = common.VirtualPKFieldName
+					} else if field.GetFieldID() >= common.StartOfUserFieldID {
+						field.ExternalField = field.GetName()
+					}
+				}
+			}
+			require.NoError(t, suite.manager.Collection.UpdateSchema(suite.collectionID, schema, uint64(i+1)))
+			if tc.disableBF {
+				item := &paramtable.Get().CommonCfg.BloomFilterEnabled
+				oldValue := item.SwapTempValue("false")
+				defer item.SwapTempValue(oldValue)
+			}
+			ids := []int64{suite.segmentID, suite.segmentID + 1<<32}
+			if tc.distinctIDs {
+				ids[1]++
+			}
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{
+					CollectionID: suite.collectionID, PartitionID: suite.partitionID, SegmentID: id,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+				})
+				defer suite.manager.Segment.Remove(ctx, id, querypb.DataScope_All)
+			}
+			// Exercise Load with real segment creation while isolating data-file I/O.
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+			defer loadDeltas.UnPatch()
+			readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+				Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+			defer readBF.UnPatch()
+			var mu sync.Mutex
+			var warnings [][]mlog.Field
+			warn := mockey.Mock(mlog.Warn).To(func(logCtx context.Context, msg string, fields ...mlog.Field) {
+				if msg == "virtual PK collision detected: two segments share truncated segment ID" {
+					assert.Same(t, ctx, logCtx)
+					mu.Lock()
+					warnings = append(warnings, fields)
+					mu.Unlock()
+				}
+			}).Build()
+			defer warn.UnPatch()
+
+			if tc.alreadyLoaded {
+				_, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos[0])
+				require.NoError(t, err)
+			}
+			loaded, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos...)
+			require.NoError(t, err)
+			if tc.alreadyLoaded {
+				require.Len(t, loaded, 1)
+			} else {
+				require.Len(t, loaded, 2)
+			}
+			for _, segment := range loaded {
+				assert.Nil(t, segment.(*LocalSegment).pkCandidate)
+			}
+			assert.Zero(t, readBF.Times())
+			if tc.wantWarnings {
+				assert.ElementsMatch(t, [][]mlog.Field{
+					{mlog.Int64("segmentID1", ids[0]), mlog.Int64("segmentID2", ids[1]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+					{mlog.Int64("segmentID1", ids[1]), mlog.Int64("segmentID2", ids[0]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+				}, warnings)
+			} else {
+				assert.Empty(t, warnings)
+			}
+		})
+	}
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
@@ -1205,58 +1813,6 @@ func (suite *SegmentLoaderSuite) makeExternalRealPKBFLoadInfo(ctx context.Contex
 		StorageVersion: storage.StorageV3,
 		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}, externalStatsPaths, payload
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKUsesExternalStats() {
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			suite.Equal(suite.collectionID, extfs.CollectionID)
-			suite.Equal(suite.schema.GetExternalSource(), extfs.Source)
-			suite.Equal(suite.schema.GetExternalSpec(), extfs.Spec)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKIgnoresBloomFilterDisable() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
-
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
 }
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExternalStats() {
@@ -3042,4 +3598,78 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 		assert.Len(t, gotDeltalogs, 1)
 		assert.EqualValues(t, 50, gotDeltalogs[0].GetBinlogs()[0].GetMemorySize())
 	})
+}
+
+func TestDeltaSourceUnchangedOrderIndependent(t *testing.T) {
+	logs := func(ids ...int64) []*datapb.Binlog {
+		result := make([]*datapb.Binlog, 0, len(ids))
+		for _, id := range ids {
+			result = append(result, &datapb.Binlog{LogID: id})
+		}
+		return result
+	}
+	current := &querypb.SegmentLoadInfo{ManifestPath: "manifest", Deltalogs: []*datapb.FieldBinlog{
+		{FieldID: 1, Binlogs: logs(1, 2)}, {FieldID: 2, Binlogs: logs(3)},
+	}}
+	incoming := proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs = []*datapb.FieldBinlog{
+		{FieldID: 2, Binlogs: logs(3, 3)}, {FieldID: 1, Binlogs: logs(2, 1)},
+	}
+	require.True(t, deltaSourceUnchanged(current, incoming))
+	require.EqualValues(t, 1, current.Deltalogs[0].Binlogs[0].LogID, "comparison must not mutate input")
+	incoming.Deltalogs[1].Binlogs[0].LogID = 4
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	incoming = proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs[0].Binlogs[0].LogPath = "another/path"
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	incoming = proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs[0].FieldID = 3
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	require.True(t, deltaSourceUnchanged(nil, &querypb.SegmentLoadInfo{}))
+}
+
+func TestLocalSegmentReopenPreparationFailure(t *testing.T) {
+	oldInfo := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: "old"}
+	segment := newReopenTestSegment(milvusTableCollectionSchema(false), oldInfo)
+	injected := merr.WrapErrParameterInvalidMsg("invalid index load parameters")
+	patch := mockey.Mock(prepareIndexLoadParams).Return(injected).Build()
+	defer patch.UnPatch()
+	err := segment.reopen(context.Background(), &querypb.SegmentLoadInfo{ManifestPath: "new"}, func() error {
+		t.Fatal("delete replay must not run when index preparation fails")
+		return nil
+	})
+	require.ErrorIs(t, err, injected)
+	require.Same(t, oldInfo, segment.LoadInfo())
+}
+
+func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
+	paramtable.Init()
+	for _, failResource := range []bool{true, false} {
+		name := "missing_segment"
+		if failResource {
+			name = "resource_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			loader := &segmentLoader{manager: NewManager(), loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+			var resourceErr error
+			if failResource {
+				resourceErr = merr.Wrap(merr.ErrServiceNotReady, "resource reservation unavailable")
+			}
+			request := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, resourceErr).Build()
+			defer request.UnPatch()
+			freed := 0
+			free := mockey.Mock((*segmentLoader).freeRequestResource).To(func(_ *segmentLoader, _ requestResourceResult) {
+				freed++
+			}).Build()
+			defer free.UnPatch()
+			err := loader.ReopenSegments(context.Background(), []*querypb.SegmentLoadInfo{{CollectionID: 1000, SegmentID: 3000}})
+			if failResource {
+				require.ErrorIs(t, err, resourceErr)
+				require.Zero(t, freed)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, 1, freed)
+			}
+		})
+	}
 }

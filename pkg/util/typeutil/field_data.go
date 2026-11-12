@@ -39,6 +39,14 @@ func GetArrayElementValidData(row *schemapb.ScalarField) []bool {
 	return row.GetValidData()
 }
 
+// SetArrayElementValidData writes element validity carried by one scalar
+// Array row.
+func SetArrayElementValidData(row *schemapb.ScalarField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
 // GetVectorArrayElementValidData returns element validity carried by one
 // ArrayOfVector row. Unlike GetFieldDataValidData, this bitmap is element-level.
 func GetVectorArrayElementValidData(row *schemapb.VectorField) []bool {
@@ -53,22 +61,20 @@ func SetVectorArrayElementValidData(row *schemapb.VectorField, validData []bool)
 	}
 }
 
-// SetFieldDataValidData writes row validity to both the legacy and the
-// field-specific location. Both locations share validData.
+// SetFieldDataValidData writes row validity to the legacy location, and to the
+// field-specific location when the ScalarField or VectorField wrapper exists.
+// Both locations share validData.
 func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
 	if fieldData == nil {
 		return
 	}
 
+	fieldData.ValidData = validData
 	if scalars := fieldData.GetScalars(); scalars != nil {
 		scalars.ValidData = validData
 	} else if vectors := fieldData.GetVectors(); vectors != nil {
 		vectors.ValidData = validData
-	} else {
-		return
 	}
-
-	fieldData.ValidData = validData
 }
 
 // ValidateAndNormalizeFieldDataValidData checks a user payload once when it

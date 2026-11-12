@@ -43,6 +43,11 @@ func reduceFieldsData(searchResultData []*schemapb.SearchResultData, rowCap int6
 	sources := make([][]*schemapb.FieldData, len(searchResultData))
 	for i, data := range searchResultData {
 		sources[i] = data.GetFieldsData()
+		if rowCap == 0 && len(sources[i]) > 0 {
+			// No row will be appended to initialize the columns. Preserve their
+			// metadata so downstream reranking can still find the primary field.
+			return typeutil.PrepareResultFieldData(sources[i], 0)
+		}
 	}
 	return typeutil.PresizeAppendFieldData(rowCap, sources...)
 }
