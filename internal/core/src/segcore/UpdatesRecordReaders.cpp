@@ -58,15 +58,16 @@ class TypedTempIndexReader final
 
     TargetBitmap
     In(size_t n, const T* values) const override {
-        return ToBitmap(Matches(n, values));
+        return Matches(n, values);
     }
 
     TargetBitmap
     NotIn(size_t n, const T* values) const override {
         auto matched = Matches(n, values);
         auto result = IsNotNull();
-        for (auto offset : matched) {
-            result.reset(offset);
+        for (auto offset = matched.find_first(); offset;
+             offset = matched.find_next(*offset)) {
+            result.reset(*offset);
         }
         return result;
     }
@@ -111,12 +112,13 @@ class TypedTempIndexReader final
                 Unsupported,
                 "Temp index supports only literal prefix matching");
         }
-        return ToBitmap(binding_->records->Prefix(
-            binding_->field_id, std::string(pattern), binding_->query_ts));
+        binding_->records->RecordRead(true);
+        return binding_->records->PrefixBitmap(
+            binding_->field_id, std::string(pattern), binding_->query_ts);
     }
 
  private:
-    std::vector<int64_t>
+    TargetBitmap
     Matches(size_t n, const T* values) const {
         RequireReaderInput(n == 0 || values != nullptr,
                            "Missing predicate values");
@@ -125,15 +127,17 @@ class TypedTempIndexReader final
         for (size_t i = 0; i < n; ++i) {
             owned.emplace_back(Own(values[i]));
         }
-        return binding_->records->In(
+        binding_->records->RecordRead(true);
+        return binding_->records->InBitmap(
             binding_->field_id, owned, binding_->query_ts);
     }
 
     TargetBitmap
     QueryRange(const std::optional<UpdateRangeBound>& lower,
                const std::optional<UpdateRangeBound>& upper) const {
-        return ToBitmap(binding_->records->Range(
-            binding_->field_id, lower, upper, binding_->query_ts));
+        binding_->records->RecordRead(true);
+        return binding_->records->RangeBitmap(
+            binding_->field_id, lower, upper, binding_->query_ts);
     }
 };
 
@@ -474,19 +478,10 @@ TempIndexReader::Caps() const {
 }
 
 TargetBitmap
-TempIndexReader::ToBitmap(const std::vector<int64_t>& offsets) const {
-    binding_->records->RecordRead(true);
-    TargetBitmap result(Count(), false);
-    for (auto offset : offsets) {
-        result.set(offset);
-    }
-    return result;
-}
-
-TargetBitmap
 TempIndexReader::IsNull() const {
-    return ToBitmap(
-        binding_->records->IsNull(binding_->field_id, binding_->query_ts));
+    binding_->records->RecordRead(true);
+    return binding_->records->NullBitmap(binding_->field_id,
+                                         binding_->query_ts);
 }
 
 TargetBitmap

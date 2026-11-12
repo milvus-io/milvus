@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "common/Types.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -149,6 +151,23 @@ class UpdatesRecord {
 
     std::vector<int64_t>
     IsNull(int64_t field_id, uint64_t query_ts) const;
+
+    // Bitmap-native queries avoid collecting/sorting intermediate offsets.
+    TargetBitmap
+    InBitmap(int64_t field_id,
+             const std::vector<UpdateValue>& values,
+             uint64_t query_ts) const;
+    TargetBitmap
+    RangeBitmap(int64_t field_id,
+                const std::optional<UpdateRangeBound>& lower,
+                const std::optional<UpdateRangeBound>& upper,
+                uint64_t query_ts) const;
+    TargetBitmap
+    PrefixBitmap(int64_t field_id,
+                 const std::string& prefix,
+                 uint64_t query_ts) const;
+    TargetBitmap
+    NullBitmap(int64_t field_id, uint64_t query_ts) const;
 
     bool
     HasField(int64_t field_id) const;

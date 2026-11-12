@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "segcore/PostingVisibility.h"
 
 namespace milvus::segcore::experimental {
 namespace {
@@ -72,9 +73,61 @@ Visible(const History& history, uint64_t query_ts) {
                                                                       : nullptr;
 }
 
+constexpr size_t kPostingBlockSize = 256;
+
+struct PostingBlock {
+    explicit PostingBlock(size_t capacity)
+        : offsets(new int64_t[capacity]),
+          last_begin(new uint64_t[capacity]),
+          last_end(new uint64_t[capacity]),
+          histories(new History[capacity]),
+          capacity(capacity) {
+    }
+
+    // Scan these arrays without following history/version pointers.
+    std::unique_ptr<int64_t[]> offsets;
+    std::unique_ptr<uint64_t[]> last_begin;
+    std::unique_ptr<uint64_t[]> last_end;
+    std::unique_ptr<History[]> histories;
+    const size_t capacity;
+    size_t size = 0;
+};
+
+struct PostingPosition {
+    PostingBlock* block;
+    size_t slot;
+};
+
 struct Postings {
     std::vector<int64_t> base;
-    std::unordered_map<int64_t, History> updates;
+    // Writer lookup only; readers walk dense blocks.
+    std::unordered_map<int64_t, PostingPosition> slots;
+    std::vector<std::unique_ptr<PostingBlock>> blocks;
+
+    PostingPosition
+    EnsureSlot(int64_t offset) {
+        auto found = slots.find(offset);
+        if (found != slots.end())
+            return found->second;
+        if (blocks.empty() || blocks.back()->size == blocks.back()->capacity) {
+            // Rare values should not pay for a full 256-slot block.
+            const size_t capacity =
+                blocks.empty()
+                    ? 1
+                    : std::min(kPostingBlockSize, blocks.back()->capacity * 2);
+            blocks.push_back(std::make_unique<PostingBlock>(capacity));
+        }
+        auto& block = *blocks.back();
+        const size_t slot = block.size;
+        PostingPosition position{&block, slot};
+        // A failed map allocation leaves an unused slot for retry.
+        slots.emplace(offset, position);
+        block.offsets[slot] = offset;
+        block.last_begin[slot] = kInfinity;
+        block.last_end[slot] = 0;  // reserved slot, no published version
+        ++block.size;
+        return position;
+    }
 };
 
 // variant ordering puts the dedicated NULL key before INT64/VARCHAR. A field
@@ -105,13 +158,13 @@ struct Field {
         }
     }
 
-    History&
-    IndexHistory(const UpdateValue& value, int64_t offset) {
+    Postings&
+    IndexPostings(const UpdateValue& value) {
         auto it = index->find(value);
         if (it == index->end()) {
             it = index->emplace(value, std::make_unique<Postings>()).first;
         }
-        return it->second->updates[offset];
+        return *it->second;
     }
 };
 
@@ -119,17 +172,41 @@ void
 Collect(const Field& field,
         const Postings& postings,
         uint64_t query_ts,
-        std::vector<int64_t>& result) {
+        TargetBitmap& result) {
     for (auto offset : postings.base) {
         auto it = field.offsets.find(offset);
         if (it == field.offsets.end() || it->second.empty() ||
             query_ts < it->second.front()->begin_ts) {
-            result.push_back(offset);
+            result.set(offset);
         }
     }
-    for (const auto& [offset, history] : postings.updates) {
-        if (Visible(history, query_ts))
-            result.push_back(offset);
+    for (const auto& block_ptr : postings.blocks) {
+        const auto& block = *block_ptr;
+        static const auto kernel = posting::SelectKernel();
+        for (size_t first = 0; first < block.size; first += 8) {
+            const auto count = std::min(size_t{8}, block.size - first);
+            auto masks = count == 8
+                             ? kernel(block.last_begin.get() + first,
+                                      block.last_end.get() + first,
+                                      query_ts)
+                             : posting::Scalar(block.last_begin.get() + first,
+                                               block.last_end.get() + first,
+                                               query_ts,
+                                               count);
+            // Only old snapshots touch histories. Ended latest intervals
+            // cannot hide an earlier version visible at the same timestamp.
+            while (masks.history) {
+                const auto lane = __builtin_ctz(unsigned(masks.history));
+                if (Visible(block.histories[first + lane], query_ts))
+                    masks.visible |= uint8_t(1u << lane);
+                masks.history &= masks.history - 1;
+            }
+            while (masks.visible) {
+                const auto lane = __builtin_ctz(unsigned(masks.visible));
+                result.set(block.offsets[first + lane]);
+                masks.visible &= masks.visible - 1;
+            }
+        }
     }
 }
 
@@ -339,6 +416,9 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
         History* history;
         History* index_history;
         Version* version;
+        PostingBlock* block;
+        size_t slot;
+        uint64_t* previous_end;
     };
     std::vector<Pending> pending;
     Require(offsets.empty() ||
@@ -354,13 +434,31 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
                 auto& history = field.offsets[offset];
                 history.reserve(history.size() + 1);
                 History* index_history = nullptr;
+                PostingBlock* block = nullptr;
+                size_t slot = 0;
+                uint64_t* previous_end = nullptr;
                 if (field.index) {
-                    index_history = &field.IndexHistory(*value, offset);
+                    auto& postings = field.IndexPostings(*value);
+                    auto position = postings.EnsureSlot(offset);
+                    block = position.block;
+                    slot = position.slot;
+                    index_history = &block->histories[slot];
                     index_history->reserve(index_history->size() + 1);
+                    if (!history.empty()) {
+                        auto& previous =
+                            field.IndexPostings(*history.back()->value);
+                        auto position = previous.slots.at(offset);
+                        previous_end = &position.block->last_end[position.slot];
+                    }
                 }
                 field.versions.push_back({value, mutation_ts, kInfinity});
-                pending.push_back(
-                    {&field, &history, index_history, &field.versions.back()});
+                pending.push_back({&field,
+                                   &history,
+                                   index_history,
+                                   &field.versions.back(),
+                                   block,
+                                   slot,
+                                   previous_end});
             }
         }
     } catch (...) {
@@ -375,13 +473,17 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
     // All allocations finished. Both ref paths are installed under the same
     // write lock before a reader can observe the newly closed/open intervals.
     for (auto& item : pending) {
-        if (!item.history->empty())
+        if (!item.history->empty()) {
             item.history->back()->end_ts = mutation_ts;
-        else
+            if (item.previous_end)
+                *item.previous_end = mutation_ts;
+        } else
             ++item.field->updated_cells;
         item.history->push_back(item.version);
         if (item.index_history) {
             item.index_history->push_back(item.version);
+            item.block->last_begin[item.slot] = mutation_ts;
+            item.block->last_end[item.slot] = kInfinity;
         }
     }
     impl_->last_mutation_ts = mutation_ts;
@@ -447,13 +549,13 @@ UpdatesRecord::Scan(int64_t field_id,
     return Gather(field_id, offsets, query_ts);
 }
 
-std::vector<int64_t>
-UpdatesRecord::In(int64_t field_id,
-                  const std::vector<UpdateValue>& values,
-                  uint64_t query_ts) const {
+TargetBitmap
+UpdatesRecord::InBitmap(int64_t field_id,
+                        const std::vector<UpdateValue>& values,
+                        uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
     const auto& field = impl_->IndexedField(field_id);
-    std::vector<int64_t> result;
+    TargetBitmap result(impl_->row_count, false);
     for (const auto& value : values) {
         // NULL in an IN list never contributes a TRUE result.
         if (std::holds_alternative<std::monostate>(value)) {
@@ -463,20 +565,19 @@ UpdatesRecord::In(int64_t field_id,
         auto it = field.index->find(value);
         if (it != field.index->end()) {
             impl_->index_postings.fetch_add(
-                it->second->base.size() + it->second->updates.size(),
+                it->second->base.size() + it->second->slots.size(),
                 std::memory_order_relaxed);
             Collect(field, *it->second, query_ts, result);
         }
     }
-    SortUnique(result);
     return result;
 }
 
-std::vector<int64_t>
-UpdatesRecord::Range(int64_t field_id,
-                     const std::optional<UpdateRangeBound>& lower,
-                     const std::optional<UpdateRangeBound>& upper,
-                     uint64_t query_ts) const {
+TargetBitmap
+UpdatesRecord::RangeBitmap(int64_t field_id,
+                           const std::optional<UpdateRangeBound>& lower,
+                           const std::optional<UpdateRangeBound>& upper,
+                           uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
     const auto& field = impl_->IndexedField(field_id);
     for (const auto* bound : {&lower, &upper}) {
@@ -490,7 +591,7 @@ UpdatesRecord::Range(int64_t field_id,
         (upper->value < lower->value ||
          (upper->value == lower->value &&
           (!lower->inclusive || !upper->inclusive)))) {
-        return {};
+        return TargetBitmap(impl_->row_count, false);
     }
     const auto& tree = *field.index;
     auto begin = !lower ? tree.upper_bound(UpdateValue{std::monostate{}})
@@ -499,26 +600,25 @@ UpdatesRecord::Range(int64_t field_id,
     auto end = !upper             ? tree.end()
                : upper->inclusive ? tree.upper_bound(upper->value)
                                   : tree.lower_bound(upper->value);
-    std::vector<int64_t> result;
+    TargetBitmap result(impl_->row_count, false);
     for (auto it = begin; it != end; ++it) {
         impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->updates.size(),
+            it->second->base.size() + it->second->slots.size(),
             std::memory_order_relaxed);
         Collect(field, *it->second, query_ts, result);
     }
-    SortUnique(result);
     return result;
 }
 
-std::vector<int64_t>
-UpdatesRecord::Prefix(int64_t field_id,
-                      const std::string& prefix,
-                      uint64_t query_ts) const {
+TargetBitmap
+UpdatesRecord::PrefixBitmap(int64_t field_id,
+                            const std::string& prefix,
+                            uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
     const auto& field = impl_->IndexedField(field_id);
     Require(field.type == UpdateFieldType::VarChar,
             "POC prefix lookup requires a VARCHAR field");
-    std::vector<int64_t> result;
+    TargetBitmap result(impl_->row_count, false);
     const auto& tree = *field.index;
     for (auto it = tree.lower_bound(UpdateValue{prefix}); it != tree.end();
          ++it) {
@@ -527,29 +627,66 @@ UpdatesRecord::Prefix(int64_t field_id,
             break;
         }
         impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->updates.size(),
+            it->second->base.size() + it->second->slots.size(),
             std::memory_order_relaxed);
         Collect(field, *it->second, query_ts, result);
     }
-    SortUnique(result);
     return result;
+}
+
+TargetBitmap
+UpdatesRecord::NullBitmap(int64_t field_id, uint64_t query_ts) const {
+    std::shared_lock lock(impl_->mutex);
+    const auto& field = impl_->IndexedField(field_id);
+    const auto& tree = *field.index;
+    TargetBitmap result(impl_->row_count, false);
+    auto it = tree.find(UpdateValue{std::monostate{}});
+    if (it != tree.end()) {
+        impl_->index_postings.fetch_add(
+            it->second->base.size() + it->second->slots.size(),
+            std::memory_order_relaxed);
+        Collect(field, *it->second, query_ts, result);
+    }
+    return result;
+}
+
+namespace {
+std::vector<int64_t>
+BitmapOffsets(const TargetBitmap& bitmap) {
+    std::vector<int64_t> result;
+    for (auto offset = bitmap.find_first(); offset;
+         offset = bitmap.find_next(*offset)) {
+        result.push_back(*offset);
+    }
+    return result;
+}
+}  // namespace
+
+std::vector<int64_t>
+UpdatesRecord::In(int64_t field_id,
+                  const std::vector<UpdateValue>& values,
+                  uint64_t query_ts) const {
+    return BitmapOffsets(InBitmap(field_id, values, query_ts));
+}
+
+std::vector<int64_t>
+UpdatesRecord::Range(int64_t field_id,
+                     const std::optional<UpdateRangeBound>& lower,
+                     const std::optional<UpdateRangeBound>& upper,
+                     uint64_t query_ts) const {
+    return BitmapOffsets(RangeBitmap(field_id, lower, upper, query_ts));
+}
+
+std::vector<int64_t>
+UpdatesRecord::Prefix(int64_t field_id,
+                      const std::string& prefix,
+                      uint64_t query_ts) const {
+    return BitmapOffsets(PrefixBitmap(field_id, prefix, query_ts));
 }
 
 std::vector<int64_t>
 UpdatesRecord::IsNull(int64_t field_id, uint64_t query_ts) const {
-    std::shared_lock lock(impl_->mutex);
-    const auto& field = impl_->IndexedField(field_id);
-    const auto& tree = *field.index;
-    std::vector<int64_t> result;
-    auto it = tree.find(UpdateValue{std::monostate{}});
-    if (it != tree.end()) {
-        impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->updates.size(),
-            std::memory_order_relaxed);
-        Collect(field, *it->second, query_ts, result);
-    }
-    SortUnique(result);
-    return result;
+    return BitmapOffsets(NullBitmap(field_id, query_ts));
 }
 
 }  // namespace milvus::segcore::experimental

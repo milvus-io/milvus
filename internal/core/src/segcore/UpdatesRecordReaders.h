@@ -74,8 +74,6 @@ class TempIndexReader : public index::IIndexReaderBase,
         std::shared_ptr<const detail::UpdateReadBinding> binding)
         : binding_(std::move(binding)) {
     }
-    TargetBitmap
-    ToBitmap(const std::vector<int64_t>& offsets) const;
     const std::shared_ptr<const detail::UpdateReadBinding> binding_;
 };
 
