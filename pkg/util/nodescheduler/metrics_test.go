@@ -64,6 +64,42 @@ func TestSchedulerStatsTrackDelayedAttempts(t *testing.T) {
 	assert.Equal(t, 2, scheduler.stats.snapshotAndReset().capacity)
 }
 
+func TestSchedulerMetricsAcrossPriorityChanges(t *testing.T) {
+	scheduler := New(1)
+	t.Cleanup(scheduler.Close)
+	release := blockPriorityWorker(t, scheduler)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	nodeID, taskType := paramtable.GetStringNodeID(), t.Name()
+	pending := metrics.NodeSchedulerPendingTaskCount.WithLabelValues(nodeID, taskType)
+	success := metrics.NodeSchedulerTaskExecutionTotal.WithLabelValues(nodeID, taskType, metrics.SuccessLabel)
+	canceled := metrics.NodeSchedulerTaskExecutionTotal.WithLabelValues(nodeID, taskType, metrics.CancelLabel)
+	successBefore, canceledBefore := testutil.ToFloat64(success), testutil.ToFloat64(canceled)
+	var executions atomic.Int32
+	submit := func(priority int32) PriorityTaskHandle {
+		return scheduler.Submit(&metricTask{taskType: taskType, execute: func(context.Context) error {
+			executions.Add(1)
+			return nil
+		}}, WithPriority(priority)).(PriorityTaskHandle)
+	}
+	first, second := submit(-10), submit(20)
+	require.Equal(t, float64(2), testutil.ToFloat64(pending))
+	require.True(t, first.SetPriority(20))
+	require.True(t, second.SetPriority(-10))
+	require.True(t, first.SetPriority(20))
+	require.Equal(t, float64(2), testutil.ToFloat64(pending), "priority changes must not enqueue another attempt")
+	first.Cancel()
+	require.NoError(t, first.Wait(ctx))
+	require.Equal(t, float64(1), testutil.ToFloat64(pending))
+	release()
+	require.NoError(t, second.Wait(ctx))
+	require.EqualValues(t, 1, executions.Load())
+	require.Zero(t, testutil.ToFloat64(pending))
+	require.Equal(t, successBefore+1, testutil.ToFloat64(success))
+	require.Equal(t, canceledBefore, testutil.ToFloat64(canceled), "queued cancellation is not an execution attempt")
+}
+
 func TestSchedulerMetrics(t *testing.T) {
 	nodeID := paramtable.GetStringNodeID()
 	for _, taskType := range []string{"blocker", "queued", "retried", "failed", "canceled"} {

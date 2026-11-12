@@ -145,6 +145,18 @@ type scopedTaskHandle struct {
 	entry *scopedTaskEntry
 }
 
+// SetPriority forwards scheduling changes without changing scoped ownership.
+// Legacy schedulers may return handles without priority support.
+func (h scopedTaskHandle) SetPriority(priority int32) bool {
+	select {
+	case <-h.entry.done:
+		return false
+	default:
+	}
+	inner, ok := h.entry.inner.(nodescheduler.PriorityTaskHandle)
+	return ok && inner.SetPriority(priority)
+}
+
 func (h scopedTaskHandle) Cancel() {
 	// A submission rejected after Close never enters the shared scheduler.
 	if h.entry.inner == nil {

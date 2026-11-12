@@ -157,6 +157,7 @@ ends when a task is dequeued for execution or canceled while pending. Execution
 counters count attempts with success, retry, fail, or cancel outcomes; a task
 canceled before execution contributes no execution attempt. Five-second summary
 logs report per-type counts and queue/execution durations. This instrumentation
-works with master's existing single queue and does not change task routing or
-concurrency budgets. A future dual-queue integration can add lane context to the
-logs; it is not a prerequisite for these metrics.
+preserves master's priority ordering, fairness and cumulative worker limits.
+Changing a queued task's priority or promoting a delayed retry does not count
+another enqueue or reset its telemetry wait interval. Metrics remain aggregated
+by task type; they do not add priority labels or per-band capacity gauges.

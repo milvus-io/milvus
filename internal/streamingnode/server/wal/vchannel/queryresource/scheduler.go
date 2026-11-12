@@ -73,7 +73,7 @@ func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuil
 			callbacks[0](scheduled)
 		}
 	}
-	scheduled.handle = scheduler.Submit(task)
+	scheduled.handle = scheduler.Submit(task, nodescheduler.WithPriority(0))
 	return scheduled
 }
 
@@ -88,15 +88,6 @@ func (t *scheduledBuild) Result() (*QueryRuntime, error) {
 }
 
 var _ nodescheduler.Task = (*resourceBuildTask)(nil)
-
-type resourceCallbackTask func()
-
-func (t resourceCallbackTask) Execute(context.Context) error {
-	t()
-	return nil
-}
-
-var _ nodescheduler.Task = resourceCallbackTask(nil)
 
 type resourceReadyTask struct {
 	ref     queryViewRef

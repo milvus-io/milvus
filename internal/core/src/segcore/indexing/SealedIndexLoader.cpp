@@ -113,7 +113,6 @@ SealedIndexLoader::SealedIndexLoader(
                         load_index_info->mmap_dir_path,
                         load_index_info->field_type,
                         load_index_info->element_type,
-                        load_index_info->index_params,
                         load_index_info->index_size,
                         load_index_info->index_engine_version,
                         std::to_string(load_index_info->index_id),
@@ -145,6 +144,9 @@ SealedIndexLoader::SealedIndexLoader(
           !lazy_load_,
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    // Resource estimation borrows these parameters only during construction.
+    // Index creation and later reads use the normalized config_.
+    const auto& index_params = load_index_info->index_params;
     index::IndexLoadContext metadata_ctx(
         op_ctx,
         index::GetValueFromConfig<int32_t>(config_, "load_priority")
@@ -248,7 +250,7 @@ SealedIndexLoader::SealedIndexLoader(
             resources = index::PackedScalarIndexLoadResource(
                 index_load_info_.field_type,
                 index_load_info_.index_size,
-                index_load_info_.index_params,
+                index_params,
                 index_load_info_.enable_mmap,
                 index_load_info_.num_rows,
                 index_load_info_.index_files,
@@ -265,7 +267,7 @@ SealedIndexLoader::SealedIndexLoader(
                     index::LegacyScalarIndexLoadResourceAsync(
                         index_load_info_.field_type,
                         index_load_info_.index_size,
-                        index_load_info_.index_params,
+                        index_params,
                         index_load_info_.enable_mmap,
                         index_load_info_.num_rows,
                         *prepared_legacy_source_)));
@@ -273,7 +275,7 @@ SealedIndexLoader::SealedIndexLoader(
             resources = index::ScalarIndexFileLoadResource(
                 index_load_info_.field_type,
                 index_load_info_.index_size,
-                index_load_info_.index_params,
+                index_params,
                 index_load_info_.enable_mmap,
                 index_load_info_.num_rows,
                 index_load_info_.index_files,
@@ -290,7 +292,7 @@ SealedIndexLoader::SealedIndexLoader(
                                      index_load_info_.element_type,
                                      index_load_info_.index_engine_version,
                                      index_load_info_.index_size,
-                                     index_load_info_.index_params,
+                                     index_params,
                                      index_load_info_.enable_mmap,
                                      index_load_info_.num_rows,
                                      index_load_info_.dim);

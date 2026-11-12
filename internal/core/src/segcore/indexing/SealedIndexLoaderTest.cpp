@@ -119,11 +119,16 @@ TEST_F(SealedIndexLoaderTest,
             config["nested"] = true;
             std::unique_ptr<SealedIndexLoader> translator;
             {
+                auto construction_info = info;
                 folly::CancellationSource cancel;
                 OpContext creation(cancel.getToken());
                 creation.runtime_load_priority = 1;
-                translator = std::make_unique<SealedIndexLoader>(
-                    &info, tracer::TraceContext{}, context_, config, &creation);
+                translator =
+                    std::make_unique<SealedIndexLoader>(&construction_info,
+                                                        tracer::TraceContext{},
+                                                        context_,
+                                                        config,
+                                                        &creation);
                 cancel.requestCancellation();
             }
             EXPECT_EQ(translator->Family(), index::families::kSort);
@@ -145,6 +150,17 @@ TEST_F(SealedIndexLoaderTest,
             EXPECT_TRUE(hits[1]);
             EXPECT_TRUE(hits[2]);
             EXPECT_FALSE(hits[3]);
+
+            // A later reader also needs no data from the destroyed input.
+            request_reader.reset();
+            auto later_reader = owner->CreateReader(&load);
+            const auto* later_predicate = dynamic_cast<
+                const index::IScalarPredicateReader<std::string_view>*>(
+                later_reader.get());
+            ASSERT_NE(later_predicate, nullptr);
+            const auto later_hits = later_predicate->In(1, &key);
+            ASSERT_EQ(later_hits.size(), 4);
+            EXPECT_EQ(later_hits.count(), 2);
         }
     }
 }

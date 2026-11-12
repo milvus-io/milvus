@@ -63,11 +63,15 @@ func getFieldBinlogs(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBi
 	return nil
 }
 
+// MergeFieldBinlogs merges newBinlogs into currentBinlogs, which the caller
+// owns, and leaves newBinlogs unchanged: a field's later entries are appended
+// to a copy of its first one, so an update operator that runs again merges the
+// same input.
 func MergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	for _, newBinlog := range newBinlogs {
 		fieldBinlogs := getFieldBinlogs(newBinlog.GetFieldID(), currentBinlogs)
 		if fieldBinlogs == nil {
-			currentBinlogs = append(currentBinlogs, newBinlog)
+			currentBinlogs = append(currentBinlogs, proto.Clone(newBinlog).(*datapb.FieldBinlog))
 		} else {
 			if len(fieldBinlogs.ChildFields) == 0 {
 				fieldBinlogs.ChildFields = newBinlog.GetChildFields()

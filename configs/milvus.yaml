@@ -1276,7 +1276,7 @@ grpc:
     compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
-    keepAliveTimeout: 20000
+    keepAliveTimeout: 2000
     maxMaxAttempts: 10
     initialBackoff: 0.2
     maxBackoff: 10
@@ -1869,8 +1869,17 @@ streaming:
     gracefulCloseTimeout: 3s
     tail:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
-      softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
+      softWatermark: 8g # RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+    flush:
+      sizeThreshold: 6g # Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      messageThreshold: 6144 # Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleMinSize: 512MB # Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleTimeout: 10m # Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+  idempotency:
+    ttlPerPChannel: 1h # Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.
+    maxSizePerPChannel: 256MB # PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.
+    bestEffortMinCountPerVChannel: 16 # Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.
   transformLog:
     catchupConcurrencyRatioPerPChannel: 0.25 # TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   replication:
