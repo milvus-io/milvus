@@ -83,7 +83,7 @@ func NewMergeOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBu
 		return nil, merr.WrapErrServiceInternal("merge_op: search runtime metric types are empty")
 	}
 
-	opts := []MergeOption{withExpectedInputs(len(metricTypes))}
+	opts := []MergeOption{withExpectedInputs(len(metricTypes)), WithScoresRewritten(buildCtx.Search.ScoresRewritten)}
 	switch spec.strategy {
 	case MergeStrategyRRF:
 		opts = append(opts, WithRRFK(spec.rrfK))
@@ -266,6 +266,7 @@ type mergeConfig struct {
 	weightsSet      bool
 	rrfK            float64
 	metricTypes     []string
+	scoresRewritten []bool
 	normalize       bool
 	forceDescending bool
 	expectedInputs  int
@@ -273,6 +274,12 @@ type mergeConfig struct {
 
 // MergeOption is a functional option for MergeOp.
 type MergeOption func(*mergeConfig)
+
+func WithScoresRewritten(rewritten []bool) MergeOption {
+	return func(cfg *mergeConfig) {
+		cfg.scoresRewritten = append([]bool(nil), rewritten...)
+	}
+}
 
 // WithWeights sets the per-input weights for weighted or RRF merge strategy.
 func WithWeights(weights []float64) MergeOption {
@@ -340,7 +347,7 @@ func NewMergeOp(strategy MergeStrategy, opts ...MergeOption) *MergeOp {
 	sortDesc := true
 	var normFuncs []normalizeFunc
 	if len(cfg.metricTypes) > 0 {
-		sortDesc, normFuncs = resolveMergeBehavior(cfg.normalize, cfg.forceDescending, cfg.metricTypes)
+		sortDesc, normFuncs = resolveMergeScoreBehavior(cfg.normalize, cfg.forceDescending, cfg.metricTypes, cfg.scoresRewritten)
 	}
 
 	return &MergeOp{
@@ -894,7 +901,7 @@ func (op *MergeOp) scoreNormFunc(inputIdx int) normalizeFunc {
 	return nil
 }
 
-// resolveMergeBehavior pre-computes the sort direction and per-input normalization
+// resolveMergeScoreBehavior pre-computes the sort direction and per-input normalization
 // functions from the construction-time config. This is called once in NewMergeOp
 // so that the execution path has no metric-type branching.
 //
@@ -904,41 +911,54 @@ func (op *MergeOp) scoreNormFunc(inputIdx int) normalizeFunc {
 // can validate input count. Entries may be nil (no-op for that input).
 //
 // Decision matrix:
-//   - normalize=true: full range normalization per metric → DESC sort.
-//   - normalize=false, mixed metrics OR forceDescending=true: direction-only
-//     conversion (atan for distance metrics, identity for similarity metrics)
-//     → DESC sort.
-//   - normalize=false, single direction: no conversion, sort by metric's
-//     natural order.
-func resolveMergeBehavior(normalize, forceDescending bool, metricTypes []string) (bool, []normalizeFunc) {
+//   - normalize=true: rewritten scores use IP-style normalization; untouched
+//     scores use the original metric's normalization → DESC sort.
+//   - normalize=false, mixed effective directions OR forceDescending=true:
+//     convert only untouched distances via atan; rewritten scores and raw
+//     similarity scores retain their scale → DESC sort.
+//   - normalize=false, single effective direction: no conversion; sort by that
+//     direction. Rewritten scores are always larger-is-better.
+func resolveMergeScoreBehavior(normalize, forceDescending bool, metricTypes []string, rewritten []bool) (bool, []normalizeFunc) {
 	normFuncs := make([]normalizeFunc, len(metricTypes))
 
 	if normalize {
 		for i, m := range metricTypes {
-			normFuncs[i] = getNormalizeFunc(m)
+			if isScoreRewritten(rewritten, i) {
+				// Rewritten business scores are larger-is-better and may have
+				// any scale, regardless of the original search metric.
+				normFuncs[i] = getNormalizeFunc(metric.IP)
+			} else {
+				normFuncs[i] = getNormalizeFunc(m)
+			}
 		}
 		return true, normFuncs
 	}
 
-	mixed, sortDescending := classifyMetricsOrder(metricTypes)
+	mixed, sortDescending := classifyScoreOrder(metricTypes, rewritten)
 	if mixed || forceDescending {
 		for i, m := range metricTypes {
-			normFuncs[i] = getDirectionConvertFunc(m)
+			if !isScoreRewritten(rewritten, i) {
+				normFuncs[i] = getDirectionConvertFunc(m)
+			}
 		}
 		return true, normFuncs
 	}
 
-	// Non-mixed: all normFuncs stay nil (no-op), sort by metric's natural order.
+	// Non-mixed: no conversion; sort by the effective score direction.
 	return sortDescending, normFuncs
 }
 
-// classifyMetricsOrder inspects the given metrics and determines
-// whether they contain mixed types and what the sorting order should be.
-func classifyMetricsOrder(metricTypes []string) (mixed bool, sortDescending bool) {
+func isScoreRewritten(rewritten []bool, index int) bool {
+	return index < len(rewritten) && rewritten[index]
+}
+
+// classifyScoreOrder uses larger-is-better for rewritten scores and the
+// original metric direction for untouched scores. Mixed directions sort DESC.
+func classifyScoreOrder(metricTypes []string, rewritten []bool) (mixed bool, sortDescending bool) {
 	countLargerIsBetter := 0
 	countSmallerIsBetter := 0
-	for _, m := range metricTypes {
-		if metric.PositivelyRelated(m) {
+	for index, m := range metricTypes {
+		if isScoreRewritten(rewritten, index) || metric.PositivelyRelated(m) {
 			countLargerIsBetter++
 		} else {
 			countSmallerIsBetter++
