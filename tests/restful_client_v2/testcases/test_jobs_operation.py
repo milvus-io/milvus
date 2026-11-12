@@ -250,16 +250,10 @@ class TestCreateImportJob(RestImportTestBase):
         # get import job progress
         for task in rsp["data"]["records"]:
             task_id = task["jobId"]
-            finished = False
-            t0 = time.time()
-
-            while not finished:
-                rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp["data"]["state"] == "Completed":
-                    finished = True
-                time.sleep(5)
-                if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+            rsp, finished = self.import_job_client.wait_import_job_state(
+                task_id, "Completed", timeout=IMPORT_TIMEOUT, interval=5
+            )
+            assert finished, f"import job did not complete: {rsp}"
         self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
