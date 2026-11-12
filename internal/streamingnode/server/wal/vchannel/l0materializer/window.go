@@ -200,7 +200,7 @@ func (m *L0Materializer) scheduleLocked() *materializeTask {
 
 func (m *L0Materializer) submit(task *materializeTask) {
 	if task != nil {
-		m.runtime.Scheduler.Submit(task)
+		m.runtime.Scheduler.Submit(task, nodescheduler.WithPriority(moduleapi.PriorityData))
 	}
 }
 

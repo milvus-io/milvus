@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -283,4 +285,36 @@ func TestWALMaterializerSeparatesDeletePositionAndFlushBoundary(t *testing.T) {
 	require.Equal(t, uint64(200), req.TargetTimeTick)
 	require.NotContains(t, req.DeletePositions, uint64(200), "Flush completion is not a Delete position")
 	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+}
+
+func TestWALPressurePromotionEndsAtCapturedTarget(t *testing.T) {
+	promoted := make(map[*moduleapi.DataTaskPriority]bool)
+	patch := mockey.Mock((*moduleapi.DataTaskPriority).Promote).To(func(p *moduleapi.DataTaskPriority) { promoted[p] = true }).Build()
+	defer patch.UnPatch()
+	m, tasks, _ := testWALMaterializer(t, 0, 1<<20)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	walObserve(m, tracker, walDelete(100))
+	m.RequestPersistThrough(100)
+	first := (*tasks)[0].(*walMaterializeTask)
+	require.Empty(t, promoted)
+	walObserve(m, tracker, walDelete(110))
+	walObserve(m, tracker, walFlush(120))
+	walObserve(m, tracker, walDelete(130))
+	walObserve(m, tracker, walFlush(140))
+	m.RequestPersistThroughUnderPressure(120)
+	require.True(t, promoted[&first.priority])
+	require.NoError(t, first.Execute(context.Background()))
+	second := (*tasks)[1].(*walMaterializeTask)
+	require.True(t, promoted[&second.priority])
+	require.NoError(t, second.Execute(context.Background()))
+	later := (*tasks)[2].(*walMaterializeTask)
+	require.False(t, promoted[&later.priority])
+	m.RequestPersistThroughUnderPressure(120) // Covered target cannot promote later work.
+	require.False(t, promoted[&later.priority])
+	require.NoError(t, later.Execute(context.Background()))
+	walObserve(m, tracker, walDelete(150))
+	m.RequestPersistThroughUnderPressure(150)
+	last := (*tasks)[3].(*walMaterializeTask)
+	require.True(t, promoted[&last.priority], "pressure also applies before initial submission")
+	require.NoError(t, last.Execute(context.Background()))
 }

@@ -2,19 +2,31 @@ package delegator
 
 import (
 	"bytes"
+	"context"
+	"net"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/mem"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 )
 
@@ -286,4 +298,99 @@ func TestAggregateMaterializeResults_OutputSizeLimit(t *testing.T) {
 			require.Zero(t, pool.outstanding())
 		})
 	}
+}
+
+// Exercise the Materialize callback's actual context through ClientBase and a
+// real gRPC connection, without requiring object storage or an etcd service.
+func TestMaterializeWorkerReadFailover(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name        string
+		failedDial  bool
+		rpcFailures int32
+		wantCalls   int32
+	}{
+		{name: "failed dial", failedDial: true},
+		{name: "transient RPC", rpcFailures: 1, wantCalls: 2},
+		{name: "persistent RPC", rpcFailures: 2, wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sd, channel := newExternalReadTestDelegator(t)
+			sd.distribution.AddDistributions(SegmentEntry{NodeID: 2, SegmentID: 1000, PartitionID: 500, Version: 1})
+			sd.distribution.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion: 1, SealedSegmentRowCount: map[int64]int64{1000: 100},
+			}, []int64{500})
+
+			server := &materializeRetryServer{failures: tc.rpcFailures}
+			addr := "127.0.0.1:0" // Port 0 cannot accept a connection.
+			if !tc.failedDial {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				require.NoError(t, err)
+				grpcServer := grpc.NewServer()
+				querypb.RegisterQueryNodeServer(grpcServer, server)
+				go grpcServer.Serve(listener)
+				t.Cleanup(grpcServer.Stop)
+				addr = listener.Addr().String()
+			}
+			base := grpcclient.NewClientBase[querypb.QueryNodeClient](&paramtable.Get().QueryNodeGrpcClientCfg, "test")
+			base.DialTimeout = 100 * time.Millisecond
+			base.InitialBackoff, base.MaxBackoff = 0.001, 0.001
+			base.SetRole("querynode-2")
+			base.SetNewGrpcClientFunc(func(conn *grpc.ClientConn) querypb.QueryNodeClient {
+				return querypb.NewQueryNodeClient(conn)
+			})
+			var dials atomic.Int32
+			base.SetGetAddrFunc(func() (string, error) {
+				dials.Add(1)
+				return addr, nil
+			})
+			t.Cleanup(func() { require.NoError(t, base.Close()) })
+
+			worker := cluster.NewMockWorker(t)
+			worker.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+					ret, err := base.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
+						return client.MaterializeSegments(ctx, req)
+					})
+					if err != nil {
+						return nil, err
+					}
+					return ret.(*internalpb.MaterializeResults), nil
+				}).Once()
+			manager := cluster.NewMockManager(t)
+			manager.EXPECT().GetWorker(mock.Anything, int64(2)).Return(worker, nil)
+			sd.workerManager = manager
+
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			results, err := sd.Materialize(ctx, &querypb.QueryRequest{
+				Req: &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()}, DmlChannels: []string{channel},
+			})
+			switch {
+			case tc.failedDial:
+				require.ErrorIs(t, err, grpcclient.ErrConnect)
+				require.EqualValues(t, 1, dials.Load(), "a failed connection must return without redialing")
+			case tc.rpcFailures == 1:
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+			default:
+				require.Equal(t, codes.Unavailable, status.Code(err))
+			}
+			require.Equal(t, tc.wantCalls, server.calls.Load())
+			require.NoError(t, ctx.Err(), "worker retry must leave time for replica failover")
+		})
+	}
+}
+
+type materializeRetryServer struct {
+	querypb.UnimplementedQueryNodeServer
+	failures int32
+	calls    atomic.Int32
+}
+
+func (s *materializeRetryServer) MaterializeSegments(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	if s.calls.Add(1) <= s.failures {
+		return nil, status.Error(codes.Unavailable, "worker temporarily unavailable")
+	}
+	return mres(2, "", false, 0), nil
 }

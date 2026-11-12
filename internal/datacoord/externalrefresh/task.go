@@ -373,8 +373,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	alreadyAppliedSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *meta.UpdateSegmentPack) bool {
+		// The operators run again when a run could not take a segment lock;
+		// the marks of a discarded run must not carry over.
+		clear(alreadyAppliedSegments)
 		for segmentID := range baselineSegmentMap {
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			incoming := upsertSegmentMap[segmentID]
 			kept := keptSegmentMap[segmentID]
 
@@ -426,7 +429,7 @@ func applyExternalCollectionSegmentUpdateAtFence(
 			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
 				continue
 			}
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			if existing == nil {
 				continue
 			}
@@ -449,7 +452,7 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *meta.UpdateSegmentPack) bool {
 		for _, segmentID := range segmentsToDrop {
-			current := modPack.Meta.Segments.GetSegment(segmentID)
+			current := modPack.Peek(segmentID)
 			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
@@ -693,15 +696,13 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 }
 
 // getExternalRefreshSegmentSnapshots returns clones in the same order as
-// segmentIDs while holding segMu across the full read, preventing one worker
-// request from observing segment metadata from different update generations.
+// segmentIDs, read at one point in time, preventing one worker request from
+// observing segment metadata from different update generations.
 func getExternalRefreshSegmentSnapshots(mt *meta.Meta, segmentIDs []int64) []*meta.SegmentInfo {
-	mt.SegMu.RLock()
-	defer mt.SegMu.RUnlock()
-
+	segments := mt.Segments.GetSegmentsByIDs(segmentIDs)
 	result := make([]*meta.SegmentInfo, len(segmentIDs))
 	for i, segmentID := range segmentIDs {
-		if segment := mt.Segments.GetSegment(segmentID); segment != nil {
+		if segment := segments[segmentID]; segment != nil {
 			result[i] = segment.Clone()
 		}
 	}

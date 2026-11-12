@@ -438,7 +438,8 @@ func (m *IndexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskIn
 
 // recordFinishedTask updates process-local observability only. The caller must
 // have already persisted the finished task and installed it in the in-memory
-// metadata, which also updated its stored size, and must not hold segMu.
+// metadata, which also updated its stored size, and must not hold a segment
+// writer lock.
 func (m *IndexMeta) recordFinishedTask(taskInfo *workerpb.IndexTaskInfo) {
 	mlog.Info(m.ctx, "finish index task success", mlog.Int64("buildID", taskInfo.GetBuildID()),
 		mlog.String("state", taskInfo.GetState().String()), mlog.String("fail reason", taskInfo.GetFailReason()),
@@ -1342,8 +1343,8 @@ func (m *IndexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 // indexes after its catalog record has been removed; taskCounts reclaims its
 // stored size. The caller must hold keyLock for segIdx.BuildID. It mutates
 // only the in-memory segment-index maps and the memory-only task counters and
-// never acquires fieldIndexLock, so it is safe to run inside a segMu critical
-// section.
+// never acquires fieldIndexLock, so it is safe to run under a segment writer
+// lock.
 func (m *IndexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
 	locks := m.getSegmentIndexMapLocks()
 	locks.Lock(segIdx.SegmentID)
@@ -1375,8 +1376,9 @@ func (m *IndexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 //
 // Precondition: the caller holds keyLock(mut.BuildID) across this projection,
 // the returned install and the observability closure it returns. It is acquired
-// by the caller rather than here so that it is ordered before segMu, matching
-// every other SegmentIndex writer; see CommitSegmentManifest's lock-order note.
+// by the caller rather than here so that it is ordered before the segment writer
+// lock, matching every other SegmentIndex writer; see CommitSegmentManifest's
+// lock-order note.
 func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*meta.StagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -1502,7 +1504,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge
 		// can wait for a Prometheus scrape, so the whole step is deferred out
-		// of segMu.
+		// of the segment writer lock.
 		return func() {
 			m.recordFinishedTask(mut.FinishedTask)
 			m.taskCounts.publishStoredSizes()

@@ -21,6 +21,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,12 +41,16 @@ import (
 
 type FailBackfillCatalogKV struct {
 	*meta.MetaMemoryKV
-	FailAtomicUpdate  bool
+	FailAtomicUpdate bool
+
+	updateSizesMu     sync.Mutex
 	AtomicUpdateSizes []int
 }
 
 func (kv *FailBackfillCatalogKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	kv.updateSizesMu.Lock()
 	kv.AtomicUpdateSizes = append(kv.AtomicUpdateSizes, len(saves)+len(removals))
+	kv.updateSizesMu.Unlock()
 	if kv.FailAtomicUpdate {
 		return merr.WrapErrIoFailedReason("injected backfill catalog failure")
 	}

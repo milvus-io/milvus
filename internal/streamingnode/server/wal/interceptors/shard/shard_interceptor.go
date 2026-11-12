@@ -66,7 +66,8 @@ func (impl *shardInterceptor) handleRestoreSnapshot(ctx context.Context, msg mes
 	}
 	created := messageutil.RestoreCollectionMessage(msg.IntoImmutableMessage(id))
 	impl.shardManager.CreateCollection(created)
-	impl.allocFunctionRunners(created.Header().GetCollectionId(), created.VChannel(), body.GetCollection().GetCollectionSchema())
+	collectionID := created.Header().GetCollectionId()
+	impl.allocFunctionRunners(collectionID, created.VChannel(), impl.shardManager.GetCollectionSchemaSnapshot(collectionID))
 	return id, nil
 }
 

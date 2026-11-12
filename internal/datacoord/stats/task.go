@@ -942,7 +942,7 @@ func (st *StatsTask) shouldPublishPreparedManifest(ctx context.Context, segmentI
 
 func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) meta.UpdateOperator {
 	return func(modPack *meta.UpdateSegmentPack) bool {
-		current := modPack.Meta.Segments.GetSegment(segmentID)
+		current := modPack.Peek(segmentID)
 		if current == nil || !meta.IsSegmentHealthy(current) {
 			mlog.Warn(ctx, "discard stats result for missing or unhealthy segment",
 				mlog.FieldTaskID(taskID),

@@ -67,7 +67,18 @@ Asynchronous recovery tasks share the process-level NodeScheduler, which owns
 execution concurrency and delayed retries. Each RecoveryStorage keeps a scoped
 task tracker only to cancel and wait for its own tasks during shutdown; it has
 no per-PChannel concurrency limit or separate pending queue. Scheduling fairness
-between PChannels is future work in NodeScheduler.
+between PChannels is future work in NodeScheduler. The scoped tracker forwards
+submission priority and `PriorityTaskHandle.SetPriority` to the shared executor;
+this does not interrupt running work or advance delayed retries. NodeScheduler
+provides task-level starvation protection within cumulative worker limits,
+not PChannel shares. ACK uses priority 20, QueryView release 5, build/ready 0,
+and ordinary data work -5 (promoted to 5 under recovery-tail pressure).
+ACK tasks yield with ErrDelay when Broadcast.Ack
+fails or reaches its 100ms timeout. The preceding legacy import completion RPC has no
+additional timeout, but remains cancelable during shutdown. Standalone QueryView
+notifications use independent goroutines.
+See the
+[NodeScheduler contract](../../../../pkg/util/nodescheduler/README.md).
 
 ## 3. One Global Checkpoint
 

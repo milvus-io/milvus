@@ -65,6 +65,13 @@ QueryViewStateMachine.Acquire(qv)
 identifies the versioned load info, and the QueryView state machine is the load
 trigger.
 
+Standalone completion/failure notifications run in their own goroutines, so
+they do not wait for NodeScheduler workers occupied by resource preparation.
+They remain asynchronous because callers may hold shard/owner locks that the
+callbacks acquire again. Build, readiness and resource cleanup work still use
+NodeScheduler; their inline completion callbacks run after the work finishes.
+Handoff waits for the existing per-view release completion signals.
+
 ## 4. Live DML
 
 After a runtime exists, the owning VChannel module forwards live resource events:

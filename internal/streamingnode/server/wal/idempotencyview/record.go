@@ -1,7 +1,7 @@
 // Package idempotencyview is the seam between the WAL summary and the
 // idempotency interceptor.
 //
-// It holds only the two shapes they exchange. It imports nothing from the WAL
+// It holds committed facts and the recovery views they exchange. It imports nothing from the WAL
 // server packages, so both
 // the summary that produces these records and the interceptor that consumes
 // them can depend on it without a cycle: the interceptor already reaches the
