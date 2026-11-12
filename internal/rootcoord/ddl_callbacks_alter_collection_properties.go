@@ -71,6 +71,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
+	if _, _, err := common.GetCollectionSegmentMaxRows(req.GetProperties()); err != nil {
+		return err
+	}
+
 	isEnableDynamicSchema, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())
 	if err != nil {
 		rawValue, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.EnableDynamicSchemaKey, req.GetProperties())

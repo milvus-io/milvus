@@ -432,6 +432,10 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoReleaseTTIKey = "collection.autorelease.tti.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
+	// CollectionSegmentMaxRowsKey overrides dataCoord.segment.maxRows for one
+	// collection: the number of rows a segment of the collection is full at,
+	// 0 for no row limit.
+	CollectionSegmentMaxRowsKey = "collection.segment.maxRows"
 	CollectionDescription       = "collection.description"
 	CollectionExternalSource    = "collection.external_source"
 	CollectionExternalSpec      = "collection.external_spec"
@@ -1143,6 +1147,38 @@ func GetCollectionAutoReleaseTTI(kvs []*commonpb.KeyValuePair) (time.Duration, e
 		tti = time.Duration(seconds) * time.Second
 	}
 	return tti, nil
+}
+
+// GetCollectionSegmentMaxRows reads the collection.segment.maxRows property:
+// the per collection override of dataCoord.segment.maxRows. exist is false
+// when the property is not set. The value must be a non-negative integer; 0
+// turns the row limit off for the collection.
+func GetCollectionSegmentMaxRows(kvs []*commonpb.KeyValuePair) (maxRows int64, exist bool, err error) {
+	value, exist := GetStringValue(kvs, CollectionSegmentMaxRowsKey)
+	if !exist {
+		return 0, false, nil
+	}
+	maxRows, err = parseCollectionSegmentMaxRows(value)
+	return maxRows, true, err
+}
+
+// GetCollectionSegmentMaxRowsFromMap is GetCollectionSegmentMaxRows for a
+// property map.
+func GetCollectionSegmentMaxRowsFromMap(kvs map[string]string) (maxRows int64, exist bool, err error) {
+	value, exist := kvs[CollectionSegmentMaxRowsKey]
+	if !exist {
+		return 0, false, nil
+	}
+	maxRows, err = parseCollectionSegmentMaxRows(value)
+	return maxRows, true, err
+}
+
+func parseCollectionSegmentMaxRows(value string) (int64, error) {
+	maxRows, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || maxRows < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("%s must be a non-negative integer, got %q", CollectionSegmentMaxRowsKey, value)
+	}
+	return maxRows, nil
 }
 
 func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {

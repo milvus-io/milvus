@@ -25,10 +25,11 @@ type segmentLimitation struct {
 // SegmentLimitationPolicy is the interface to generate the limitation of the segment.
 type SegmentLimitationPolicy interface {
 	// GenerateLimitation generates the limitation of the segment.
-	// rowCapped tells whether the collection is capped at
-	// dataCoord.segment.maxRows rows per segment (it has no vector field); an
-	// L1 segment is then sealed on rows as well as on bytes.
-	GenerateLimitation(lv datapb.SegmentLevel, rowCapped bool) segmentLimitation
+	// An L1 segment is sealed on rows as well as on bytes. maxRowsOverride is
+	// the collection.segment.maxRows property of the collection, or a
+	// negative value when it is not set and dataCoord.segment.maxRows
+	// applies; 0 means no row limit.
+	GenerateLimitation(lv datapb.SegmentLevel, maxRowsOverride int64) segmentLimitation
 }
 
 // jitterSegmentLimitationPolicyExtraInfo is the extra info of the jitter segment limitation policy.
@@ -43,12 +44,12 @@ type jitterSegmentLimitationPolicyExtraInfo struct {
 type jitterSegmentLimitationPolicy struct{}
 
 // GenerateLimitation generates the limitation of the segment.
-func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel, rowCapped bool) segmentLimitation {
+func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel, maxRowsOverride int64) segmentLimitation {
 	switch lv {
 	case datapb.SegmentLevel_L0:
 		return p.generateL0Limitation()
 	case datapb.SegmentLevel_L1:
-		return p.generateL1Limitation(rowCapped)
+		return p.generateL1Limitation(maxRowsOverride)
 	default:
 		panic(fmt.Sprintf("invalid segment level: %s", lv))
 	}
@@ -78,14 +79,15 @@ func (p jitterSegmentLimitationPolicy) generateL0Limitation() segmentLimitation 
 }
 
 // generateL1Limitation generates the limitation of the L1 segment: the seal
-// proportion of the segment size, and for a row capped collection
-// dataCoord.segment.maxRows rows, both with the same jitter.
+// proportion of the segment size, and the row cap of the collection
+// (maxRowsOverride, or dataCoord.segment.maxRows when it is negative), both
+// with the same jitter. A row cap of 0 leaves the segment sealed on bytes only.
 //
 // The seal proportion is not applied to the row limit. It exists to keep a
-// growing segment, which is held in memory, well below maxSize bytes; a row
-// capped segment of narrow rows is small in bytes at maxRows rows, and sealing
-// it earlier would only produce segments that compaction has to merge back.
-func (p jitterSegmentLimitationPolicy) generateL1Limitation(rowCapped bool) segmentLimitation {
+// growing segment, which is held in memory, well below maxSize bytes; a
+// segment of narrow rows is small in bytes at maxRows rows, and sealing it
+// earlier would only produce segments that compaction has to merge back.
+func (p jitterSegmentLimitationPolicy) generateL1Limitation(maxRowsOverride int64) segmentLimitation {
 	// TODO: It's weird to set such a parameter into datacoord configuration.
 	// Refactor it in the future
 	jitterRatio := p.getJitterRatio()
@@ -93,7 +95,11 @@ func (p jitterSegmentLimitationPolicy) generateL1Limitation(rowCapped bool) segm
 	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
 	segmentRows := uint64(math.MaxUint64)
-	if maxRows := paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64(); rowCapped && maxRows > 0 {
+	maxRows := maxRowsOverride
+	if maxRows < 0 {
+		maxRows = paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64()
+	}
+	if maxRows > 0 {
 		segmentRows = max(uint64(jitterRatio*float64(maxRows)), 1)
 	}
 	return segmentLimitation{

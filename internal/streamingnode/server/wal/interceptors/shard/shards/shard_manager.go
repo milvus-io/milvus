@@ -222,21 +222,22 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
-	// rowCapped tells whether the segments of the collection are capped at
-	// dataCoord.segment.maxRows rows: the current schema is known and has no
-	// vector field. The segment alloc worker reads it without the shard
-	// manager lock, hence atomic.
-	rowCapped atomic.Bool
+	// maxRowsOverride holds the collection.segment.maxRows property carried
+	// by the current schema snapshot, stored as the value plus one so that
+	// the zero value means "not set" (also when the schema is unknown or the
+	// property does not parse). The segment alloc worker reads it without
+	// the shard manager lock, hence atomic.
+	maxRowsOverride atomic.Int64
 }
 
-// RowCapped tells whether new L1 segments of the collection are sealed on a
-// row count in addition to the byte size. It is false when the schema is
-// unknown.
-func (c *CollectionInfo) RowCapped() bool {
+// MaxRowsOverride returns the row cap the collection sets for its own
+// segments (0 for no row limit), or a negative value when it sets none and
+// dataCoord.segment.maxRows applies.
+func (c *CollectionInfo) MaxRowsOverride() int64 {
 	if c == nil {
-		return false
+		return -1
 	}
-	return c.rowCapped.Load()
+	return c.maxRowsOverride.Load() - 1
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write
@@ -249,7 +250,10 @@ type PrimaryKeyDescriptor struct {
 func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
 	c.Schema = schema
 	c.primaryKey = nil
-	c.rowCapped.Store(schema.GetSchema() != nil && !typeutil.HasVectorField(schema.GetSchema()))
+	c.maxRowsOverride.Store(0)
+	if maxRows, exist, err := common.GetCollectionSegmentMaxRows(schema.GetSchema().GetProperties()); exist && err == nil && maxRows < math.MaxInt64 {
+		c.maxRowsOverride.Store(maxRows + 1)
+	}
 	if schema == nil || schema.GetSchema() == nil {
 		return
 	}

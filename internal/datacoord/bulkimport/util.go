@@ -206,21 +206,35 @@ func GetSegmentMaxSize(job ImportJob, indexMeta *index.IndexMeta) int {
 	return int(policy.GetExpectedSegmentSize(indexMeta, job.GetCollectionID(), job.GetSchema()))
 }
 
-// CapSegmentMaxSizeByRows lowers the byte target of an import job of a row
-// capped collection (see policy.GetSegmentMaxRows) so that a segment of that
-// size holds about the row cap: min(segmentMaxSize, maxRows x row size), where
-// the row size is measured from the job's own data, totalBytes / totalRows.
+// CollectionProperties returns the current properties of the collection, or
+// nil when the collection is not known.
+func CollectionProperties(mt *meta.Meta, collectionID int64) map[string]string {
+	if mt == nil {
+		return nil
+	}
+	if coll := mt.GetCollection(collectionID); coll != nil {
+		return coll.Properties
+	}
+	return nil
+}
+
+// CapSegmentMaxSizeByRows lowers the byte target of an import job by the row
+// cap of the collection (see policy.GetSegmentMaxRows; properties are the
+// collection properties) so that a segment of that size holds about the row
+// cap: min(segmentMaxSize, maxRows x row size), where the row size is measured
+// from the job's own data, totalBytes / totalRows. Rows wider than
+// segmentMaxSize / maxRows keep the byte target.
 //
 // An import job sizes its segments once from this static target, so a per-job
 // measurement cannot make it disagree with itself. Row sizes that differ
 // between partitions make the row count per segment approximate; compaction
 // counts the rows of every segment afterwards, and a segment holding the cap
 // is full to it whatever its byte size.
-func CapSegmentMaxSizeByRows(job ImportJob, segmentMaxSize int64, totalBytes int64, totalRows int64) int64 {
+func CapSegmentMaxSizeByRows(job ImportJob, properties map[string]string, segmentMaxSize int64, totalBytes int64, totalRows int64) int64 {
 	if importutilv2.IsL0Import(job.GetOptions()) {
 		return segmentMaxSize
 	}
-	maxRows := policy.GetSegmentMaxRows(job.GetSchema())
+	maxRows := policy.GetSegmentMaxRows(properties)
 	if maxRows <= 0 || totalBytes <= 0 || totalRows <= 0 {
 		return segmentMaxSize
 	}

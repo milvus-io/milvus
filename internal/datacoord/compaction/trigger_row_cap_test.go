@@ -81,6 +81,15 @@ func TestGeneratePlansRowCap(t *testing.T) {
 				require.Empty(t, tr.generatePlans(newSegments(20, maxRows), signal, compactTime, expectedSize, maxRows))
 			})
 
+			// Segments that already hold more than maxRows rows, such as the
+			// segments of a collection of narrow rows written before the row
+			// cap applied to it, or after maxRows was lowered: they are full,
+			// and no plan is generated to split them. They are cut at maxRows
+			// only when another compaction rewrites them.
+			t.Run("segments above maxRows rows are not split actively", func(t *testing.T) {
+				require.Empty(t, tr.generatePlans(newSegments(5, 3*maxRows), signal, compactTime, expectedSize, maxRows))
+			})
+
 			// Twenty segments of maxRows / 8 rows each.
 			t.Run("smaller segments are packed up to maxRows rows", func(t *testing.T) {
 				buckets := tr.generatePlans(newSegments(20, maxRows/8), signal, compactTime, expectedSize, maxRows)
