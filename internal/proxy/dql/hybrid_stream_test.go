@@ -10,6 +10,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -87,6 +89,46 @@ func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	require.Equal(t, 1, second.closeCalls)
 }
 
+func TestHybridStreamingRetriesWholeAttemptOnUnavailable(t *testing.T) {
+	for _, afterChunk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after_chunk_%t", afterChunk), func(t *testing.T) {
+			failed := &fakeLegacySearchStream{}
+			if afterChunk {
+				failed.recv = append(failed.recv, fakeLegacySearchRecv{chunk: newFinalSearchChunk([]int64{10}, []float32{.9}, "failed")})
+			}
+			failed.recv = append(failed.recv, fakeLegacySearchRecv{err: status.Error(codes.Unavailable, "worker unavailable")})
+			sibling := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{20}, []float32{.8}, "failed")}}}
+			first := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{30, 31}, []float32{.9, .8}, "replacement")}}}
+			second := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{40, 41}, []float32{.9, .8}, "replacement")}}}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
+			legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
+				if attempt == 1 {
+					return &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{failed, sibling}}, nil
+				}
+				return &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{first, second}}, nil
+			}
+			task := newQueryViewSearchTask(t, legacy, 2)
+			task.IsIterator, task.IsAdvanced = false, true
+			task.rerankMeta = &legacyRerankMeta{}
+			task.SubReqs = []*internalpb.SubSearchRequest{
+				{Nq: 1, Topk: 2, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+				{Nq: 1, Topk: 2, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+			}
+			require.NoError(t, task.Execute(t.Context()))
+			require.Equal(t, 2, legacy.searchCalled)
+			require.Len(t, legacy.lastSearchRequest.RetryErrors, 1)
+			require.Equal(t, codes.Unavailable, status.Code(legacy.lastSearchRequest.RetryErrors[0]))
+			require.Equal(t, 1, failed.closeCalls)
+			require.Equal(t, 1, sibling.closeCalls)
+			require.Equal(t, 1, first.closeCalls)
+			require.Equal(t, 1, second.closeCalls)
+			require.Equal(t, []int64{30, 31}, task.reducedSubResults[0].GetResults().GetIds().GetIntId().GetData())
+			require.Equal(t, []int64{40, 41}, task.reducedSubResults[1].GetResults().GetIds().GetIntId().GetData())
+			require.Equal(t, map[string]uint64{"replacement": 1}, task.queryChannelsTs)
+		})
+	}
+}
+
 func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
 	for _, nq := range []int64{1, 2} {
 		for _, metric := range []string{"IP", "L2"} {
@@ -124,7 +166,7 @@ func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
 							require.NoError(t, err)
 							shardStreams = append(shardStreams, stream)
 						}
-						batch, err := reduceAdvanceGroupBy(context.Background(), batchShards, nq, request.GetTopk(), schemapb.DataType_Int64, metric, request.GetGroupByFieldIds())
+						batch, err := reduceAdvanceGroupBy(context.Background(), batchShards, nq, request.GetTopk(), schemapb.DataType_Int64, metric, request.GetGroupByFieldIds(), false)
 						require.NoError(t, err)
 						stream, err := searchreducestream.NewHybridGroupReduceStream(request, shardStreams, chunkBytes)
 						require.NoError(t, err)
@@ -323,7 +365,7 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 									children[channel], err = searchreducestream.NewShardReduceStream(request, workers, 20)
 									s.Require().NoError(err)
 								}
-								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset())
+								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset(), false)
 								s.Require().NoError(err)
 								streams[index], err = searchreducestream.NewReduceStream(request, children, 20)
 								s.Require().NoError(err)

@@ -86,10 +86,12 @@ hits for earlier vectors to reach later vectors. Group By + ORDER BY retains all
 merged groups until EOF, then uses Proxy ordering and pagination. Search bypasses repeated Batch
 candidate reduction; Query passes its merged result through existing pagination
 and aggregate finalization. `Close()` cancels children, joins receives and releases
-resources; `Interrupt()` remains unimplemented. On a retryable ViewError, Proxy discards the
-attempt's output/metadata and recreates its streams within the retry budget,
-even after internal Chunks arrived. Other errors fail the attempt; streams do
-not resume. See [Search](../../../internal/proxy/dql/task_search.go#L1569) and
+resources; `Interrupt()` remains unimplemented. On a retryable ViewError or gRPC
+`UNAVAILABLE`, Query and ordinary Search can replan a failed vchannel before it
+emits any Chunk. After output, after shard retries are exhausted, and for Hybrid
+receive failures, Proxy discards the attempt's output/metadata and recreates all
+shard streams within its retry budget. Other errors fail the attempt; streams do
+not resume from a partial position. See [Search](../../../internal/proxy/dql/task_search.go#L1569) and
 [Query](../../../internal/proxy/dql/task_query.go#L1167) attempt ownership.
 
 ### Controls and Compatibility
@@ -819,21 +821,38 @@ closes its children. Sources:
 
 #### Retry ownership
 
-One ReduceStream tree represents one attempt; it never reconnects and resumes
-itself. Proxy `Execute()` owns planning, consumption and whole-attempt retries.
-Internal Chunks are not published to the SDK incrementally, so a classified
-retryable failure can discard the entire attempt even after Chunks arrived.
+Opening streams does not prefetch a Chunk. Query and ordinary Search retain
+Batch's `executeShard()` retry state across stream opening and consumption:
+attempt count, replica history and failed-worker/session information share one
+shard retry budget. Before the first per-vchannel Chunk is returned, a retryable
+receive failure closes and discards that vchannel reducer, including buffered
+rows and metadata, then replans and constructs a replacement reducer. Healthy
+vchannels remain open. The replacement starts from the beginning; it does not
+resume the failed worker's stream.
+
+Once any per-vchannel Chunk has been returned, including metadata-only output,
+the parent may have consumed it. A later failure must propagate to Proxy rather
+than silently restart the vchannel. Exhausted shard retries also propagate.
+Hybrid receive failures always propagate because its concurrent sub-searches
+share one QueryPlan; independent replanning could mix plans.
+
+Proxy `Execute()` then closes the entire tree, discards the attempt's rows,
+metadata and plans, and replans all vchannels within its retry budget. Internal
+Chunks are not published incrementally to the SDK, so discarding an entire
+attempt does not duplicate SDK output. Stream close cancels pending receiving
+or replanning and joins it before callers read the successful retained plans.
 
 ```text
 capture server settings once
 for attempt in allowed attempts:
     create new streams and attempt-local output/metadata
     consume until request window is satisfied or EOF
+        retry Query/ordinary Search vchannels locally only before their first Chunk
     classify original receive error before combining cleanup errors
     close all attempt streams
     if canceled or deadline expired:
         return error
-    if receive error is a retryable ViewError:
+    if receive error is a retryable ViewError or gRPC UNAVAILABLE:
         discard this attempt; continue with new planning
     if receive or cleanup failed:
         return error
@@ -842,12 +861,19 @@ return last attempt error
 ```
 
 The retryable ViewError codes are `VIEW_INVALIDATED`, `VIEW_NOT_FOUND`,
-`ON_SHUTDOWN` and `NOT_PRIMARY`. A raw gRPC `UNAVAILABLE` is not sufficient for
-QueryView replanning. Rows and metadata from different attempts must never mix.
-The existing shard setup retry remains; Proxy additionally owns failures during
-consumption. Live qualification must verify error preservation from the actual
-worker through gRPC, not only the local classification helper. Sources:
+`ON_SHUTDOWN` and `NOT_PRIMARY`; raw gRPC `UNAVAILABLE` also permits replanning.
+Worker errors retain the vchannel, replica and worker identity. Routing prefers
+an untried replica when available, while a generic `UNAVAILABLE` does not
+permanently exclude a worker. Session/SubConn failures retain the existing Batch
+worker exclusion and session-change behavior.
+
+Rows and metadata from different attempts must never mix. Only the successful
+attempt's plans, MVCC and execution summaries are retained, including empty
+results and Search requery. Live qualification must still verify failure handling
+through actual worker gRPC connections. Sources:
 [classification](../../../internal/views/viewerror/error.go#L55),
+[shard retries](../../../internal/views/queryclient/shard_client.go),
+[retained plans](../../../internal/views/queryclient/legacy_client.go),
 [Search attempts](../../../internal/proxy/dql/task_search.go#L1569),
 [Query attempts](../../../internal/proxy/dql/task_query.go#L1167).
 

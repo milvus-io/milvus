@@ -107,7 +107,7 @@ func runGroupedSearchComparison(t *testing.T, request *internalpb.SearchRequest,
 	batch, err := reduceResults(context.Background(), batchShards, request.GetNq(), request.GetTopk(), request.GetOffset(),
 		request.GetMetricType(), pkType, &planpb.QueryInfo{
 			GroupByFieldId: request.GetGroupByFieldId(), GroupByFieldIds: request.GetGroupByFieldIds(), GroupSize: request.GetGroupSize(),
-		}, false, false, 1, nil)
+		}, false, false, 1, nil, false)
 	require.NoError(t, err)
 	stream, err := searchreducestream.NewReduceStream(request, streams, chunkBytes)
 	require.NoError(t, err)

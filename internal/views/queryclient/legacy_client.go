@@ -47,14 +47,30 @@ type LegacySearchRequest struct {
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
+	// RetryErrors retain failed workers from earlier whole-Proxy stream attempts.
+	RetryErrors []error
 }
 
 type LegacySearchResult struct {
 	Results []*internalpb.SearchResults
 	Stream  searchreducestream.ReduceStream
 	// SubStreams contains one final stream per Hybrid sub-search, in request order.
-	SubStreams []searchreducestream.ReduceStream
-	Plans      []ShardPlan
+	SubStreams  []searchreducestream.ReduceStream
+	Plans       []ShardPlan  // Initial plans; streaming consumers use GetPlans after Close.
+	streamPlans []*ShardPlan // Plans replaced by pre-output shard retries.
+}
+
+// GetPlans returns the successful plans. Streaming callers must close all result
+// streams first, joining receives and any shard replanning before reading them.
+func (r *LegacySearchResult) GetPlans() []ShardPlan {
+	if r.streamPlans == nil {
+		return r.Plans
+	}
+	plans := make([]ShardPlan, len(r.streamPlans))
+	for i, plan := range r.streamPlans {
+		plans[i] = *plan
+	}
+	return plans
 }
 
 type LegacyQueryRequest struct {
@@ -70,15 +86,30 @@ type LegacyQueryRequest struct {
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
+	// RetryErrors retain failed workers from earlier whole-Proxy stream attempts.
+	RetryErrors []error
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
 	Plans []ShardPlan
 }
 
 type LegacyQueryResult struct {
-	Results []*internalpb.RetrieveResults
-	Stream  queryreducestream.ReduceStream
-	Plans   []ShardPlan
+	Results     []*internalpb.RetrieveResults
+	Stream      queryreducestream.ReduceStream
+	Plans       []ShardPlan
+	streamPlans []*ShardPlan // Plans replaced by pre-output shard retries; read after Close.
+}
+
+// GetPlans returns the successful plans after the result stream has been closed.
+func (r *LegacyQueryResult) GetPlans() []ShardPlan {
+	if r.streamPlans == nil {
+		return r.Plans
+	}
+	plans := make([]ShardPlan, len(r.streamPlans))
+	for i, plan := range r.streamPlans {
+		plans[i] = *plan
+	}
+	return plans
 }
 
 type legacyOnlyClient struct {
@@ -189,6 +220,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 	}
 	vchannelStreams := make([][]searchreducestream.ReduceStream, len(vchannels))
 	shardPlans := make([]ShardPlan, len(vchannels))
+	streamPlans := make([]*ShardPlan, len(vchannels))
 	var g errgroup.Group
 	for i := range vchannels {
 		i := i
@@ -198,12 +230,14 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 				Req:         req.Req,
 				MVCC:        req.MVCC,
 				BarrierMVCC: req.BarrierMVCC,
+				retryErrors: req.RetryErrors,
 			}, chunkBytes)
 			if err != nil {
 				return err
 			}
 			vchannelStreams[i] = streams
 			shardPlans[i] = *plan
+			streamPlans[i] = plan
 			return nil
 		})
 	}
@@ -238,9 +272,9 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 		}
 	}
 	if req.Req.GetIsAdvanced() {
-		return &LegacySearchResult{SubStreams: finalStreams, Plans: shardPlans}, nil
+		return &LegacySearchResult{SubStreams: finalStreams, Plans: shardPlans, streamPlans: streamPlans}, nil
 	}
-	return &LegacySearchResult{Stream: finalStreams[0], Plans: shardPlans}, nil
+	return &LegacySearchResult{Stream: finalStreams[0], Plans: shardPlans, streamPlans: streamPlans}, nil
 }
 
 func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
@@ -298,6 +332,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 
 	vchannelStreams := make([]queryreducestream.ReduceStream, len(vchannels))
 	shardPlans := make([]ShardPlan, len(vchannels))
+	streamPlans := make([]*ShardPlan, len(vchannels))
 	var group errgroup.Group
 	for i := range vchannels {
 		i := i
@@ -308,12 +343,14 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 				Schema:      req.Schema,
 				MVCC:        req.MVCC,
 				BarrierMVCC: req.BarrierMVCC,
+				retryErrors: req.RetryErrors,
 			}, chunkBytes)
 			if err != nil {
 				return err
 			}
 			vchannelStreams[i] = stream
 			shardPlans[i] = *plan
+			streamPlans[i] = plan
 			return nil
 		})
 	}
@@ -333,7 +370,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 		}
 		return nil, err
 	}
-	return &LegacyQueryResult{Stream: finalStream, Plans: shardPlans}, nil
+	return &LegacyQueryResult{Stream: finalStream, Plans: shardPlans, streamPlans: streamPlans}, nil
 }
 
 type legacySearchCollector struct {

@@ -517,6 +517,35 @@ func TestSearchTaskRetriesCompleteStreamAttempt(t *testing.T) {
 	}
 }
 
+func TestSearchTaskRetriesUnavailableStream(t *testing.T) {
+	for _, afterChunk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after_chunk_%t", afterChunk), func(t *testing.T) {
+			failed := &fakeLegacySearchStream{}
+			if afterChunk {
+				failed.recv = append(failed.recv, fakeLegacySearchRecv{chunk: newFinalSearchChunk([]int64{1}, []float32{1}, "failed")})
+			}
+			failed.recv = append(failed.recv, fakeLegacySearchRecv{err: status.Error(codes.Unavailable, "worker unavailable")})
+			replacement := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{2, 3}, []float32{0.9, 0.8}, "replacement")}}}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
+			legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
+				if attempt == 1 {
+					return &queryclient.LegacySearchResult{Stream: failed}, nil
+				}
+				return &queryclient.LegacySearchResult{Stream: replacement}, nil
+			}
+			task := newQueryViewSearchTask(t, legacy, 2)
+			require.NoError(t, task.Execute(t.Context()))
+			require.Equal(t, 2, legacy.searchCalled)
+			require.Len(t, legacy.lastSearchRequest.RetryErrors, 1)
+			require.Equal(t, codes.Unavailable, status.Code(legacy.lastSearchRequest.RetryErrors[0]))
+			require.Equal(t, 1, failed.closeCalls)
+			require.Equal(t, 1, replacement.closeCalls)
+			require.Equal(t, []int64{2, 3}, task.reducedResult.GetResults().GetIds().GetIntId().GetData())
+			require.Equal(t, map[string]uint64{"replacement": 1}, task.queryChannelsTs)
+		})
+	}
+}
+
 func TestSearchTaskRetriesStreamCreation(t *testing.T) {
 	replacement := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{
 		chunk: newFinalSearchChunk([]int64{2}, []float32{0.9}, "replacement"),
@@ -565,7 +594,6 @@ func TestSearchTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 	}{
 		{name: "unknown before Chunk", err: streamViewError(viewpb.ViewCode_VIEW_CODE_UNKNOWN, "unknown")},
 		{name: "unknown after Chunk", err: streamViewError(viewpb.ViewCode_VIEW_CODE_UNKNOWN, "unknown"), chunk: newFinalSearchChunk([]int64{1}, []float32{1}, "failed")},
-		{name: "raw unavailable", err: status.Error(codes.Unavailable, "transport unavailable")},
 		{name: "canceled", err: context.Canceled},
 		{name: "deadline exceeded", err: context.DeadlineExceeded},
 	} {
@@ -607,6 +635,61 @@ func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 	require.Equal(t, 3, legacy.searchCalled)
 	for _, stream := range streams {
 		require.Equal(t, 1, stream.closeCalls)
+	}
+}
+
+func TestQueryViewUnavailableRetryBudget(t *testing.T) {
+	for _, query := range []bool{false, true} {
+		for _, canceled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("query_%t/canceled_%t", query, canceled), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				failure := status.Error(codes.Unavailable, "worker disconnected")
+				legacy := &fakeLegacyQueryClient{maxRetries: 2}
+				var queryStreams []*fakeLegacyQueryStream
+				var searchStreams []*fakeLegacySearchStream
+				legacy.query = func(int) (*queryclient.LegacyQueryResult, error) {
+					if canceled {
+						cancel()
+					}
+					stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{err: failure}}}
+					queryStreams = append(queryStreams, stream)
+					return &queryclient.LegacyQueryResult{Stream: stream}, nil
+				}
+				legacy.search = func(int) (*queryclient.LegacySearchResult, error) {
+					if canceled {
+						cancel()
+					}
+					stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{err: failure}}}
+					searchStreams = append(searchStreams, stream)
+					return &queryclient.LegacySearchResult{Stream: stream}, nil
+				}
+				var err error
+				if query {
+					task := newQueryViewQueryTask(t, legacy, 2)
+					err = task.Execute(ctx)
+					require.Empty(t, task.resultBuf.Collect())
+				} else {
+					task := newQueryViewSearchTask(t, legacy, 2)
+					err = task.Execute(ctx)
+					require.Nil(t, task.reducedResult)
+				}
+				wantAttempts := 2
+				if canceled {
+					wantAttempts = 1
+					require.ErrorIs(t, err, context.Canceled)
+				} else {
+					require.Equal(t, codes.Unavailable, status.Code(err))
+				}
+				require.Equal(t, wantAttempts, legacy.queryCalled+legacy.searchCalled)
+				for _, stream := range queryStreams {
+					require.Equal(t, 1, stream.closeCalls)
+				}
+				for _, stream := range searchStreams {
+					require.Equal(t, 1, stream.closeCalls)
+				}
+			})
+		}
 	}
 }
 
@@ -1045,6 +1128,37 @@ func TestQueryTaskRetriesCompleteStreamAttempt(t *testing.T) {
 	}
 }
 
+func TestQueryTaskRetriesUnavailableStream(t *testing.T) {
+	for _, afterChunk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after_chunk_%t", afterChunk), func(t *testing.T) {
+			failed := &fakeLegacyQueryStream{}
+			if afterChunk {
+				failed.recv = append(failed.recv, fakeLegacyQueryRecv{chunk: newFinalQueryChunk([]int64{1}, 1)})
+			}
+			failed.recv = append(failed.recv, fakeLegacyQueryRecv{err: status.Error(codes.Unavailable, "worker unavailable")})
+			replacement := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{2, 3}, 2)}, {err: io.EOF}}}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
+			legacy.query = func(attempt int) (*queryclient.LegacyQueryResult, error) {
+				if attempt == 1 {
+					return &queryclient.LegacyQueryResult{Stream: failed}, nil
+				}
+				return &queryclient.LegacyQueryResult{Stream: replacement}, nil
+			}
+			task := newQueryViewQueryTask(t, legacy, 2)
+			require.NoError(t, task.Execute(t.Context()))
+			require.Equal(t, 2, legacy.queryCalled)
+			require.Len(t, legacy.lastQueryRequest.RetryErrors, 1)
+			require.Equal(t, codes.Unavailable, status.Code(legacy.lastQueryRequest.RetryErrors[0]))
+			require.Equal(t, 1, failed.closeCalls)
+			require.Equal(t, 1, replacement.closeCalls)
+			require.Len(t, task.resultBuf.Collect(), 1)
+			result := task.resultBuf.Collect()[0]
+			require.Equal(t, []int64{2, 3}, result.GetIds().GetIntId().GetData())
+			require.Equal(t, uint64(2), result.GetMvccTimestamp())
+		})
+	}
+}
+
 func TestQueryTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -1053,7 +1167,6 @@ func TestQueryTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 	}{
 		{name: "unknown before Chunk", err: streamViewError(viewpb.ViewCode_VIEW_CODE_UNKNOWN, "unknown")},
 		{name: "unknown after Chunk", err: streamViewError(viewpb.ViewCode_VIEW_CODE_UNKNOWN, "unknown"), chunk: newFinalQueryChunk([]int64{1}, 1)},
-		{name: "raw unavailable", err: status.Error(codes.Unavailable, "transport unavailable")},
 		{name: "canceled", err: context.Canceled},
 		{name: "deadline exceeded", err: context.DeadlineExceeded},
 	} {

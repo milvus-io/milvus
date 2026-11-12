@@ -15,6 +15,8 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1584,12 +1586,14 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	}
 
 	var lastErr error
+	var retryErrors []error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := legacy.Search(ctx, &queryclient.LegacySearchRequest{
 			Req:                    searchRequest,
 			BarrierMVCC:            t.MvccTimestamp,
 			AllowStreaming:         allowStreaming,
 			ReduceStreamChunkBytes: chunkBytes,
+			RetryErrors:            retryErrors,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -1630,10 +1634,6 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			storageCost.ScannedTotalBytes += r.GetScannedTotalBytes()
 		}
 
-		for _, plan := range result.Plans {
-			featureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
-			queryChannelsTs[plan.ShardID.VChannel] = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
-		}
 		var reducedResult *milvuspb.SearchResults
 		var reducedMetricType string
 		var reducedSubResults []*milvuspb.SearchResults
@@ -1645,13 +1645,15 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			reducedResult, reducedMetricType, recvErr = t.consumeSearchResultStream(result.Stream, searchRequest, metricType, collectMetadata)
 			closeErr = result.Stream.Close()
 		}
-		retryable := recvErr != nil && viewerror.AsViewError(recvErr).IsRetryable()
+		retryable := recvErr != nil && (viewerror.AsViewError(recvErr).IsRetryable() || status.Code(recvErr) == codes.Unavailable)
 		if recvErr != nil {
 			attemptErr := merr.Combine(recvErr, closeErr)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if retryable {
+				// Emitted output, exhausted shard retries, or shared Hybrid plans require a whole-attempt retry.
+				retryErrors = append(retryErrors, recvErr)
 				lastErr = attemptErr
 				continue
 			}
@@ -1659,6 +1661,14 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		}
 		if closeErr != nil {
 			return closeErr
+		}
+		// Plans can change during pre-output shard retries. Read them only after Close.
+		plans := result.GetPlans()
+		for _, plan := range plans {
+			featureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
+			if _, received := queryChannelsTs[plan.ShardID.VChannel]; !received {
+				queryChannelsTs[plan.ShardID.VChannel] = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
+			}
 		}
 
 		t.reducedResult = reducedResult
@@ -1670,7 +1680,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.isTopkReduce = isTopkReduce
 		t.isRecallEvaluation = isRecallEvaluation
 		t.storageCost = storageCost
-		t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
+		t.queryViewPlans = append([]queryclient.ShardPlan{}, plans...)
 		return nil
 	}
 	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)

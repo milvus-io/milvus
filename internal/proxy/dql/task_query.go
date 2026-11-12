@@ -10,6 +10,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1225,7 +1227,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			}
 		} else {
 			reducedResult, recvErr := t.consumeQueryResultStream(result.Stream)
-			retryable := recvErr != nil && viewerror.AsViewError(recvErr).IsRetryable()
+			retryable := recvErr != nil && (viewerror.AsViewError(recvErr).IsRetryable() || status.Code(recvErr) == codes.Unavailable)
 			closeErr := result.Stream.Close()
 			if recvErr != nil {
 				attemptErr := merr.Combine(recvErr, closeErr)
@@ -1233,6 +1235,8 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 					return ctx.Err()
 				}
 				if retryable {
+					// Shard-local recovery is exhausted or has emitted output; discard the whole attempt.
+					request.RetryErrors = append(request.RetryErrors, recvErr)
 					lastErr = attemptErr
 					continue
 				}
@@ -1241,7 +1245,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			if closeErr != nil {
 				return closeErr
 			}
-			for _, plan := range result.Plans {
+			for _, plan := range result.GetPlans() {
 				reducedResult.FeatureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 			}
 			t.resultBuf.Insert(reducedResult)
@@ -1249,7 +1253,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 
 		// Both frontiers belong to the final successful Strong WAL snapshot,
 		// including successful empty shards.
-		for _, plan := range result.Plans {
+		for _, plan := range result.GetPlans() {
 			if t.actualChannelsMvcc != nil {
 				t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
 			}
