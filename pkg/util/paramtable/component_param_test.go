@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
@@ -367,6 +368,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
 		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
 
+		assert.Equal(t, 1.0, Params.ArrowIOThreadPoolCoefficient.GetAsFloat())
+		assert.Equal(t, 0, Params.ArrowIOThreadPoolMaxCapacity.GetAsInt())
+
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 		params.Save(Params.ArrowReaderHoleSizeLimitBytes.Key, "1048576")
@@ -374,8 +378,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
-		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
-		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())
+		assert.Equal(t, int32(-1), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(-1), Params.IndexBuildReadWindowBytes.GetAsInt64())
 		params.Save(Params.StorageReaderThreadPoolSize.Key, "16")
 		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
@@ -543,6 +547,30 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := &params.ProxyCfg
+
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogMaxBytes.Version)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		params.Save(Params.SearchPlaceholderLogMaxBytes.Key, "32768")
+		assert.Equal(t, 32768, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		for _, value := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+			params.Save(Params.SearchPlaceholderLogMaxBytes.Key, value)
+			assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		}
+		params.Reset(Params.SearchPlaceholderLogMaxBytes.Key)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogRateLimit.Version)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		params.Save(Params.SearchPlaceholderLogRateLimit.Key, "50")
+		assert.Equal(t, float64(50), Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		for _, value := range []string{"NaN", "inf", "+Inf", "-Inf", "Infinity", "invalid", "1e999"} {
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, value))
+			assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat(), value)
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, "0.5"))
+			assert.Equal(t, 0.5, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		}
+		params.Reset(Params.SearchPlaceholderLogRateLimit.Key)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
 
 		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)
 
@@ -1542,4 +1570,87 @@ func TestSnapshotDescriptionLengthConfig(t *testing.T) {
 	field, ok := reflect.TypeOf(&params.ProxyCfg).Elem().FieldByName("MaxSnapshotDescriptionLength")
 	require.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
+}
+
+func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.Export)
+	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
+	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+}
+
+func TestCredentialBrokerStartupPolicy(t *testing.T) {
+	const key = "common.security.credentialBrokerAllowedEndpoints"
+	const endpoint = "https://broker.example.com/v1/credentials/assume-role"
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	defer bt.mgr.Close()
+	require.NoError(t, bt.Save(key, `["`+endpoint+`"]`))
+	var params ComponentParam
+	params.Init(bt)
+	require.Equal(t, []string{endpoint}, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	// Runtime updates cannot expand a startup security policy.
+	require.NoError(t, bt.Save(key, `["https://other"]`))
+	require.Equal(t, []string{endpoint}, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	bad := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	defer bad.mgr.Close()
+	require.NoError(t, bad.Save(key, `["file:///tmp/broker"]`))
+	require.Panics(t, func() { var invalid ComponentParam; invalid.Init(bad) })
+}
+
+func TestCredentialBrokerStartupPolicyJSON(t *testing.T) {
+	const key = "common.security.credentialBrokerAllowedEndpoints"
+	for _, raw := range []string{"", "  ", "[]"} {
+		t.Run("empty_"+raw, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			defer bt.mgr.Close()
+			require.NoError(t, bt.Save(key, raw))
+			var params ComponentParam
+			params.Init(bt)
+			require.Empty(t, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+			require.Error(t, params.CommonCfg.CredentialBrokerPolicy().Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: "https://broker/token"}))
+		})
+	}
+	for _, raw := range []string{"null", "{}", "true", `"https://broker/token"`, "https://broker/token,https://other/token", `["https://broker/token",]`, `[42]`, `[null]`, `[""]`} {
+		t.Run("invalid_"+raw, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			defer bt.mgr.Close()
+			require.NoError(t, bt.Save(key, raw))
+			require.Panics(t, func() { var params ComponentParam; params.Init(bt) })
+		})
+	}
+}
+
+func TestCredentialBrokerStartupPolicyYAMLQuery(t *testing.T) {
+	const endpoint = "https://broker.example/token?scope=a,b&audience=a,https://nested.example/token"
+	const other = "https://other.example/token"
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	yaml := `common:
+  security:
+    credentialBrokerAllowedEndpoints: '["` + endpoint + `","` + other + `"]'
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(yaml), 0o600))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(0))
+	defer bt.mgr.Close()
+	var params ComponentParam
+	params.Init(bt)
+	policy := params.CommonCfg.CredentialBrokerPolicy()
+	require.Equal(t, []string{endpoint, other}, policy.Endpoints())
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: endpoint}))
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCloudProvider: "azure", specutil.ExtfsKeyAzureCredentialEndpoint: endpoint}))
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: other}))
+	for _, denied := range []string{"https://nested.example/token", "https://broker.example/token?scope=a", "https://broker.example/token?scope=a,b&audience=a", endpoint + "&extra=1"} {
+		require.Error(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: denied}), denied)
+	}
+}
+
+func TestCredentialBrokerRejectsInvalidStartupQuery(t *testing.T) {
+	for _, endpoint := range []string{"https://broker/token?x=%zz", "https://broker/token?q=[1]"} {
+		bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+		require.NoError(t, bt.Save("common.security.credentialBrokerAllowedEndpoints", `["`+endpoint+`"]`))
+		require.Panics(t, func() { var params ComponentParam; params.Init(bt) })
+		bt.mgr.Close()
+	}
 }

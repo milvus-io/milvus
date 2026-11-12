@@ -354,10 +354,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         [this, batch_size](OffsetVector* input) -> ColumnVectorPtr {
         TargetBitmap valid_res;
         if (expr_->column_.element_level_) {
-            valid_res = TargetBitmap(batch_size, true);
-            if (input == nullptr) {
-                MoveCursor();
-            }
+            // A null element stays UNKNOWN. Without input this consumes the
+            // batch.
+            valid_res = ProcessElementValidity(input, batch_size);
         } else if (input != nullptr) {
             valid_res =
                 ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input);
@@ -1023,16 +1022,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
     const ValueType& val1 = lower_arg_.GetValue<ValueType>();
     const ValueType& val2 = upper_arg_.GetValue<ValueType>();
 
-    int index = -1;
-    if (expr_->column_.nested_path_.size() > 0) {
-        index = std::stoi(expr_->column_.nested_path_[0]);
-    }
+    int index = ParseArraySubscript(expr_->column_.nested_path_);
 
+    if (is_nested_array_field_) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "nested ARRAY field {} does not support element range "
+                  "predicates",
+                  field_id_.get());
+    }
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ lower_inclusive, upper_inclusive, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::ArrayView* data,
+    auto make_sub_batch = [&]<typename ArrayType>() {
+        return [
+            lower_inclusive,
+            upper_inclusive,
+            &processed_cursor,
+            &bitmap_input
+        ]<FilterType filter_type = FilterType::sequential>(
+            const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
@@ -1041,96 +1047,95 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             const ValueType& val1,
             const ValueType& val2,
             int index) {
-        AssertInfo(index >= 0,
-                   "array element range predicate requires nested path");
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
+            AssertInfo(index >= 0,
+                       "array element range predicate requires nested path");
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // We only need to update processed_cursor for bitmap_input indexing.
+            if (data == nullptr) {
+                processed_cursor += size;
+                return;
+            }
+            if (lower_inclusive && upper_inclusive) {
+                BinaryRangeElementFuncForArray<ValueType,
+                                               true,
+                                               true,
+                                               filter_type,
+                                               ArrayType>
+                    func;
+                func(val1,
+                     val2,
+                     index,
+                     data,
+                     valid_data,
+                     size,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+            } else if (lower_inclusive && !upper_inclusive) {
+                BinaryRangeElementFuncForArray<ValueType,
+                                               true,
+                                               false,
+                                               filter_type,
+                                               ArrayType>
+                    func;
+                func(val1,
+                     val2,
+                     index,
+                     data,
+                     valid_data,
+                     size,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+
+            } else if (!lower_inclusive && upper_inclusive) {
+                BinaryRangeElementFuncForArray<ValueType,
+                                               false,
+                                               true,
+                                               filter_type,
+                                               ArrayType>
+                    func;
+                func(val1,
+                     val2,
+                     index,
+                     data,
+                     valid_data,
+                     size,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+
+            } else {
+                BinaryRangeElementFuncForArray<ValueType,
+                                               false,
+                                               false,
+                                               filter_type,
+                                               ArrayType>
+                    func;
+                func(val1,
+                     val2,
+                     index,
+                     data,
+                     valid_data,
+                     size,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+            }
             processed_cursor += size;
-            return;
-        }
-        if (lower_inclusive && upper_inclusive) {
-            BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
-                func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
-        } else if (lower_inclusive && !upper_inclusive) {
-            BinaryRangeElementFuncForArray<ValueType, true, false, filter_type>
-                func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
-
-        } else if (!lower_inclusive && upper_inclusive) {
-            BinaryRangeElementFuncForArray<ValueType, false, true, filter_type>
-                func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
-
-        } else {
-            BinaryRangeElementFuncForArray<ValueType, false, false, filter_type>
-                func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
-        }
-        processed_cursor += size;
+        };
     };
 
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    val1,
-                                                    val2,
-                                                    index);
-    } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
-                                                              std::nullptr_t{},
-                                                              res,
-                                                              valid_res,
-                                                              val1,
-                                                              val2,
-                                                              index);
-    }
+    int64_t processed_size = ProcessArrayRows(
+        make_sub_batch, input, res, valid_res, val1, val2, index);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1186,11 +1191,9 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index below serves this expression; see SegmentExpr::
+    // FallbackToJsonStatsIfEligible().
 
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {

@@ -445,6 +445,9 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 }
 
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	if err := c.updateSchemaLoadFields(ctx, result); err != nil {
+		return err
+	}
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 	if err := c.meta.AlterCollection(ctx, result); err != nil {

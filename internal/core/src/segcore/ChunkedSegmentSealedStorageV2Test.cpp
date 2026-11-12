@@ -25,6 +25,11 @@
 #include <folly/ScopeGuard.h>
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include "storage/Util.h"
+#include "milvus-storage/common/extend_status.h"
+#include "common/Utils.h"
+#include <parquet/arrow/writer.h>
+#include <arrow/filesystem/mockfs.h>
 #include <boost/filesystem/operations.hpp>
 
 #include "test_utils/Constants.h"
@@ -1513,6 +1518,118 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         if (expected_valid[i]) {
             EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
         }
+    }
+}
+
+TEST_P(TestLazyManifest, UnsortedPkInPreservesQueryLoadPriority) {
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = std::make_shared<Schema>();
+    const auto type = GetParam() ? DataType::VARCHAR : DataType::INT64;
+    const auto pk = schema->AddDebugField("pk", type, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kRows = 64;
+    auto expected = DataGen(schema, kRows, 42);
+    std::vector<proto::plan::GenericValue> values(1);
+    IdArray ids;
+    if (GetParam()) {
+        auto value = expected.get_col<std::string>(pk)[0];
+        values[0].set_string_val(value);
+        ids.mutable_str_id()->add_data(value);
+    } else {
+        auto value = expected.get_col<int64_t>(pk)[0];
+        values[0].set_int64_val(value);
+        ids.mutable_int_id()->add_data(value);
+    }
+    // A fresh index and evicted PK column exercise the real translator load.
+    for (bool query : {false, true}) {
+        SCOPED_TRACE(query);
+        auto path = UniqueManifestTestPath("unsorted_pk_priority");
+        StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            kRows,
+            1,
+            TestLocalPath,
+            path,
+            fmt::format("{},{}", pk.get(), TimestampFieldID.get()));
+        auto segment = CreateV3ManifestSegment(
+            data, 3290 + query + 10 * GetParam(), 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto runtime = impl->TestCloneMutableRuntimeResourceState();
+        auto column = runtime->fields.at(pk);
+        column->ManualEvictCache();
+        bool loaded = false;
+        class CheckingPkTranslator
+            : public storagev2translator::PkIndexTranslator {
+         public:
+            CheckingPkTranslator(int64_t id,
+                                 std::shared_ptr<ChunkedColumnInterface> column,
+                                 DataType type,
+                                 bool query,
+                                 bool& loaded)
+                : PkIndexTranslator(id, std::move(column), type, false),
+                  query_(query),
+                  loaded_(loaded) {
+            }
+            std::vector<
+                std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<storagev2translator::PkIndexCell>>>
+            get_cells(milvus::OpContext* ctx,
+                      const std::vector<cachinglayer::cid_t>& cids) override {
+                loaded_ = true;
+                if (query_) {
+                    EXPECT_NE(ctx, nullptr);
+                    if (ctx)
+                        EXPECT_EQ(ctx->runtime_load_priority,
+                                  proto::common::LoadPriority::HIGH);
+                } else {
+                    EXPECT_TRUE(ctx == nullptr ||
+                                !ctx->runtime_load_priority.has_value());
+                }
+                return PkIndexTranslator::get_cells(ctx, cids);
+            }
+
+         private:
+            bool query_;
+            bool& loaded_;
+        };
+        runtime->pk_index_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                    std::make_unique<CheckingPkTranslator>(
+                        impl->get_segment_id(), column, type, query, loaded));
+        EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+        impl->TestPublishRuntimeResourceState(std::move(runtime));
+        if (query) {
+            auto plan = std::make_unique<query::RetrievePlan>(schema);
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            plan->plan_node_->plannodes_ =
+                milvus::test::CreateRetrievePlanByExpr(
+                    std::make_shared<expr::TermFilterExpr>(
+                        expr::ColumnInfo(pk, type), values));
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            EXPECT_GT(result->offset_size(), 0);
+        } else {
+            BitsetType bits(kRows, false);
+            static_cast<SegmentInternalInterface*>(impl)->search_ids(bits, ids);
+            EXPECT_TRUE(bits[0]);
+        }
+        EXPECT_TRUE(loaded);
     }
 }
 
@@ -3516,4 +3633,297 @@ TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
         EXPECT_EQ(c.expected, final.count())
             << "UnaryRangeFilterExpr(pk " << c.name << " X)";
     }
+}
+
+namespace {
+
+// A 2.6.0/2.6.1 StorageV2 segment: every column in column group 0 and no
+// FieldBinlog.child_fields, so the loader learns the stored fields only from
+// the packed file footer. items[source] is a nullable struct sub-field with
+// row 1 null and rows 0, 2, 3 holding two elements each.
+struct LegacyStructSegmentFiles {
+    SchemaPtr old_schema;
+    SchemaPtr new_schema;
+    FieldId pk;
+    FieldId source;
+    FieldId added;
+    std::string root;
+    std::string path;
+    int64_t rows = 4;
+    std::vector<std::vector<int32_t>> source_values;
+
+    proto::segcore::SegmentLoadInfo
+    LoadInfo() const {
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(1);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(rows);
+        info.set_storageversion(2);
+        auto* group = info.add_binlog_paths();
+        group->set_fieldid(0);
+        auto* log = group->add_binlogs();
+        log->set_log_path(path);
+        log->set_entries_num(rows);
+        log->set_memory_size(1024);
+        return info;
+    }
+};
+
+SchemaPtr
+MakeLegacyStructSchema(FieldId pk,
+                       FieldId source,
+                       std::optional<FieldId> added,
+                       int64_t version) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(version);
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->AddField(FieldName("items[source]"),
+                     source,
+                     DataType::ARRAY,
+                     DataType::INT32,
+                     true,
+                     false);
+    if (added.has_value()) {
+        schema->AddField(FieldName("items[added]"),
+                         *added,
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true,
+                         true);
+    }
+    return schema;
+}
+
+LegacyStructSegmentFiles
+WriteLegacyStructSegment(const std::string& name) {
+    LegacyStructSegmentFiles files;
+    files.pk = FieldId(START_USER_FIELDID);
+    files.source = FieldId(START_USER_FIELDID + 1);
+    files.added = FieldId(START_USER_FIELDID + 2);
+    files.old_schema =
+        MakeLegacyStructSchema(files.pk, files.source, std::nullopt, 1);
+    files.new_schema =
+        MakeLegacyStructSchema(files.pk, files.source, files.added, 2);
+    files.source_values = {{1, 2}, {}, {5, 6}, {7, 8}};
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    files.root = UniqueManifestTestPath(name);
+    files.path = files.root + "/0/1.parquet";
+    EXPECT_TRUE(fs->CreateDir(files.root + "/0").ok());
+
+    auto arrow_schema = files.old_schema->ConvertToArrowSchema();
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (const auto& field : arrow_schema->fields()) {
+        auto field_id =
+            FieldId(std::stoll(field->metadata()
+                                   ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                   .ValueOrDie()));
+        if (field_id != files.source) {
+            arrow::Int64Builder builder;
+            for (int64_t row = 0; row < files.rows; ++row) {
+                EXPECT_TRUE(builder.Append(row).ok());
+            }
+            arrays.push_back(builder.Finish().ValueOrDie());
+            continue;
+        }
+        // 2.6.0/2.6.1 store an Array as a serialized ScalarField per row.
+        arrow::BinaryBuilder builder;
+        for (int64_t row = 0; row < files.rows; ++row) {
+            if (row == 1) {
+                EXPECT_TRUE(builder.AppendNull().ok());
+                continue;
+            }
+            proto::schema::ScalarField value;
+            for (auto element : files.source_values[row]) {
+                value.mutable_int_data()->add_data(element);
+            }
+            EXPECT_TRUE(builder.Append(value.SerializeAsString()).ok());
+        }
+        arrays.push_back(builder.Finish().ValueOrDie());
+    }
+
+    std::vector<std::string> paths{files.path};
+    std::vector<std::vector<int>> column_groups{{0, 1, 2, 3}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto writer = milvus_storage::PackedRecordBatchWriter::Make(
+                      fs,
+                      paths,
+                      arrow_schema,
+                      storage_config,
+                      column_groups,
+                      16 * 1024 * 1024,
+                      ::parquet::default_writer_properties())
+                      .ValueOrDie();
+    EXPECT_TRUE(
+        writer
+            ->Write(arrow::RecordBatch::Make(arrow_schema, files.rows, arrays))
+            .ok());
+    EXPECT_TRUE(writer->Close().ok());
+    return files;
+}
+
+void
+ExpectLegacyStructRows(SegmentSealed* segment,
+                       const LegacyStructSegmentFiles& files) {
+    std::vector<int64_t> row_ids(files.rows);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    milvus::OpContext op_ctx;
+
+    auto source = segment->bulk_subscript(
+        &op_ctx, files.source, row_ids.data(), files.rows);
+    const auto& source_validity = GetFieldDataRowValidData(*source);
+    ASSERT_EQ(source_validity.size(), files.rows);
+    for (int64_t row = 0; row < files.rows; ++row) {
+        EXPECT_EQ(source_validity[row], row != 1) << "row " << row;
+        const auto& values =
+            source->scalars().array_data().data(row).int_data().data();
+        EXPECT_EQ(std::vector<int32_t>(values.begin(), values.end()),
+                  files.source_values[row])
+            << "row " << row;
+    }
+
+    auto added = segment->bulk_subscript(
+        &op_ctx, files.added, row_ids.data(), files.rows);
+    const auto& added_validity = GetFieldDataRowValidData(*added);
+    ASSERT_EQ(added_validity.size(), files.rows);
+    ASSERT_EQ(added->scalars().array_data().data_size(), files.rows);
+    for (int64_t row = 0; row < files.rows; ++row) {
+        // A null struct row stays a null row; every other row gets one null
+        // element per element of its stored sibling.
+        EXPECT_EQ(added_validity[row], row != 1) << "row " << row;
+        const auto& row_data = added->scalars().array_data().data(row);
+        EXPECT_EQ(row_data.valid_data_size(),
+                  static_cast<int>(files.source_values[row].size()))
+            << "row " << row;
+        for (bool valid : row_data.valid_data()) {
+            EXPECT_FALSE(valid) << "row " << row;
+        }
+    }
+
+    for (auto field_id : {files.source, files.added}) {
+        auto offsets = segment->GetStructElementOffsets(field_id);
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(offsets->GetTotalElementCount(), 6);
+    }
+}
+
+std::unique_ptr<SegmentSealed>
+LoadLegacyStructSegment(const SchemaPtr& schema,
+                        proto::segcore::SegmentLoadInfo info) {
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, 1, segcore::SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    EXPECT_NE(sealed, nullptr);
+    sealed->SetLoadInfo(std::move(info));
+    milvus::OpContext op_ctx;
+    milvus::tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, &op_ctx);
+    return segment;
+}
+
+class FailingOpenFileSystem : public arrow::fs::internal::MockFileSystem {
+ public:
+    explicit FailingOpenFileSystem(arrow::Status status)
+        : MockFileSystem(arrow::fs::TimePoint{}), status_(std::move(status)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string&) override {
+        return status_;
+    }
+
+ private:
+    arrow::Status status_;
+};
+
+ErrorCode
+FooterReadErrorCode(const milvus_storage::ArrowFileSystemPtr& fs,
+                    const std::string& path) {
+    try {
+        storage::GetPackedFileColumnFieldIDs(fs, path);
+    } catch (const SegcoreError& e) {
+        return e.get_error_code();
+    }
+    return ErrorCode::Success;
+}
+
+}  // namespace
+
+// A segment written by 2.6.0/2.6.1 has no child_fields. Loading it with a
+// schema that added an element-nullable struct sub-field must keep the stored
+// sub-field and give the new one N null elements per row (a null struct row
+// stays null), both on a direct load and on a schema-only reopen.
+TEST(ChunkedSegmentSealedStorageV2,
+     LegacyGroupWithoutChildFieldsBackfillsAddedStructChild) {
+    auto files = WriteLegacyStructSegment("legacy_struct_child");
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto cleanup = folly::makeGuard([&] { (void)fs->DeleteDir(files.root); });
+
+    EXPECT_EQ(storage::GetPackedFileColumnFieldIDs(fs, files.path),
+              (std::vector<int64_t>{RowFieldID.get(),
+                                    TimestampFieldID.get(),
+                                    files.pk.get(),
+                                    files.source.get()}));
+
+    {
+        SCOPED_TRACE("load with the new schema");
+        auto segment =
+            LoadLegacyStructSegment(files.new_schema, files.LoadInfo());
+        ExpectLegacyStructRows(segment.get(), files);
+    }
+    {
+        SCOPED_TRACE("load with the old schema, then reopen");
+        auto segment =
+            LoadLegacyStructSegment(files.old_schema, files.LoadInfo());
+        segment->Reopen(files.new_schema);
+        ExpectLegacyStructRows(segment.get(), files);
+        // Go re-sends the same legacy load info on later reopens.
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        milvus::OpContext op_ctx;
+        sealed->Reopen(&op_ctx, files.LoadInfo());
+        ExpectLegacyStructRows(segment.get(), files);
+    }
+}
+
+TEST(ChunkedSegmentSealedStorageV2, PackedFooterFieldIDReadErrorsKeepClass) {
+    // A transient object-storage failure stays the retriable 2045.
+    auto transient =
+        std::make_shared<FailingOpenFileSystem>(milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+            "slow down"));
+    EXPECT_EQ(FooterReadErrorCode(transient, "any/1.parquet"),
+              ErrorCode::StorageTransientError);
+
+    // A missing object is permanent, not an input error.
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto root = UniqueManifestTestPath("packed_footer_errors");
+    ASSERT_TRUE(fs->CreateDir(root).ok());
+    auto cleanup = folly::makeGuard([&] { (void)fs->DeleteDir(root); });
+    EXPECT_EQ(FooterReadErrorCode(fs, root + "/missing.parquet"),
+              ErrorCode::ObjectNotExist);
+
+    // A parquet file whose columns carry no field id is broken data.
+    auto plain_schema =
+        arrow::schema({arrow::field("c", arrow::int64(), false)});
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    auto table =
+        arrow::Table::Make(plain_schema, {builder.Finish().ValueOrDie()});
+    auto path = root + "/no_field_id.parquet";
+    auto sink = fs->OpenOutputStream(path).ValueOrDie();
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+                    *table, arrow::default_memory_pool(), sink, 1)
+                    .ok());
+    ASSERT_TRUE(sink->Close().ok());
+    EXPECT_EQ(FooterReadErrorCode(fs, path), ErrorCode::DataFormatBroken);
 }

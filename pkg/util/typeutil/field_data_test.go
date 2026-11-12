@@ -39,6 +39,11 @@ func TestFieldDataValidData(t *testing.T) {
 		field := &schemapb.ScalarField{ValidData: scalarValid}
 		assert.Equal(t, scalarValid, GetArrayElementValidData(field))
 		assert.Nil(t, GetArrayElementValidData((*schemapb.ScalarField)(nil)))
+
+		written := &schemapb.ScalarField{}
+		SetArrayElementValidData(written, scalarValid)
+		assert.Equal(t, scalarValid, GetArrayElementValidData(written))
+		SetArrayElementValidData(nil, scalarValid)
 	})
 
 	t.Run("nested vector field", func(t *testing.T) {

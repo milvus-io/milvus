@@ -823,7 +823,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * Sort all candidates in ascending order, and then return the limit smallest.
@@ -890,6 +892,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::unique_ptr<DataArray>
     bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t row_begin,
+                                   int64_t count,
+                                   const IStructElementOffsets& offsets) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   const int64_t* row_ids,
                                    int64_t count) const;
 
  protected:

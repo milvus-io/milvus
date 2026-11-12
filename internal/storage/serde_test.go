@@ -119,7 +119,7 @@ func TestSerDe(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.args.dt
 			v := tt.args.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None, false))
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].legacyArrowType(1, schemapb.DataType_None, false))
 			serdeMap[dt].serialize(builder, v, schemapb.DataType_None, 0, false)
 			// assert.True(t, ok)
 			a := builder.NewArray()
@@ -153,7 +153,7 @@ func TestSerDeCopy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dt := tt.dt
 			v := tt.v
-			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1, schemapb.DataType_None, false))
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].legacyArrowType(1, schemapb.DataType_None, false))
 			defer builder.Release()
 			serdeMap[dt].serialize(builder, v, schemapb.DataType_None, 0, false)
 			a := builder.NewArray()
@@ -328,6 +328,7 @@ func TestArrayOfVectorArrowType(t *testing.T) {
 			listType, ok := nonNullableArrowType.(*arrow.ListType)
 			assert.True(t, ok)
 			assert.Equal(t, tt.expectedChild, listType.Elem())
+			assert.True(t, listType.ElemField().Nullable)
 
 			elementNullableArrowType := getArrayOfVectorArrowType(tt.elementType, tt.dim, true)
 			listType, ok = elementNullableArrowType.(*arrow.ListType)
@@ -462,7 +463,7 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 
-			arrowType := entry.arrowType(tt.dim, tt.elementType, false)
+			arrowType := entry.legacyArrowType(tt.dim, tt.elementType, false)
 			assert.NotNil(t, arrowType)
 
 			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
@@ -519,7 +520,7 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 
 func TestArrayOfVectorSerializationRejectsInvalidPayloadLength(t *testing.T) {
 	entry := serdeMap[schemapb.DataType_ArrayOfVector]
-	arrowType := entry.arrowType(4, schemapb.DataType_FloatVector, false)
+	arrowType := entry.legacyArrowType(4, schemapb.DataType_FloatVector, false)
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 	defer builder.Release()
 
@@ -588,7 +589,7 @@ func TestArrayOfVectorSerializationRejectsInvalidElementValidity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 			builder := array.NewBuilder(memory.DefaultAllocator,
-				entry.arrowType(tt.dim, tt.elementType, tt.elementNullable))
+				entry.legacyArrowType(tt.dim, tt.elementType, tt.elementNullable))
 			defer builder.Release()
 
 			err := entry.serialize(builder, tt.row, tt.elementType, tt.dim, tt.elementNullable)
@@ -606,7 +607,7 @@ func TestArrayOfVectorSerializationRejectsWrongChildBuilder(t *testing.T) {
 		t.Run(fmt.Sprint(elementNullable), func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 			builder := array.NewBuilder(memory.DefaultAllocator,
-				entry.arrowType(2, schemapb.DataType_FloatVector, !elementNullable))
+				entry.legacyArrowType(2, schemapb.DataType_FloatVector, !elementNullable))
 			defer builder.Release()
 			row := makeFloatVec(2, 1, 2)
 			if elementNullable {
@@ -656,7 +657,7 @@ func TestElementNullableArrayOfVectorSerializationUsesSchemaDim(t *testing.T) {
 	entry := serdeMap[schemapb.DataType_ArrayOfVector]
 	builder := array.NewBuilder(
 		memory.DefaultAllocator,
-		entry.arrowType(schemaDim, schemapb.DataType_FloatVector, true),
+		entry.legacyArrowType(schemaDim, schemapb.DataType_FloatVector, true),
 	)
 	defer builder.Release()
 
@@ -676,7 +677,7 @@ func TestElementNullableArrayOfVectorNullChildrenHaveNoVectorPayload(t *testing.
 	entry := serdeMap[schemapb.DataType_ArrayOfVector]
 	builder := array.NewBuilder(
 		memory.DefaultAllocator,
-		entry.arrowType(dim, schemapb.DataType_FloatVector, true),
+		entry.legacyArrowType(dim, schemapb.DataType_FloatVector, true),
 	)
 	defer builder.Release()
 
@@ -816,7 +817,7 @@ func TestArrayOfVectorEmptyArray(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := serdeMap[schemapb.DataType_ArrayOfVector]
 
-			arrowType := entry.arrowType(tt.dim, tt.elementType, false)
+			arrowType := entry.legacyArrowType(tt.dim, tt.elementType, false)
 			assert.NotNil(t, arrowType)
 
 			// Create empty VectorField based on element type
@@ -1580,10 +1581,9 @@ func TestBuildRecord_ElementNullableArrayRoundTrip(t *testing.T) {
 	record := recordBuilder.NewRecord()
 	defer record.Release()
 
-	entry := serdeMap[schemapb.DataType_Array]
-	value, err := entry.deserialize(record.Column(0), 0, schemapb.DataType_Int64, 0, true, true)
+	value, err := DeserializeNativeArrayRow(record.Column(0), 0, schema.Fields[0])
 	require.NoError(t, err)
-	row := value.(*schemapb.ScalarField)
+	row := value
 	assert.Equal(t, []bool{true, false}, row.GetValidData())
 	assert.Equal(t, []int64{10, 0}, row.GetLongData().GetData())
 }

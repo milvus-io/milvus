@@ -57,7 +57,7 @@ func TestBuildMaterializationStatsDelta(t *testing.T) {
 	memorySizes := map[int64]int{102: 4096, 103: 2048}
 	nullCounts := map[int64]int64{102: 0, 103: 7}
 
-	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, 512)
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, nil, 512)
 
 	assert.EqualValues(t, 6144, got.GetInsertBinlogSize())
 	assert.EqualValues(t, 2, got.GetInsertBinlogCount())
@@ -84,9 +84,23 @@ func TestBuildMaterializationStatsDelta(t *testing.T) {
 func TestBuildMaterializationStatsDeltaMissingMemorySize(t *testing.T) {
 	columnGroups := []storagecommon.ColumnGroup{{GroupID: 104, Fields: []int64{104}}}
 
-	got := buildMaterializationStatsDelta(columnGroups, map[int64]int{}, map[int64]int64{104: 0}, 0)
+	got := buildMaterializationStatsDelta(columnGroups, map[int64]int{}, map[int64]int64{104: 0}, nil, 0)
 
 	assert.EqualValues(t, 0, got.GetInsertBinlogSize())
 	assert.EqualValues(t, 1, got.GetInsertBinlogCount())
 	assert.Equal(t, map[int64]int64{104: 0}, got.GetNullCounts())
+}
+
+func TestBuildMaterializationStatsDeltaValidElementCounts(t *testing.T) {
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 102, Fields: []int64{102}},
+		{GroupID: 103, Fields: []int64{103}},
+	}
+	got := buildMaterializationStatsDelta(columnGroups, map[int64]int{102: 10, 103: 10},
+		map[int64]int64{102: 1, 103: 0}, map[int64]int64{103: 0}, 0)
+	// Only the VectorArray output (103) carries a count, zero included.
+	assert.Equal(t, map[int64]int64{103: 0}, got.GetValidElementCounts())
+
+	got = buildMaterializationStatsDelta(columnGroups, map[int64]int{}, map[int64]int64{}, nil, 0)
+	assert.Nil(t, got.GetValidElementCounts())
 }

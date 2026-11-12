@@ -443,13 +443,13 @@ StructElementOffsetsSealed::BuildFromColumn(
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
                 if (!valid_flags || valid_flags[i]) {
-                    array_len = vector_array_views[i].physical_length();
+                    array_len = vector_array_views[i].length();
                 }
 
                 append_array_length(array_len, !valid_flags || valid_flags[i]);
             }
         }
-    } else if (field_meta.is_nested_array()) {
+    } else if (field_meta.is_native_list_array()) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             CheckOffsetsCancellation(op_ctx);
             auto pinned_chunk = column.GetChunk(op_ctx, chunk_id);

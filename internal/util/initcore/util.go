@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -122,7 +123,13 @@ func UpdateArrowIOThreadPoolCapacity(threads int) {
 // when the coefficient is unset, which signals the C++ side to keep arrow's
 // built-in default (8).
 func ResolveArrowIOThreadPoolCapacity() int {
-	cfg := &paramtable.Get().CommonCfg
+	return resolveArrowIOThreadPoolCapacity(paramtable.Get())
+}
+
+// resolveArrowIOThreadPoolCapacity is ResolveArrowIOThreadPoolCapacity for
+// the given param table.
+func resolveArrowIOThreadPoolCapacity(params *paramtable.ComponentParam) int {
+	cfg := &params.CommonCfg
 	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
 	if coef <= 0 {
 		return 0
@@ -189,6 +196,26 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
 }
 
+// LogLoonReaderConfig logs the milvus-storage reader settings in effect, with
+// automatic (-1) values resolved, so the startup log shows what a DataNode
+// actually runs with. `source` identifies the component.
+func LogLoonReaderConfig(pt *paramtable.ComponentParam, source string) {
+	pool, poolErr := ResolveLoonReaderThreadPoolSize(pt)
+	window, windowErr := ResolveIndexBuildReadWindowBytes(pt)
+	if err := merr.Combine(poolErr, windowErr); err != nil {
+		mlog.Warn(context.TODO(), "cannot resolve loon reader params",
+			mlog.String("source", source), mlog.Err(err))
+		return
+	}
+	mlog.Info(context.TODO(), "loon reader params in effect",
+		mlog.String("source", source),
+		mlog.String("readerThreadPoolSizeConfigured", pt.CommonCfg.StorageReaderThreadPoolSize.GetValue()),
+		mlog.Int64("readerThreadPoolSizeRequested", pool),
+		mlog.Int64("readerThreadPoolSizeEffective", int64(EffectiveLoonReaderThreadPoolSize())),
+		mlog.String("indexBuildReadWindowBytesConfigured", pt.CommonCfg.IndexBuildReadWindowBytes.GetValue()),
+		mlog.Int64("indexBuildReadWindowBytes", window))
+}
+
 // RegisterLoonReaderConfigWatchers wires hot-reload of the milvus-storage
 // reader thread pool size and the index-build read window. `source` is
 // included in the log entry for the same reason as in
@@ -228,7 +255,11 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 		// requested == 0 with effective == 1 is the pool being absent (or
 		// sized 1) - not a failure to destroy it. Only warn when a real
 		// pool survives a disable request.
-		requested := pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+		// The requested size is the resolved one: -1 (auto) stands for the
+		// hardware-derived size, which may itself be 0 outside a DataNode.
+		// It was validated by InitLoonReaderConfig just above.
+		requested, _ := ResolveLoonReaderThreadPoolSize(pt)
+		window, _ := ResolveIndexBuildReadWindowBytes(pt)
 		effective := int64(EffectiveLoonReaderThreadPoolSize())
 		if requested == 0 && effective > 1 {
 			mlog.Warn(context.TODO(),
@@ -241,12 +272,29 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 			mlog.String("source", source),
 			mlog.Int64("readerThreadPoolSizeRequested", requested),
 			mlog.Int64("readerThreadPoolSizeEffective", effective),
-			mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()))
+			mlog.Int64("indexBuildReadWindowBytes", window))
 	}
 	pt.Watch(pt.CommonCfg.StorageReaderThreadPoolSize.Key,
 		config.NewHandler(pt.CommonCfg.StorageReaderThreadPoolSize.Key, handler))
 	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key,
 		config.NewHandler(pt.CommonCfg.IndexBuildReadWindowBytes.Key, handler))
+	// An automatic (-1) read window is sized from the arrow read range size
+	// and the arrow IO pool size, so re-resolve it when either changes too.
+	// An explicit window does not depend on them, so skip the
+	// reconfiguration then.
+	autoWindowHandler := func(evt *config.Event) {
+		if pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64() != loonReaderAuto {
+			return
+		}
+		handler(evt)
+	}
+	for _, key := range []string{
+		pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
+		pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+	} {
+		pt.Watch(key, config.NewHandler("loon-reader-"+key, autoWindowHandler))
+	}
 }
 
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {

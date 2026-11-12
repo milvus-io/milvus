@@ -1443,6 +1443,13 @@ JsonKeyStats::LoadSharedKeyIndex(
 
 void
 JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
+    Load(ctx, config, nullptr);
+}
+
+void
+JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
+                   const Config& config,
+                   milvus::OpContext* op_ctx) {
     auto enable_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(false);
     if (enable_mmap) {
@@ -1455,6 +1462,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                  mmap_filepath_);
     }
     load_priority_ = config[milvus::LOAD_PRIORITY];
+    const auto priority = milvus::ResolveLoadPriority(op_ctx, load_priority_);
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              static_cast<int>(load_priority_));
@@ -1509,7 +1517,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             segment_id_,
             field_id_);
         auto local_meta_file = disk_file_manager_->CacheJsonStatsMetaToDisk(
-            meta_files[0], load_priority_);
+            meta_files[0], priority);
         LoadMetaFile(local_meta_file);
     }
 
@@ -1531,10 +1539,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    AssertInfo(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path),
-               "failed to upload meta file: {} for segment {}",
-               meta_file_path,
-               segment_id_);
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

@@ -240,9 +240,9 @@ For each current segment:
 1. If any fragment is missing from the new external fragment set, the segment
    is invalidated and its surviving fragments are treated as orphan fragments.
 2. If all fragments still exist and all current external fields are covered by
-   fake binlogs, the segment is kept unchanged.
-3. If all fragments still exist but some external fields are missing from fake
-   binlog `ChildFields`, the segment is patched in place.
+   fake binlogs or the pinned manifest, the segment is kept unchanged.
+3. If all fragments still exist but some external fields are absent from both
+   fake binlog `ChildFields` and the pinned manifest, the segment is patched in place.
 
 Orphan fragments are still balanced into new segments using the existing
 refresh path.
@@ -252,9 +252,14 @@ refresh path.
 DataNode derives target external fields from the task schema:
 
 - Only fields with `external_field` are considered.
-- Existing coverage is read from segment fake binlog `ChildFields`.
-- A field is missing if the schema requires it and no fake binlog child field
-  covers it.
+- Existing coverage is first read from segment fake binlog `ChildFields`.
+- Fields not advertised there are checked together against the pinned segment
+  manifest. StorageV3 fake binlogs are not persisted, so their absence after a
+  DataCoord restart does not prove that the physical columns are missing.
+- `StorageColumnResolver` supplies physical names for this check: numeric field
+  IDs for `milvus-table`, and `external_field` names for ordinary file formats.
+- Only fields absent from both sources are returned as missing. Manifest read
+  failures abort the task rather than being treated as missing columns.
 
 The missing set is expressed as external column names, not Milvus field IDs,
 because manifest column groups reference external source column names.
@@ -276,6 +281,14 @@ When missing columns are detected for an otherwise unchanged segment, DataNode:
 
 The old segment is not mutated in DataNode. DataCoord performs the actual meta
 patch after validation.
+
+The sampling, memory estimate, and fake-binlog construction are shared with
+manifest-only deltalog updates. After catalog recovery a StorageV3 segment can
+have all physical columns but no fake binlogs. Before returning such a same-ID
+manifest patch, DataNode reconstructs its fake binlogs from the final manifest
+without appending columns or recomputing Functions. Existing binlogs are reused;
+sampling failure aborts the task without publishing a partial result. Unchanged
+segments returned only through `kept_segments` do not need this reconstruction.
 
 ### 6.4 Worker Response
 

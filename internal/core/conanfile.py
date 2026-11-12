@@ -51,6 +51,7 @@ class MilvusConan(ConanFile):
         "aws-crt-cpp/*:shared": True,
         "aws-c-*/*:shared": True,
         "aws-checksums/*:shared": True,
+        "s2n/*:shared": True,
         "openssl/*:shared": True,
         "openssl/*:no_apps": True,
         "libevent/*:shared": True,
@@ -139,12 +140,12 @@ class MilvusConan(ConanFile):
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.
         self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
-        self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
+        self.requires("aws-sdk-cpp/1.11.921@milvus/dev#0b229410d5498d3bacc19ccf57334b30", force=True)
         # Tests call CRT APIs directly. A direct requirement exposes its link
         # libraries even when the shared SDK hides transitive libraries.
         # Keep this version in sync with the SDK recipe; do not force it, so
         # an incompatible SDK upgrade produces a Conan dependency conflict.
-        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750")
+        self.requires("aws-crt-cpp/0.44.3#43f6408847655d35224320f4774bfcb9")
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
@@ -157,9 +158,6 @@ class MilvusConan(ConanFile):
             self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
-        # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
-        if self.settings.os in ["Linux", "FreeBSD"]:
-            self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
 
     def validate(self):
         # Profiles and command-line options can override default_options.

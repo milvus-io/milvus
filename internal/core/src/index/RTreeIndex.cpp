@@ -396,9 +396,7 @@ RTreeIndex<T>::Upload(const Config& config) {
             continue;
         }
 
-        AssertInfo(disk_file_manager_->AddFile(it->path().string()),
-                   "failed to add index file: {}",
-                   it->path().string());
+        disk_file_manager_->AddFileOrThrow(it->path().string());
     }
 
     // 3. Collect remote paths to size mapping

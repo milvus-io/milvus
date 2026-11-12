@@ -72,18 +72,10 @@ SealedIndexTranslator::SealedIndexTranslator(
           milvus::segcore::getCellDataType(
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          // if index data supports lazy load internally, we always use sync for index metadata
-          // warmup policy will be used for index internally
-          // currently only vector index is possible to support lazy load
-          (IsVectorDataType(load_index_info->field_type) &&
-           knowhere::IndexFactory::Instance().FeatureCheck(
-               index_info_.index_type, knowhere::feature::LAZY_LOAD))
-              ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
-              : milvus::segcore::getCacheWarmupPolicy(
-                    load_index_info->warmup_policy,
-                    /* is_vector */
-                    IsVectorDataType(load_index_info->field_type),
-                    /* is_index */ true),
+          milvus::segcore::getCacheWarmupPolicy(
+              load_index_info->warmup_policy,
+              /* is_vector */ IsVectorDataType(load_index_info->field_type),
+              /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load
@@ -190,6 +182,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                  const std::vector<cid_t>& cids) {
+    auto config = config_;
+    if (ctx != nullptr && ctx->runtime_load_priority.has_value()) {
+        config[milvus::LOAD_PRIORITY] = *ctx->runtime_load_priority;
+    }
+
     int64_t segment_id = std::stoll(index_load_info_.segment_id);
 
     std::unique_ptr<milvus::index::IndexBase> index =
@@ -205,14 +202,14 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                          "index_files" / index_load_info_.index_id /
                          index_load_info_.segment_id /
                          index_load_info_.field_id;
-        config_[milvus::index::ENABLE_MMAP] = "true";
-        config_[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
-        config_[milvus::index::EMB_LIST_META_PATH] =
+        config[milvus::index::ENABLE_MMAP] = "true";
+        config[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
+        config[milvus::index::EMB_LIST_META_PATH] =
             (base_path / index::EMB_LIST_META_FILE_NAME).string();
-        config_[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
+        config[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
             (base_path / index::EMB_LIST_RAW_INDEX_FILE_NAME).string();
     } else {
-        config_[milvus::index::ENABLE_MMAP] = "false";
+        config[milvus::index::ENABLE_MMAP] = "false";
     }
 
     // Check for cancellation before loading index data
@@ -221,16 +218,16 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     // Check scalar index engine version for V3 routing
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
-            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_info_.field_type)) {
-        config_[milvus::index::COLLECTION_ID] =
+        config[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
-        LOG_DEBUG("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadUnified(config_, ctx);
+        LOG_DEBUG("load V3 scalar index with configs: {}", config.dump());
+        index->LoadUnified(config, ctx);
     } else {
-        LOG_DEBUG("load index with configs: {}", config_.dump());
-        index->Load(ctx_, config_);
+        LOG_DEBUG("load index with configs: {}", config.dump());
+        index->Load(ctx_, config);
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>

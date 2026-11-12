@@ -280,7 +280,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
+	if err != nil {
+		return nil, nil, err
+	}
 	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
 	if err != nil {
 		return nil, nil, err
@@ -354,7 +357,29 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		w.GetWrittenPaths,
 		getFieldNullCounts,
 	)
+	setFieldValidElementCounts(logs, bw.columnGroups, bw.schema, rec)
 	return logs, files, nil
+}
+
+// setFieldValidElementCounts records the valid element counts of the
+// VectorArray fields of rec on the binlog of each column group.
+func setFieldValidElementCounts(logs map[int64]*datapb.FieldBinlog, columnGroups []storagecommon.ColumnGroup,
+	schema *schemapb.CollectionSchema, rec storage.Record,
+) {
+	counts, _ := storage.CollectVectorArrayValidElements(schema, rec, nil, nil)
+	if len(counts) == 0 {
+		return
+	}
+	for _, columnGroup := range columnGroups {
+		fieldBinlog := logs[columnGroup.GroupID]
+		if fieldBinlog == nil {
+			continue
+		}
+		groupCounts := storage.ColumnGroupValidElementCounts(columnGroup, counts)
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.FieldValidElementCounts = groupCounts
+		}
+	}
 }
 
 func buildV3ColumnGroupFieldBinlogs(

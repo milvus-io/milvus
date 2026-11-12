@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NumRows reads only the .npy headers to get the exact row count of one
@@ -33,13 +36,9 @@ import (
 // Paths for omitted nullable/default columns are simply absent and contribute
 // nothing.
 //
-// Only the paths the reader will open are inspected. Sizing runs before the
-// broadcast, so validating a path the reader ignores would reject at submit an
-// input that imports fine -- a redundant .npy naming no schema field is dropped
-// by CreateReaders, and must be dropped here by the same rule. When that
-// leaves no path at all, this returns 0 rather than an error: the file carries no
-// readable column, and saying so is the reader's job, at the same place it said
-// so before this sizing stage existed.
+// Only the paths the reader will open are inspected, and each header is validated
+// against its field with the reader's own checks: Import V3 finishes a zero-row job
+// before any reader is created.
 func NumRows(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (int64, error) {
 	rows, _, _, err := NumRowsAndBytes(ctx, cm, schema, paths)
 	return rows, err
@@ -51,8 +50,17 @@ func NumRows(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Coll
 // Import V3 reshard BFD packs tasks by; the physical size comes for free from the
 // SizingReaderAt so callers need not size the objects again.
 func NumRowsAndBytes(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (int64, int64, int64, error) {
+	if err := ValidateSchema(schema, paths); err != nil {
+		return 0, 0, 0, err
+	}
+
+	sourcedPaths, _ := resolveFieldPaths(schema, paths)
+	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
+
 	var rows, logicalBytes, fileSize int64
-	for _, path := range SourcePaths(schema, paths) {
+	for name, path := range sourcedPaths {
 		ra, err := common.NewSizingReaderAt(ctx, cm, path)
 		if err != nil {
 			return 0, 0, 0, err
@@ -66,10 +74,19 @@ func NumRowsAndBytes(ctx context.Context, cm storage.ChunkManager, schema *schem
 		if err != nil {
 			return 0, 0, 0, common.WrapDecodeErr(err, fmt.Sprintf("read numpy header failed, path=%s", path))
 		}
-		shape := r.Header.Descr.Shape
-		if len(shape) == 0 {
-			continue
+		field := nameToField[name]
+		dim := int64(1)
+		if typeutil.IsVectorType(field.GetDataType()) && !typeutil.IsSparseFloatVectorType(field.GetDataType()) {
+			dim, err = typeutil.GetDim(field)
+			if err != nil {
+				return 0, 0, 0, err
+			}
 		}
+		if err := validateHeader(r, field, int(dim)); err != nil {
+			return 0, 0, 0, err
+		}
+
+		shape := r.Header.Descr.Shape
 		if n := int64(shape[0]); n > rows {
 			rows = n
 		}

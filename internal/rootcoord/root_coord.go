@@ -70,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -157,6 +158,8 @@ type Core struct {
 	streamingCoord *streamingcoord.Server
 	quotaCenter    *QuotaCenter
 	keyManager     *KeyManager
+
+	schemaLoadFieldsUpdater schemaLoadFieldsUpdateFunc
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -2775,11 +2778,16 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	ctxLog.Debug(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	var visibility *internalpb.CollectionVisibilitySnapshot
+	if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+		visibility = rbacutil.CompileCollectionVisibility(policies, collectionVisibilityGroups(allGroups))
+	}
 	return &internalpb.ListPolicyResponse{
-		Status:          merr.Success(),
-		PolicyInfos:     expandPolicies,
-		UserRoles:       userRoles,
-		PrivilegeGroups: allGroups,
+		Status:               merr.Success(),
+		PolicyInfos:          expandPolicies,
+		UserRoles:            userRoles,
+		PrivilegeGroups:      allGroups,
+		CollectionVisibility: visibility,
 	}, nil
 }
 
@@ -3101,64 +3109,11 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GetName() == "" {
-		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
-	}
-
-	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
+	if err := c.broadcastAddFileResource(ctx, req); err != nil {
 		return merr.Status(err), nil
-	} else if !exist {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
-
-	alreadyExists := false
-	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-		resources, _ := c.meta.ListFileResource(ctx)
-		for _, resource := range resources {
-			if resource.GetName() != req.GetName() {
-				continue
-			}
-			if resource.GetPath() != req.GetPath() {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
-			}
-			alreadyExists = true
-			break
-		}
-
-		if !alreadyExists {
-			size, err := c.storage.Size(ctx, req.GetPath())
-			if err != nil {
-				return merr.Status(err), nil
-			}
-			if size < 0 {
-				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
-			}
-			if size > maxFileSize {
-				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
-					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
-			}
-		}
-	}
-
-	if !alreadyExists {
-		id, err := c.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-		resource := &internalpb.FileResourceInfo{
-			Id:   int64(id),
-			Name: req.GetName(),
-			Path: req.GetPath(),
-		}
-		err = c.meta.AddFileResource(ctx, resource)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-	}
-
 	if c.fileResourceObserver != nil {
-		err := c.fileResourceObserver.Sync()
-		if err != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil
 		}
@@ -3181,14 +3136,12 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	err, exist := c.meta.RemoveFileResource(ctx, req.GetName())
+	removed, err := c.broadcastRemoveFileResource(ctx, req)
 	if err != nil {
 		return merr.Status(err), nil
 	}
-
-	if exist && c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
-		if err != nil {
+	if removed && c.fileResourceObserver != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "remove file resource success but some node sync failed")), nil
 		}
@@ -3427,21 +3380,13 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 			return nil, err
 		}
 		for _, entity := range entities {
-			objectType := entity.GetObject().GetName()
-			priv := entity.GetGrantor().GetPrivilege().GetName()
-			if objectType == commonpb.ObjectType_Global.String() &&
-				priv == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
-				privilegeColls.Insert(util.AnyWord)
-				return privilegeColls, nil
+			collectionName, visible := rbacutil.CollectionVisibilityName(entity, func(name string) bool {
+				_, custom := customPrivilegeGroupMap[name]
+				return custom || Params.RbacConfig.IsCollectionPrivilegeGroup(name)
+			})
+			if !visible {
+				continue
 			}
-			// should list collection level built-in privilege group or custom privilege group objects
-			if objectType != commonpb.ObjectType_Collection.String() {
-				_, isCustomGroup := customPrivilegeGroupMap[priv]
-				if !isCustomGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
-					continue
-				}
-			}
-			collectionName := entity.GetObjectName()
 			privilegeColls.Insert(collectionName)
 			if collectionName == util.AnyWord {
 				return privilegeColls, nil

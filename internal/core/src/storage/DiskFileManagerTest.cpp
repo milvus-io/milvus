@@ -24,9 +24,12 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <initializer_list>
+#include <iterator>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -54,12 +57,21 @@
 #include "filemanager/InputStream.h"
 #include "filemanager/OutputStream.h"
 #include "gtest/gtest.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/RTreeIndex.h"
+#include "index/TextMatchIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/bson_inverted.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/index_c.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/index/index_factory.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/cgo_msg.pb.h"
 #include "pb/common.pb.h"
 #include "pb/index_coord.pb.h"
 #include "storage/ChunkManager.h"
@@ -159,8 +171,12 @@ CollectIdMapMmapDirectories(const std::string& root_path,
 // (S3Error), so a test can check which code reaches the caller.
 class FailingWriteChunkManager : public ChunkManager {
  public:
-    FailingWriteChunkManager(ChunkManagerPtr inner, std::string fail_substr)
-        : inner_(std::move(inner)), fail_substr_(std::move(fail_substr)) {
+    FailingWriteChunkManager(ChunkManagerPtr inner,
+                             std::string fail_substr,
+                             ErrorCode code = ErrorCode::S3Error)
+        : inner_(std::move(inner)),
+          fail_substr_(std::move(fail_substr)),
+          code_(code) {
     }
 
     bool
@@ -236,7 +252,7 @@ class FailingWriteChunkManager : public ChunkManager {
     MaybeFail(const std::string& filepath) {
         if (filepath.find(fail_substr_) != std::string::npos) {
             ++failed_writes_;
-            ThrowInfo(ErrorCode::S3Error,
+            ThrowInfo(code_,
                       "injected object storage write failure for {}",
                       filepath);
         }
@@ -244,10 +260,192 @@ class FailingWriteChunkManager : public ChunkManager {
 
     ChunkManagerPtr inner_;
     std::string fail_substr_;
+    ErrorCode code_;
     std::atomic<int> failed_writes_{0};
 };
 
+// Adapt a real index upload to the C entry point used by index and text stats jobs.
+class UploadIndexCreator : public milvus::indexbuilder::IndexCreatorBase {
+ public:
+    explicit UploadIndexCreator(
+        std::function<milvus::index::IndexStatsPtr()> upload)
+        : upload_(std::move(upload)) {
+    }
+
+    void
+    Build(const milvus::DatasetPtr&, const bool*, int64_t) override {
+        ADD_FAILURE() << "only Upload should be called";
+    }
+
+    void
+    Build() override {
+        ADD_FAILURE() << "only Upload should be called";
+    }
+
+    BinarySet
+    Serialize() override {
+        ADD_FAILURE() << "only Upload should be called";
+        return {};
+    }
+
+    void
+    Load(const BinarySet&) override {
+        ADD_FAILURE() << "only Upload should be called";
+    }
+
+    milvus::index::IndexStatsPtr
+    Upload() override {
+        return upload_();
+    }
+
+ private:
+    std::function<milvus::index::IndexStatsPtr()> upload_;
+};
+
+void
+ExpectUploadCStatus(std::function<milvus::index::IndexStatsPtr()> upload,
+                    ErrorCode code) {
+    UploadIndexCreator creator(std::move(upload));
+    auto result = CreateProtoLayout();
+    auto status =
+        SerializeIndexAndUpLoad(reinterpret_cast<CIndex>(&creator), result);
+    EXPECT_EQ(status.error_code, code) << status.error_msg;
+    ReleaseProtoLayout(result);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+}
+
+storage::FileManagerContext
+IndexUploadContext(DataType type,
+                   int64_t segment_id,
+                   const ChunkManagerPtr& cm,
+                   const milvus_storage::ArrowFileSystemPtr& fs) {
+    FieldDataMeta field_meta = {1, 2, segment_id, 101};
+    field_meta.field_schema.set_fieldid(101);
+    field_meta.field_schema.set_name("value");
+    field_meta.field_schema.set_data_type(
+        static_cast<proto::schema::DataType>(type));
+    IndexMeta index_meta = {segment_id, 101, segment_id, 1, "index"};
+    return storage::FileManagerContext(field_meta, index_meta, cm, fs);
+}
+
 }  // namespace
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaReportsStreamedIndexSize) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    const auto local_path =
+        file_manager->GetLocalIndexObjectPrefix() + "streamed_index";
+    const std::string data(4096, 'x');
+    auto output = file_manager->OpenOutputStream(local_path);
+    output->Write(data.data(), data.size());
+    const auto file_size = output->Tell();
+    output->Close();
+    ASSERT_EQ(file_size, data.size());
+    ASSERT_TRUE(file_manager->AddFileMeta({local_path, file_size}));
+
+    const auto& files = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_EQ(files.begin()->second, data.size());
+    EXPECT_EQ(cm_->Size(files.begin()->first), data.size());
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), data.size());
+
+    auto stats = milvus::index::IndexStats::NewFromSizeMap(
+        file_manager->GetAddedTotalFileSize(), files);
+    EXPECT_EQ(stats->GetMemSize(), data.size());
+    EXPECT_EQ(stats->GetSerializedSize(), data.size());
+
+    milvus::ProtoLayout layout;
+    stats->SerializeAt(&layout);
+    const auto* c_layout = reinterpret_cast<const CProto*>(&layout);
+    milvus::proto::cgo::IndexStats serialized_stats;
+    ASSERT_TRUE(serialized_stats.ParseFromArray(c_layout->proto_blob,
+                                                c_layout->proto_size));
+    EXPECT_EQ(serialized_stats.mem_size(), data.size());
+    ASSERT_EQ(serialized_stats.serialized_index_infos_size(), 1);
+    EXPECT_EQ(serialized_stats.serialized_index_infos(0).file_size(),
+              data.size());
+    cm_->Remove(files.begin()->first);
+}
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaReplacesSizeWithoutDoubleCounting) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    DiskFileManagerImpl file_manager(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    const struct {
+        const char* file_name;
+        size_t file_size;
+        size_t expected_total;
+    } registrations[] = {
+        {"empty", 0, 0},
+        {"first", 64, 64},
+        {"second", 32, 96},
+        {"first", 64, 96},
+        {"first", 96, 128},
+        {"first", 16, 48},
+        {"second", 0, 16},
+        {"second", 8, 24},
+        {"empty", 0, 24},
+    };
+    EXPECT_EQ(file_manager.GetAddedTotalFileSize(), 0);
+    for (const auto& registration : registrations) {
+        SCOPED_TRACE(registration.file_name);
+        ASSERT_TRUE(file_manager.AddFileMeta(
+            {registration.file_name, registration.file_size}));
+        EXPECT_EQ(file_manager.GetAddedTotalFileSize(),
+                  registration.expected_total);
+        const auto remote_path = file_manager.GetRemoteIndexObjectPrefix() +
+                                 "/" + registration.file_name;
+        EXPECT_EQ(file_manager.GetRemotePathsToFileSize().at(remote_path),
+                  registration.file_size);
+    }
+    EXPECT_EQ(file_manager.GetRemotePathsToFileSize().size(), 3);
+}
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaCountsAlongsideSlicedUploads) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto legacy_path =
+        file_manager->GetLocalIndexObjectPrefix() + "legacy_index";
+    std::vector<uint8_t> legacy_data(1024, 42);
+    local_chunk_manager->CreateFile(legacy_path);
+    local_chunk_manager->Write(
+        legacy_path, legacy_data.data(), legacy_data.size());
+    ASSERT_TRUE(file_manager->AddFile(legacy_path));
+    ASSERT_EQ(file_manager->GetAddedTotalFileSize(), legacy_data.size());
+
+    const auto streamed_path =
+        file_manager->GetLocalIndexObjectPrefix() + "streamed_index";
+    const std::string streamed_data(4096, 'x');
+    auto output = file_manager->OpenOutputStream(streamed_path);
+    output->Write(streamed_data.data(), streamed_data.size());
+    const auto streamed_size = output->Tell();
+    output->Close();
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, streamed_size}));
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, streamed_size}));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(),
+              legacy_data.size() + streamed_data.size());
+
+    auto empty_output = file_manager->OpenOutputStream(streamed_path);
+    empty_output->Close();
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, 0}));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), legacy_data.size());
+    const auto& files = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(files.size(), 2);
+    for (const auto& [path, size] : files) {
+        cm_->Remove(path);
+    }
+}
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -338,6 +536,176 @@ TEST_F(DiskAnnFileManagerTest, AddFileOrThrowKeepsUploadErrorCode) {
     }
 
     lcm->Remove(local_file);
+}
+
+TEST_F(DiskAnnFileManagerTest, TantivyUploadKeepsStorageErrorCode) {
+    for (auto code : {ErrorCode::S3Error,
+                      ErrorCode::BucketInvalid,
+                      ErrorCode::ObjectNotExist}) {
+        SCOPED_TRACE(static_cast<int>(code));
+        auto failing_cm =
+            std::make_shared<FailingWriteChunkManager>(cm_, "", code);
+        auto ctx = IndexUploadContext(DataType::INT64,
+                                      3600 + static_cast<int64_t>(code),
+                                      failing_cm,
+                                      fs_);
+        milvus::index::InvertedIndexTantivy<int64_t> idx(
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+        const int64_t values[] = {1, 2};
+        idx.BuildWithRawDataForUT(2, values);
+        ExpectUploadCStatus([&] { return idx.Upload(); }, code);
+        EXPECT_GT(failing_cm->FailedWrites(), 0);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, RTreeUploadKeepsStorageErrorCode) {
+    for (auto code : {ErrorCode::S3Error,
+                      ErrorCode::BucketInvalid,
+                      ErrorCode::ObjectNotExist}) {
+        SCOPED_TRACE(static_cast<int>(code));
+        auto failing_cm =
+            std::make_shared<FailingWriteChunkManager>(cm_, "", code);
+        auto ctx = IndexUploadContext(DataType::GEOMETRY,
+                                      3700 + static_cast<int64_t>(code),
+                                      failing_cm,
+                                      fs_);
+        milvus::index::RTreeIndex<std::string> idx(ctx);
+        auto geometry = Geometry(GetThreadLocalGEOSContext(), "POINT (1 2)");
+        const std::string values[] = {geometry.to_wkb_string()};
+        idx.BuildWithRawDataForUT(1, values);
+        ExpectUploadCStatus([&] { return idx.Upload(); }, code);
+        EXPECT_GT(failing_cm->FailedWrites(), 0);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, TextLogUploadKeepsStorageErrorCode) {
+    for (auto code : {ErrorCode::S3Error,
+                      ErrorCode::BucketInvalid,
+                      ErrorCode::ObjectNotExist}) {
+        SCOPED_TRACE(static_cast<int>(code));
+        auto failing_cm =
+            std::make_shared<FailingWriteChunkManager>(cm_, "", code);
+        auto ctx = IndexUploadContext(DataType::VARCHAR,
+                                      3800 + static_cast<int64_t>(code),
+                                      failing_cm,
+                                      fs_);
+        milvus::index::TextMatchIndex idx(
+            ctx,
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION,
+            "milvus_tokenizer",
+            "{}",
+            "");
+        std::vector<std::string> values = {"football basketball",
+                                           "table tennis"};
+        auto field_data =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        field_data->FillFieldData(values.data(), values.size());
+        idx.BuildIndexFromFieldData({field_data}, false);
+        ExpectUploadCStatus([&] { return idx.Upload({}); }, code);
+        EXPECT_GT(failing_cm->FailedWrites(), 0);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, JsonStatsMetaUploadKeepsStorageErrorCode) {
+    for (auto code : {ErrorCode::S3Error,
+                      ErrorCode::BucketInvalid,
+                      ErrorCode::ObjectNotExist}) {
+        SCOPED_TRACE(static_cast<int>(code));
+        auto ctx = IndexUploadContext(
+            DataType::JSON, 3900 + static_cast<int64_t>(code), cm_, fs_);
+        DiskFileManagerImpl paths(ctx);
+        auto meta_path =
+            paths.GetRemoteJsonStatsMetaPath(JSON_STATS_META_FILE_NAME);
+        auto failing_cm =
+            std::make_shared<FailingWriteChunkManager>(cm_, meta_path, code);
+        ctx.chunkManagerPtr = failing_cm;
+        {
+            milvus::index::JsonKeyStats idx(ctx, false);
+            std::vector<milvus::Json> values;
+            values.emplace_back(
+                simdjson::padded_string(std::string(R"({"key":1})")));
+            auto field_data =
+                storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
+            field_data->FillFieldData(values.data(), values.size());
+            idx.BuildWithFieldData({field_data}, false);
+            try {
+                idx.Upload();
+                FAIL() << "expected the JSON metadata upload to fail";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), code) << error.what();
+            }
+            EXPECT_GT(failing_cm->FailedWrites(), 0);
+        }
+        std::filesystem::remove_all(paths.GetRemoteJsonStatsLogPrefix());
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, JsonSharedIndexUploadKeepsStorageErrorCode) {
+    for (auto code : {ErrorCode::S3Error,
+                      ErrorCode::BucketInvalid,
+                      ErrorCode::ObjectNotExist}) {
+        SCOPED_TRACE(static_cast<int>(code));
+        auto failing_cm =
+            std::make_shared<FailingWriteChunkManager>(cm_, "", code);
+        auto ctx = IndexUploadContext(
+            DataType::JSON, 4000 + static_cast<int64_t>(code), failing_cm, fs_);
+        DiskFileManagerImpl paths(ctx);
+        auto local_path =
+            paths.GetLocalTempJsonStatsPrefix() + "/shared_key_index";
+        boost::filesystem::create_directories(local_path);
+        milvus::index::BsonInvertedIndex idx(
+            local_path, 101, ctx, milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+        idx.AddRecord("/key", 0, 0);
+        idx.BuildIndex();
+        try {
+            idx.UploadIndex();
+            FAIL() << "expected the shared index upload to fail";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), code) << error.what();
+        }
+        EXPECT_GT(failing_cm->FailedWrites(), 0);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, LogUploadsKeepErrorCodesAndMissingLocalFiles) {
+    using UploadLog = void (DiskFileManagerImpl::*)(const std::string&);
+    const UploadLog uploads[] = {&DiskFileManagerImpl::AddTextLog,
+                                 &DiskFileManagerImpl::AddJsonStatsMetaLog,
+                                 &DiskFileManagerImpl::AddJsonSharedIndexLog};
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    for (size_t operation = 0; operation < std::size(uploads); ++operation) {
+        auto local_file =
+            TestLocalPath + "t36_log_upload/" + std::to_string(operation);
+        std::vector<uint8_t> data(1024, 1);
+        lcm->Write(local_file, data.data(), data.size());
+        auto failing_cm = std::make_shared<FailingWriteChunkManager>(cm_, "");
+        auto ctx = IndexUploadContext(
+            DataType::JSON, 4100 + operation, failing_cm, fs_);
+        DiskFileManagerImpl file_manager(ctx);
+        try {
+            (file_manager.*uploads[operation])(local_file);
+            FAIL() << "expected the log upload to fail";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), S3Error) << error.what();
+        }
+        EXPECT_GT(failing_cm->FailedWrites(), 0);
+        EXPECT_TRUE(file_manager.GetRemotePathsToFileSize().empty());
+        lcm->Remove(local_file);
+        try {
+            (file_manager.*uploads[operation])(local_file);
+            FAIL() << "expected a missing local file to fail";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), PathNotExist) << error.what();
+        }
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, IndexUploadCStatusKeepsUnexpectedErrorFallback) {
+    ExpectUploadCStatus(
+        []() -> milvus::index::IndexStatsPtr {
+            throw std::runtime_error("uncoded upload failure");
+        },
+        UnexpectedError);
 }
 
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
@@ -2177,13 +2545,14 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     milvus::index::VectorDiskAnnIndex<float> index(
         DataType::VECTOR_FLOAT,
         knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
+        knowhere::metric::MAX_SIM_L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);
 
     milvus::Config config;
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[DIM_KEY] = dim;
+    config[milvus::index::METRIC_TYPE] = knowhere::metric::MAX_SIM_L2;
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
     index.Build(config);
@@ -2201,7 +2570,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     query_dataset->Set(knowhere::meta::NQ, num_rows);
 
     SearchInfo search_info;
-    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_L2;
     search_info.topk_ = 2;
 
     SearchResult search_result;
@@ -2220,6 +2589,44 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find("empty_emb_list_offsets"), std::string::npos);
+
+    // Existing empty-list artifacts carry no metric. A reader opened with
+    // an ordinary element metric must still return no hits.
+    for (const auto* metric : {knowhere::metric::L2,
+                               knowhere::metric::IP,
+                               knowhere::metric::COSINE}) {
+        SCOPED_TRACE(metric);
+        milvus::index::VectorDiskAnnIndex<float> legacy(
+            DataType::VECTOR_FLOAT,
+            knowhere::IndexEnum::INDEX_DISKANN,
+            metric,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            file_manager_context);
+        auto load_config = config;
+        load_config[milvus::index::INDEX_FILES] = files;
+        load_config[milvus::index::METRIC_TYPE] = metric;
+        load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+        legacy.Load(milvus::BinarySet{}, load_config);
+        EXPECT_EQ(legacy.Count(), 0);
+        EXPECT_EQ(legacy.GetDim(), dim);
+        auto element_query = knowhere::GenDataSet(1, dim, vec_data.data());
+        SearchInfo element_search;
+        element_search.search_params_ = {
+            {milvus::index::DISK_ANN_QUERY_LIST, 8}};
+        element_search.metric_type_ = metric;
+        element_search.topk_ = 2;
+        SearchResult element_result;
+        legacy.Query(element_query,
+                     element_search,
+                     milvus::BitsetView{},
+                     nullptr,
+                     element_result);
+        EXPECT_EQ(element_result.total_nq_, 1);
+        ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);
+        for (auto offset : element_result.seg_offsets_) {
+            EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+        }
+    }
 
     for (const auto& file : files) {
         cm_->Remove(file);

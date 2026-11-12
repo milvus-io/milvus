@@ -181,8 +181,6 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
-	defer node.updateDistributionModifyTS()
-
 	channel := req.GetInfos()[0]
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -206,28 +204,31 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	if !node.subscribingChannels.Insert(channel.GetChannelName()) {
-		msg := "channel subscribing..."
-		log.Warn(ctx,
-			msg)
-		return merr.Success(), nil
+	release, err := node.channelOperations.acquire(ctx, channel.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
 	}
-	defer node.subscribingChannels.Remove(channel.GetChannelName())
+	defer release()
 
-	// to avoid concurrent watch/unwatch
-	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
-		err := merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
-		log.Warn(ctx, "failed to unsubscribe channel", mlog.Err(err))
+	// Publish the distribution change before releasing the shared channel gate.
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
+	existing, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
+		// Replica reassignment does not require rebuilding a channel subscription.
+		// Only advance its generation and preserve live data and the query view;
+		// QueryCoord reconciles worker routes and target partitions separately.
+		if existing.UpdateVersion(req.GetVersion()) {
+			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+		}
 		log.Info(ctx, "channel already subscribed")
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	err = node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
@@ -372,7 +373,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
-	defer node.updateDistributionModifyTS()
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.String("channel", req.GetChannelName()),
@@ -387,61 +387,83 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	defer node.lifetime.Done()
 
-	node.unsubscribingChannels.Insert(req.GetChannelName())
-	defer node.unsubscribingChannels.Remove(req.GetChannelName())
-	_, ok := node.delegators.Get(req.GetChannelName())
-	if ok {
-		growingSegmentIDs := node.localGrowingSegmentIDs(req.GetChannelName(), nil)
-		prepared, err := node.prepareReleaseManualFlush(ctx, req.GetCollectionID(), req.GetChannelName(), growingSegmentIDs)
-		prepareSkipped := false
-		if err != nil {
-			if isReleaseManualFlushPrepareUnavailable(err) {
-				log.Warn(ctx, "release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
-					mlog.Int64s("segmentIDs", growingSegmentIDs),
-					mlog.Err(err))
-				prepared = false
-				prepareSkipped = true
-			} else {
-				log.Warn(ctx, "failed to prepare release manual flush before unsubscribing channel",
-					mlog.Int64s("segmentIDs", growingSegmentIDs),
-					mlog.Err(err))
-				return merr.Status(err), nil
-			}
-		}
-		if prepareSkipped {
-			log.Info(ctx, "release manual flush prepare skipped before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
-		} else {
-			log.Info(ctx, "release manual flush prepare result before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
-		}
+	release, err := node.channelOperations.acquire(ctx, req.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer release()
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
+		return merr.Status(err), nil
+	}
 
-		delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
-		if !ok {
-			log.Info(ctx, "channel already unsubscribed")
-			return merr.Success(), nil
-		}
-		node.pipelineManager.Remove(req.GetChannelName())
-		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
-		// close the delegator first to block all coming query/search requests
-		delegator.Close()
-
-		if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
-			for _, segmentID := range preparedGrowingSourceSegments {
-				detacher.DetachStreaming(ctx, segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(req.GetChannelName(), segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(req.GetChannelName(), segmentID)
-			}
-		}
-		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
+	if err := node.unsubscribeChannelLocked(ctx, req.GetCollectionID(), req.GetChannelName()); err != nil {
+		return merr.Status(err), nil
 	}
 	node.distDeltaTracker.markChannelRemove(req.GetChannelName())
 	log.Info(ctx, "unsubscribed channel")
 
 	return merr.Success(), nil
+}
+
+// unsubscribeChannelLocked tears down the channel's delegator, pipeline and
+// growing segments. The caller must hold the channel's operation gate.
+func (node *QueryNode) unsubscribeChannelLocked(ctx context.Context, collectionID int64, channel string) error {
+	log := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.String("channel", channel),
+		mlog.Int64("currentNodeID", node.GetNodeID()),
+	)
+	if _, ok := node.delegators.Get(channel); !ok {
+		return nil
+	}
+	growingSegmentIDs := node.localGrowingSegmentIDs(channel, nil)
+	prepared, err := node.prepareReleaseManualFlush(ctx, collectionID, channel, growingSegmentIDs)
+	prepareSkipped := false
+	if err != nil {
+		if isReleaseManualFlushPrepareUnavailable(err) {
+			log.Warn(ctx, "release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
+				mlog.Int64s("segmentIDs", growingSegmentIDs),
+				mlog.Err(err))
+			prepared = false
+			prepareSkipped = true
+		} else {
+			log.Warn(ctx, "failed to prepare release manual flush before unsubscribing channel",
+				mlog.Int64s("segmentIDs", growingSegmentIDs),
+				mlog.Err(err))
+			return err
+		}
+	}
+	if prepareSkipped {
+		log.Info(ctx, "release manual flush prepare skipped before unsubscribing channel",
+			mlog.Int64s("segmentIDs", growingSegmentIDs),
+			mlog.Bool("prepared", prepared))
+	} else {
+		log.Info(ctx, "release manual flush prepare result before unsubscribing channel",
+			mlog.Int64s("segmentIDs", growingSegmentIDs),
+			mlog.Bool("prepared", prepared))
+	}
+
+	delegator, ok := node.delegators.GetAndRemove(channel)
+	if !ok {
+		log.Info(ctx, "channel already unsubscribed")
+		return nil
+	}
+	node.pipelineManager.Remove(channel)
+	preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(channel)
+	// close the delegator first to block all coming query/search requests
+	delegator.Close()
+
+	if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
+		for _, segmentID := range preparedGrowingSourceSegments {
+			detacher.DetachStreaming(ctx, segmentID)
+			syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(channel, segmentID)
+			syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(channel, segmentID)
+		}
+	}
+	node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel), segments.WithType(segments.SegmentTypeGrowing))
+	node.manager.Collection.Unref(collectionID, 1)
+	return nil
 }
 
 func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {

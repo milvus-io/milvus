@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"encoding/base64"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -172,24 +171,16 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) *indexcgopb.StoragePluginContext {
-	if !hookutil.IsClusterEncryptionEnabled() {
-		return nil
-	}
-	ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), collectionID)
-	if ez == nil {
-		return nil
-	}
-	unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-	if len(unsafe) == 0 {
-		return nil
-	}
-
-	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ez.EzID,
-		CollectionId:     ez.CollectionID,
-		EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-	}
+func (bw *BulkPackWriterV2) getPluginContext(ctx context.Context, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	var pluginContext *indexcgopb.StoragePluginContext
+	// Key lookup is part of the critical write path. Use the same retry policy
+	// as storage writes before surfacing an error to SyncTask.HandleError.
+	err := retry.Do(ctx, func() error {
+		var err error
+		pluginContext, err = hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+		return err
+	}, bw.writeRetryOpts...)
+	return pluginContext, err
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -221,7 +212,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
+	if err != nil {
+		return nil, "", err
+	}
 
 	// Allocate logIDs once, before the retry loop. writeInsertsIntoStorage builds the
 	// actual writer and performs the IO; retries must only repeat the IO, never draw
@@ -310,6 +304,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return nil, "", err
 	}
 	// workaround to store row num
+	validElementCounts, _ := storage.CollectVectorArrayValidElements(bw.schema, rec, nil, nil)
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
@@ -324,6 +319,8 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 					TimestampFrom:   tsFrom,
 					TimestampTo:     tsTo,
 					FieldNullCounts: getFieldNullCounts(columnGroup),
+					FieldValidElementCounts: storage.ColumnGroupValidElementCounts(
+						columnGroup, validElementCounts),
 				},
 			},
 		}

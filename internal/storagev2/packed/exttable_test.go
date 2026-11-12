@@ -793,6 +793,45 @@ func TestReadFragmentsFromManifest_FiltersColumns(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse manifest path")
 }
 
+func TestManifestMissingColumns(t *testing.T) {
+	readErr := merr.WrapErrServiceUnavailableMsg("manifest read unavailable")
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		groups  []manifestColumnGroup
+		err     error
+		want    []string
+	}{
+		{name: "empty request"},
+		{name: "empty manifest", columns: []string{"101", "text"}, want: []string{"101", "text"}},
+		{
+			name: "columns across groups", columns: []string{"101", "text"},
+			groups: []manifestColumnGroup{{Columns: []string{"text"}}, {Columns: []string{"101"}}},
+		},
+		{
+			name: "missing order and deduplication", columns: []string{"b", "101", "a", "b"},
+			groups: []manifestColumnGroup{{Columns: []string{"101", "unrequested"}}}, want: []string{"b", "a"},
+		},
+		{name: "read error", columns: []string{"101"}, err: readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := mockey.Mock(readColumnGroupsFromManifest).Return(tc.groups, tc.err).Build()
+			defer read.UnPatch()
+			missing, err := ManifestMissingColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, missing)
+			reads := 1
+			if len(tc.columns) == 0 {
+				reads = 0
+			}
+			require.Equal(t, reads, read.Times())
+			has, err := ManifestHasColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.err == nil && len(tc.want) == 0, has)
+		})
+	}
+}
+
 func TestMarshalUnmarshalManifestPath(t *testing.T) {
 	original := "/base/path/to/manifest"
 	version := int64(42)
@@ -2250,6 +2289,33 @@ func TestMakePropertiesFromStorageConfig_NilConfig(t *testing.T) {
 	_, err := MakePropertiesFromStorageConfig(nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "storageConfig is required")
+}
+
+func TestMakePropertiesFromStorageConfig_DoesNotPublishBrokerPolicy(t *testing.T) {
+	publication := mockey.Mock(initCredentialBrokerPolicy).
+		Return(merr.WrapErrServiceInternalMsg("broker policy publication failed")).Build()
+	defer publication.UnPatch()
+
+	props, err := MakePropertiesFromStorageConfig(&indexpb.StorageConfig{StorageType: "local"}, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NotNil(t, props)
+	assert.Zero(t, publication.Times())
+}
+
+func TestInjectExternalSpecProperties_PublishesBrokerPolicy(t *testing.T) {
+	wantErr := merr.WrapErrServiceInternalMsg("broker policy publication failed")
+	publication := mockey.Mock(initCredentialBrokerPolicy).Return(wantErr).Build()
+	defer publication.UnPatch()
+
+	props, err := MakePropertiesFromStorageConfig(&indexpb.StorageConfig{StorageType: "local"}, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, 42, "", ""))
+	require.Zero(t, publication.Times())
+	err = injectExternalSpecProperties(props, 42, "s3://bucket/key", `{"format":"parquet"}`)
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, 1, publication.Times())
 }
 
 func TestMakePropertiesFromStorageConfig_LocalType(t *testing.T) {

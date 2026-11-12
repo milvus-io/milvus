@@ -393,6 +393,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	matched, found := 0, false
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -414,6 +415,15 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
 		dstNodeSet.Remove(srcNode)
+		// The scheduler rejects a load onto a node outside the replica, so
+		// report it here instead of returning success without a task.
+		writable := req.GetToAllNodes() || replica.ContainRWNode(req.GetTargetNodeID())
+		if req.GetTransferAll() && !writable {
+			log.Info(ctx, "skip replica, target node is not its rw node",
+				mlog.Int64("replicaID", replica.GetID()), mlog.Int64("dest", req.GetTargetNodeID()))
+			continue
+		}
+		matched++
 
 		// check sealed segment list
 		segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(srcNode))
@@ -425,8 +435,13 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			// check whether sealed segment exist
 			segment, ok := lo.Find(segments, func(s *meta.Segment) bool { return s.GetID() == req.GetSegmentID() })
 			if !ok {
-				err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
-				return merr.Status(err), nil
+				// The source node can serve several collections; the segment
+				// belongs to at most one of their replicas.
+				continue
+			}
+			found = true
+			if !writable {
+				return merr.Status(errTransferTargetNotWritable(req.GetTargetNodeID(), replica)), nil
 			}
 
 			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
@@ -443,6 +458,13 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			log.Warn(ctx, msg, mlog.Err(err))
 			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
+	}
+	if len(replicas) > 0 && !req.GetTransferAll() && !found {
+		err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
+		return merr.Status(err), nil
+	}
+	if len(replicas) > 0 && matched == 0 {
+		return merr.Status(errTransferTargetNotMember(req.GetTargetNodeID(), srcNode)), nil
 	}
 	return merr.Success(), nil
 }
@@ -472,6 +494,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	matched, found := 0, false
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -490,6 +513,15 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
 		dstNodeSet.Remove(srcNode)
+		// The scheduler rejects a watch onto a node outside the replica, so
+		// report it here instead of returning success without a task.
+		writable := req.GetToAllNodes() || isWritableDelegatorNode(replica, req.GetTargetNodeID())
+		if req.GetTransferAll() && !writable {
+			log.Info(ctx, "skip replica, target node is not its rw delegator node",
+				mlog.Int64("replicaID", replica.GetID()), mlog.Int64("dest", req.GetTargetNodeID()))
+			continue
+		}
+		matched++
 
 		// check sealed segment list
 		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
@@ -500,8 +532,13 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			// check whether sealed segment exist
 			channel, ok := lo.Find(channels, func(ch *meta.DmChannel) bool { return ch.GetChannelName() == req.GetChannelName() })
 			if !ok {
-				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
-				return merr.Status(err), nil
+				// The source node can serve several collections; the channel
+				// belongs to at most one of their replicas.
+				continue
+			}
+			found = true
+			if !writable {
+				return merr.Status(errTransferTargetNotWritable(req.GetTargetNodeID(), replica)), nil
 			}
 			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
 			if !existInTarget {
@@ -518,7 +555,31 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
 	}
+	if len(replicas) > 0 && !req.GetTransferAll() && !found {
+		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
+		return merr.Status(err), nil
+	}
+	if len(replicas) > 0 && matched == 0 {
+		return merr.Status(errTransferTargetNotMember(req.GetTargetNodeID(), srcNode)), nil
+	}
 	return merr.Success(), nil
+}
+
+// isWritableDelegatorNode reports whether a channel can be moved to node,
+// using the same node set as a transfer to all nodes.
+func isWritableDelegatorNode(replica *meta.Replica, node int64) bool {
+	if streamingutil.UseStreamingQueryNodeAsDelegator() {
+		return replica.ContainRWSQNode(node)
+	}
+	return replica.ContainRWNode(node)
+}
+
+func errTransferTargetNotWritable(target int64, replica *meta.Replica) error {
+	return merr.WrapErrParameterInvalidMsg("target node %d is not a rw node of replica %d", target, replica.GetID())
+}
+
+func errTransferTargetNotMember(target, source int64) error {
+	return merr.WrapErrParameterInvalidMsg("target node %d is not a rw node of any replica on source node %d", target, source)
 }
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {

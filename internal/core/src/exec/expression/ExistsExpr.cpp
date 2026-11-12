@@ -45,10 +45,8 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::DetermineExecPath() {
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index serves this path; see SegmentExpr::FallbackToJsonStatsIfEligible().
     SegmentExpr::DetermineExecPath();
 }
 
