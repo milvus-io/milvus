@@ -78,6 +78,7 @@ def test_pyudf_composes_with_builtin_l0_l1_in_stage_order(owned_probe, order):
         output_fields=["ts"],
         function_chains=[stages[index] for index in order],
     )
+    assert len(results) == 2, results
     for hits in results:
         assert [hit["id"] for hit in hits] == list(reversed(owned_probe.ids))
         assert [hit["distance"] for hit in hits] == [180, 120, 60]
@@ -195,6 +196,7 @@ def test_pyudf_explicit_sort_direction_and_unicode_ties(owned_probe, descending,
         output_fields=["ts", "text"],
         function_chains=chain,
     )
+    assert len(results) == 2, results
     for hits in results:
         assert [hit["id"] for hit in hits] == [pk for pk, _ in expected]
         assert [hit["distance"] for hit in hits] == [2 * ts for _, ts in expected]

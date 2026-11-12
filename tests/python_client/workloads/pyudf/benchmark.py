@@ -357,7 +357,9 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None)
             candidates = []
             for query in queries:
                 check_stop_file(stop_file)
-                candidates.append(checker.verify_fields(checker.search(checker.client, query, limit=candidate_count)))
+                ids = checker.verify_fields(checker.search(checker.client, query, limit=candidate_count))
+                assert len(ids) == candidate_count, f"Expected {candidate_count} baseline candidates, got {len(ids)}"
+                candidates.append(ids)
             (checker.evidence / f"batch-candidates-{candidate_count}.json").write_text(json.dumps(candidates))
             for nq in (1, 8):
                 for mode in ("repeated", "unique"):
