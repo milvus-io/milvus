@@ -14,7 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <barrier>
+#include <future>
 #include <string>
+#include <vector>
 
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -49,6 +52,72 @@ TEST(FieldMetaTest, CopiesShareDescriptionAndKeepIndependentExternalMappings) {
     EXPECT_NE(&copy.get_name(), &field.get_name());
     EXPECT_EQ(copy.default_value()->string_data(), "default text");
     EXPECT_EQ(field.default_value()->string_data(), "default text");
+}
+
+TEST(FieldMetaTest, ConcurrentCopiesDetachAfterSchemaRetirement) {
+    proto::schema::FieldSchema text_proto;
+    text_proto.set_fieldid(200);
+    text_proto.set_name("shared_text");
+    text_proto.set_data_type(proto::schema::DataType::VarChar);
+    text_proto.mutable_default_value()->set_string_data("default text");
+    auto* max_length = text_proto.add_type_params();
+    max_length->set_key("max_length");
+    max_length->set_value("1024");
+
+    proto::schema::FieldSchema array_proto;
+    array_proto.set_fieldid(201);
+    array_proto.set_name("shared_array");
+    array_proto.set_data_type(proto::schema::DataType::Array);
+    array_proto.set_element_type(proto::schema::DataType::Array);
+    array_proto.mutable_type_schema()
+        ->mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta::ParseFrom(text_proto));
+    schema->AddField(FieldMeta::ParseFrom(array_proto));
+    const auto text = (*schema)[FieldId(200)];
+    const auto array = (*schema)[FieldId(201)];
+    const auto expected_text = text.ToProto().SerializeAsString();
+    const auto expected_array = array.ToProto().SerializeAsString();
+    std::weak_ptr<Schema> weak_schema = schema;
+
+    constexpr int kWorkers = 8;
+    std::barrier start(kWorkers + 1);
+    std::vector<std::future<void>> workers;
+    for (int worker = 0; worker < kWorkers; ++worker) {
+        workers.push_back(std::async(std::launch::async, [&, worker] {
+            start.arrive_and_wait();
+            const auto mapping = "physical_" + std::to_string(worker);
+            for (int iteration = 0; iteration < 128; ++iteration) {
+                auto text_copy = text;
+                auto array_copy = array;
+                EXPECT_EQ(&text_copy.get_name(), &text.get_name());
+                EXPECT_EQ(&array_copy.get_array_type_schema(),
+                          &array.get_array_type_schema());
+                text_copy.set_external_field(mapping);
+                array_copy.set_external_field(mapping);
+                EXPECT_EQ(text_copy.get_external_field(), mapping);
+                EXPECT_EQ(array_copy.get_external_field(), mapping);
+                EXPECT_NE(&text_copy.get_name(), &text.get_name());
+                EXPECT_NE(&array_copy.get_array_type_schema(),
+                          &array.get_array_type_schema());
+                EXPECT_EQ(text_copy.default_value()->string_data(),
+                          "default text");
+                EXPECT_EQ(text.ToProto().SerializeAsString(), expected_text);
+                EXPECT_EQ(array.ToProto().SerializeAsString(), expected_array);
+                EXPECT_TRUE(text.get_external_field().empty());
+                EXPECT_TRUE(array.get_external_field().empty());
+            }
+        }));
+    }
+    schema.reset();
+    EXPECT_TRUE(weak_schema.expired());
+    start.arrive_and_wait();
+    for (auto& worker : workers) {
+        worker.get();
+    }
 }
 
 TEST(FieldMetaTest, NeedLoadReturnsTrueForNormalField) {
