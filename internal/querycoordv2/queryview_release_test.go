@@ -10,12 +10,15 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func newReleaseTestServer(t *testing.T) *Server {
@@ -23,8 +26,10 @@ func newReleaseTestServer(t *testing.T) *Server {
 	registry, err := coordview.RecoverShardViewRegistry(t.Context(), &fakeQueryViewCatalog{}, nil)
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
+	changes := readiness.NewNotifications()
+	t.Cleanup(changes.Close)
 	return &Server{qviewsRuntime: &qviewsRuntime{
-		shardViewRegistry: registry, balancer: &fakeRuntimeBalancer{}, loadManager: &loadmgr.CollectionLoadManager{},
+		shardViewRegistry: registry, balancer: &fakeRuntimeBalancer{}, loadManager: &loadmgr.CollectionLoadManager{}, readyChanges: changes,
 	}}
 }
 
@@ -77,11 +82,15 @@ func TestQueryViewReleaseRemovalSubscriptionLifecycle(t *testing.T) {
 					t.Error("release must not subscribe to global publications or replay")
 					return func() {}
 				}).Build(),
-				mockey.Mock((*fakeRuntimeBalancer).Reconcile).To(func(_ *fakeRuntimeBalancer, ctx context.Context) error {
+				mockey.Mock((*fakeRuntimeBalancer).TriggerWithCompletion).To(func(_ *fakeRuntimeBalancer, scopes ...balancer.TriggerScope) *syncutil.Future[error] {
+					require.Equal(t, []balancer.TriggerScope{{DirtyCollections: []int64{100}}}, scopes)
+					completion := syncutil.NewFuture[error]()
 					if scenario == "before subscription" {
-						return manager.RequestRelease(ctx)
+						completion.Set(manager.RequestRelease(ctx))
+					} else {
+						completion.Set(nil)
 					}
-					return nil
+					return completion
 				}).Build(),
 				mockey.Mock((*coordview.ShardViewRegistry).RegisterShardRemovalListener).To(func(reg *coordview.ShardViewRegistry, collectionID int64, listener func()) func() {
 					require.Equal(t, int64(100), collectionID)
@@ -129,6 +138,8 @@ func TestQueryViewReleaseRemovalSubscriptionLifecycle(t *testing.T) {
 
 func TestQueryViewReleaseConcurrentWaiters(t *testing.T) {
 	s := newReleaseTestServer(t)
+	completion := syncutil.NewFuture[error]()
+	s.qviewsRuntime.balancer = &fakeRuntimeBalancer{completion: completion}
 	registry := s.qviewsRuntime.shardViewRegistry
 	first := registry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
 	second := registry.Ensure(qviews.ShardID{ReplicaID: 2, VChannel: "p_200v0"})
@@ -138,9 +149,18 @@ func TestQueryViewReleaseConcurrentWaiters(t *testing.T) {
 	go func() { firstDone <- s.waitQueryViewsReleased(ctx, 100) }()
 	go func() { repeatedDone <- s.waitQueryViewsReleased(ctx, 100) }()
 	go func() { secondDone <- s.waitQueryViewsReleased(ctx, 200) }()
+	canceledCtx, cancelWaiter := context.WithCancel(ctx)
+	defer cancelWaiter()
+	canceledDone := make(chan error, 1)
+	go func() { canceledDone <- s.waitQueryViewsReleased(canceledCtx, 100) }()
+	assertReadinessBlocked(t, canceledDone)
+	cancelWaiter()
+	require.ErrorIs(t, <-canceledDone, context.Canceled)
+	require.False(t, completion.Ready())
 	assertReadinessBlocked(t, firstDone)
 	assertReadinessBlocked(t, repeatedDone)
 	assertReadinessBlocked(t, secondDone)
+	completion.Set(nil)
 	require.NoError(t, first.RequestRelease(ctx))
 	require.NoError(t, <-firstDone)
 	require.NoError(t, <-repeatedDone, "all waiters of the same collection must complete")
@@ -153,17 +173,15 @@ func TestQueryViewReleaseDrainsInFlightPreparation(t *testing.T) {
 	s := newReleaseTestServer(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	applied := make(chan *coordview.ShardViewManager, 1)
-	patch := mockey.Mock((*fakeRuntimeBalancer).Reconcile).To(func(_ *fakeRuntimeBalancer, _ context.Context) error {
-		// Simulate a prepare that started before desired-state removal, but was
-		// not applied until the release barrier drained the in-flight pass.
-		applied <- s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
-		return nil
-	}).Build()
-	defer patch.UnPatch()
+	completion := syncutil.NewFuture[error]()
+	s.qviewsRuntime.balancer = &fakeRuntimeBalancer{completion: completion}
 	done := make(chan error, 1)
 	go func() { done <- s.waitQueryViewsReleased(ctx, 100) }()
-	manager := <-applied
+	assertReadinessBlocked(t, done)
+	// Simulate an old prepare applied after withdrawal but before the release
+	// batch finishes. An initially empty registry must not complete the wait.
+	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+	completion.Set(nil)
 	select {
 	case err := <-done:
 		t.Fatalf("missed in-flight preparation: %v", err)
@@ -174,16 +192,57 @@ func TestQueryViewReleaseDrainsInFlightPreparation(t *testing.T) {
 }
 
 func TestQueryViewReleaseCancellationAndReconcileError(t *testing.T) {
-	s := newReleaseTestServer(t)
-	s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- s.waitQueryViewsReleased(ctx, 100) }()
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
-	patch := mockey.Mock((*fakeRuntimeBalancer).Reconcile).Return(merr.ErrServiceUnavailable).Build()
-	defer patch.UnPatch()
-	require.ErrorIs(t, s.waitQueryViewsReleased(t.Context(), 100), merr.ErrServiceUnavailable)
+	for _, phase := range []string{"batch", "final removal"} {
+		t.Run(phase, func(t *testing.T) {
+			s := newReleaseTestServer(t)
+			s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+			completion := syncutil.NewFuture[error]()
+			s.qviewsRuntime.balancer = &fakeRuntimeBalancer{completion: completion}
+			if phase == "final removal" {
+				completion.Set(nil)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- s.waitQueryViewsReleased(ctx, 100) }()
+			assertReadinessBlocked(t, done)
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+			if phase == "batch" {
+				require.False(t, completion.Ready(), "canceling a waiter must not finish the shared batch")
+				completion.Set(merr.ErrServiceUnavailable)
+				err := s.waitQueryViewsReleased(t.Context(), 100)
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Code(err))
+			}
+		})
+	}
+}
+
+func TestQueryViewReleaseRuntimeShutdown(t *testing.T) {
+	for _, phase := range []string{"batch", "already stopped"} {
+		t.Run(phase, func(t *testing.T) {
+			s := newReleaseTestServer(t)
+			runtime := s.qviewsRuntime
+			runtime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+			completion := syncutil.NewFuture[error]()
+			runtime.balancer = &fakeRuntimeBalancer{completion: completion}
+			runtime.syncer = &readinessSyncer{}
+			if phase == "already stopped" {
+				runtime.stop()
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- s.waitQueryViewsReleased(ctx, 100) }()
+			if phase != "already stopped" {
+				assertReadinessBlocked(t, done)
+				runtime.stop()
+			}
+			require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
+			require.NoError(t, ctx.Err(), "shutdown must wake the waiter without canceling its request")
+		})
+	}
 }
 
 func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
