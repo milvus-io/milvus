@@ -349,7 +349,7 @@ VisitBuildField(const BuildSource& build_source,
                     bool stopped = false;
                     for (auto& future : futures) {
                         try {
-                            auto codec = future.get();
+                            auto codec = std::move(future).get();
                             AssertInfo(codec != nullptr,
                                        "binlog decoder returned null codec");
                             if (!first_failure && !stopped) {

@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/futures/Future.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <folly/executors/InlineExecutor.h>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -1796,8 +1798,8 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesStreamToFilesRunsFilesConcurrently) {
         std::chrono::milliseconds(50));
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
-    if (milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
-            .GetMaxThreadNum() <= 1) {
+    if (milvus::ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH)
+            .numThreads() <= 1) {
         GTEST_SKIP() << "HIGH load thread pool has only one worker";
     }
 
@@ -1858,8 +1860,8 @@ TEST_F(IndexEntryWriterV3Test,
     });
 
     auto pool_priority = milvus::ThreadPoolPriority::LOW;
-    auto& pool = milvus::ThreadPools::GetThreadPool(pool_priority);
-    auto old_max_threads = pool.GetMaxThreadNum();
+    auto& pool = milvus::ThreadPools::GetExecutor(pool_priority);
+    auto old_max_threads = pool.numThreads();
     auto cpu_num = std::max(1, milvus::CPU_NUM);
     milvus::ThreadPools::ResizeThreadPool(pool_priority,
                                           1.0F / static_cast<float>(cpu_num));
@@ -1870,8 +1872,8 @@ TEST_F(IndexEntryWriterV3Test,
                 static_cast<float>(old_max_threads) /
                     static_cast<float>(cpu_num));
         });
-    ASSERT_EQ(pool.GetMaxThreadNum(), 1);
-    if (pool.GetThreadNum() > 1) {
+    ASSERT_EQ(pool.numThreads(), 1);
+    if (pool.numActiveThreads() > 1) {
         GTEST_SKIP() << "LOW load thread pool already has more than one worker";
     }
 
@@ -1886,8 +1888,11 @@ TEST_F(IndexEntryWriterV3Test,
 
     EXPECT_EQ(load_future.wait_for(std::chrono::milliseconds(50)),
               std::future_status::timeout);
-    auto marker_future = pool.Submit([]() {});
-    auto marker_status = marker_future.wait_for(std::chrono::milliseconds(200));
+    auto marker_future = folly::via(&pool, []() {})
+                             .semi()
+                             .via(&folly::InlineExecutor::instance());
+    auto marker_status =
+        marker_future.wait(std::chrono::milliseconds(200)).isReady();
 
     budget.Release({entry_size, 1});
     budget_held = false;
@@ -1895,10 +1900,9 @@ TEST_F(IndexEntryWriterV3Test,
     ASSERT_EQ(load_future.wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
     load_future.get();
-    ASSERT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
-              std::future_status::ready);
-    marker_future.get();
-    EXPECT_EQ(marker_status, std::future_status::ready);
+    ASSERT_TRUE(marker_future.wait(std::chrono::seconds(2)).isReady());
+    std::move(marker_future).get();
+    EXPECT_TRUE(marker_status);
 
     ::unlink(local_file.c_str());
 }
