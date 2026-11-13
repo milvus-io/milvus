@@ -30,9 +30,10 @@ import (
 type recoveringSessionEtcd struct {
 	clientv3.KV
 	clientv3.Watcher
-	getCalls int
-	revision int64
-	events   chan clientv3.WatchResponse
+	getCalls  int
+	revision  int64
+	events    chan clientv3.WatchResponse
+	watchCtxs []context.Context
 }
 
 func (c *recoveringSessionEtcd) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -46,32 +47,40 @@ func (c *recoveringSessionEtcd) Get(context.Context, string, ...clientv3.OpOptio
 	}, nil
 }
 
-func (c *recoveringSessionEtcd) Watch(_ context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+func (c *recoveringSessionEtcd) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	c.watchCtxs = append(c.watchCtxs, ctx)
 	c.revision = clientv3.OpGet(key, opts...).Rev()
 	return c.events
 }
 
 func (c *recoveringSessionEtcd) Close() error { return nil }
 
-func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stub := &recoveringSessionEtcd{events: make(chan clientv3.WatchResponse)}
+func newRecoveringWatcher(ctx context.Context, t *testing.T, responses ...clientv3.WatchResponse) (*sessionWatcher, *recoveringSessionEtcd) {
+	stub := &recoveringSessionEtcd{events: make(chan clientv3.WatchResponse, len(responses))}
+	for _, response := range responses {
+		stub.events <- response
+	}
 	cli := clientv3.NewCtxClient(ctx)
 	cli.KV, cli.Watcher = stub, stub
-	defer cli.Close()
-
-	rewatched := false
-	w := &sessionWatcher{
+	t.Cleanup(func() { cli.Close() })
+	return &sessionWatcher{
 		s:       &Session{ctx: ctx, etcdCli: cli},
 		ctx:     ctx,
 		prefix:  "test",
 		eventCh: make(chan *SessionEvent),
-		rewatch: func(sessions map[string]*Session) error {
-			require.Equal(t, int64(200), sessions["test-200"].ServerID)
-			rewatched = true
-			return nil
-		},
+	}, stub
+}
+
+func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w, stub := newRecoveringWatcher(ctx, t, clientv3.WatchResponse{Created: true})
+
+	rewatched := false
+	w.rewatch = func(sessions map[string]*Session) error {
+		require.Equal(t, int64(200), sessions["test-200"].ServerID)
+		rewatched = true
+		return nil
 	}
 	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
 	require.Equal(t, 2, stub.getCalls)
@@ -88,4 +97,49 @@ func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 	require.Equal(t, 2, stub.getCalls, "permission denied must not retry")
 	_, open := <-w.eventCh
 	require.False(t, open)
+}
+
+func TestSessionWatcher_RejectedWatchRetriesWithoutReplay(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rejected := clientv3.WatchResponse{Canceled: true, CancelReason: rpctypes.ErrorDesc(rpctypes.ErrGRPCNotSupportedForLearner)}
+	w, stub := newRecoveringWatcher(ctx, t, rejected, clientv3.WatchResponse{Created: true})
+	replays := 0
+	w.rewatch = func(map[string]*Session) error {
+		replays++
+		return nil
+	}
+
+	require.NoError(t, w.handleWatchErr(rejected.Err()))
+	require.Equal(t, 3, stub.getCalls, "the leader change and the rejection each fail one attempt")
+	require.Equal(t, 1, replays, "only the created watch replays the sessions")
+}
+
+// A replay that fails with a retriable error runs the attempt again, so it must
+// stop the watch it created. Only the installed watch stays open, until the next
+// re-watch replaces it.
+func TestSessionWatcher_FailedReplayCancelsItsWatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	created := clientv3.WatchResponse{Created: true}
+	w, stub := newRecoveringWatcher(ctx, t, created, created, created)
+	replays := 0
+	w.rewatch = func(map[string]*Session) error {
+		replays++
+		if replays == 1 {
+			return rpctypes.ErrLeaderChanged
+		}
+		return nil
+	}
+
+	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
+	require.Equal(t, 2, replays)
+	require.Len(t, stub.watchCtxs, 2)
+	require.ErrorIs(t, stub.watchCtxs[0].Err(), context.Canceled, "the failed attempt's watch must stop")
+	require.NoError(t, stub.watchCtxs[1].Err(), "the installed watch must stay open")
+
+	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
+	require.Len(t, stub.watchCtxs, 3)
+	require.ErrorIs(t, stub.watchCtxs[1].Err(), context.Canceled, "a re-watch replaces the installed watch")
+	require.NoError(t, stub.watchCtxs[2].Err())
 }

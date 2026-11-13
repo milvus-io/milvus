@@ -829,6 +829,7 @@ type sessionWatcher struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	rch       clientv3.WatchChan
+	cancelRch context.CancelFunc // releases rch's context once a re-watch has replaced it
 	eventCh   chan *SessionEvent
 	prefix    string
 	rewatch   Rewatch
@@ -1029,23 +1030,41 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 }
 
 // handleReWatch re-establishes the session watch: it re-reads the current
-// sessions (a unary request that also refreshes the etcd auth token), replays
-// them through the rewatch hook, then opens a fresh watch stream from the new
-// revision.
-func (w *sessionWatcher) handleReWatch() error {
+// sessions (a unary request that also refreshes the etcd auth token), opens a
+// fresh watch stream from the new revision, then replays the sessions through
+// the rewatch hook.
+func (w *sessionWatcher) handleReWatch() (err error) {
 	sessions, revision, err := w.s.GetSessions(w.ctx, w.prefix)
 	if err != nil {
 		return err
+	}
+	// A failed attempt runs again, so its watch must not stay open on w.ctx.
+	watchCtx, cancelWatch := context.WithCancel(w.ctx)
+	defer func() {
+		if err != nil {
+			cancelWatch()
+		}
+	}()
+	rch := w.s.etcdCli.Watch(watchCtx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision), clientv3.WithCreatedNotify())
+	// Watch returns once the stream is created or rejected. A rejection, e.g. by a
+	// learner, must fail this attempt: the read above keeps succeeding, so without
+	// retry.Do's backoff this would spin and replay the sessions every time.
+	created := <-rch
+	if err = created.Err(); err != nil {
+		return err
+	}
+	if w.ctx.Err() != nil {
+		return w.ctx.Err()
 	}
 	if w.rewatch == nil {
 		mlog.Warn(w.ctx, "re-watch session service but no rewatch logic provided", mlog.String("prefix", w.prefix))
 	} else if err = w.rewatch(sessions); err != nil {
 		return err
 	}
-	if w.ctx.Err() != nil {
-		return w.ctx.Err()
+	if w.cancelRch != nil {
+		w.cancelRch()
 	}
-	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	w.rch, w.cancelRch = rch, cancelWatch
 	return nil
 }
 
