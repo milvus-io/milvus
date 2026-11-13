@@ -100,19 +100,26 @@ class ThreadPool {
     auto
     Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
         using ReturnType = decltype(f(args...));
-        auto task = std::make_shared<std::packaged_task<ReturnType()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        auto bound = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+        using BoundTask = decltype(bound);
+        // Keep the callable out of the future's shared state. A rejected
+        // submission must destroy its captures even if the caller retains
+        // the broken-promise future. The packaged task stores only an invoker.
+        auto task =
+            std::make_shared<std::packaged_task<ReturnType(BoundTask&)>>(
+                [](BoundTask& callable) -> ReturnType { return callable(); });
         auto future = task->get_future();
 
         auto enqueue_time = std::chrono::steady_clock::now();
         auto* queue_metric = metric_queue_duration_;
         auto* execute_metric = metric_execute_duration_;
         auto* completed_metric = metric_completed_;
-        std::function<void()> wrap_func = [task,
-                                           enqueue_time,
-                                           queue_metric,
-                                           execute_metric,
-                                           completed_metric]() {
+        auto wrap_func = [task,
+                          bound = std::move(bound),
+                          enqueue_time,
+                          queue_metric,
+                          execute_metric,
+                          completed_metric]() mutable {
             auto execute_start = std::chrono::steady_clock::now();
             if (queue_metric) {
                 queue_metric->Observe(
@@ -131,7 +138,7 @@ class ThreadPool {
                 }
             };
             try {
-                (*task)();
+                (*task)(bound);
             } catch (...) {
                 observe_execute();
                 throw;
@@ -195,6 +202,7 @@ class ThreadPool {
                prometheus::Histogram* execute_duration);
 
  private:
+    friend struct ThreadPoolsTestAccess;
     friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
 
     void

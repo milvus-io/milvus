@@ -222,4 +222,31 @@ TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
     EXPECT_EQ(task_runs.load(), 1);
 }
 
+TEST_F(ThreadPoolTest, SubmitPreservesValueVoidReferenceAndException) {
+    ThreadPool pool(1.0, "test_pool");
+    auto value = pool.Submit([] { return std::make_unique<int>(7); });
+    EXPECT_EQ(*value.get(), 7);
+
+    int counter = 0;
+    auto nothing = pool.Submit([&counter] { ++counter; });
+    EXPECT_NO_THROW(nothing.get());
+    EXPECT_EQ(counter, 1);
+
+    auto reference = pool.Submit([&counter]() -> int& { return counter; });
+    EXPECT_EQ(&reference.get(), &counter);
+
+    auto failure = pool.Submit([]() -> int {
+        throw std::system_error(
+            std::make_error_code(std::errc::resource_unavailable_try_again));
+    });
+    try {
+        failure.get();
+        FAIL() << "expected original exception";
+    } catch (const std::system_error& error) {
+        EXPECT_EQ(
+            error.code(),
+            std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
+}
+
 }  // namespace milvus
