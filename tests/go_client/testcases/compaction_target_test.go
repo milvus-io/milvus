@@ -123,3 +123,64 @@ func TestCompactionTargetRewrite(t *testing.T) {
 	require.Equal(t, target.GetStopReason(), stopped.GetStopReason())
 	require.Equal(t, target.GetStoppedAt(), stopped.GetStoppedAt())
 }
+
+func TestCompactionTargetClosesWhenCollectionIsDropped(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	_, err := mc.ListCompactionTargets(ctx, client.NewListCompactionTargetsOption())
+	if client.ErrorCode(err) == 3000 && strings.Contains(err.Error(), "target-based compaction is disabled") {
+		t.Skip("requires target-based compaction")
+	}
+	require.NoError(t, err)
+
+	name := common.GenRandomString("tbc_drop_scope", 8)
+	const dim = 4
+	require.NoError(t, mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name, dim)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(name)))
+	})
+	collection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+	require.NoError(t, err)
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(name).
+		WithFloatVectorColumn("vector", dim, [][]float32{{1, 0, 0, 0}}))
+	require.NoError(t, err)
+	flush, err := mc.Flush(ctx, client.NewFlushOption(name))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+
+	protection, err := mc.GetService().CreateSnapshot(ctx, &milvuspb.CreateSnapshotRequest{
+		Name: "protect_during_drop", CollectionName: name, CompactionProtectionSeconds: 60,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, protection)
+	require.Zero(t, protection.GetCode(), protection.GetReason())
+
+	created, err := mc.CreateCompactionTarget(ctx, client.NewRewriteCompactionTargetOption(name))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, created.GetTotalRows())
+	before, err := mc.DescribeCompactionTarget(ctx, created.GetTargetId())
+	require.NoError(t, err)
+	require.Equal(t, milvuspb.CompactionTargetState_COMPACTION_TARGET_STATE_ACTIVE, before.GetState())
+
+	require.NoError(t, mc.DropCollection(ctx, client.NewDropCollectionOption(name)))
+	after, err := mc.DescribeCompactionTarget(ctx, created.GetTargetId())
+	require.NoError(t, err)
+	require.Equal(t, collection.ID, after.GetCollectionId())
+	require.Empty(t, after.GetCollectionName())
+	require.Equal(t, milvuspb.CompactionTargetState_COMPACTION_TARGET_STATE_INACTIVE, after.GetState())
+	require.Equal(t, "scope_dropped", after.GetStopReason())
+	require.NotZero(t, after.GetStoppedAt())
+	require.Nil(t, after.RemainingRows)
+
+	listed, err := mc.ListCompactionTargets(ctx, client.NewListCompactionTargetsOption().WithCollectionID(collection.ID))
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, after.GetTargetId(), listed[0].GetTargetId())
+	require.NoError(t, mc.DropCompactionTarget(ctx, after.GetTargetId()))
+	retained, err := mc.DescribeCompactionTarget(ctx, after.GetTargetId())
+	require.NoError(t, err)
+	require.Equal(t, after.GetStoppedAt(), retained.GetStoppedAt())
+	require.Equal(t, "scope_dropped", retained.GetStopReason())
+}
