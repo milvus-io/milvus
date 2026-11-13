@@ -59,7 +59,7 @@ func IncreaseVersion(version int64) SegmentAction {
 			mlog.Int64("segmentVersion", segment.Version()),
 			mlog.Int64("updateVersion", version),
 		)
-		for oldVersion := segment.Version(); oldVersion < version; {
+		for oldVersion := segment.Version(); oldVersion < version; oldVersion = segment.Version() {
 			if segment.CASVersion(oldVersion, version) {
 				return true
 			}
