@@ -315,6 +315,18 @@ func TestNodePicker_UnpricedTasksRetainSlotAdmission(t *testing.T) {
 	}
 	assert.Equal(t, map[int64]int{1: 2, 2: 2}, counts)
 	assert.Equal(t, int64(NullNodeID), p.Pick(64, taskcommon.Resource{}))
-	// Exhausted compatibility slots must not stop a memory-priced task.
-	assert.NotEqual(t, int64(NullNodeID), p.Pick(128, taskcommon.Resource{CPU: 8, Memory: 2 * pickGiB}))
+	// Legacy work books memory on the worker. Its unknown booking cannot be
+	// offered again in this round; wait for the next actual resource report.
+	assert.Equal(t, int64(NullNodeID), p.Pick(128, taskcommon.Resource{CPU: 8, Memory: 2 * pickGiB}))
+	for _, n := range p.remaining() {
+		assert.Zero(t, n.AvailableMemory)
+	}
+
+	// Once fresh memory is reported, exhausted compatibility slots do not
+	// prevent priced placement.
+	p = newNodePicker(map[int64]*session.WorkerSlots{
+		1: resourceWorker(1, 0, 8, 32*pickGiB),
+	})
+	p.nodes[0].availableMemory = 16 * pickGiB
+	assert.Equal(t, int64(1), p.Pick(128, taskcommon.Resource{CPU: 8, Memory: 2 * pickGiB}))
 }
