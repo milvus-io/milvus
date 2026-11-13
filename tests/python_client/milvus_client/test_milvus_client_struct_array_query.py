@@ -413,7 +413,10 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         expected: valid unique coordinates and distances; exact FLAT top-k or bounded HNSW recall
         """
         client = self._client()
-        name, schema = self.create_metadata_collection(client, vector_index=index_type, metric=metric)
+        # Keep a custom name so field-to-index resolution is exercised in regular CI.
+        name, schema = self.create_metadata_collection(
+            client, vector_index=index_type, metric=metric, clips_index_name="clips_idx"
+        )
         rows = [make_metadata_row(schema, i) for i in range(1100)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)

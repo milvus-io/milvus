@@ -236,6 +236,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
         second=False,
         dim=DIM,
         extra_fields=(),
+        clips_index_name="clips[emb]",
     ):
         name = cf.gen_unique_str("struct_contract")
         schema = cf.gen_collection_schema(
@@ -269,6 +270,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
             for field in ("clips", "other") if second else ("clips",):
                 indexes.add_index(
                     f"{field}[emb]",
+                    index_name=clips_index_name if field == "clips" else f"{field}[emb]",
                     index_type=vector_index,
                     metric_type=metric,
                     params={"M": 16, "efConstruction": 200} if vector_index == "HNSW" else {},
@@ -354,7 +356,10 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
             assert len(rows) == len(expected) and {row["id"] for row in rows} == expected, expression
 
     def assert_element_search(self, client, name, model, metric, index_type, field="clips"):
-        index, _ = self.describe_index(client, name, f"{field}[emb]")
+        names, _ = self.list_indexes(client, name, field_name=f"{field}[emb]")
+        assert len(names) == 1, (name, field, names)
+        index, _ = self.describe_index(client, name, names[0])
+        assert index is not None, (name, names[0])
         tolerance = vector_score_tolerance(index)
         available = [
             (pk, offset, element) for pk, row in model.items() for offset, element in enumerate(row[field] or [])
