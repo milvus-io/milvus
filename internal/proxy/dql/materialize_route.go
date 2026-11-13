@@ -22,10 +22,13 @@ import (
 // and Get stay on Query, which returns rows in pk order. Also no limit, no
 // offset, no ORDER BY, no aggregation or GROUP BY, not an iterator, not
 // element-level, and every output field carried as Arrow (materialize.Carries).
+// calc_distance is excluded: the Materialize reply path does not run the QN
+// reduce that computes the distance column (execute() returns at the
+// buildMaterializeResult block), so a calc_distance request must stay on Query.
 func (t *QueryTask) materializeInScope() bool {
 	p := t.queryParams
 	if !t.reQuery || p == nil || p.limit != typeutil.Unlimited || p.offset != 0 || p.isIterator ||
-		len(p.orderByFields) > 0 || len(t.GetGroupByFieldIds()) > 0 || len(t.GetAggregates()) > 0 {
+		len(p.orderByFields) > 0 || len(t.GetGroupByFieldIds()) > 0 || len(t.GetAggregates()) > 0 || p.calcDistance != nil {
 		return false
 	}
 	// Segcore makes a retrieve element-level exactly when the top-level

@@ -16,7 +16,15 @@ func init() {
 		IPImpl = asm.IP
 		L2Impl = asm.L2
 		CosineImpl = func(a []float32, b []float32) float32 {
-			return asm.IP(a, b) / float32(math.Sqrt(float64(asm.IP(a, a))*float64((asm.IP(b, b)))))
+			normA := asm.IP(a, a)
+			normB := asm.IP(b, b)
+			// zero-norm vectors: cosine is undefined; return 0 (not NaN 0/0) to
+			// match the pure implementation, knowhere's search semantics and the
+			// fused int8/fp16/bf16 kernels
+			if normA == 0 || normB == 0 {
+				return 0
+			}
+			return asm.IP(a, b) / float32(math.Sqrt(float64(normA)*float64(normB)))
 		}
 	}
 }

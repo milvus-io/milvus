@@ -80,11 +80,12 @@ func TestQueryChainCreatePlanPreservesArgumentsAndProjection(t *testing.T) {
 
 func TestQueryChainPlanRejectsUnsupportedQueryModes(t *testing.T) {
 	for name, mutate := range map[string]func(*QueryTask){
-		"count":     func(t *QueryTask) { t.plan.GetQuery().IsCount = true },
-		"group_by":  func(t *QueryTask) { t.plan.GetQuery().GroupByFieldIds = []int64{100} },
-		"aggregate": func(t *QueryTask) { t.plan.GetQuery().Aggregates = []*planpb.Aggregate{{}} },
-		"order_by":  func(t *QueryTask) { t.plan.GetQuery().OrderByFields = []*planpb.OrderByField{{FieldId: 100}} },
-		"iterator":  func(t *QueryTask) { t.queryParams.isIterator = true },
+		"count":         func(t *QueryTask) { t.plan.GetQuery().IsCount = true },
+		"group_by":      func(t *QueryTask) { t.plan.GetQuery().GroupByFieldIds = []int64{100} },
+		"aggregate":     func(t *QueryTask) { t.plan.GetQuery().Aggregates = []*planpb.Aggregate{{}} },
+		"order_by":      func(t *QueryTask) { t.plan.GetQuery().OrderByFields = []*planpb.OrderByField{{FieldId: 100}} },
+		"iterator":      func(t *QueryTask) { t.queryParams.isIterator = true },
+		"calc_distance": func(t *QueryTask) { t.queryParams.calcDistance = &calcDistanceSpec{} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			task := queryStageTestTask()

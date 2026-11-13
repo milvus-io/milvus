@@ -2,11 +2,15 @@ package distance
 
 import (
 	"math"
+	"math/bits"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const PRECISION = 1e-5
@@ -150,6 +154,15 @@ func Test_CalcCosine(t *testing.T) {
 	assert.Equal(t, expected, distance)
 	distance = CosineImplPure(left, right)
 	assert.Equal(t, expected, distance)
+
+	// zero-norm vectors: cosine is undefined; both paths return 0, never NaN
+	zero := []float32{0, 0, 0}
+	distance = CosineImplPure(zero, right)
+	assert.Equal(t, float32(0), distance)
+	distance = CosineImpl(zero, right)
+	assert.Equal(t, float32(0), distance)
+	distance = CosineImplPure(zero, zero)
+	assert.Equal(t, float32(0), distance)
 }
 
 func Test_CalcFloatDistance(t *testing.T) {
@@ -215,4 +228,215 @@ func Test_CalcFloatDistance(t *testing.T) {
 			assert.InEpsilon(t, sum, distances[i*rightNum+j], PRECISION)
 		}
 	}
+}
+
+// hammingRef is the hand-rolled hamming distance over packed bits (LSB-first
+// per byte, matching the Milvus binary vector convention).
+func hammingRef(a, b []byte) float32 {
+	var sum float32
+	for i := range a {
+		sum += float32(bits.OnesCount8(a[i] ^ b[i]))
+	}
+	return sum
+}
+
+func Test_CalcBinaryDistance(t *testing.T) {
+	dim := int64(16) // 2 bytes per vector
+	left := []byte{0b00001111, 0b10101010}
+	right := []byte{
+		0b00001111, 0b10101010, // identical
+		0b00000000, 0b00000000, // 8 bits differ
+		0b11111111, 0b01010101, // all 16 bits differ
+	}
+
+	distances, err := CalcBinaryDistance(dim, left, right, "HAMMING")
+	assert.NoError(t, err)
+	expected := []float32{
+		hammingRef(left, right[0:2]),
+		hammingRef(left, right[2:4]),
+		hammingRef(left, right[4:6]),
+	}
+	assert.Equal(t, expected, distances)
+
+	// Jaccard: 1 - |A∩B| / |A∪B|
+	distances, err = CalcBinaryDistance(dim, left, right, "JACCARD")
+	assert.NoError(t, err)
+	for i := 0; i < 3; i++ {
+		var intersect, unionA, unionB float32
+		for j := 0; j < 2; j++ {
+			unionA += float32(bits.OnesCount8(left[j]))
+			unionB += float32(bits.OnesCount8(right[i*2+j]))
+			intersect += float32(bits.OnesCount8(left[j] & right[i*2+j]))
+		}
+		want := 1 - intersect/(unionA+unionB-intersect)
+		assert.Equal(t, want, distances[i])
+	}
+
+	// error cases
+	_, err = CalcBinaryDistance(dim, left, right, "L2")
+	assert.Error(t, err)
+	_, err = CalcBinaryDistance(7, left, right, "HAMMING") // dim not multiple of 8
+	assert.Error(t, err)
+	_, err = CalcBinaryDistance(dim, left, []byte{1}, "HAMMING") // bad byte length
+	assert.Error(t, err)
+}
+
+func sparseRow(indices []uint32, values []float32) []byte {
+	indices, values = typeutil.SortSparseFloatRow(indices, values)
+	return typeutil.CreateSparseFloatRow(indices, values)
+}
+
+func Test_CalcSparseDistance(t *testing.T) {
+	left := sparseRow([]uint32{0, 2, 5}, []float32{1, 2, 3})
+	rows := [][]byte{
+		sparseRow([]uint32{0, 2, 5}, []float32{1, 2, 3}), // identical → IP = 1+4+9
+		sparseRow([]uint32{2, 7}, []float32{2, 10}),      // overlap on idx 2 → IP = 4
+		sparseRow([]uint32{100}, []float32{5}),           // no overlap → IP = 0
+	}
+
+	distances, err := CalcSparseDistance(left, rows, "IP")
+	assert.NoError(t, err)
+	assert.Equal(t, []float32{14, 4, 0}, distances)
+
+	// error cases: only IP is supported for sparse
+	_, err = CalcSparseDistance(left, rows, "COSINE")
+	assert.Error(t, err)
+	_, err = CalcSparseDistance(left, rows, "L2")
+	assert.Error(t, err)
+}
+
+func TestBinaryImpls(t *testing.T) {
+	a := []byte{0b00001111, 0b10101010}
+	b := []byte{0b11111111, 0b01010101}
+	// hamming: popcount(0x0f^0xff)=4 + popcount(0xaa^0x55)=8 = 12
+	assert.Equal(t, float32(12), HammingImplPure(a, b))
+	assert.Equal(t, float32(12), HammingImpl(a, b))
+	// jaccard: unionA=8, unionB=12, intersect=4, union=16, 1-4/16
+	assert.InEpsilon(t, 0.75, JaccardImplPure(a, b), PRECISION)
+	assert.InEpsilon(t, 0.75, JaccardImpl(a, b), PRECISION)
+	// two empty rows: no union → 0
+	assert.Equal(t, float32(0), JaccardImplPure(nil, nil))
+}
+
+func TestSparseIPImpl(t *testing.T) {
+	row1 := typeutil.CreateSparseFloatRow([]uint32{0, 2}, []float32{1, 2})
+	row2 := typeutil.CreateSparseFloatRow([]uint32{2, 5}, []float32{2, 3})
+	// IP: intersection on index 2 → 2*2
+	assert.Equal(t, float32(4), SparseIPImpl(row1, row2))
+	// disjoint rows → IP 0
+	row3 := typeutil.CreateSparseFloatRow([]uint32{100}, []float32{1})
+	assert.Equal(t, float32(0), SparseIPImpl(row1, row3))
+}
+
+// TestFusedKernelsExactValues asserts hand-computed truth values for the three
+// fused kernels, independent of any reference implementation. left=[1,2,3,4]
+// vs row=[5,6,7,8]:
+//
+//	L2 = (1-5)^2+...+(4-8)^2 = 64
+//	IP = 1*5+...+4*8 = 70
+//	COSINE = 70 / sqrt(30*174)
+//
+// All values 1..8 are exactly representable in int8, float16 and bfloat16.
+func TestFusedKernelsExactValues(t *testing.T) {
+	left := []float32{1, 2, 3, 4}
+	cosineWant := 70 / float32(math.Sqrt(30*174))
+
+	cases := []struct {
+		name  string
+		right []byte
+		calc  func(dim int64, left []float32, right []byte, metric string) ([]float32, error)
+	}{
+		{"int8", []byte{5, 6, 7, 8}, CalcInt8FloatDistance},
+		{"float16", typeutil.Float32ArrayToFloat16Bytes([]float32{5, 6, 7, 8}), CalcFloat16FloatDistance},
+		{"bfloat16", typeutil.Float32ArrayToBFloat16Bytes([]float32{5, 6, 7, 8}), CalcBFloat16FloatDistance},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.calc(4, left, tc.right, "L2")
+			require.NoError(t, err)
+			assert.Equal(t, []float32{64}, got, "L2")
+
+			got, err = tc.calc(4, left, tc.right, "IP")
+			require.NoError(t, err)
+			assert.Equal(t, []float32{70}, got, "IP")
+
+			got, err = tc.calc(4, left, tc.right, "COSINE")
+			require.NoError(t, err)
+			assert.InDelta(t, cosineWant, got[0], 1e-4, "COSINE")
+		})
+	}
+}
+
+// fused decoder tests: the fused kernels must match the "decode then
+// CalcFloatDistance" reference within float32 rounding for the same metric.
+func checkFusedDistance(t *testing.T, metric string, got, ref []float32) {
+	t.Helper()
+	require.Equal(t, len(ref), len(got))
+	for i := range ref {
+		assert.InDelta(t, ref[i], got[i], 1e-4, "row %d metric %s", i, metric)
+	}
+}
+
+func TestCalcInt8FloatDistance(t *testing.T) {
+	left := []float32{1, 2, 3, 4}
+	// two rows: [1,2,3,4] and [-1,-2,-3,-4] as signed bytes
+	right := []byte{1, 2, 3, 4, 0xFF, 0xFE, 0xFD, 0xFC}
+	refRows := [][]float32{{1, 2, 3, 4}, {-1, -2, -3, -4}}
+
+	for _, metric := range []string{"L2", "IP", "COSINE"} {
+		t.Run(metric, func(t *testing.T) {
+			got, err := CalcInt8FloatDistance(4, left, right, metric)
+			require.NoError(t, err)
+			ref, err := CalcFloatDistance(4, left, append(refRows[0], refRows[1]...), metric)
+			require.NoError(t, err)
+			checkFusedDistance(t, metric, got, ref)
+		})
+	}
+
+	// invalid inputs
+	_, err := CalcInt8FloatDistance(4, []float32{1, 2}, right, "IP")
+	require.Error(t, err)
+	_, err = CalcInt8FloatDistance(4, left, []byte{1, 2, 3}, "IP") // not a whole row
+	require.Error(t, err)
+	_, err = CalcInt8FloatDistance(4, left, right, "HAMMING")
+	require.Error(t, err)
+}
+
+func TestCalcFloat16FloatDistance(t *testing.T) {
+	left := []float32{1, 2, 3, 4}
+	right := typeutil.Float32ArrayToFloat16Bytes([]float32{1, 2, 3, 4, 5, 6, 7, 8})
+	refRows := []float32{1, 2, 3, 4, 5, 6, 7, 8}
+
+	for _, metric := range []string{"L2", "IP", "COSINE"} {
+		t.Run(metric, func(t *testing.T) {
+			got, err := CalcFloat16FloatDistance(4, left, right, metric)
+			require.NoError(t, err)
+			ref, err := CalcFloatDistance(4, left, refRows, metric)
+			require.NoError(t, err)
+			checkFusedDistance(t, metric, got, ref)
+		})
+	}
+
+	_, err := CalcFloat16FloatDistance(4, left, []byte{0, 0, 1}, "IP")
+	require.Error(t, err)
+}
+
+func TestCalcBFloat16FloatDistance(t *testing.T) {
+	left := []float32{1, 2, 3, 4}
+	right := typeutil.Float32ArrayToBFloat16Bytes([]float32{1, 2, 3, 4, 5, 6, 7, 8})
+	refRows := []float32{1, 2, 3, 4, 5, 6, 7, 8}
+
+	for _, metric := range []string{"L2", "IP", "COSINE"} {
+		t.Run(metric, func(t *testing.T) {
+			got, err := CalcBFloat16FloatDistance(4, left, right, metric)
+			require.NoError(t, err)
+			ref, err := CalcFloatDistance(4, left, refRows, metric)
+			require.NoError(t, err)
+			checkFusedDistance(t, metric, got, ref)
+		})
+	}
+
+	_, err := CalcBFloat16FloatDistance(4, left, []byte{0, 0, 1}, "IP")
+	require.Error(t, err)
 }
