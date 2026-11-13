@@ -36,29 +36,49 @@ func parseArrayFloat32Plan(t *testing.T, helper *typeutil.SchemaHelper, filter s
 	return expr
 }
 
-func TestRewriteArrayFloat32IndexUsesInOptimizations(t *testing.T) {
+func TestRewriteArrayFloat32IndexPreservesMixedPrecisionExecutors(t *testing.T) {
 	helper := arrayFloat32Schema(t)
-	singleton := parseArrayFloat32Plan(t, helper, "ArrayFloat32[0] in [1.5]", true).GetUnaryRangeExpr()
+	singleton := parseArrayFloat32Plan(t, helper, "ArrayFloat32[0] in [1.5]", true).GetTermExpr()
 	require.NotNil(t, singleton)
-	require.Equal(t, planpb.OpType_Equal, singleton.GetOp())
-	require.Equal(t, 1.5, singleton.GetValue().GetFloatVal())
+	require.Len(t, singleton.GetValues(), 1)
+	require.Equal(t, 1.5, singleton.GetValues()[0].GetFloatVal())
 
 	for _, tc := range []struct {
-		filter string
-		values []float64
+		filter     string
+		termValues []float64
+		equalCount int
 	}{
-		{"ArrayFloat32[0] == 1.5 OR ArrayFloat32[0] == 2.5", []float64{1.5, 2.5}},
-		{"ArrayFloat32[0] in [1.5, 2.5] OR ArrayFloat32[0] == 3.5", []float64{1.5, 2.5, 3.5}},
+		{"ArrayFloat32[0] == 1.5 OR ArrayFloat32[0] == 2.5", nil, 2},
+		{"ArrayFloat32[0] in [1.5, 2.5] OR ArrayFloat32[0] == 3.5", []float64{1.5, 2.5}, 1},
 	} {
 		t.Run(tc.filter, func(t *testing.T) {
-			term := parseArrayFloat32Plan(t, helper, tc.filter, true).GetTermExpr()
-			require.NotNil(t, term)
-			require.Equal(t, []string{"0"}, term.GetColumnInfo().GetNestedPath())
-			values := make([]float64, 0, len(term.GetValues()))
-			for _, value := range term.GetValues() {
-				values = append(values, value.GetFloatVal())
+			expr := parseArrayFloat32Plan(t, helper, tc.filter, true)
+			// Fixed ARRAY<FLOAT> index equality uses UnaryRange's float32
+			// executor, while TermExpr uses double. Do not collapse the former
+			// into the latter until the executor precision is made consistent.
+			require.NotNil(t, expr.GetBinaryExpr())
+			require.Equal(t, planpb.BinaryExpr_LogicalOr, expr.GetBinaryExpr().GetOp())
+			equalCount := 0
+			termCount := 0
+			for _, child := range []*planpb.Expr{expr.GetBinaryExpr().GetLeft(), expr.GetBinaryExpr().GetRight()} {
+				if eq := child.GetUnaryRangeExpr(); eq != nil {
+					equalCount++
+					require.Equal(t, planpb.OpType_Equal, eq.GetOp())
+					require.Equal(t, []string{"0"}, eq.GetColumnInfo().GetNestedPath())
+					continue
+				}
+				term := child.GetTermExpr()
+				require.NotNil(t, term)
+				termCount++
+				require.Equal(t, []string{"0"}, term.GetColumnInfo().GetNestedPath())
+				values := make([]float64, 0, len(term.GetValues()))
+				for _, value := range term.GetValues() {
+					values = append(values, value.GetFloatVal())
+				}
+				require.Equal(t, tc.termValues, values)
 			}
-			require.ElementsMatch(t, tc.values, values)
+			require.Equal(t, tc.equalCount, equalCount)
+			require.Equal(t, len(tc.termValues) > 0, termCount == 1)
 		})
 	}
 }
@@ -76,6 +96,27 @@ func TestRewriteArrayFloat32KeepsWholeArrayNormalization(t *testing.T) {
 			require.Equal(t, planpb.OpType_Equal, comparison.GetOp())
 			require.NotNil(t, comparison.GetValue().GetArrayVal())
 			require.Empty(t, comparison.GetColumnInfo().GetNestedPath())
+		}
+	}
+}
+
+func TestRewriteArrayFloat32ParsedBoundarySemantics(t *testing.T) {
+	helper := arrayFloat32Schema(t)
+	row := float64(16777216)
+	for _, tc := range []struct {
+		filter string
+		want   int
+	}{
+		{"ArrayFloat32[0] in [16777217.0]", 0},
+		{"ArrayFloat32[0] == 16777217.0 OR ArrayFloat32[0] == 2.0", 2},
+		{"ArrayFloat32[0] in [16777217.0, 2.0] OR ArrayFloat32[0] == 16777217.0", 2},
+		{"ArrayFloat32[0] > 16777216.0 AND ArrayFloat32[0] >= 16777217.0", 0},
+		{"ArrayFloat32[0] > 16777216.0 OR ArrayFloat32[0] >= 16777217.0", 2},
+	} {
+		for _, optimize := range []bool{false, true} {
+			expr := parseArrayFloat32Plan(t, helper, tc.filter, optimize)
+			require.Equal(t, tc.want, evalFloatRewritePlan(t, expr, &row), "optimize=%t %s; plan %s", optimize, tc.filter, expr)
+			require.Equal(t, 1, evalFloatRewritePlan(t, expr, nil), "nullable array: %s", tc.filter)
 		}
 	}
 }
