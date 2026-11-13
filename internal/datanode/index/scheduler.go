@@ -271,7 +271,7 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 		bookings:      make(map[Task]taskcommon.Resource),
 		maxTaskNum:    1024,
 
-		utBufChan: make(chan struct{}, 1024),
+		utBufChan: make(chan struct{}, 1), // coalesced; the loop drains admissible work
 		sched:     sched,
 	}
 }
@@ -291,18 +291,19 @@ type TaskScheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	downloadTasks  chan *taskExecution
-	buildWakeup    chan struct{}
-	resourceMu     sync.Mutex
-	heldSlots      map[Task]int64
-	heldMemory     map[Task]int64
-	pendingTasks   []pendingTask
-	usingSlot      atomic.Int64
-	usingMemory    atomic.Int64
-	externalSlots  func() int64
-	totalSlots     func() int64
-	totalMemory    func() int64
-	externalMemory func() int64
+	downloadTasks   chan *taskExecution
+	buildWakeup     chan struct{}
+	resourceMu      sync.Mutex
+	heldSlots       map[Task]int64
+	heldMemory      map[Task]int64
+	pendingTasks    []pendingTask
+	usingSlot       atomic.Int64
+	usingMemory     atomic.Int64
+	externalSlots   func() int64
+	totalSlots      func() int64
+	totalMemory     func() int64
+	memoryAdmission *taskcost.MemoryAdmission
+	heldReleases    map[Task]func()
 }
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
@@ -315,6 +316,7 @@ func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 		buildWakeup:   make(chan struct{}, 1),
 		heldSlots:     make(map[Task]int64),
 		heldMemory:    make(map[Task]int64),
+		heldReleases:  make(map[Task]func()),
 		externalSlots: func() int64 { return 0 },
 		totalSlots:    CalculateNodeSlots,
 	}
@@ -333,9 +335,11 @@ func (sched *TaskScheduler) SetExternalSlotUsage(usage func() int64) {
 // Call before Start. Other executors' accepted work shares the node budget;
 // this scheduler's waiting tasks are counted only in the report, not here.
 // If capacity is unavailable, the legacy slot admission remains in force.
-func (sched *TaskScheduler) SetMemoryAdmission(capacity, externalUsage func() int64) {
+// The returned budget can also admit import V3 without double-booking memory.
+func (sched *TaskScheduler) SetMemoryAdmission(capacity, externalUsage func() int64) *taskcost.MemoryAdmission {
 	sched.totalMemory = capacity
-	sched.externalMemory = externalUsage
+	sched.memoryAdmission = taskcost.NewMemoryAdmission(capacity, externalUsage)
+	return sched.memoryAdmission
 }
 
 func (sched *TaskScheduler) memoryCapacity() int64 {
@@ -403,22 +407,23 @@ func (sched *TaskScheduler) acquireResources(t Task, memory int64) bool {
 			sched.pendingTasks = append(sched.pendingTasks, pendingTask{name: t.Name(), ctx: t.Ctx(), task: t})
 		}
 	}
-	if capacity := sched.memoryCapacity(); capacity > 0 {
-		used := sched.usingMemory.Load()
-		if sched.externalMemory != nil {
-			used += max(sched.externalMemory(), 0)
-		}
-		// As with legacy slots, an otherwise idle node can run an oversized
-		// estimate alone. Waiting cannot make such a task fit the total.
-		if used > 0 && memory > capacity-used {
-			return false
-		}
-	} else if !sched.slotsAvailable(t.GetSlot()) {
+
+	if sched.memoryCapacity() <= 0 && !sched.slotsAvailable(t.GetSlot()) {
 		return false
 	}
-	sched.heldSlots[t] = t.GetSlot()
+
+	if sched.memoryAdmission != nil {
+		release, ok := sched.memoryAdmission.TryAcquire(memory)
+		if !ok {
+			return false
+		}
+		sched.heldReleases[t] = release
+	}
+
+	slots := max(t.GetSlot(), 0)
+	sched.heldSlots[t] = slots
 	sched.heldMemory[t] = memory
-	sched.usingSlot.Add(t.GetSlot())
+	sched.usingSlot.Add(slots)
 	sched.usingMemory.Add(memory)
 	return true
 }
@@ -437,6 +442,10 @@ func (sched *TaskScheduler) releaseResources(task Task) {
 		sched.usingSlot.Sub(slots)
 		sched.usingMemory.Sub(sched.heldMemory[task])
 		delete(sched.heldMemory, task)
+		if release := sched.heldReleases[task]; release != nil {
+			release()
+			delete(sched.heldReleases, task)
+		}
 	}
 	sched.resourceMu.Unlock()
 }

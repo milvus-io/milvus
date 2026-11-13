@@ -316,7 +316,8 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   running can overlap a retry with the same name without releasing its budget.
 - Local index admission has a separate execution ledger. Before preparation
   and download it atomically reserves accepted memory against node capacity
-  minus index execution reservations and the other executors' accepted memory.
+  minus shared index/V3 execution reservations and the other executors' accepted
+  memory. Import V3 pending bookings are excluded from execution admission.
   Its own waiting tasks are excluded from this test, so queued bookings cannot
   prevent their own execution. The waiting queue is separately bounded to one
   node's memory and 1024 tasks. An empty queue accepts one oversized estimate;
@@ -327,6 +328,26 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   tasks retain FIFO build admission and their full-lifecycle concurrency cap.
   A blocked vector can be bypassed by a non-vector task that fits. If memory
   capacity cannot be read, queue and execution admission use legacy slots.
+- `taskcost.MemoryAdmission` is shared by index/stats/analyze and import V3.
+  Its capacity is `nodeTaskCapacity().Memory`. Its external usage includes
+  compaction, import V2 and external refresh only; participating schedulers
+  reserve their running work atomically through this budget. Their pending
+  bookings must not enter its external usage, which would let queues block
+  themselves or each other. No callback reads a participating scheduler while
+  the shared budget is locked.
+- Import V3 captures an immutable price at Submit. Pending work remains in
+  `Resource()` for QuerySlot, but acquires execution memory only on admission.
+  Drop/replacement keeps admitted memory reserved until the closure exits.
+  Rejected pool submissions return their reservation and become Retry. V3
+  preimport cancels and joins every file future on failure; reshard cleanup
+  likewise joins detached fragment writes before memory is returned. Direct
+  legacy V3 requests without a price book their scalar share of node memory.
+  If memory capacity is unavailable, V3 keeps its original slot admission;
+  reservations still track explicit prices for capacity recovery.
+- The existing local progress rule remains: an otherwise idle worker can run
+  one oversized estimate alone. Coordinator placement has no oversized
+  exception and never intentionally dispatches such a priced task. Scalar
+  compatibility reports still include queued and admitted slot demand.
 - The external-collection refresh task runs through its own manager rather
   than one of the four executors. The manager books the estimate when it
   accepts the task (queued in its pool included, a duplicate dispatch books
@@ -423,7 +444,7 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
 - Direct index RPCs (`CreateJob`, `CreateJobV2`) carry no resource properties.
   The index queue converts missing memory from the task's scalar slot, or uses
   the memory floor if that slot is absent too. Other direct pre-`CreateTask`
-  RPCs (`PreImport`, `ImportV2`, `CompactionV2`, `PreImportV3`) still book zero
+  RPCs (`PreImport`, `ImportV2`, `CompactionV2`) still book zero
   CPU/memory and do not reach `CreateTask`'s slot-share fallback. Accounting for
   those historical callers remains outside this change: a shared pool does
   not include those direct tasks in its CPU/memory ledger. The compatibility
@@ -464,7 +485,9 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
 - Picker: memory filter, CPU/slot exhaustion with spare memory, score ordering,
   in-round charging, oversized requests waiting, unpriced slot compatibility,
   all-old-workers falling back to the heap, and mixed clusters.
-- Executors: separate acceptance and execution ledgers; exhausted old slots
+- Executors: shared index/V3 execution reservations, pending-work exclusion,
+  simultaneous scheduler admission, cancellation and pool rejection; separate
+  acceptance and execution ledgers; exhausted old slots
   with spare memory, external executor usage, oversized tasks, cancellation
   through cleanup, same-name retries, and the retained vector concurrency cap.
 - Merge-sort compaction: a V1 fan-in whose resident reader windows exceed one
