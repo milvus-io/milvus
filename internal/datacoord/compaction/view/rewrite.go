@@ -18,6 +18,7 @@ package view
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -65,6 +66,9 @@ type MixView struct {
 	OptimizeSize    int64
 	OptimizeMatch   map[int64]struct{}
 	RewriteRequired map[int64]struct{}
+	SizeExpected    int64
+	MaxFragments    int64
+	SizeInputs      []*SegmentView
 }
 
 func (v *MixView) Plan() ([]*datapb.CompactionTask, error) {
@@ -82,6 +86,21 @@ func (v *MixView) Plan() ([]*datapb.CompactionTask, error) {
 			}
 			plans = append(plans, plan)
 			for _, input := range group {
+				covered[input.ID] = true
+			}
+		}
+	}
+	if v.SizeExpected > 0 {
+		// The packer sorts its own copy. A second Plan uses the same View.
+		groups := GroupTwoTier(slices.Clone(v.SizeInputs), &CompactTime{CollectionTTL: v.TTL}, v.SizeExpected, v.MaxFragments, false)
+		for _, group := range groups {
+			plan, err := v.planMix(group.Inputs, group.MaxSize, v.SizeExpected, true)
+			if err != nil {
+				return nil, err
+			}
+			plan.SizeCompactionHint = true
+			plans = append(plans, plan)
+			for _, input := range group.Inputs {
 				covered[input.ID] = true
 			}
 		}

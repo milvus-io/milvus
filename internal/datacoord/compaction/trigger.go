@@ -483,7 +483,6 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, s
 	}
 
 	maxFragments := Params.DataCoordCfg.MaxFragmentsPerGroup.GetAsInt64()
-	middleSize := compactionMiddleSize(expectedSize)
 
 	// Step 1: Classify segments.
 	// Force compaction (manual trigger) bypasses the single-compaction
@@ -513,77 +512,14 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, s
 		})
 	}
 
-	// Step 2: Full-tier composition.
-	// Force compaction bypasses the fill-rate gate and minimum-segment
-	// count so every candidate is packed.
-	packer := view.NewSegmentPacker("full-tier", compactable, compactTime)
-	fullMaxLeftSize := expectedSize - compactionFullThreshold(expectedSize)
-	minSegs := int64(2)
-	if signal.IsForce {
-		fullMaxLeftSize = math.MaxInt64
-		minSegs = 1
-	}
-	for {
-		pack, _ := packer.PackSliding(expectedSize, fullMaxLeftSize, minSegs, math.MaxInt64)
-		if len(pack) == 0 {
-			break
-		}
+	for _, group := range view.GroupTwoTier(compactable, compactTime, expectedSize, maxFragments, signal.IsForce) {
 		var rows int64
-		for _, s := range pack {
-			rows += s.GetNumOfRows()
+		for _, segment := range group.Inputs {
+			rows += segment.GetNumOfRows()
 		}
 		buckets = append(buckets, &compactionBucket{
-			segments:  pack,
-			totalRows: rows,
-			maxSize:   expectedSize,
+			segments: group.Inputs, totalRows: rows, maxSize: group.MaxSize,
 		})
-	}
-
-	// Force compaction: segments too large for the target size still
-	// need individual compaction tasks (e.g. to apply deletes).
-	if signal.IsForce {
-		for _, s := range packer.Candidates {
-			buckets = append(buckets, &compactionBucket{
-				segments:  []*meta.SegmentInfo{s},
-				totalRows: s.GetNumOfRows(),
-				maxSize:   expectedSize,
-			})
-		}
-		packer.Candidates = nil
-	}
-
-	// Step 3: Fragment-tier composition
-	var fragmentCount int64
-	for _, s := range packer.Candidates {
-		if isFragmentSegment(expectedSize, s.GetResidualSegmentSize()) {
-			fragmentCount++
-		}
-	}
-
-	if fragmentCount > maxFragments {
-		var fragments []*meta.SegmentInfo
-		for _, s := range packer.Candidates {
-			if isFragmentSegment(expectedSize, s.GetResidualSegmentSize()) {
-				fragments = append(fragments, s)
-			}
-		}
-
-		fragPacker := view.NewSegmentPacker("fragment-tier", fragments, compactTime)
-		for {
-			pack, _ := fragPacker.Pack(middleSize, math.MaxInt64, 2, math.MaxInt64)
-			if len(pack) == 0 {
-				break
-			}
-			var rows int64
-			for _, s := range pack {
-				rows += s.GetNumOfRows()
-			}
-			buckets = append(buckets, &compactionBucket{
-				segments:  pack,
-				totalRows: rows,
-				maxSize:   middleSize,
-			})
-		}
 	}
 
 	if len(buckets) > 0 {
@@ -592,7 +528,6 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, s
 			mlog.Int("prioritized", len(prioritized)),
 			mlog.Int("compactable", len(compactable)),
 			mlog.Int("buckets", len(buckets)),
-			mlog.Int64("fragmentCount", fragmentCount),
 			mlog.Int64("maxFragments", maxFragments))
 	}
 

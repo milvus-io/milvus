@@ -100,13 +100,16 @@ func MatchesSortCompaction(segment *meta.SegmentInfo) bool {
 }
 
 func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
-	allDiskIndex := indexMeta != nil && indexMeta.AllDenseWithDiskIndex(collectionID, schema)
-	if allDiskIndex {
+	if UsesDiskSegmentSize(indexMeta, collectionID, schema) {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
 	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+}
+
+func UsesDiskSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) bool {
+	return indexMeta != nil && indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 }
 
 func IsNormalManualCompactionCandidate(mt *meta.Meta, segment *meta.SegmentInfo) bool {

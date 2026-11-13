@@ -317,6 +317,13 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	var observed bool
 	var observationErr error
 	switch {
+	case targets.IsStandingSize(record):
+		condition, err := targets.ReadSizeCondition()
+		applySizeCondition(target, condition, err)
+		if err == nil && condition.Enabled {
+			rows, observationErr = targets.ObserveSize(ctx, s.meta, s.indexMeta, condition)
+			observed = true
+		}
 	case !resource.GetDeleted() && targets.IsRewrite(record):
 		observation, err := targets.ObserveRewrite(ctx, s.meta, record, false)
 		rows, observed, observationErr = observation.Rows, true, err
@@ -387,6 +394,14 @@ func publicStandingConditionKeys(intent datapb.TargetIntent) []string {
 	}
 }
 
+func applySizeCondition(target *datapb.CompactionTargetReadModel, condition targets.SizeCondition, err error) {
+	target.Enabled = proto.Bool(condition.Enabled)
+	target.Parameters = condition.Parameters()
+	if err != nil {
+		target.Message = "some SIZE parameters are unavailable"
+	}
+}
+
 func (s *Server) ListCompactionTargets(ctx context.Context, req *datapb.ListCompactionTargetsRequest) (*datapb.ListCompactionTargetsResponse, error) {
 	result, err := s.listCompactionTargets(ctx, req)
 	if ctx.Err() != nil {
@@ -421,6 +436,8 @@ func (s *Server) listCompactionTargets(ctx context.Context, req *datapb.ListComp
 		return nil, err
 	}
 	resources := make(map[int64]*datapb.CompactionTargetResource)
+	var sizeCondition *targets.SizeCondition
+	var sizeErr error
 	var result []*datapb.CompactionTargetReadModel
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
@@ -451,6 +468,13 @@ func (s *Server) listCompactionTargets(ctx context.Context, req *datapb.ListComp
 		target, err := compactionTargetReadModel(record, resource)
 		if err != nil {
 			return nil, err
+		}
+		if targets.IsStandingSize(record) {
+			if sizeCondition == nil {
+				condition, err := targets.ReadSizeCondition()
+				sizeCondition, sizeErr = &condition, err
+			}
+			applySizeCondition(target, *sizeCondition, sizeErr)
 		}
 		result = append(result, target)
 	}

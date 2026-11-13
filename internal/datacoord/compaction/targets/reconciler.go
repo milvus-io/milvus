@@ -70,6 +70,17 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	sortMatches := reconciler.observeStandingSort(ctx)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
+	var size SizeCondition
+	var sizeErr error
+	if _, err := manager.SyncSize(ctx, reconciler.allocator); err != nil {
+		sizeErr = err
+	} else {
+		size, sizeErr = ReadSizeCondition()
+	}
+	if sizeErr != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not synchronize Standing SIZE compaction target", mlog.Err(sizeErr))
+		size.Enabled = false
+	}
 	records := manager.GetActiveCompactionTargets()
 	matches := make(map[int64]*meta.SegmentInfo)
 	optimizeInputs := make(map[int64]optimizeInput)
@@ -133,7 +144,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	})
 	slices.SortFunc(rewriteSelectable, compareSegment)
 	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
-	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible)
+	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible, size)
 	return events, ctx.Err()
 }
 

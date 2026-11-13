@@ -216,18 +216,7 @@ func (m *targetWriteErrorKV) MultiSaveAndRemove(context.Context, map[string]stri
 }
 
 func TestLateCompactionTargetCreateCannotOutliveCollectionDrop(t *testing.T) {
-	cfg := embed.NewConfig()
-	cfg.Dir = t.TempDir()
-	cfg.LogLevel = "error"
-	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
-	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
-	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
-	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
-	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
-	backend, err := etcdkv.NewEmbededEtcdKV(cfg, "test/meta")
-	require.NoError(t, err)
-	t.Cleanup(backend.Close)
-
+	backend := newCompactionTargetEtcd(t)
 	ctx := t.Context()
 	root := rootcatalog.NewCatalog(backend)
 	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
@@ -251,6 +240,62 @@ func TestLateCompactionTargetCreateCannotOutliveCollectionDrop(t *testing.T) {
 	stored, err = catalog.LoadCompactionTarget(ctx, record.GetTargetID())
 	require.NoError(t, err)
 	require.Nil(t, stored)
+}
+
+func newCompactionTargetEtcd(t *testing.T) kv.MetaKv {
+	t.Helper()
+	cfg := embed.NewConfig()
+	cfg.Dir = t.TempDir()
+	cfg.LogLevel = "error"
+	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	backend, err := etcdkv.NewEmbededEtcdKV(cfg, "test/meta")
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	return backend
+}
+
+func TestOptimizeSlotSerializesCoordinatorsAndReleasesAtStop(t *testing.T) {
+	backend := newCompactionTargetEtcd(t)
+	ctx := t.Context()
+	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, rootcatalog.NewCatalog(backend).CreateCollection(ctx, collection, collection.UpdateTimestamp))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Revision: collection.UpdateTimestamp}
+	newCandidate := func(id int64) *datapb.CompactionTarget {
+		return &datapb.CompactionTarget{TargetID: id, CollectionID: collection.CollectionID,
+			Intent: datapb.TargetIntent_INTENT_OPTIMIZE, Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: 1000, ActualTargetSizeBytes: 1000}}
+	}
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	first := NewCatalog(delayed, "", "")
+	unknown, err := first.CreateCompactionTarget(ctx, newCandidate(100), scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, unknown)
+	second := NewCatalog(backend, "", "")
+	rows, err := second.ListCompactionTargets(ctx)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	winner := newCandidate(101)
+	_, err = second.CreateCompactionTarget(ctx, winner, scope)
+	require.NoError(t, err)
+	require.Error(t, delayed.commit())
+	unknown, err = second.CreateCompactionTarget(ctx, newCandidate(102), scope)
+	require.ErrorIs(t, err, merr.ErrCompactionPlanConflict)
+	require.False(t, unknown)
+	require.ErrorContains(t, err, "101")
+	winner.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	winner.StopReason = "operator_dropped"
+	stopped, changed, err := second.StopCompactionTarget(ctx, winner)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, winner.GetState(), stopped.GetState())
+	_, err = second.CreateCompactionTarget(ctx, newCandidate(102), scope)
+	require.NoError(t, err)
+	rows, err = second.ListCompactionTargets(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
 }
 
 // Hold the storage request past its timeout and a subsequent read-back, as a

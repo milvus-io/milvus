@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -73,12 +74,13 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 
 func (r *CompactionTargetReconciler) mixViews(
 	ctx context.Context, rewrites []*meta.SegmentInfo, optimizeInputs map[int64]optimizeInput,
-	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts,
+	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts, size SizeCondition,
 ) []view.TargetView {
 	requiredRewrites := make(map[int64]*meta.SegmentInfo, len(rewrites))
 	for _, segment := range rewrites {
 		requiredRewrites[segment.GetID()] = segment
 	}
+	sizeInputs := r.selectSizeInputs(ctx, size, optimizeInputs, allocated, eligible)
 
 	var optimizeSelectable []*meta.SegmentInfo
 	for id, input := range optimizeInputs {
@@ -88,12 +90,15 @@ func (r *CompactionTargetReconciler) mixViews(
 		}
 	}
 	optimizeSelectable = r.filterMixCompactionSelectable(ctx, optimizeSelectable)
-	selected := make(map[int64]*meta.SegmentInfo, len(optimizeSelectable)+len(rewrites))
+	selected := make(map[int64]*meta.SegmentInfo, len(optimizeSelectable)+len(rewrites)+len(sizeInputs))
 	for _, segment := range optimizeSelectable {
 		selected[segment.GetID()] = segment
 	}
 	for id, segment := range requiredRewrites {
 		selected[id] = segment
+	}
+	for id, input := range sizeInputs {
+		selected[id] = input.segment
 	}
 
 	ordered := make([]*meta.SegmentInfo, 0, len(selected))
@@ -108,11 +113,18 @@ func (r *CompactionTargetReconciler) mixViews(
 	groups := make(map[poolKey]*view.MixView)
 	var views []view.TargetView
 	for _, segment := range ordered {
-		input := view.GetTargetSegmentView(segment)
 		opt, inOptimize := optimizeInputs[segment.GetID()]
+		sizeInput, sizeEligible := sizeInputs[segment.GetID()]
 		_, required := requiredRewrites[segment.GetID()]
 		if inOptimize {
+			segment = opt.segment
+		}
+		input := view.GetTargetSegmentView(segment)
+		if inOptimize {
 			input.ResidualSize = opt.residual
+		}
+		if sizeEligible {
+			input.ResidualSize = sizeInput.residual
 		}
 		key := poolKey{group: *input.Label, optimize: inOptimize}
 		pool := groups[key]
@@ -121,11 +133,16 @@ func (r *CompactionTargetReconciler) mixViews(
 			pool = &view.MixView{
 				RewriteInputs: view.RewriteInputs{Group: input.Label, TTL: facts.ttl, Schema: facts.schema, ExpectedSize: facts.expectedSize},
 				OptimizeSize:  opt.expected,
+				MaxFragments:  size.MaxFragments,
 			}
 			groups[key] = pool
 			views = append(views, pool)
 		}
 		pool.Segments = append(pool.Segments, input)
+		if sizeEligible {
+			pool.SizeExpected = sizeInput.expected
+			pool.SizeInputs = append(pool.SizeInputs, input)
+		}
 		if required {
 			if pool.RewriteRequired == nil {
 				pool.RewriteRequired = make(map[int64]struct{})
@@ -140,4 +157,45 @@ func (r *CompactionTargetReconciler) mixViews(
 		}
 	}
 	return views
+}
+
+func (r *CompactionTargetReconciler) selectSizeInputs(
+	ctx context.Context, condition SizeCondition, optimizeInputs map[int64]optimizeInput,
+	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts,
+) map[int64]sizeInput {
+	if !condition.Enabled {
+		return nil
+	}
+	var candidates []*meta.SegmentInfo
+	inputs := make(map[int64]sizeInput)
+	auto := make(map[int64]bool)
+	err := visitSizeMatches(ctx, r.meta, r.IndexMeta, condition, standingSegments(ctx, r.meta), func(input sizeInput) error {
+		segment := input.segment
+		id := segment.GetID()
+		_, assigned := allocated[id]
+		_, inOptimize := optimizeInputs[id]
+		if assigned || inOptimize || segment.GetIsImporting() || !r.selectable(ctx, segment, eligible) {
+			return nil
+		}
+		collectionID := segment.GetCollectionID()
+		enabled, observed := auto[collectionID]
+		if !observed {
+			enabled = policy.IsCollectionAutoCompactionEnabled(r.meta.GetCollection(collectionID))
+			auto[collectionID] = enabled
+		}
+		if enabled {
+			candidates = append(candidates, segment)
+			inputs[id] = input
+		}
+		return nil
+	})
+	if err != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not fully observe Standing SIZE compaction target", mlog.Err(err))
+	}
+	selectable := r.filterMixCompactionSelectable(ctx, candidates)
+	selected := make(map[int64]sizeInput, len(selectable))
+	for _, segment := range selectable {
+		selected[segment.GetID()] = inputs[segment.GetID()]
+	}
+	return selected
 }

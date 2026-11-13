@@ -105,10 +105,10 @@ func knownTargetRecord(record *datapb.CompactionTarget) bool {
 	case datapb.TargetIntent_INTENT_REWRITE:
 		return IsRewrite(record) && record.GetCollectionID() > 0
 	case datapb.TargetIntent_INTENT_OPTIMIZE:
-		return record.GetOptimize() != nil && record.GetCollectionID() > 0
-	case datapb.TargetIntent_INTENT_SORT:
-		return IsStandingSort(record)
+		return IsOptimize(record) && record.GetCollectionID() > 0
+	case datapb.TargetIntent_INTENT_SIZE:
+		return IsStandingSize(record)
 	default:
-		return false
+		return HasStandingCondition(record)
 	}
 }
