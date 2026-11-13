@@ -1360,3 +1360,135 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
             search_params={"metric_type": "L2" if vector_type == DataType.FLOAT_VECTOR else "IP", "params": {}},
         )[0][0]
         assert {hit["id"] for hit in hits} == {row["id"] for row in new_rows if row["added_vector"] is not None}
+
+    @pytest.mark.tags("import_v3")
+    @pytest.mark.parametrize("with_valid_group", [False, True], ids=["misnamed_group", "mixed_groups"])
+    def test_import_numpy_rejects_group_without_matching_fields(self, with_valid_group, upload_import_file, tmp_path):
+        """
+        target: reject a NumPy group with no filenames matching required fields
+        method: submit misnamed columns alone or alongside a correctly named group, then retry with correct names
+        expected: the bad job fails without publishing rows, and the corrected job imports every row
+        case: IV3-FN-21 SC-03/SC-12 (milvus-io/milvus#55150)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
+        self._create_data_collection(client, collection_name, schema)
+        existing = [{"id": 100, "vector": [100.0] * 8}]
+        self.insert(client, collection_name, existing)
+
+        rows = [{"id": i, "vector": [float(i)] * 8} for i in range(1, 5)]
+        columns = (
+            ("id", "wrong_id", np.asarray([row["id"] for row in rows], dtype=np.int64)),
+            ("vector", "wrong_vector", np.asarray([row["vector"] for row in rows], dtype=np.float32)),
+        )
+        bad_group, corrected_group = [], []
+        for field, wrong_name, values in columns:
+            bad_path = tmp_path / f"{wrong_name}.npy"
+            corrected_path = tmp_path / f"{field}.npy"
+            np.save(bad_path, values[:2], allow_pickle=False)
+            np.save(corrected_path, values[:2], allow_pickle=False)
+            bad_group.append(upload_import_file(bad_path))
+            corrected_group.append(upload_import_file(corrected_path))
+
+        extra_groups = []
+        if with_valid_group:
+            valid_dir = tmp_path / "valid"
+            valid_dir.mkdir()
+            valid_group = []
+            for field, _, values in columns:
+                path = valid_dir / f"{field}.npy"
+                np.save(path, values[2:], allow_pickle=False)
+                valid_group.append(upload_import_file(path))
+            extra_groups.append(valid_group)
+
+        failed = self._import_and_wait(collection_name, [*extra_groups, bad_group], expected_state="Failed")
+        assert "no file for field:" in failed.get("reason", "").lower(), failed
+        self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, existing)
+
+        imported = self._import_and_wait(collection_name, [*extra_groups, corrected_group])
+        expected = rows if with_valid_group else rows[:2]
+        assert imported["importedRows"] == imported["totalRows"] == len(expected), imported
+        self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, existing + expected)
+
+    @pytest.mark.tags("import_v3")
+    @pytest.mark.parametrize(
+        "invalid_input, expected_reason",
+        [
+            ("numpy_missing_vector", "no file for field: vector"),
+            ("numpy_scalar_arrays", "expected shape"),
+            ("numpy_wrong_dimension", "expected dim"),
+            ("numpy_wrong_dtype", "expected element type"),
+            ("parquet_missing_fields", "not in arrow schema"),
+            ("parquet_wrong_type", "type mis-match"),
+        ],
+    )
+    def test_import_validates_schema_before_zero_row_completion(
+        self, invalid_input, expected_reason, upload_import_file, tmp_path
+    ):
+        """
+        target: validate schema even if columnar metadata yields a zero row count
+        method: submit invalid NumPy or Parquet input, then import a schema-compatible empty file set
+        expected: invalid input fails for the schema error; valid empty input completes without adding rows
+        case: IV3-FN-21 SC-12 (zero-row validation)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
+        self._create_data_collection(client, collection_name, schema)
+        existing = [{"id": 100, "vector": [100.0] * 8}]
+        self.insert(client, collection_name, existing)
+
+        if invalid_input.startswith("parquet"):
+            bad = tmp_path / "invalid.parquet"
+            good = tmp_path / "empty.parquet"
+            bad_schema = (
+                pa.schema([("wrong_id", pa.int64()), ("wrong_vector", pa.list_(pa.float32()))])
+                if invalid_input == "parquet_missing_fields"
+                else pa.schema([("id", pa.string()), ("vector", pa.list_(pa.float32()))])
+            )
+            self._write_rows(bad, [], bad_schema)
+            self._write_rows(good, [], pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32()))]))
+            bad_group = [upload_import_file(bad)]
+            valid_group = [upload_import_file(good)]
+        else:
+            bad_dir = tmp_path / "bad"
+            bad_dir.mkdir()
+            ids = np.empty(0, dtype=np.int64)
+            vectors = np.empty((0, 8), dtype=np.float32)
+            if invalid_input == "numpy_scalar_arrays":
+                bad_ids = np.array(1, dtype=np.int64)
+            elif invalid_input == "numpy_wrong_dtype":
+                bad_ids = np.empty(0, dtype=np.float32)
+            else:
+                bad_ids = ids
+            np.save(bad_dir / "id.npy", bad_ids, allow_pickle=False)
+            bad_group = [upload_import_file(bad_dir / "id.npy")]
+            if invalid_input != "numpy_missing_vector":
+                if invalid_input == "numpy_scalar_arrays":
+                    bad_vectors = np.array(1, dtype=np.float32)
+                elif invalid_input == "numpy_wrong_dimension":
+                    bad_vectors = np.empty((0, 7), dtype=np.float32)
+                else:
+                    bad_vectors = vectors
+                np.save(bad_dir / "vector.npy", bad_vectors, allow_pickle=False)
+                bad_group.append(upload_import_file(bad_dir / "vector.npy"))
+            np.save(tmp_path / "id.npy", ids, allow_pickle=False)
+            np.save(tmp_path / "vector.npy", vectors, allow_pickle=False)
+            valid_group = [upload_import_file(tmp_path / "id.npy"), upload_import_file(tmp_path / "vector.npy")]
+
+        failed = self._import_and_wait(collection_name, [bad_group], expected_state="Failed")
+        assert expected_reason in failed.get("reason", "").lower(), failed
+        self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, existing)
+
+        imported = self._import_and_wait(collection_name, [valid_group])
+        assert imported["importedRows"] == imported["totalRows"] == 0, imported
+        self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, existing)
