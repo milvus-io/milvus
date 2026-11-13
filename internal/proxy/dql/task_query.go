@@ -66,6 +66,10 @@ type QueryTask struct {
 	queryParams    *queryParams
 	schema         *schemaInfo
 
+	// Only Search requery supplies this version, including zero. It detects
+	// stale output fields without pinning an unavailable execution schema.
+	requerySchemaVersion *int32
+
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
@@ -646,6 +650,15 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	originalOuputFields := t.request.GetOutputFields()
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
 	if err != nil {
+		if t.reQuery && t.requerySchemaVersion != nil && *t.requerySchemaVersion != t.schema.GetVersion() {
+			// The parent Search already validated these fields. Retry the whole
+			// Search so it expands its original projection against the new schema.
+			// Combine keeps the validation diagnostic while the last error supplies
+			// the retryable system code, rather than the original input-error code.
+			return merr.Combine(err, merr.WrapErrInconsistentRequery(fmt.Sprintf(
+				"schema changed during requery, collection=%d, search schema version=%d, query schema version=%d",
+				t.CollectionID, *t.requerySchemaVersion, t.schema.GetVersion())))
+		}
 		return err
 	}
 
