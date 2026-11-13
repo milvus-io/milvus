@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -507,7 +508,9 @@ func NewSegment(ctx context.Context,
 	)
 
 	var csegment segcore.CSegment
+	submitTime := time.Now()
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
+		createPoolWait.Observe(time.Since(submitTime), stage.Success)
 		var err error
 		csegment, err = collection.CreateCSegment(&segcore.CreateCSegmentRequest{
 			SegmentID:   loadInfo.GetSegmentID(),
@@ -541,7 +544,10 @@ func NewSegment(ctx context.Context,
 		insertCount:     atomic.NewInt64(0),
 	}
 
-	if err := segment.initializeSegment(); err != nil {
+	initializeSegmentStart := time.Now()
+	initializeErr := segment.initializeSegment()
+	createInitialize.Observe(time.Since(initializeSegmentStart), stage.Outcome(initializeErr))
+	if err := initializeErr; err != nil {
 		csegment.Release()
 		return nil, err
 	}
@@ -1261,7 +1267,8 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 		return
 	}
 
-	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).
+		WithManifestReadOrigin(packed.ManifestReadPostSync).TextAndJSONIndexStatsWithBasePaths()
 	jsonKeyStats := statsResult.JSONKeyStats
 	if statsResult.Err() != nil {
 		mlog.Warn(ctx, "failed to resolve json key stats from manifest",
@@ -1299,10 +1306,20 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 }
 
 func (s *LocalSegment) Load(ctx context.Context) error {
-	if err := s.csegment.Load(ctx); err != nil {
+	physicalLoadTiming := PhysicalLoadTimingFromContext(ctx)
+	startedAt := time.Now()
+	err := s.csegment.Load(ctx)
+	if physicalLoadTiming != nil {
+		physicalLoadTiming.CSegmentLoad = time.Since(startedAt)
+	}
+	if err != nil {
 		return err
 	}
+	startedAt = time.Now()
 	s.syncFieldJSONStatsFromLoadInfo(ctx, s.LoadInfo())
+	if physicalLoadTiming != nil {
+		physicalLoadTiming.SyncJSONStats = time.Since(startedAt)
+	}
 	return nil
 }
 
@@ -1854,3 +1871,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		BM25Stats:              bm25Stats,
 	}, nil
 }
+
+var createPoolWait = stage.New("queryNode", "segment_create", "pool_wait")
+
+var createInitialize = stage.New("queryNode", "segment_create", "initialize")

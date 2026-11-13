@@ -26,6 +26,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
 #include "exec/QueryContext.h"
+#include "monitor/QueryMetrics.h"
 
 namespace milvus {
 namespace exec {
@@ -73,13 +74,21 @@ class PhyMvccNode : public Operator {
     PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<PhyMvccNode>(shared_from_this());
-        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            self->segment_->prefetch_chunks(
-                self->operator_context_->get_exec_context()
-                    ->get_query_context()
-                    ->get_op_context(),
-                TimestampFieldID);
-        }));
+        const auto submit_time = std::chrono::steady_clock::now();
+        prefetch_future_.emplace(
+            folly::via(prefetch_pool.get(), [self, submit_time]() {
+                const auto started = milvus::monitor::QueryStageClock::now();
+                auto* query_context =
+                    self->operator_context_->get_exec_context()
+                        ->get_query_context();
+                auto* op_context = query_context->get_op_context();
+                milvus::monitor::ObserveQueryStage(
+                    milvus::monitor::QueryStage::MvccPrefetchQueue,
+                    started - submit_time);
+                milvus::monitor::QueryStageTimer run_timer(
+                    milvus::monitor::QueryStage::MvccPrefetchRun);
+                self->segment_->prefetch_chunks(op_context, TimestampFieldID);
+            }));
     }
 
     void
@@ -87,6 +96,8 @@ class PhyMvccNode : public Operator {
         if (prefetch_future_.has_value()) {
             auto future = std::move(*prefetch_future_);
             prefetch_future_.reset();
+            milvus::monitor::QueryStageTimer wait_timer(
+                milvus::monitor::QueryStage::MvccPrefetchWait);
             std::move(future).get();
         }
     }

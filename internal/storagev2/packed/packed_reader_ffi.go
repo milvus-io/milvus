@@ -39,6 +39,7 @@ import "C"
 import (
 	"context"
 	"io"
+	"time"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // ExternalReaderContext carries per-collection context needed by the FFI
@@ -437,13 +439,30 @@ func GetManifestHandleWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) (loonManifestHandle *C.LoonManifest, err error) {
+	return getManifestHandleWithTiming(manifestPath, storageConfig, extfs, nil)
+}
+
+func getManifestHandleWithTiming(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	timing *manifestReadTiming,
+) (loonManifestHandle *C.LoonManifest, err error) {
+	totalTimer := manifestTotal.Begin()
+	defer totalTimer.EndError(&err)
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
+	propertiesTimer := manifestProperties.Begin()
+	propertiesStartedAt := time.Now()
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if timing != nil {
+		timing.durations[manifestReadProperties] = time.Since(propertiesStartedAt)
+	}
+	propertiesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -451,8 +470,15 @@ func GetManifestHandleWithExtfs(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, merr.Wrap(err, "inject extfs")
 	}
-	return openManifest(manifest, cProperties)
+	return openManifest(manifest, cProperties, timing)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface
 // var _ array.RecordReader = (*FFIPackedReader)(nil)
+
+var (
+	manifestTotal      = stage.New("storage", "manifest", "total")
+	manifestProperties = stage.New("storage", "manifest", "properties")
+	manifestBegin      = stage.New("storage", "manifest", "transaction_begin")
+	manifestGet        = stage.New("storage", "manifest", "get_manifest")
+)

@@ -9,11 +9,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // ShardViewRegistry owns the lifecycle of every ShardViewManager on this Coord
@@ -139,9 +141,13 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 	return registry, nil
 }
 
+var registryEnsure = stage.New("coord", "apply", "ensure")
+
 // Ensure returns the ShardViewManager for shardID, creating a fresh one if
 // none exists. Safe to call repeatedly.
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
+	timer := registryEnsure.Begin()
+	defer timer.End(nil)
 	// Fast path: already present.
 	r.mu.RLock()
 	if mgr, ok := r.shards[shardID]; ok {
@@ -190,6 +196,7 @@ func (r *ShardViewRegistry) Close() {
 		manager.closed = true
 		for _, sm := range manager.views {
 			sm.failPreparation("shard registry closed")
+			qvobserve.CancelView("coord", manager.keyForStateMachine(sm))
 		}
 		manager.mu.Unlock()
 	}

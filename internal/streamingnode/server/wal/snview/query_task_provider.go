@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 var _ viewquery.TaskProvider = (*SNQueryViewHandler)(nil)
@@ -24,7 +25,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if req.GetIgnoreGrowing() {
 		return NewSNSearchSegmentTasks(nil), nil
 	}
+	leaseTimer := queryLease.Begin()
 	lease, err := h.acquireUpView(ctx, shardID, version, false)
+	leaseTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +36,10 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
 
-	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
+	queryOptimizeTimer := queryOptimize.Begin()
+	queryOptimizeErr := h.localOptimizer.OptimizeSearch(ctx, req)
+	queryOptimizeTimer.End(queryOptimizeErr)
+	if err := queryOptimizeErr; err != nil {
 		return nil, err
 	}
 	runtime, err := h.queryRuntime(qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version})
@@ -47,14 +53,19 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 	)
-	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+	queryVisibleTimer := queryVisible.Begin()
+	queryVisibleErr := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick())
+	queryVisibleTimer.End(queryVisibleErr)
+	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
 	if err != nil {
 		return nil, err
 	}
+	handlesTimer := queryHandles.Begin()
 	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
+	handlesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +94,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	req *internalpb.RetrieveRequest,
 	selection *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
+	leaseTimer := queryLease.Begin()
 	lease, err := h.acquireUpView(ctx, shardID, version, false)
+	leaseTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +105,10 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
 
-	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
+	queryOptimizeTimer := queryOptimize.Begin()
+	queryOptimizeErr := h.localOptimizer.OptimizeRetrieve(ctx, req)
+	queryOptimizeTimer.End(queryOptimizeErr)
+	if err := queryOptimizeErr; err != nil {
 		return nil, err
 	}
 	runtime, err := h.queryRuntime(qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version})
@@ -106,14 +122,19 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 	)
-	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+	queryVisibleTimer := queryVisible.Begin()
+	queryVisibleErr := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick())
+	queryVisibleTimer.End(queryVisibleErr)
+	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
 	if err != nil {
 		return nil, err
 	}
+	handlesTimer := queryHandles.Begin()
 	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
+	handlesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -133,3 +154,10 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	}
 	return NewSNQuerySegmentTasks(tasks), nil
 }
+
+var (
+	queryLease    = stage.New("streamingNode", "query_acquire", "lease")
+	queryOptimize = stage.New("streamingNode", "query_acquire", "local_optimize")
+	queryVisible  = stage.New("streamingNode", "query_acquire", "visibility_wait")
+	queryHandles  = stage.New("streamingNode", "query_acquire", "segment_handles")
+)

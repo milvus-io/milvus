@@ -37,66 +37,118 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // EnsureCollectionReady loads an absent collection and waits until all its shards are Up.
 func (s *Server) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
-	return merr.Status(s.ensureCollectionReady(ctx, req)), nil
+	path, err := s.ensureCollectionReadyWithPath(ctx, req)
+	status := merr.Status(err)
+	if path != "" {
+		// Telemetry only: Proxy labels request latency with the readiness path
+		// this caller observed. Older Proxies ignore the entry.
+		if status.ExtraInfo == nil {
+			status.ExtraInfo = make(map[string]string)
+		}
+		status.ExtraInfo[stage.ReadinessPathKey] = path
+	}
+	return status, nil
 }
 
+var (
+	collectionReadyCheck = stage.New("coord", "readiness", "check")
+	autoLoadLifecycle    = stage.New("coord", "auto_load", "shared_lifecycle")
+	autoLoadSubmit       = stage.New("coord", "auto_load", "load_submit")
+	autoLoadReadyWait    = stage.New("coord", "auto_load", "ready_wait")
+	autoLoadCallerWait   = stage.New("coord", "auto_load", "caller_wait")
+)
+
 func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) error {
+	_, err := s.ensureCollectionReadyWithPath(ctx, req)
+	return err
+}
+
+// ensureCollectionReadyWithPath also returns the readiness path this caller
+// observed before joining any shared load; it is empty when no check ran.
+func (s *Server) ensureCollectionReadyWithPath(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (string, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		return err
+		return "", err
 	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		return "", context.Cause(ctx)
 	}
 	collectionID := req.GetCollectionID()
 	runtime := s.qviewsRuntime
 	s.collectionUsage.touch(collectionID)
+	checkStartedAt := time.Now()
 	progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels())
 	if progress.Ready() {
-		return nil
+		collectionReadyCheck.Observe(time.Since(checkStartedAt), stage.Success)
+		return stage.PathReady, nil
+	}
+	collectionReadyCheck.Observe(time.Since(checkStartedAt), stage.NotReady)
+	path := stage.PathLoading
+	if progress.Config == nil {
+		path = stage.PathUnloaded
 	}
 
-	result := s.autoLoadCollectionGroup.DoChan(strconv.FormatInt(collectionID, 10), func() (any, error) {
+	result := s.autoLoadCollectionGroup.DoChan(strconv.FormatInt(collectionID, 10), func() (_ any, retErr error) {
 		// The shared operation belongs to Coord, not to the first waiting Proxy.
 		loadCtx, cancelLifecycle := contextutil.MergeContext(context.WithoutCancel(ctx), s.ctx)
 		defer cancelLifecycle()
 		loadCtx, cancelTimeout := context.WithTimeout(loadCtx, paramtable.Get().QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
 		defer cancelTimeout()
+		lifecycleTimer := autoLoadLifecycle.Begin()
+		defer lifecycleTimer.EndError(&retErr)
 		if progress.Config == nil {
-			coll, err := s.broker.DescribeCollection(loadCtx, collectionID)
+			submitTimer := autoLoadSubmit.Begin()
+			err := s.submitAutoLoad(loadCtx, collectionID)
+			submitTimer.End(err)
 			if err != nil {
-				return nil, err
-			}
-			loadReq, err := s.prepareAutoLoadRequest(loadCtx, coll)
-			if err != nil {
-				return nil, err
-			}
-			status, err := s.LoadCollection(loadCtx, loadReq)
-			if err := merr.CheckRPCCall(status, err); err != nil {
 				return nil, err
 			}
 		}
-		return nil, s.waitCollectionReady(loadCtx, req)
+		waitTimer := autoLoadReadyWait.Begin()
+		err := s.waitCollectionReady(loadCtx, req)
+		waitTimer.End(err)
+		return nil, err
 	})
+	callerTimer := autoLoadCallerWait.Begin()
 	select {
 	case r := <-result:
 		if ctx.Err() != nil {
-			return context.Cause(ctx)
+			callerTimer.End(context.Cause(ctx))
+			return path, context.Cause(ctx)
 		}
+		callerTimer.End(r.Err)
 		if r.Err == nil {
 			// A long load gets a fresh idle TTL immediately before query execution.
 			s.collectionUsage.touch(collectionID)
 		}
-		return r.Err
+		return path, r.Err
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		callerTimer.End(context.Cause(ctx))
+		return path, context.Cause(ctx)
 	case <-runtime.readyChanges.Done():
-		return merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for collection %d", collectionID)
+		err := merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for collection %d", collectionID)
+		callerTimer.End(err)
+		return path, err
 	}
+}
+
+// submitAutoLoad submits a load for an absent collection with Proxy defaults.
+func (s *Server) submitAutoLoad(ctx context.Context, collectionID int64) error {
+	coll, err := s.broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	loadReq, err := s.prepareAutoLoadRequest(ctx, coll)
+	if err != nil {
+		return err
+	}
+	status, err := s.LoadCollection(ctx, loadReq)
+	return merr.CheckRPCCall(status, err)
 }
 
 // prepareAutoLoadRequest applies the same default field and index requirements

@@ -63,6 +63,7 @@
 #include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
+#include "common/PrometheusClient.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -126,6 +127,29 @@ IsLazyColumnForTest(const std::shared_ptr<ChunkedColumnInterface>& column) {
     auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
     EXPECT_NE(proxy, nullptr);
     return proxy != nullptr && proxy->IsLazy();
+}
+
+uint64_t
+QueryStageSampleCount(const std::string& stage, const std::string& result) {
+    for (const auto& family :
+         milvus::monitor::getPrometheusClient().GetRegistry().Collect()) {
+        if (family.name != "internal_core_query_stage_duration_seconds") {
+            continue;
+        }
+        for (const auto& metric : family.metric) {
+            bool matches_stage = false;
+            bool matches_result = false;
+            for (const auto& label : metric.label) {
+                matches_stage |= label.name == "stage" && label.value == stage;
+                matches_result |=
+                    label.name == "result" && label.value == result;
+            }
+            if (matches_stage && matches_result) {
+                return metric.histogram.sample_count;
+            }
+        }
+    }
+    return 0;
 }
 
 class LazyColumnGroupGuard {
@@ -1259,6 +1283,11 @@ TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
         EXPECT_TRUE(IsLazyColumnForTest(column));
     }
 
+    const auto reader_opens =
+        QueryStageSampleCount("manifest_reader_open", "success");
+    const auto translators =
+        QueryStageSampleCount("manifest_translator", "success");
+    const auto slots = QueryStageSampleCount("manifest_cache_slot", "success");
     auto memory_before_materialize = segment_impl->GetMemoryUsageInBytes();
     constexpr int kThreadCount = 16;
     std::atomic<int> ready{0};
@@ -1292,6 +1321,16 @@ TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
     }
 
     EXPECT_FALSE(failed.load(std::memory_order_acquire));
+    EXPECT_EQ(QueryStageSampleCount("manifest_reader_open", "success"),
+              reader_opens + 1);
+    EXPECT_EQ(QueryStageSampleCount("manifest_translator", "success"),
+              translators + 1);
+    EXPECT_EQ(QueryStageSampleCount("manifest_cache_slot", "success"),
+              slots + 1);
+    // Warm access must not be reported as another cold reader construction.
+    ASSERT_NE(int64_column->DataOfChunk(nullptr, 0).get(), nullptr);
+    EXPECT_EQ(QueryStageSampleCount("manifest_reader_open", "success"),
+              reader_opens + 1);
     EXPECT_GT(int64_column->DataByteSize(), 0);
     EXPECT_GT(string_column->DataByteSize(), 0);
     // The untouched user-field sibling shares the same Task.
@@ -1490,6 +1529,11 @@ TEST_P(TestLazyManifest, LazyManifestFirstNonCancellationFailureIsRetryable) {
     int64_t first_offset = 0;
     EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
 
+    auto failed_load_stages = [] {
+        return QueryStageSampleCount("manifest_reader_open", "error") +
+               QueryStageSampleCount("manifest_load_cells", "error");
+    };
+    const auto failures_before = failed_load_stages();
     std::optional<ErrorCode> first_error;
     try {
         (void)column->DataOfChunk(nullptr, 0);
@@ -1528,6 +1572,7 @@ TEST_P(TestLazyManifest, LazyManifestFirstNonCancellationFailureIsRetryable) {
         std::rethrow_exception(unexpected_error);
     }
 
+    EXPECT_GT(failed_load_stages(), failures_before);
     ASSERT_TRUE(first_error.has_value());
     EXPECT_NE(*first_error, ErrorCode::FollyCancel);
     ASSERT_TRUE(operator_error.has_value());

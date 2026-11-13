@@ -45,6 +45,7 @@
 #include "common/Span.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ColumnOffsetLookup.h"
+#include "monitor/QueryMetrics.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus {
@@ -294,14 +295,23 @@ class ChunkedColumnGroup {
 
         auto& init = *lazy_init_;
         // Serialize construction; waiting for this lock is not cancellable.
-        std::lock_guard<std::mutex> lock(init.mutex);
+        std::unique_lock<std::mutex> lock(init.mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            // Another caller is constructing the shared group.
+            milvus::monitor::QueryStageTimer wait_timer(
+                milvus::monitor::QueryStage::ManifestGroupWait);
+            lock.lock();
+        }
         if (auto slot = GetSlotIfReady()) {
             return slot;
         }
 
         auto translator = init.factory(op_ctx);
+        milvus::monitor::QueryStageTimer slot_timer(
+            milvus::monitor::QueryStage::ManifestCacheSlot);
         auto slot = Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
+        slot_timer.End();
         auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
             slot->meta());
         const auto materialized_num_rows =

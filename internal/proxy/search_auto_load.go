@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // retryDQL replans the entire request when its read view has
@@ -56,21 +57,27 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 }
 
 func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error), retryExecution func(error) bool) error {
+	timing := getDQLTiming(ctx)
+	defer timing.Stop()
 	var terminalErr error
 	err := retry.Handle(ctx, func() (bool, error) {
+		timing.Readiness()
 		terminalErr = nil
 		if err := ctx.Err(); err != nil {
 			return false, context.Cause(ctx)
 		}
 		if err := node.ensureCollectionReady(ctx, dbName, collectionName); err != nil {
 			if node.shouldRetryDQLLoad(err) {
+				timing.RetryWait()
 				return true, err
 			}
 			terminalErr = err
 			return false, err
 		}
+		timing.Ready()
 		again, err := execute(ctx)
 		if again || retryExecution(err) {
+			timing.RetryWait()
 			return true, err
 		}
 		terminalErr = err
@@ -107,6 +114,7 @@ func (node *Proxy) ensureCollectionReady(ctx context.Context, dbName, collection
 		return err
 	}
 	if !Params.ProxyCfg.EnableAutoLoad.GetAsBool() {
+		setDQLPath(ctx, stage.PathDisabled)
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
@@ -125,5 +133,6 @@ func (node *Proxy) ensureCollectionReady(ctx context.Context, dbName, collection
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
+	setDQLPath(ctx, status.GetExtraInfo()[stage.ReadinessPathKey])
 	return merr.CheckRPCCall(status, err)
 }
