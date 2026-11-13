@@ -1699,6 +1699,9 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
+	if !crypto.BcryptAvailable {
+		mt.reportBcryptCredentials(ctx)
+	}
 
 	credInfo, err := mt.catalog.GetCredential(ctx, util.UserRoot)
 	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1722,6 +1725,45 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// reportBcryptCredentials runs at startup in builds without bcrypt. Users
+// whose stored hash is not PBKDF2 cannot log in on such a build until their
+// password is reset, so name them instead of leaving each failed login to be
+// diagnosed separately. The caller holds permissionLock.
+func (mt *MetaTable) reportBcryptCredentials(ctx context.Context) {
+	mlog.Info(ctx, "this build leaves bcrypt out (built with -tags nobcrypt); passwords are hashed with pbkdf2-sha512")
+	usernames, err := mt.catalog.ListCredentials(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "failed to list credentials for the bcrypt hash check", mlog.Err(err))
+		return
+	}
+	var bcryptUsers []string
+	rootAffected := false
+	for _, username := range usernames {
+		credInfo, err := mt.catalog.GetCredential(ctx, username)
+		if err != nil {
+			mlog.Warn(ctx, "failed to read a credential for the bcrypt hash check", mlog.String("username", username), mlog.Err(err))
+			continue
+		}
+		if credInfo == nil || credInfo.EncryptedPassword == "" || crypto.IsPBKDF2SHA512Hash(credInfo.EncryptedPassword) {
+			continue
+		}
+		bcryptUsers = append(bcryptUsers, username)
+		if username == util.UserRoot {
+			rootAffected = true
+		}
+	}
+	if len(bcryptUsers) == 0 {
+		return
+	}
+	mlog.Warn(ctx, "these users have bcrypt password hashes and cannot log in on this build until their passwords are reset",
+		mlog.Strings("users", bcryptUsers))
+	if rootAffected {
+		mlog.Error(ctx, "the root password hash uses bcrypt, so root cannot log in on this build. "+
+			"Either update the root password on a build with bcrypt and passwordHashAlgorithm=pbkdf2-sha512, "+
+			"or delete the root credential from the metadata store: it is then recreated from common.security.defaultRootPassword")
+	}
 }
 
 func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {

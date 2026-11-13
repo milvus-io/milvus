@@ -24,7 +24,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -48,9 +47,9 @@ func (c *notificationCredentialClient) GetCredential(_ context.Context, request 
 }
 
 func TestCredentialNotificationsRevokeManagementPassword(t *testing.T) {
-	oldHash, err := bcrypt.GenerateFromPassword([]byte("previous"), bcrypt.MinCost)
+	oldHash, err := mockPasswordHash("previous")
 	require.NoError(t, err)
-	newHash, err := bcrypt.GenerateFromPassword([]byte("rotated"), bcrypt.MinCost)
+	newHash, err := mockPasswordHash("rotated")
 	require.NoError(t, err)
 	for _, update := range []bool{true, false} {
 		for _, withBusinessCache := range []bool{true, false} {
@@ -68,7 +67,7 @@ func TestCredentialNotificationsRevokeManagementPassword(t *testing.T) {
 						if rotated.Load() {
 							hash = newHash
 						}
-						return &rootcoordpb.GetCredentialResponse{Status: merr.Success(), Username: request.Username, Password: string(hash)}, nil
+						return &rootcoordpb.GetCredentialResponse{Status: merr.Success(), Username: request.Username, Password: hash}, nil
 					},
 				}
 				businessCache := privilege.NewPrivilegeCache(mixCoord)
