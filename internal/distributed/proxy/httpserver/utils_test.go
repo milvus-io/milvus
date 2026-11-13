@@ -775,24 +775,41 @@ func TestPrimaryField(t *testing.T) {
 		values[primaryKeyTemplateVar].GetArrayVal().GetStringData().GetData())
 }
 
+// minAllocBytesPerCall returns the fewest bytes allocated by a single call of
+// f across several attempts. runtime.MemStats.TotalAlloc is process-global, so
+// each measurement also counts other goroutines: the config refresher started
+// by paramtable.Init re-reads and parses milvus.yaml on every tick, allocating
+// over 1 MiB each time. Such bursts land in only some attempts, while an
+// allocation made by f itself (such as copying the request body) shows up in
+// every attempt, so the minimum isolates f's own allocation.
+func minAllocBytesPerCall(f func()) uint64 {
+	const attempts = 20
+	minAlloc := uint64(math.MaxUint64)
+	var before, after runtime.MemStats
+	for i := 0; i < attempts; i++ {
+		runtime.ReadMemStats(&before)
+		f()
+		runtime.ReadMemStats(&after)
+		minAlloc = min(minAlloc, after.TotalAlloc-before.TotalAlloc)
+	}
+	return minAlloc
+}
+
 func TestCheckAndSetDataDoesNotCopyWholeDataArray(t *testing.T) {
 	// One small row surrounded by a large amount of valid JSON whitespace
 	// isolates the cost of extracting data from row conversion allocations.
 	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
 	schema := &schemapb.CollectionSchema{}
-	_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, false)
-	require.NoError(t, err)
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	rows, _, err := checkAndSetData(body, schema, false)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := minAllocBytesPerCall(func() {
+		_, _, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+	})
+	require.Less(t, alloc, uint64(1<<20),
 		"extracting one row should not copy the entire data array")
 }
 
@@ -805,16 +822,15 @@ func TestSchemaForPathReplaceDoesNotCopyWholeDataArray(t *testing.T) {
 		Path:      "$.name",
 	}}
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	got, err := schemaForPathReplaceOperands(body, schema, ops)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.True(t, proto.Equal(schema, got))
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := minAllocBytesPerCall(func() {
+		_, err := schemaForPathReplaceOperands(body, schema, ops)
+		require.NoError(t, err)
+	})
+	require.Less(t, alloc, uint64(1<<20),
 		"validating path-replace rows should not copy the entire data array")
 }
 
