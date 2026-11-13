@@ -33,6 +33,11 @@ type CompactionTargetReconciler struct {
 	handler              meta.Handler
 	allocator            allocator.Allocator
 	collectionAvailable  func(context.Context, int64) (bool, error)
+	versionManager       index.IndexEngineVersionManager
+}
+
+func (reconciler *CompactionTargetReconciler) SetIndexVersionManager(manager index.IndexEngineVersionManager) {
+	reconciler.versionManager = manager
 }
 
 func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, alloc allocator.Allocator, collectionAvailable func(context.Context, int64) (bool, error)) *CompactionTargetReconciler {
@@ -60,6 +65,9 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	sortMatches := reconciler.observeStandingSort(ctx)
+	auto := paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool()
+	segments := standingSegments(ctx, reconciler.meta)
+	standingRewrites := reconciler.selectableStorageRewrites(ctx, auto, segments)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
@@ -109,6 +117,12 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 	}
 	rewriteSelectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	for _, segment := range standingRewrites {
+		if _, assigned := allocated[segment.GetID()]; !assigned && reconciler.selectable(ctx, segment, eligible) {
+			rewriteSelectable = append(rewriteSelectable, segment)
+		}
+	}
+	rewriteSelectable = deduplicateSegments(rewriteSelectable)
 	if len(sortMatches) > len(sortSelectable) || len(matches) > len(rewriteSelectable) {
 		mlog.RatedInfo(ctx, rate.Limit(1), "compaction target inputs awaiting selection",
 			mlog.Int("sortMatches", len(sortMatches)), mlog.Int("sortSelectable", len(sortSelectable)),
@@ -127,6 +141,20 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
 	events[policy.TriggerTypeSingle] = targetViews(rewriteSelectable, eligible, false)
 	return events, ctx.Err()
+}
+
+func deduplicateSegments(segments []*meta.SegmentInfo) []*meta.SegmentInfo {
+	seen := make(map[int64]struct{}, len(segments))
+	unique := segments[:0]
+	for _, segment := range segments {
+		id := segment.GetID()
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, segment)
+	}
+	return unique
 }
 
 func compareSegment(a, b *meta.SegmentInfo) int {
