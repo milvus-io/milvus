@@ -196,7 +196,7 @@ parameter:
 
 environment:
 TANTIVY_ANALYZER_REMOTE_TLS: ON/OFF (default: ON). Set OFF for FIPS builds that must not link rustls/ring
-TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL: ON/OFF (default: OFF). Set ON with TANTIVY_ANALYZER_REMOTE_TLS=OFF for gRPC tokenizer TLS through OpenSSL
+TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL: ON/OFF (default: OFF). Set ON with TANTIVY_ANALYZER_REMOTE_TLS=OFF for Lindera download and gRPC tokenizer TLS through OpenSSL
   (disables Lindera online dictionary download and gRPC tokenizer TLS).
 
 usage:

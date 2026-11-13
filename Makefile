@@ -105,8 +105,8 @@ ifdef TANTIVY_ANALYZER_REMOTE_TLS
 endif
 
 # FIPS: set TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=ON, with
-# TANTIVY_ANALYZER_REMOTE_TLS=OFF, to keep gRPC tokenizer https:// endpoints
-# through OpenSSL. Lindera HTTPS fetch stays off.
+# TANTIVY_ANALYZER_REMOTE_TLS=OFF, to keep Lindera HTTPS fetch and gRPC
+# tokenizer https:// endpoints through OpenSSL.
 tantivy_analyzer_remote_tls_openssl = OFF
 ifdef TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL
 	tantivy_analyzer_remote_tls_openssl = ${TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL}
