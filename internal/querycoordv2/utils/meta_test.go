@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -41,6 +42,10 @@ import (
 )
 
 func TestSpawnReplicasWithRG(t *testing.T) {
+	extension.SetForm()
+	t.Cleanup(extension.ResetForTest)
+	cleanup := withStreamingQueryNodes(map[string]typeutil.UniqueSet{})
+	defer cleanup()
 	paramtable.Init()
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(

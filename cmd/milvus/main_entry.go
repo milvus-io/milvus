@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/asan"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -49,10 +48,6 @@ import (
 // (pkg/extension) before calling Main; nothing runs earlier than the first
 // line here except package initialization.
 func Main(args []string) {
-	// after 2.6.0, we enable streaming service by default.
-	// TODO: after remove all streamingutil.IsStreamingServiceEnabled(), we can remove this code.
-	streamingutil.SetStreamingServiceEnabled()
-
 	defer asan.LsanDoLeakCheck()
 	args, profileEnv, err := prepareNativeProfile(args, os.Environ())
 	if err != nil {

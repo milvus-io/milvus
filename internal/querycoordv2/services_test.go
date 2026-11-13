@@ -207,6 +207,15 @@ func (suite *ServiceSuite) SetupSuite() {
 		101, 102, 103, 104, 105,
 	}
 
+	// Keep enough SNs so resource-group capacity tests exercise the QN bound.
+	streamingNodes := typeutil.NewUniqueSet()
+	for i := 0; i <= len(suite.nodes); i++ {
+		streamingNodes.Insert(int64(10001 + i))
+	}
+	suite.T().Cleanup(withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: streamingNodes,
+	}))
+
 	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
 	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.proxyManager.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(nil).Maybe()

@@ -24,28 +24,20 @@ import (
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 )
 
-// Delegators live on streaming query nodes exactly when the streaming service
-// is on and no form is installed. A form keeps its one streaming node for DDL
+// Delegators live on streaming query nodes when no form is installed. A form keeps its one streaming node for DDL
 // and the write ahead log, and serves queries from regular query nodes.
 func TestUseStreamingQueryNodeAsDelegator(t *testing.T) {
 	for name, tc := range map[string]struct {
-		streaming, form, want bool
+		form, want bool
 	}{
-		"stock binary, streaming on":    {streaming: true, form: false, want: true},
-		"stock binary, streaming off":   {streaming: false, form: false, want: false},
-		"installed form, streaming on":  {streaming: true, form: true, want: false},
-		"installed form, streaming off": {streaming: false, form: true, want: false},
+		"stock binary":   {form: false, want: true},
+		"installed form": {form: true, want: false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ext.ResetForTest()
 			t.Cleanup(ext.ResetForTest)
 			if tc.form {
 				ext.SetForm()
-			}
-			if tc.streaming {
-				t.Setenv(MilvusStreamingServiceEnabled, "1")
-			} else {
-				t.Setenv(MilvusStreamingServiceEnabled, "")
 			}
 			assert.Equal(t, tc.want, UseStreamingQueryNodeAsDelegator())
 		})

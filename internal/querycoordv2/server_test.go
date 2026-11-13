@@ -127,6 +127,9 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	initStreamingSystem()
+	suite.T().Cleanup(withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(10001, 10002, 10003),
+	}))
 	// These node lifecycle tests have no pending schema ALTER.
 	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
 	suite.T().Cleanup(func() { schemaTarget.UnPatch() })

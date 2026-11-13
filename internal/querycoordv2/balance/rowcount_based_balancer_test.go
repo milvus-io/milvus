@@ -723,6 +723,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 }
 
 func TestRowCountBasedBalancerSuite(t *testing.T) {
+	useRegularQueryNodes(t)
 	suite.Run(t, new(RowCountBasedBalancerTestSuite))
 }
 

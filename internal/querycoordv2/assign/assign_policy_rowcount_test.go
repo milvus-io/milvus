@@ -236,6 +236,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_ConvertToNodeItems(t *testing.T
 
 // TestRowCountBasedAssignPolicy_AssignChannel_PriorityToLeastLoaded tests channels go to least loaded node
 func TestRowCountBasedAssignPolicy_AssignChannel_PriorityToLeastLoaded(t *testing.T) {
+	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
@@ -301,6 +302,7 @@ func TestRowCountBasedAssignPolicy_AssignChannel_PriorityToLeastLoaded(t *testin
 
 // TestRowCountBasedAssignPolicy_AssignChannel_MultipleChannels tests multiple channels distribution
 func TestRowCountBasedAssignPolicy_AssignChannel_MultipleChannels(t *testing.T) {
+	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
@@ -349,6 +351,7 @@ func TestRowCountBasedAssignPolicy_AssignChannel_MultipleChannels(t *testing.T) 
 
 // TestRowCountBasedAssignPolicy_AssignChannel_ConvertToNodeItems tests node items creation for channels
 func TestRowCountBasedAssignPolicy_AssignChannel_ConvertToNodeItems(t *testing.T) {
+	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
@@ -435,6 +438,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 
 // TestRowCountBasedAssignPolicy_AssignChannel_EmptyChannels tests with empty channels
 func TestRowCountBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
+	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()

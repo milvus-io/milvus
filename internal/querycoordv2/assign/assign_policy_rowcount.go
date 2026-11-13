@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -189,12 +188,10 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 	for _, c := range channels {
 		var ni *NodeItem
 
-		// If streaming service is enabled, assign channel to the node where WAL is located
-		if streamingutil.IsStreamingServiceEnabled() {
-			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
-			if item, ok := nodeItems[nodeID]; ok {
-				ni = item
-			}
+		// Prefer the node where the WAL is located.
+		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+		if item, ok := nodeItems[nodeID]; ok {
+			ni = item
 		}
 
 		if ni == nil {

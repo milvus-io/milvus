@@ -162,13 +162,12 @@ func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params me
 		return nil, err
 	}
 	RecoverReplicaOfCollection(ctx, m, params.CollectionID)
-	if streamingutil.IsStreamingServiceEnabled() {
-		m.RecoverSQNodesInCollections(
-			ctx,
-			[]int64{params.CollectionID},
-			snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup(),
-		)
-	}
+	m.RecoverSQNodesInCollections(
+		ctx,
+		[]int64{params.CollectionID},
+		snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup(),
+	)
+
 	return replicas, nil
 }
 
@@ -187,13 +186,12 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 	}
 	// Active recover it.
 	RecoverReplicaOfCollection(ctx, m, collection)
-	if streamingutil.IsStreamingServiceEnabled() {
-		m.RecoverSQNodesInCollections(
-			ctx,
-			[]int64{collection},
-			snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup(),
-		)
-	}
+	m.RecoverSQNodesInCollections(
+		ctx,
+		[]int64{collection},
+		snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup(),
+	)
+
 	return replicas, nil
 }
 

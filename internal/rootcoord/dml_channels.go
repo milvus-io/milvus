@@ -25,7 +25,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
@@ -220,23 +219,20 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 	for i, name := range names {
 		var ms msgstream.MsgStream
 		var closeNotifier *snmanager.StreamingReadyNotifier
-		if !streamingutil.IsStreamingServiceEnabled() {
-			ms = d.newMsgstream(initCtx, factory, name)
-		} else {
-			notifier := snmanager.NewStreamingReadyNotifier()
-			if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(initCtx, notifier); err != nil {
-				panic(err)
-			}
-			logger := mlog.With(mlog.String("pchannel", name))
-			if !notifier.IsReady() {
-				logger.Info(initCtx, "streaming service is not enabled, create a msgstream to use")
-				ms = d.newMsgstream(initCtx, factory, name)
-				closeNotifier = notifier
-			} else {
-				logger.Info(initCtx, "streaming service has been enabled, msgstream should not be created")
-				notifier.Release()
-			}
+		notifier := snmanager.NewStreamingReadyNotifier()
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(initCtx, notifier); err != nil {
+			panic(err)
 		}
+		logger := mlog.With(mlog.String("pchannel", name))
+		if !notifier.IsReady() {
+			logger.Info(initCtx, "streaming service is not enabled, create a msgstream to use")
+			ms = d.newMsgstream(initCtx, factory, name)
+			closeNotifier = notifier
+		} else {
+			logger.Info(initCtx, "streaming service has been enabled, msgstream should not be created")
+			notifier.Release()
+		}
+
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,

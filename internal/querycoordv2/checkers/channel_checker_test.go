@@ -19,7 +19,6 @@ package checkers
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -39,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -119,6 +117,7 @@ func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
 }
 
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
+	useRegularQueryNodes(suite.T())
 	ctx := context.Background()
 	checker := suite.checker
 	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
@@ -154,6 +153,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
+	useRegularQueryNodes(suite.T())
 	ctx := context.Background()
 	checker := suite.checker
 	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
@@ -216,6 +216,7 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
+	useRegularQueryNodes(suite.T())
 	ctx := context.Background()
 	checker := suite.checker
 	err := checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
@@ -305,6 +306,7 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 }
 
 func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
+	useRegularQueryNodes(suite.T())
 	ctx := context.Background()
 	checker := suite.checker
 	err := checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
@@ -378,8 +380,6 @@ func TestChannelCheckerSuite(t *testing.T) {
 // streaming nodes own no pchannel). Every channel task generated in one check
 // round must not target the same node.
 func (suite *ChannelCheckerTestSuite) TestLoadChannelsSpreadAcrossSQNodes() {
-	streamingutil.SetStreamingServiceEnabled()
-	defer os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled)
 
 	const channelNum = 12
 	sqNodes := []int64{1051, 1053, 1054, 1056, 1057, 1058}

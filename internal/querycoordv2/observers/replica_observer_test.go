@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -131,7 +130,6 @@ func (m *replicaObserverTargetManager) GetDmChannelsByCollection(ctx context.Con
 }
 
 func (suite *ReplicaObserverSuite) SetupSuite() {
-	streamingutil.SetStreamingServiceEnabled()
 	paramtable.Init()
 	paramtable.Get().Save(Params.QueryCoordCfg.CheckNodeInReplicaInterval.Key, "1")
 }
@@ -559,7 +557,6 @@ func (suite *ReplicaObserverSuite) TearDownTest() {
 
 func (suite *ReplicaObserverSuite) TearDownSuite() {
 	suite.kv.Close()
-	streamingutil.UnsetStreamingServiceEnabled()
 }
 
 func TestReplicaObserver(t *testing.T) {

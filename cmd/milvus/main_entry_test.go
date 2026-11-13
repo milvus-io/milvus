@@ -17,9 +17,16 @@
 package milvus
 
 import (
+	"context"
+	"os"
+	"strconv"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // Main must return normally on too few arguments, taking the usage branch
@@ -57,4 +64,40 @@ func TestSubprocessArgsWithoutTheMarker(t *testing.T) {
 	subArgs, ok := subprocessArgs(args)
 	assert.False(t, ok)
 	assert.Equal(t, args, subArgs, "no marker means no strip")
+}
+
+func TestMainSubprocessHelper(t *testing.T) {
+	code := os.Getenv("MILVUS_TEST_MAIN_CHILD_EXIT")
+	if code == "" {
+		return
+	}
+	exitCode, err := strconv.Atoi(code)
+	require.NoError(t, err)
+	os.Exit(exitCode)
+}
+
+func TestMainSubprocessReturnsAndPreservesArgs(t *testing.T) {
+	for _, exitCode := range []int{0, 1} {
+		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
+			t.Setenv("MILVUS_TEST_MAIN_CHILD_EXIT", strconv.Itoa(exitCode))
+			// The child is only a test helper; it owns no coordinator sessions.
+			sessions := mockey.Mock(sessionutil.GetSessions).Return([]string{"test-child"}).Build()
+			defer sessions.UnPatch()
+			cleaned := false
+			cleanup := mockey.Mock(CleanSession).To(func(_ string, _ []string, suffixes []string) error {
+				assert.Equal(t, []string{"test-child"}, suffixes)
+				cleaned = true
+				if exitCode != 0 {
+					return context.Canceled
+				}
+				return nil
+			}).Build()
+			defer cleanup.UnPatch()
+			args := []string{os.Args[0], "-test.run=^TestMainSubprocessHelper$", "-test.count=1", "--run-with-subprocess"}
+			want := append([]string(nil), args...)
+			Main(args)
+			assert.True(t, cleaned)
+			assert.Equal(t, want, args)
+		})
+	}
 }

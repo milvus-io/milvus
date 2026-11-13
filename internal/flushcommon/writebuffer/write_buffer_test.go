@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -209,9 +208,10 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
 
 		err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
-			PartitionID:   10,
-			SegmentID:     2003,
-			SchemaVersion: 13,
+			PartitionID:    10,
+			SegmentID:      2003,
+			SchemaVersion:  13,
+			StorageVersion: storage.StorageV3,
 		})
 		s.NoError(err)
 	})
@@ -255,7 +255,6 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 	})
 
 	s.Run("streaming_requires_create_segment_storage_version", func() {
-		s.T().Setenv(streamingutil.MilvusStreamingServiceEnabled, "1")
 
 		s.metacache.EXPECT().GetSegmentByID(int64(2005)).Return(nil, false).Once()
 
