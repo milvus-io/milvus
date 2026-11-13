@@ -19,8 +19,10 @@ package meta
 import (
 	"slices"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // ApplyIndexSummary updates a cloned segment before its catalog publication.
@@ -59,4 +61,17 @@ func manifestSummaryFieldID(commit SegmentManifestCommit, buildID int64) int64 {
 		}
 	}
 	return 0
+}
+
+// SegmentIndexFromSummary carries coordinator decisions without any file keys.
+func SegmentIndexFromSummary(segment *datapb.SegmentInfo, summary *datapb.SegmentIndexSummary) *model.SegmentIndex {
+	return &model.SegmentIndex{
+		SegmentID: segment.GetID(), CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
+		NumRows: segment.GetNumOfRows(), IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(),
+		IndexVersion: summary.GetIndexVersion(), IndexState: commonpb.IndexState_Finished,
+		IndexSerializedSize: summary.GetSerializedSize(), IndexMemSize: summary.GetMemSize(),
+		CurrentIndexVersion: summary.GetVectorEngineVersion(), CurrentScalarIndexVersion: summary.GetScalarEngineVersion(),
+		IndexType: summary.GetIndexType(), ManifestPublished: true, ArtifactPresent: summary.GetHasArtifact(),
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
 }
