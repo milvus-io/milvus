@@ -104,11 +104,14 @@ func (provider *SiliconflowEmbeddingProvider) CallEmbedding(ctx context.Context,
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutMs)
+		resp, err := provider.client.Embedding(ctx, provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

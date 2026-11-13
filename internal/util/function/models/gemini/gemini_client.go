@@ -17,6 +17,7 @@
 package gemini
 
 import (
+	"context"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -43,7 +44,7 @@ func (c *GeminiClient) headers() map[string]string {
 	}
 }
 
-func (c *GeminiClient) Embedding(url string, modelName string, texts []string, dim int, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
+func (c *GeminiClient) Embedding(ctx context.Context, url string, modelName string, texts []string, dim int, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	modelName = strings.TrimPrefix(modelName, "models/")
 	requests := make([]BatchEmbedRequest, 0, len(texts))
 	for _, text := range texts {
@@ -66,7 +67,7 @@ func (c *GeminiClient) Embedding(url string, modelName string, texts []string, d
 		Requests: requests,
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](batchReq, url, c.headers(), timeoutMs)
+	res, err := models.PostRequest[EmbeddingResponse](ctx, batchReq, url, c.headers(), timeoutMs)
 	if err != nil {
 		return nil, err
 	}
