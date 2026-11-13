@@ -264,6 +264,7 @@ type DataCoordCatalog interface {
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
 	LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error)
 	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, scope *CompactionTargetCollectionVersion) (mayHaveCommitted bool, err error)
+	UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget) error
 	StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error)
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 

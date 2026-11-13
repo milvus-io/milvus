@@ -1704,6 +1704,12 @@ enum TargetIntent {
   INTENT_SORT = 3;
   INTENT_OPTIMIZE = 4;
   INTENT_BACKFILL = 5;
+  INTENT_INDEX_VERSION = 6;
+  INTENT_SCHEMA_VERSION = 7;
+  INTENT_STORAGE_VERSION = 8;
+  INTENT_STORAGE_FORMAT = 9;
+  INTENT_DELETE_CLEANUP = 10;
+  INTENT_TTL = 11;
 }
 
 // A resolved collection identity for authorization, including the metadata
@@ -1766,6 +1772,8 @@ message CompactionTargetReadModel {
   optional int64 remaining_rows = 11;
   uint64 checked_at = 12;
   string message = 13;
+  optional bool enabled = 14;
+  map<string, string> parameters = 15;
 }
 
 message DescribeCompactionTargetRequest {
@@ -1819,6 +1827,9 @@ message CompactionTarget {
   optional int64 total_rows = 11;
   CompactionTargetRewrite rewrite = 12;
   CompactionTargetOptimize optimize = 13;
+  optional bool enabled = 14;
+  // Fences delayed conditional Standing updates when a condition is reverted.
+  uint64 condition_revision = 15;
 }
 
 message CompactionTask{
@@ -1855,6 +1866,8 @@ message CompactionTask{
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
+  // Planning-time estimate used to allocate output IDs. Cleared before save.
+  int64 output_segment_count_hint = 32;
 }
 
 message PartitionStatsInfo {

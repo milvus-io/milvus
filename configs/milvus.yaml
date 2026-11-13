@@ -851,6 +851,8 @@ dataCoord:
   enableCompaction: true
   compaction:
     enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    rateLimitTokens: 256 # Shared bucket capacity and tokens replenished per interval in either compaction mode. One token per new task.
+    rateLimitInterval: 60 # Refill interval in seconds for the shared compaction task bucket.
     target:
       retentionSeconds: 604800 # Retention in seconds for inactive compaction targets.
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
@@ -863,6 +865,10 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # Soft cap on pending and running compaction tasks. Concurrent submissions can briefly exceed it.
+    # Sort tasks required by an admitted clustering task may pass this cap while still using the shared bucket and queue.
+    # 0 or a negative value means unlimited.
+    maxTaskNum: 0
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
