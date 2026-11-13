@@ -613,11 +613,11 @@ func segmentIDsFromViews(views []*view.SegmentView) []int64 {
 
 func TestCompactionTargetReconcilerReoffersSortWithAutoCompactionOff(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	Params.Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
-	Params.Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
 	t.Cleanup(func() {
-		Params.Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
-		Params.Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 	})
 
 	record := &datapb.CompactionTarget{
