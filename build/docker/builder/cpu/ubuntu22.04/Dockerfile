@@ -18,7 +18,7 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-15 clang-tidy-15 lcov libtool m4 autoconf automake \
-    pkg-config uuid-dev libaio-dev && \
+    pkg-config uuid-dev libaio-dev libibverbs-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \

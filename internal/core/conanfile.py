@@ -156,10 +156,13 @@ class MilvusConan(ConanFile):
             "azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137",
             force=True,
         )
-        self.requires(
-            "aws-sdk-cpp/1.11.921@milvus/dev#0b229410d5498d3bacc19ccf57334b30",
-            force=True,
-        )
+        if self.settings.os == "Linux":
+            self.requires("aws-sdk-cpp/1.11.921+rdma@milvus/dev", force=True)
+        else:
+            self.requires(
+                "aws-sdk-cpp/1.11.921@milvus/dev#0b229410d5498d3bacc19ccf57334b30",
+                force=True,
+            )
         # Tests call CRT APIs directly. A direct requirement exposes its link
         # libraries even when the shared SDK hides transitive libraries.
         # Keep this version in sync with the SDK recipe; do not force it, so
