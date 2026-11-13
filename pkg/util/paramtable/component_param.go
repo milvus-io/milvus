@@ -31,6 +31,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -6603,6 +6604,7 @@ type dataCoordConfig struct {
 	CompactionRateLimitTokens              ParamItem `refreshable:"true"`
 	CompactionRateLimitInterval            ParamItem `refreshable:"true"`
 	TargetCompactionMaxEvents              ParamItem `refreshable:"true"`
+	CompactionTargetRetentionSeconds       ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
@@ -7035,6 +7037,24 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		},
 	}
 	p.TargetCompactionMaxEvents.Init(base.mgr)
+
+	p.CompactionTargetRetentionSeconds = ParamItem{
+		Key:          "dataCoord.compaction.target.retentionSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "604800",
+		Doc:          "Retention in seconds for inactive compaction targets, independently of task history.",
+		Export:       true,
+		Formatter: func(value string) string {
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
+				mlog.RatedWarn(context.TODO(), rate.Limit(1), "invalid compaction target retention, using default",
+					mlog.String("configured", value))
+				return "604800"
+			}
+			return value
+		},
+	}
+	p.CompactionTargetRetentionSeconds.Init(base.mgr)
 
 	p.IndexBasedCompaction = ParamItem{
 		Key:          "dataCoord.compaction.indexBasedCompaction",

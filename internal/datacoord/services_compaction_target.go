@@ -30,8 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -49,7 +52,7 @@ func validateCompactionTargetReplication(ctx context.Context) error {
 }
 
 func (s *Server) compactionTargetsReady() error {
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() || !Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+	if !s.targetCompactionEnabled {
 		return merr.WrapErrOperationNotSupportedMsg("target-based compaction is disabled")
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -59,6 +62,70 @@ func (s *Server) compactionTargetsReady() error {
 		return merr.WrapErrServiceNotReadyMsg("compaction target metadata is initializing")
 	}
 	return nil
+}
+
+// DropCollectionCompactionTargets is called by the control-channel ACK after
+// RootCoord has persisted the collection tombstone.
+func (s *Server) DropCollectionCompactionTargets(ctx context.Context, collectionID int64) error {
+	if !s.targetCompactionEnabled {
+		return nil
+	}
+	if s.compactionTargetMeta == nil {
+		return merr.WrapErrServiceNotReadyMsg("compaction target metadata is initializing")
+	}
+	return s.compactionTargetMeta.CloseCollectionScope(ctx, collectionID)
+}
+
+func (s *Server) recoverCompactionTargetScopes(ctx context.Context) error {
+	if s.compactionTargetMeta == nil {
+		return nil
+	}
+	for _, id := range s.compactionTargetMeta.ActiveCollectionIDs() {
+		if s.meta.GetCollection(id).IsCreated() {
+			continue
+		}
+		if s.collectionDropped == nil {
+			return merr.WrapErrServiceNotReadyMsg("compaction target collection lifecycle is unavailable")
+		}
+		dropped, err := s.collectionDropped(ctx, id)
+		if err != nil {
+			return merr.Wrapf(err, "recover compaction target scope for collection %d", id)
+		}
+		if dropped {
+			if err := s.compactionTargetMeta.CloseCollectionScope(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Server) tryLockCompactionTargetScope(ctx context.Context, id int64) (func(), error) {
+	collection := s.meta.GetCollection(id)
+	if !collection.IsCreated() {
+		return nil, nil
+	}
+	dbName, name := collection.DatabaseName, collection.Schema.GetName()
+	if dbName == "" || name == "" {
+		return nil, merr.WrapErrServiceUnavailableMsg("compaction target collection identity is unavailable")
+	}
+	// A DropCollection can retire channel data before its control ACK
+	// persists the collection tombstone. Order the final satisfaction
+	// observation against the existing DDL resource lock.
+	release, err := broadcast.TryLockResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewSharedCollectionNameResourceKey(dbName, name))
+	if err != nil || release == nil {
+		return nil, err
+	}
+	// Rename takes database locks. Revalidate the stable ID after the
+	// acquisition in case the name changed before those locks were held.
+	current := s.meta.GetCollection(id)
+	if !current.IsCreated() || current.DatabaseName != dbName || current.Schema.GetName() != name {
+		release()
+		return nil, nil
+	}
+	return release, nil
 }
 
 func (s *Server) CreateCompactionTarget(ctx context.Context, req *datapb.CreateCompactionTargetRequest) (*datapb.CreateCompactionTargetResponse, error) {
@@ -121,7 +188,15 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 		return nil, err
 	}
 	candidate.TotalRows = proto.Int64(observation.Rows)
-	return s.compactionTargetMeta.Create(ctx, candidate, validate)
+	collection := s.meta.GetCollection(resource.GetCollectionId())
+	if !collection.IsCreated() {
+		return nil, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+	}
+	scope := &metastore.CompactionTargetCollectionVersion{
+		DatabaseID: collection.DatabaseID,
+		Revision:   resource.GetRevision(),
+	}
+	return s.compactionTargetMeta.Create(ctx, candidate, scope, validate)
 }
 
 func (s *Server) readCompactionTarget(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
@@ -367,8 +442,8 @@ func (s *Server) DropCompactionTarget(ctx context.Context, req *datapb.DropCompa
 		if !targets.IsRewrite(record) || record.GetCollectionID() == 0 {
 			return false, merr.WrapErrOperationNotSupportedMsg("target family does not support operator drop")
 		}
-		if resource.GetDeleted() {
-			return false, merr.WrapErrPrivilegeNotPermitted("compaction target collection is unavailable")
+		if resource.GetDeleted() && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+			return false, merr.WrapErrServiceNotReadyMsg("compaction target scope is closing")
 		}
 		return true, nil
 	})

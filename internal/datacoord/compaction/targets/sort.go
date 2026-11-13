@@ -81,7 +81,7 @@ func (m *CompactionTargetMeta) SyncSort(ctx context.Context, alloc allocator.All
 			}
 		}
 		candidate := m.pendingSort
-		current, err = m.Create(ctx, candidate, func() error { return nil })
+		current, err = m.Create(ctx, candidate, nil, func() error { return nil })
 		if err != nil {
 			confirmation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 			defer cancel()

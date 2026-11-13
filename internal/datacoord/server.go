@@ -136,6 +136,7 @@ type Server struct {
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	collectionDropped                   func(context.Context, int64) (bool, error)
 	checkCompactionTargetReplication    func(context.Context) error
+	targetCompactionEnabled             bool
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -286,6 +287,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		metricsRequest:                   metricsinfo.NewMetricsRequest(),
 		pkindexService:                   pkindexservice.New(),
 		checkCompactionTargetReplication: validateCompactionTargetReplication,
+		targetCompactionEnabled:          Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 
 	for _, opt := range opts {
@@ -408,6 +410,11 @@ func (s *Server) initDataCoord() (initErr error) {
 		return err
 	}
 	mlog.Info(s.ctx, "init compaction done")
+	if err = retry.Do(s.ctx, func() error {
+		return s.recoverCompactionTargetScopes(s.ctx)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
 
 	s.initAnalyzeInspector()
 	mlog.Info(s.ctx, "init analyze inspector done")
@@ -791,7 +798,7 @@ type domainMetas struct {
 }
 
 // loadDomainMetas returns a DomainMetaLoader that builds every domain meta in parallel into out and returns the index catalog and the compaction protection.
-func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas) meta.DomainMetaLoader {
+func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas, targetCompactionEnabled bool) meta.DomainMetaLoader {
 	return func(ctx context.Context, collectionIDs []int64) (meta.SegmentIndexCatalog, meta.CompactionProtection, error) {
 		g, _ := errgroup.WithContext(ctx)
 
@@ -819,7 +826,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 			return err
 		})
 
-		if Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		if targetCompactionEnabled {
 			g.Go(func() error {
 				var err error
 				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
@@ -889,7 +896,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			err error
 			dm  domainMetas
 		)
-		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
+		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm, s.targetCompactionEnabled))
 		recoveredDomainMetas = dm
 		if err == nil {
 			recoveredMeta.PreparationSchema = coordinatorPreparationSchema
@@ -950,6 +957,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	recoveredMeta.DataViewManager = manager
 	s.meta = recoveredMeta
 	s.domainMetas = recoveredDomainMetas
+	if s.compactionTargetMeta != nil {
+		s.compactionTargetMeta.SetCollectionScopeGuard(s.tryLockCompactionTargetScope)
+	}
 	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	s.watchCollectionMetrics()
@@ -1099,7 +1109,7 @@ func (s *Server) startCompaction() {
 		s.compactionInspector.Start()
 	}
 
-	if s.compactionTrigger != nil {
+	if !s.targetCompactionEnabled && s.compactionTrigger != nil {
 		s.compactionTrigger.Start()
 	}
 
@@ -1111,6 +1121,10 @@ func (s *Server) startCompaction() {
 func (s *Server) startServerLoop() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.startCompaction()
+	}
+	if s.compactionTargetMeta != nil {
+		s.serverLoopWg.Add(1)
+		go s.collectExpiredCompactionTargets(s.serverLoopCtx)
 	}
 
 	s.serverLoopWg.Add(2)
@@ -1140,6 +1154,20 @@ func (s *Server) startServerLoop() {
 	}
 
 	s.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
+}
+
+func (s *Server) collectExpiredCompactionTargets(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	ticker := time.NewTicker(Params.DataCoordCfg.CompactionGCIntervalInSeconds.GetAsDuration(time.Second))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.compactionTargetMeta.CollectExpired(ctx, time.Now())
+		}
+	}
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {

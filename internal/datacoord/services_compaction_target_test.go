@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -34,10 +35,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func enableTestCompactionTargets(t *testing.T) {
@@ -63,8 +70,11 @@ func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, al
 		Schema: &schemapb.CollectionSchema{Name: "records"},
 	}
 	segmentMeta.AddCollection(collection)
-	s := &Server{allocator: alloc, meta: segmentMeta}
+	s := CreateServer(t.Context(), nil)
+	s.allocator = alloc
+	s.meta = segmentMeta
 	s.compactionTargetMeta = targetMeta
+	s.checkCompactionTargetReplication = func(context.Context) error { return nil }
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	return s, &datapb.CompactionTargetResource{
 		CollectionId: 1, DbId: 2, DbName: "default", CollectionName: "records", Revision: 10,
@@ -78,6 +88,233 @@ func rewriteRPCRequest(resource *datapb.CompactionTargetResource, roots ...int64
 			Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: roots},
 		},
 	}
+}
+
+func TestCompactionTargetModeIsFixedAtStartup(t *testing.T) {
+	enableTestCompactionTargets(t)
+	catalog, _ := targets.NewCompactionTargetTestCatalog(t)
+	enabled, _ := newTargetRPCServer(t, catalog, nil)
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "false"))
+	disabled := CreateServer(t.Context(), nil)
+	disabled.UpdateStateCode(commonpb.StateCode_Healthy)
+	enabled.UpdateStateCode(commonpb.StateCode_Initializing)
+	response, err := enabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrServiceNotReady)
+	enabled.UpdateStateCode(commonpb.StateCode_Healthy)
+	response, err = enabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.NoError(t, merr.CheckRPCCall(response, err))
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true"))
+	response, err = disabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrOperationNotSupported)
+}
+
+func TestDropCollectionCompactionTargetsRetriesPartialClosure(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	active := &datapb.CompactionTarget{
+		TargetID: 1, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Rewrite: &datapb.CompactionTargetRewrite{},
+	}
+	second := proto.CloneOf(active)
+	second.TargetID = 2
+	otherScope := proto.CloneOf(active)
+	otherScope.TargetID, otherScope.CollectionID = 3, 9
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).
+		Return([]*datapb.CompactionTarget{active, second, otherScope}, nil).Once()
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.MatchedBy(func(target *datapb.CompactionTarget) bool {
+		return target.GetTargetID() == active.GetTargetID()
+	})).RunAndReturn(func(_ context.Context, record *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+		return proto.CloneOf(record), true, nil
+	}).Once()
+	stopSecond := mock.MatchedBy(func(target *datapb.CompactionTarget) bool {
+		return target.GetTargetID() == second.GetTargetID()
+	})
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, stopSecond).Return(nil, false, merr.ErrIoFailed).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, second.GetTargetID()).Return(second, nil).Once()
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, stopSecond).
+		RunAndReturn(func(_ context.Context, record *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+			return proto.CloneOf(record), true, nil
+		}).Once()
+
+	s, _ := newTargetRPCServer(t, catalog, nil)
+	deleted := *s.meta.GetCollection(1)
+	deleted.State = etcdpb.CollectionState_CollectionDropping
+	s.meta.AddCollection(&deleted)
+	s.SetCollectionDroppedChecker(func(_ context.Context, id int64) (bool, error) {
+		return id == 1, nil
+	})
+	require.ErrorIs(t, s.DropCollectionCompactionTargets(ctx, 1), merr.ErrIoFailed)
+	req := &datapb.DescribeCompactionTargetRequest{
+		TargetId:   active.GetTargetID(),
+		Collection: &datapb.CompactionTargetResource{CollectionId: 1, DbId: 2, DbName: "default", Revision: 10, Deleted: true},
+	}
+	before, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(before, err))
+	require.Equal(t, targets.StopScopeDropped, before.GetTarget().GetStopReason())
+	require.NotZero(t, before.GetTarget().GetStoppedAt())
+
+	require.NoError(t, s.DropCollectionCompactionTargets(ctx, 1))
+	after, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(after, err))
+	require.True(t, proto.Equal(before.GetTarget(), after.GetTarget()))
+	req.TargetId = second.GetTargetID()
+	closed, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(closed, err))
+	require.Equal(t, targets.StopScopeDropped, closed.GetTarget().GetStopReason())
+
+	drop, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{TargetId: req.GetTargetId(), Collection: req.GetCollection()})
+	require.NoError(t, merr.CheckRPCCall(drop, err))
+	afterDrop, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(afterDrop, err))
+	require.True(t, proto.Equal(closed.GetTarget(), afterDrop.GetTarget()))
+}
+
+func TestCompactionTargetRecoveryClosesOnlyConfirmedDeletedScopes(t *testing.T) {
+	enableTestCompactionTargets(t)
+	active := &datapb.CompactionTarget{
+		TargetID: 1, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{11}}, TotalRows: proto.Int64(50),
+		ExpectedTS: 10, ActivatedAtTS: 10,
+	}
+	missing := proto.CloneOf(active)
+	missing.TargetID, missing.CollectionID = 2, 22
+	restoring := proto.CloneOf(active)
+	restoring.TargetID, restoring.CollectionID = 3, 33
+	history := proto.CloneOf(missing)
+	history.TargetID = 4
+	history.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	history.StopReason, history.InactivatedAtTS = targets.StopOperatorDropped, 20
+	catalog, durable := targets.NewCompactionTargetTestCatalog(t, active, missing, restoring, history)
+	ctx := t.Context()
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "false"))
+	disabled := CreateServer(ctx, nil)
+	require.NoError(t, disabled.DropCollectionCompactionTargets(ctx, missing.GetCollectionID()))
+	require.True(t, proto.Equal(missing, durable[missing.GetTargetID()]))
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true"))
+	restarted, _ := newTargetRPCServer(t, catalog, nil)
+	restarted.UpdateStateCode(commonpb.StateCode_Initializing)
+	restarted.SetCollectionDroppedChecker(func(_ context.Context, id int64) (bool, error) {
+		return id == missing.GetCollectionID(), nil
+	})
+	require.NoError(t, restarted.recoverCompactionTargetScopes(ctx))
+	require.True(t, proto.Equal(active, durable[active.GetTargetID()]))
+	require.True(t, proto.Equal(restoring, durable[restoring.GetTargetID()]))
+	require.True(t, proto.Equal(history, durable[history.GetTargetID()]))
+
+	restarted.UpdateStateCode(commonpb.StateCode_Healthy)
+	req := &datapb.DescribeCompactionTargetRequest{
+		TargetId:   missing.GetTargetID(),
+		Collection: &datapb.CompactionTargetResource{CollectionId: missing.GetCollectionID(), Deleted: true},
+	}
+	resp, err := restarted.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, targets.StopScopeDropped, resp.GetTarget().GetStopReason())
+	require.Greater(t, resp.GetTarget().GetStoppedAt(), history.GetInactivatedAtTS())
+	require.Equal(t, []int64{11}, resp.GetTarget().GetRewrite().GetRootSegmentIds())
+	require.Equal(t, int64(50), resp.GetTarget().GetTotalRows())
+}
+
+func TestCompactionTargetWithEmptyMatchWaitsForCollectionDropAck(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	record := &datapb.CompactionTarget{
+		TargetID: 1, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Rewrite: &datapb.CompactionTargetRewrite{}, ExpectedTS: 10, ActivatedAtTS: 10,
+	}
+	catalog, _ := targets.NewCompactionTargetTestCatalog(t, record)
+	s, resource := newTargetRPCServer(t, catalog, nil)
+	s.compactionTargetMeta.SetCollectionScopeGuard(s.tryLockCompactionTargetScope)
+	// A collection may still be Created while its DropCollection message
+	// retires all the candidate segments on the business channels.
+	b := mock_broadcaster.NewMockBroadcaster(t)
+	b.EXPECT().TryLockResourceKeys(mock.Anything,
+		message.NewSharedDBNameResourceKey("default"),
+		message.NewSharedCollectionNameResourceKey("default", "records")).
+		Return(nil, nil).Once()
+	b.EXPECT().Close().Return().Once()
+	broadcast.ResetBroadcaster()
+	t.Cleanup(broadcast.ResetBroadcaster)
+	broadcast.Register(b)
+
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, nil)
+	_, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	req := &datapb.DescribeCompactionTargetRequest{TargetId: record.GetTargetID(), Collection: resource}
+	resp, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, resp.GetTarget().GetState())
+	require.Zero(t, resp.GetTarget().GetRemainingRows())
+	require.NotZero(t, resp.GetTarget().GetCheckedAt())
+
+	s.meta.DropCollection(record.GetCollectionID())
+	s.SetCollectionDroppedChecker(func(context.Context, int64) (bool, error) { return true, nil })
+	require.NoError(t, s.DropCollectionCompactionTargets(ctx, record.GetCollectionID()))
+	req.Collection = &datapb.CompactionTargetResource{CollectionId: record.GetCollectionID(), Deleted: true}
+	resp, err = s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, targets.StopScopeDropped, resp.GetTarget().GetStopReason())
+}
+
+func TestCompactionTargetGCConfirmsDeletionAndKeepsQueryableHistory(t *testing.T) {
+	enableTestCompactionTargets(t)
+	now := time.Date(2026, time.November, 13, 0, 0, 0, 0, time.UTC)
+	const retention = "dataCoord.compaction.target.retentionSeconds"
+	require.NoError(t, Params.Save(retention, "86400"))
+	t.Cleanup(func() { Params.Reset(retention) })
+
+	newTerminal := func(id int64, stoppedAt time.Time) *datapb.CompactionTarget {
+		return &datapb.CompactionTarget{
+			TargetID: id, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+			Rewrite: &datapb.CompactionTargetRewrite{}, State: datapb.TargetState_TARGET_STATE_INACTIVE,
+			InactivatedAtTS: tsoutil.ComposeTSByTime(stoppedAt), StopReason: targets.StopOperatorDropped,
+		}
+	}
+	retained := newTerminal(1, now.Add(-48*time.Hour))
+	removed := newTerminal(2, now.Add(-48*time.Hour))
+	atLimit := newTerminal(3, now.Add(-24*time.Hour))
+	unknown := newTerminal(4, now.Add(-48*time.Hour))
+	unknown.Intent = datapb.TargetIntent(999)
+	missingStop := newTerminal(5, now.Add(-48*time.Hour))
+	missingStop.InactivatedAtTS = 0
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).
+		Return([]*datapb.CompactionTarget{retained, removed, atLimit, unknown, missingStop}, nil).Once()
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, retained).Return(context.DeadlineExceeded).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, retained.GetTargetID()).Return(retained, nil)
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, removed).Return(context.DeadlineExceeded).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
+
+	s, resource := newTargetRPCServer(t, catalog, nil)
+	s.compactionTargetMeta.CollectExpired(t.Context(), now)
+	req := &datapb.DescribeCompactionTargetRequest{TargetId: retained.GetTargetID(), Collection: resource}
+	resp, err := s.DescribeCompactionTarget(t.Context(), req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, retained.GetInactivatedAtTS(), resp.GetTarget().GetStoppedAt())
+	drop, err := s.DropCompactionTarget(t.Context(), &datapb.DropCompactionTargetRequest{TargetId: retained.GetTargetID(), Collection: resource})
+	require.NoError(t, merr.CheckRPCCall(drop, err))
+
+	req.TargetId = removed.GetTargetID()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
+	resp, err = s.DescribeCompactionTarget(t.Context(), req)
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrIoFailed)
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, nil).Once()
+	resp, err = s.DescribeCompactionTarget(t.Context(), req)
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrCompactionTargetNotFound)
+
+	require.NoError(t, Params.Save(retention, "604800"))
+	s.compactionTargetMeta.CollectExpired(t.Context(), now)
+	listed, err := s.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{IncludeSystem: true})
+	require.NoError(t, merr.CheckRPCCall(listed, err))
+	require.Len(t, listed.GetTargets(), 4)
+	require.Equal(t, []int64{5, 4, 3, 1}, []int64{
+		listed.GetTargets()[0].GetTargetId(), listed.GetTargets()[1].GetTargetId(),
+		listed.GetTargets()[2].GetTargetId(), listed.GetTargets()[3].GetTargetId(),
+	})
 }
 
 func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {
@@ -132,8 +369,8 @@ func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) 
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
 			var candidate *datapb.CompactionTarget
-			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-				func(_ context.Context, record *datapb.CompactionTarget) (bool, error) {
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
 					candidate = proto.CloneOf(record)
 					if tc.ambiguous {
 						return true, context.DeadlineExceeded

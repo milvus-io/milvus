@@ -18,6 +18,7 @@ package targets
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -48,8 +49,11 @@ type CompactionTargetMeta struct {
 	// record before making another decision about this Target.
 	unconfirmedStops   map[int64]struct{}
 	unconfirmedCreates map[int64]*datapb.CompactionTarget
+	unconfirmedDeletes map[int64]struct{}
 	writes             *lock.KeyLock[int64]
 	admission          *lock.KeyLock[int64]
+	collectionWrites   *lock.KeyLock[int64]
+	tryLockScope       func(context.Context, int64) (func(), error)
 
 	standingMu            sync.Mutex
 	pendingSort           *datapb.CompactionTarget
@@ -66,8 +70,10 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
 		unconfirmedStops:   make(map[int64]struct{}),
 		unconfirmedCreates: make(map[int64]*datapb.CompactionTarget),
+		unconfirmedDeletes: make(map[int64]struct{}),
 		writes:             lock.NewKeyLock[int64](),
 		admission:          lock.NewKeyLock[int64](),
+		collectionWrites:   lock.NewKeyLock[int64](),
 	}
 	for _, record := range records {
 		m.targets[record.GetTargetID()] = record
@@ -81,6 +87,67 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 func (m *CompactionTargetMeta) LockCollectionAdmission(collectionID int64) func() {
 	m.admission.Lock(collectionID)
 	return func() { m.admission.Unlock(collectionID) }
+}
+
+// SetCollectionScopeGuard installs the DDL guard before starting reconciliation.
+func (m *CompactionTargetMeta) SetCollectionScopeGuard(guard func(context.Context, int64) (func(), error)) {
+	m.tryLockScope = guard
+}
+
+// ActiveCollectionIDs lists the stable collection IDs whose scope needs to
+// be checked during recovery. Cluster-wide Targets have no collection scope.
+func (m *CompactionTargetMeta) ActiveCollectionIDs() []int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make(map[int64]struct{})
+	for _, record := range m.targets {
+		if record.GetCollectionID() > 0 && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+			ids[record.GetCollectionID()] = struct{}{}
+		}
+	}
+	result := make([]int64, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	slices.Sort(result)
+	return result
+}
+
+// CloseCollectionScope runs after the authoritative collection tombstone.
+// A writer that passed validation before the tombstone either published its
+// Target, recorded an ambiguous candidate, or lost the durable scope guard.
+func (m *CompactionTargetMeta) CloseCollectionScope(ctx context.Context, collectionID int64) error {
+	m.collectionWrites.Lock(collectionID)
+	defer m.collectionWrites.Unlock(collectionID)
+
+	m.mu.RLock()
+	var ids []int64
+	for id, record := range m.targets {
+		if record.GetCollectionID() == collectionID && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+			ids = append(ids, id)
+		}
+	}
+	for id, candidate := range m.unconfirmedCreates {
+		if candidate.GetCollectionID() == collectionID {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.RUnlock()
+	slices.Sort(ids)
+
+	var firstErr error
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := m.stop(ctx, id, StopScopeDropped, func(record *datapb.CompactionTarget) (bool, error) {
+			return record.GetCollectionID() == collectionID, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (m *CompactionTargetMeta) GetCompactionTarget(targetID int64) *datapb.CompactionTarget {
@@ -103,11 +170,14 @@ func (m *CompactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 // ambiguous writes before taking it so no item carries an obsolete outcome.
 func (m *CompactionTargetMeta) List(ctx context.Context) (map[int64]*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	ids := make([]int64, 0, len(m.unconfirmedStops)+len(m.unconfirmedCreates))
+	ids := make([]int64, 0, len(m.unconfirmedStops)+len(m.unconfirmedCreates)+len(m.unconfirmedDeletes))
 	for id := range m.unconfirmedStops {
 		ids = append(ids, id)
 	}
 	for id := range m.unconfirmedCreates {
+		ids = append(ids, id)
+	}
+	for id := range m.unconfirmedDeletes {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
@@ -145,9 +215,14 @@ func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) 
 	}
 	delete(m.unconfirmedStops, id)
 	delete(m.unconfirmedCreates, id)
+	delete(m.unconfirmedDeletes, id)
 }
 
-func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.CompactionTarget, validate func() error) (*datapb.CompactionTarget, error) {
+func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion, validate func() error) (*datapb.CompactionTarget, error) {
+	if collectionID := candidate.GetCollectionID(); collectionID != 0 {
+		m.collectionWrites.Lock(collectionID)
+		defer m.collectionWrites.Unlock(collectionID)
+	}
 	id := candidate.GetTargetID()
 	m.writes.Lock(id)
 	defer m.writes.Unlock(id)
@@ -157,7 +232,7 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	mayHaveCommitted, err := m.catalog.CreateCompactionTarget(ctx, candidate)
+	mayHaveCommitted, err := m.catalog.CreateCompactionTarget(ctx, candidate, scope)
 	if err == nil {
 		m.store(candidate, id)
 		return candidate, nil
@@ -195,8 +270,9 @@ func sameCreation(stored, candidate *datapb.CompactionTarget) bool {
 // Read refreshes a Target whose previous write returned an ambiguous result.
 func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	_, refresh := m.unconfirmedStops[id]
-	if !refresh && m.unconfirmedCreates[id] == nil {
+	_, stopping := m.unconfirmedStops[id]
+	_, deleting := m.unconfirmedDeletes[id]
+	if !stopping && !deleting && m.unconfirmedCreates[id] == nil {
 		record := proto.CloneOf(m.targets[id])
 		m.mu.RUnlock()
 		return record, nil
@@ -209,16 +285,25 @@ func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.Comp
 
 func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	_, refresh := m.unconfirmedStops[id]
+	_, stopping := m.unconfirmedStops[id]
+	_, deleting := m.unconfirmedDeletes[id]
 	candidate := m.unconfirmedCreates[id]
 	record := proto.CloneOf(m.targets[id])
 	m.mu.RUnlock()
-	if !refresh && candidate == nil {
+	if !stopping && !deleting && candidate == nil {
 		return record, nil
 	}
 	stored, err := m.catalog.LoadCompactionTarget(ctx, id)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read compaction target %d after ambiguous write", id)
+	}
+	if deleting {
+		// A surviving value cannot rule out a delayed delete. Only a
+		// confirmed absence stops read-through for this ID.
+		if stored == nil {
+			m.store(nil, id)
+		}
+		return stored, nil
 	}
 	if candidate != nil {
 		if stored == nil {
@@ -234,7 +319,9 @@ func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datap
 	// stop. Keep checking until a terminal value is durable.
 	if stored == nil || stored.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE {
 		m.store(stored, id)
-		observeSatisfaction(stored)
+		if stored != nil {
+			observeSatisfaction(stored)
+		}
 	}
 	return stored, nil
 }
@@ -260,26 +347,41 @@ func (m *CompactionTargetMeta) refreshUnconfirmedCreates(ctx context.Context) {
 // Stop revalidates the current record before the first transition. A satisfied
 // transition runs its full observation while the current Target is serialized.
 func (m *CompactionTargetMeta) Stop(ctx context.Context, id int64, reason string, validate func(*datapb.CompactionTarget) (bool, error)) error {
+	found, err := m.stop(ctx, id, reason, validate)
+	if !found && err == nil {
+		return merr.Wrapf(merr.ErrCompactionTargetNotFound, "target ID %d", id)
+	}
+	return err
+}
+
+func (m *CompactionTargetMeta) stop(ctx context.Context, id int64, reason string, validate func(*datapb.CompactionTarget) (bool, error)) (bool, error) {
 	m.writes.Lock(id)
 	defer m.writes.Unlock(id)
 	record, err := m.readLocked(ctx, id)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if record == nil {
-		return merr.Wrapf(merr.ErrCompactionTargetNotFound, "target ID %d", id)
+		return false, nil
 	}
 	if record.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE && record.GetState() != datapb.TargetState_TARGET_STATE_INACTIVE {
-		return merr.WrapErrDataIntegrityMsg("compaction target %d has invalid state %d", id, record.GetState())
+		return true, merr.WrapErrDataIntegrityMsg("compaction target %d has invalid state %d", id, record.GetState())
+	}
+	if reason == StopSatisfied && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && m.tryLockScope != nil {
+		release, err := m.tryLockScope(ctx, record.GetCollectionID())
+		if err != nil || release == nil {
+			return true, err
+		}
+		defer release()
 	}
 	if ok, err := validate(record); err != nil || !ok {
-		return err
+		return true, err
 	}
 	if record.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE {
-		return nil
+		return true, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return true, err
 	}
 	record.State = datapb.TargetState_TARGET_STATE_INACTIVE
 	record.StopReason = reason
@@ -289,18 +391,18 @@ func (m *CompactionTargetMeta) Stop(ctx context.Context, id int64, reason string
 		m.mu.Lock()
 		m.unconfirmedStops[id] = struct{}{}
 		m.mu.Unlock()
-		return merr.Wrapf(err, "stop compaction target %d", id)
+		return true, merr.Wrapf(err, "stop compaction target %d", id)
 	}
 	m.store(stored, id)
 	if stored == nil {
-		return merr.Wrapf(merr.ErrCompactionTargetNotFound, "target ID %d", id)
+		return false, nil
 	}
 	if changed || stored.GetStopReason() == StopSatisfied {
 		// A previously ambiguous write can win between the read and this
 		// conditional update. It becomes visible only once in this process.
 		observeSatisfaction(stored)
 	}
-	return nil
+	return true, nil
 }
 
 func observeSatisfaction(record *datapb.CompactionTarget) {

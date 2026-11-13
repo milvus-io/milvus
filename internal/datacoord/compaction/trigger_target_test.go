@@ -35,8 +35,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -72,6 +76,8 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(kv.Close)
 	catalog := kvdatacoord.NewCatalog(kv, "", "")
+	collection := &model.Collection{CollectionID: 1, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, rootcatalog.NewCatalog(kv).CreateCollection(ctx, collection, collection.UpdateTimestamp))
 	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
 	require.NoError(t, err)
 	segmentMeta := meta.NewEmptyTestMeta()
@@ -92,7 +98,8 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(100), nil).Once()
 	rewrite, err := targets.NewRewriteRecord(ctx, alloc, 1, []int64{10})
 	require.NoError(t, err)
-	_, err = manager.Create(ctx, rewrite, func() error { return nil })
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Revision: collection.UpdateTimestamp}
+	_, err = manager.Create(ctx, rewrite, scope, func() error { return nil })
 	require.NoError(t, err)
 	alloc.EXPECT().AllocID(mock.Anything).Return(200, nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(110), nil).Once()

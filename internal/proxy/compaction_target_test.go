@@ -85,7 +85,7 @@ func TestProxyCreateCompactionTargetDispatchesOnce(t *testing.T) {
 			coord.EXPECT().CreateCompactionTarget(mock.Anything, mock.MatchedBy(func(req *datapb.CreateCompactionTargetRequest) bool {
 				return req.GetCollection().GetCollectionId() == 41 && req.GetCollection().GetRevision() == 10
 			})).Return(tc.response, tc.rpcErr).Once()
-			proxy := &Proxy{mixCoord: coord}
+			proxy := &Proxy{mixCoord: coord, targetCompactionEnabled: true}
 			proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 			ctx := NewContextWithMetadata(context.Background(), "user", "another_db")
 			result, err := proxy.CreateCompactionTarget(ctx, &milvuspb.CreateCompactionTargetRequest{
@@ -147,7 +147,7 @@ func TestProxyDescribeCompactionTargetAuthorizesStableIdentity(t *testing.T) {
 					CollectionId: 41, DbId: 1, DbName: "tenant_b", CollectionName: "records", Revision: tc.revision,
 				},
 			}
-			proxy := &Proxy{mixCoord: coord}
+			proxy := &Proxy{mixCoord: coord, targetCompactionEnabled: true}
 			proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 			ctx := NewContextWithMetadata(t.Context(), "reader", "tenant_a")
 			result, err := proxy.DescribeCompactionTarget(ctx, &milvuspb.DescribeCompactionTargetRequest{TargetId: 100})

@@ -18,20 +18,27 @@ package datacoord
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore"
+	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -65,14 +72,18 @@ func (s *CatalogCompactionTargetSuite) TestCreateListStopAndRemove() {
 		ActivatedAtTS: 301,
 	}
 
-	_, err := s.catalog.CreateCompactionTarget(s.ctx, record)
+	require.NoError(s.T(), rootcatalog.NewCatalog(s.metakv).CreateCollection(s.ctx, &model.Collection{
+		CollectionID: record.GetCollectionID(), State: etcdpb.CollectionState_CollectionCreated,
+	}, 0))
+	scope := &metastore.CompactionTargetCollectionVersion{}
+	_, err := s.catalog.CreateCompactionTarget(s.ctx, record, scope)
 	s.Require().NoError(err)
 	s.True(proto.Equal(record, s.loadRecord(10)))
 
 	unknownTarget := proto.Clone(record).(*datapb.CompactionTarget)
 	unknownTarget.TargetID = 11
 	unknownTarget.Intent = datapb.TargetIntent(999)
-	_, err = s.catalog.CreateCompactionTarget(s.ctx, unknownTarget)
+	_, err = s.catalog.CreateCompactionTarget(s.ctx, unknownTarget, scope)
 	s.Require().NoError(err)
 
 	records, err := s.catalog.ListCompactionTargets(s.ctx)
@@ -188,7 +199,7 @@ func TestCompactionTargetCreateClassifiesBackendWriteOutcome(t *testing.T) {
 				err:                             merr.WrapErrIoFailedErr(test.err, "execute etcd txn"),
 			}
 			catalog := NewCatalog(backend, rootPath, "")
-			unknown, err := catalog.CreateCompactionTarget(t.Context(), &datapb.CompactionTarget{TargetID: 100})
+			unknown, err := catalog.CreateCompactionTarget(t.Context(), &datapb.CompactionTarget{TargetID: 100}, nil)
 			require.ErrorIs(t, err, merr.ErrIoFailed)
 			require.Equal(t, test.ambiguous, unknown)
 		})
@@ -202,4 +213,56 @@ type targetWriteErrorKV struct {
 
 func (m *targetWriteErrorKV) MultiSaveAndRemove(context.Context, map[string]string, []string, ...predicates.Predicate) error {
 	return m.err
+}
+
+func TestLateCompactionTargetCreateCannotOutliveCollectionDrop(t *testing.T) {
+	cfg := embed.NewConfig()
+	cfg.Dir = t.TempDir()
+	cfg.LogLevel = "error"
+	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	backend, err := etcdkv.NewEmbededEtcdKV(cfg, "test/meta")
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+
+	ctx := t.Context()
+	root := rootcatalog.NewCatalog(backend)
+	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, root.CreateCollection(ctx, collection, collection.UpdateTimestamp))
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	catalog := NewCatalog(delayed, "", "")
+	record := &datapb.CompactionTarget{TargetID: 123, CollectionID: collection.CollectionID}
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Revision: collection.UpdateTimestamp}
+	unknown, err := catalog.CreateCompactionTarget(ctx, record, scope)
+	require.Error(t, err)
+	require.True(t, unknown)
+	stored, err := catalog.LoadCompactionTarget(ctx, record.GetTargetID())
+	require.NoError(t, err)
+	require.Nil(t, stored)
+
+	dropped := collection.Clone()
+	dropped.State = etcdpb.CollectionState_CollectionDropping
+	dropped.UpdateTimestamp = 20
+	require.NoError(t, root.AlterCollection(ctx, collection, dropped, metastore.MODIFY, dropped.UpdateTimestamp, false))
+	require.Error(t, delayed.commit())
+	stored, err = catalog.LoadCompactionTarget(ctx, record.GetTargetID())
+	require.NoError(t, err)
+	require.Nil(t, stored)
+}
+
+// Hold the storage request past its timeout and a subsequent read-back, as a
+// server may do after the caller has already lost its response.
+type delayedTargetCreateKV struct {
+	kv.MetaKv
+	commit func() error
+}
+
+func (m *delayedTargetCreateKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	m.commit = func() error {
+		return m.MetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
+	}
+	return context.DeadlineExceeded
 }

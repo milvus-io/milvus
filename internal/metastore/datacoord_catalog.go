@@ -30,6 +30,13 @@ type BinlogsUpdateMask struct {
 	WithoutBm25Statslogs bool // if true, the bm25 statslogs will not be updated
 }
 
+// CompactionTargetCollectionVersion identifies the collection row authorized
+// for a Target creation. DatabaseID is the catalog ID, including legacy 0.
+type CompactionTargetCollectionVersion struct {
+	DatabaseID int64
+	Revision   uint64
+}
+
 func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
 	if m.UpdateMask.WithoutBinlogs {
 		return nil
@@ -132,7 +139,7 @@ type DataCoordCatalog interface {
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
 	LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error)
-	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (mayHaveCommitted bool, err error)
+	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *CompactionTargetCollectionVersion) (mayHaveCommitted bool, err error)
 	UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget) error
 	StopCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (current *datapb.CompactionTarget, changed bool, err error)
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error

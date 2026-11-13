@@ -918,6 +918,7 @@ dataCoord:
     rateLimitInterval: 60 # Refill interval in seconds for the shared compaction task bucket.
     target:
       maxEventsPerReconcile: 100 # Deprecated. Target reconciliation plans all matches and uses the shared admission limit.
+      retentionSeconds: 604800 # Retention in seconds for inactive compaction targets.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
