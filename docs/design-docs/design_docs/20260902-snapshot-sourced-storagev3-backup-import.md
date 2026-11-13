@@ -1040,8 +1040,11 @@ matching physical FieldIDs, it requires equal `nullable` settings, even when the
 target has a default. Missing fields retain the existing filling rules. It
 rejects different data types when either field
 is a vector (including ArrayOfVector). For the same fixed-dimensional vector
-type, it rejects different dimensions and ArrayOfVector element types before
-opening the native reader. Equal-width
+type, it rejects different dimensions and ArrayOfVector element types or
+`element_nullable` settings before opening the native reader. ArrayOfVector
+uses `list<Binary>` for nullable elements and `list<FixedSizeBinary>` otherwise.
+The existing Proxy import gate still rejects targets with element-nullable arrays.
+Equal-width
 element types such as Float16Vector and BFloat16Vector are not interchangeable:
 interpreting source buffers with the target type or width can otherwise
 hide a mismatch from row-level checks. Sparse vectors have no fixed dimension.

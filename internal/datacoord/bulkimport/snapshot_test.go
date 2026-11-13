@@ -2120,6 +2120,43 @@ func TestPrepareSnapshotImportOptions_Nullable(t *testing.T) {
 	}
 }
 
+func TestPrepareSnapshotImportOptions_VectorElementNullable(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		sourceNullable bool
+		targetNullable bool
+		wantErr        bool
+	}{
+		{name: "both_required"},
+		{name: "both_nullable", sourceNullable: true, targetNullable: true},
+		{name: "nullable_to_required", sourceNullable: true, wantErr: true},
+		{name: "required_to_nullable", targetNullable: true, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := SnapshotImportTestSchema()
+			source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "group", Fields: []*schemapb.FieldSchema{{
+				FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector, ElementNullable: tc.sourceNullable,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+			}}}}
+			target := proto.Clone(source).(*schemapb.CollectionSchema)
+			target.StructArrayFields[0].Fields[0].ElementNullable = tc.targetNullable
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrImportFailed)
+				require.ErrorContains(t, err, "vector element nullable mismatch for field vectors (ID 103)")
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+			} else {
+				require.NoError(t, err)
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
+	}
+}
+
 func TestPrepareSnapshotImportOptions_VarcharMaxLength(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

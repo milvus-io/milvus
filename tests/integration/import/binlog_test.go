@@ -84,18 +84,20 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 			})
 			defer restore()
 			for _, tc := range []struct {
-				name           string
-				dim            int
-				targetType     schemapb.DataType
-				sourceElement  schemapb.DataType
-				targetElement  schemapb.DataType
-				text           string
-				sourceLength   int
-				targetLength   int
-				sourceNullable bool
-				targetNullable bool
-				withDefault    bool
-				admissionErr   string
+				name                  string
+				dim                   int
+				targetType            schemapb.DataType
+				sourceElement         schemapb.DataType
+				targetElement         schemapb.DataType
+				sourceElementNullable bool
+				targetElementNullable bool
+				text                  string
+				sourceLength          int
+				targetLength          int
+				sourceNullable        bool
+				targetNullable        bool
+				withDefault           bool
+				admissionErr          string
 			}{
 				{name: "smaller_dimension", dim: 64, admissionErr: "vector dimension mismatch"},
 				{name: "larger_dimension", dim: 256, admissionErr: "vector dimension mismatch"},
@@ -110,6 +112,17 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 				{
 					name: "array_float16_to_bfloat16", sourceElement: schemapb.DataType_Float16Vector,
 					targetElement: schemapb.DataType_BFloat16Vector, admissionErr: "vector element type mismatch",
+				},
+				{
+					name: "array_nullable_to_required", sourceElement: schemapb.DataType_FloatVector,
+					targetElement: schemapb.DataType_FloatVector, sourceElementNullable: true,
+					admissionErr: "vector element nullable mismatch",
+				},
+				{
+					name: "array_required_to_nullable", sourceElement: schemapb.DataType_FloatVector,
+					targetElement: schemapb.DataType_FloatVector, targetElementNullable: true,
+					// Nullable elements in the target are already rejected by the Proxy import gate.
+					admissionErr: "element-nullable or nested Array field group.vectors is not supported",
 				},
 				{name: "ascii_boundary", text: "abcdef", sourceLength: 6, sourceNullable: true, targetNullable: true},
 				{name: "utf8_boundary", text: "中文", sourceLength: 6, sourceNullable: true, targetNullable: true},
@@ -155,7 +168,8 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "group", Fields: []*schemapb.FieldSchema{
 							{
 								Name: "vectors", DataType: schemapb.DataType_ArrayOfVector, ElementType: tc.sourceElement,
-								TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}, {Key: common.MaxCapacityKey, Value: "1000"}},
+								ElementNullable: tc.sourceElementNullable,
+								TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}, {Key: common.MaxCapacityKey, Value: "1000"}},
 							},
 						}}}
 					}
@@ -177,7 +191,14 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						integration.NewFloatVectorFieldData("vector", 3, sourceDim), text, values,
 					}
 					if tc.sourceElement != schemapb.DataType_None {
-						fieldsData = append(fieldsData, integration.NewStructArrayFieldData(source.StructArrayFields[0], "group", 3, 32))
+						group := integration.NewStructArrayFieldData(source.StructArrayFields[0], "group", 3, 32)
+						if tc.sourceElementNullable {
+							for _, row := range group.GetStructArrays().GetFields()[0].GetVectors().GetVectorArray().GetData() {
+								row.GetFloatVector().Data = make([]float32, 32)
+								row.ValidData = []bool{true, false}
+							}
+						}
+						fieldsData = append(fieldsData, group)
 					}
 					insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 						CollectionName: source.GetName(), NumRows: 3, HashKeys: integration.GenerateHashKeys(3),
@@ -252,6 +273,7 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					}
 					if tc.targetElement != schemapb.DataType_None {
 						target.StructArrayFields[0].Fields[0].ElementType = tc.targetElement
+						target.StructArrayFields[0].Fields[0].ElementNullable = tc.targetElementNullable
 					}
 					if tc.targetLength != 0 {
 						target.Fields[2].TypeParams[0].Value = fmt.Sprint(tc.targetLength)

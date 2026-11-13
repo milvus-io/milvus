@@ -828,6 +828,11 @@ func validateSnapshotSchema(target, source *schemapb.CollectionSchema) error {
 				"vector element type mismatch for field %s (ID %d): source %s, target %s",
 				field.GetName(), field.GetFieldID(), sourceField.GetElementType(), field.GetElementType())
 		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementNullable() != field.GetElementNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"vector element nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementNullable(), field.GetElementNullable())
+		}
 		sourceDim, err := typeutil.GetDim(sourceField)
 		if err != nil {
 			return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
