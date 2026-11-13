@@ -99,6 +99,9 @@ var (
 	ErrParameterInvalid         = newRPCError("invalid parameter", 1100, commonpb.ErrorCode_IllegalArgument, false, true)
 	ErrParameterMissing         = newRPCError("missing required parameters", 1101, commonpb.ErrorCode_IllegalArgument, false, true)
 
+	ErrCompactionTargetNotFound             = newRPCError("compaction target not found", 2318, commonpb.ErrorCode_UnexpectedError, false, false)
+	ErrCompactionTargetCreateOutcomeUnknown = newRPCError("compaction target create outcome unknown", 2319, commonpb.ErrorCode_UnexpectedError, false, false)
+
 	errUnexpected = newRPCError("unexpected error", unexpectedCode, commonpb.ErrorCode_UnexpectedError, false, false)
 )
 
@@ -312,6 +315,10 @@ func WrapErrServiceInternal(reason string, messages ...string) error {
 
 func WrapErrServiceUnimplemented(reason string, messages ...string) error {
 	return withDetails(ErrServiceUnimplemented, "reason", reason, messages...)
+}
+
+func WrapErrCompactionTargetCreateOutcomeUnknown(reason string) error {
+	return cloneWithMessage(ErrCompactionTargetCreateOutcomeUnknown, ErrCompactionTargetCreateOutcomeUnknown.message+": "+reason)
 }
 
 func WrapErrCollectionNotFound(collection any, messages ...string) error {
