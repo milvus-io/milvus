@@ -3066,7 +3066,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         probes = [(row, offset) for row in non_empty_rows for offset in range(len(row[STRUCT_FIELD]))]
-        score_tolerance = vector_score_tolerance(index_info, abs_tol=epsilon, rel_tol=0)
+        score_tolerance = vector_score_tolerance(index_info, indexed=True, abs_tol=epsilon, rel_tol=0)
         query_vectors = [row[STRUCT_FIELD][offset][VECTOR_SUBFIELD] for row, offset in probes]
         if metric_type == "MAX_SIM_COSINE":
             query_vectors = [EmbeddingList().add(vector) for vector in query_vectors]

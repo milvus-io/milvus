@@ -165,7 +165,7 @@ class TestMilvusClientStructArrayGrowingSealedSearch(MetadataStructArrayTestBase
         observe("before_search")
         self.assert_metadata_rows(client, name, model)
         self.assert_required_predicates(client, name, model)
-        self.assert_element_search(client, name, model, metric, "HNSW")
+        self.assert_element_search(client, name, model, metric, "HNSW", indexed=True, raw_ids=range(3000, 4000))
         # Each selected row has exactly two elements; all six must survive global reduction.
         selected = [3, 3006, 3503]
         assert all(len(model[key]["clips"]) == 2 for key in selected)
@@ -181,12 +181,14 @@ class TestMilvusClientStructArrayGrowingSealedSearch(MetadataStructArrayTestBase
             search_params={"metric_type": metric, "params": {"ef": 512}},
         )
         expected_keys = {(key, offset) for key in selected for offset in range(2)}
+        index, _ = self.describe_index(client, name, "clips_idx")
         assert len(hits) == 3
         for query, result in zip(queries, hits):
             assert len(result) == 6 and {(hit["id"], hit["offset"]) for hit in result} == expected_keys
             for hit in result:
                 expected = vector_score(query, model[hit["id"]]["clips"][hit["offset"]]["emb"], metric)
-                assert hit["distance"] == pytest.approx(expected, abs=2e-4, rel=2e-4)
+                tolerance = vector_score_tolerance(index, indexed=hit["id"] < 3000)
+                assert hit["distance"] == pytest.approx(expected, **tolerance)
         observe("after_search")
 
 
@@ -552,7 +554,8 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         score_deviations = [] if (dtype, kind, metric) in DISKANN_SCORE_PROFILES else None
         name, schema = self.create_typed_collection(client, dtype, kind, metric)
         model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema), split=False)
-        self.assert_typed_search(client, name, model, dtype, kind, metric, score_deviations)
+        self.assert_typed_search(client, name, model, dtype, kind, metric, score_deviations, indexed=False)
+        raw_ids = set()
         for phase in range(2):
             self.reload_collection(client, name)
             assert self.wait_for_index_ready(client, name, index_name="clips[emb]", timeout=300)
@@ -561,7 +564,9 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
             assert info["index_type"] == kind, info
             assert int(info["indexed_rows"]) >= 1000, info
             self.assert_typed_rows(client, name, model, dtype)
-            self.assert_typed_search(client, name, model, dtype, kind, metric, score_deviations)
+            self.assert_typed_search(
+                client, name, model, dtype, kind, metric, score_deviations, indexed=True, raw_ids=raw_ids
+            )
             if phase == 0:
                 deleted = list(range(0, 1200, 13))
                 self.delete(client, name, ids=deleted)
@@ -587,6 +592,8 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
                     patches.append(patch)
                     model[pk] = copy.deepcopy(patch)
                 self.upsert(client, name, patches, partial_update=True)
+                # The replacement batch is below the sealed-index build threshold.
+                raw_ids = {row["id"] for row in patches}
         if score_deviations:
             detail = json.dumps(score_deviations)
             allure.attach(detail, name="typed DISKANN score deviations", attachment_type=allure.attachment_type.JSON)
@@ -604,12 +611,12 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         dtype = DataType.FLOAT_VECTOR
         name, schema = self.create_typed_collection(client, dtype, "HNSW", "L2")
         model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema)[:rows], split=False)
-        self.assert_typed_search(client, name, model, dtype, "HNSW", "L2")
+        self.assert_typed_search(client, name, model, dtype, "HNSW", "L2", indexed=False)
         self.reload_collection(client, name)
         segments = client._get_connection().get_query_segment_info(name, timeout=30)
         log.info(f"STRUCT_SEALED_PATH collection={name} expected_rows={rows} segments={segments}")
         self.assert_typed_rows(client, name, model, dtype)
-        self.assert_typed_search(client, name, model, dtype, "HNSW", "L2")
+        self.assert_typed_search(client, name, model, dtype, "HNSW", "L2", indexed=rows == 1200)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -774,9 +781,12 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
         self.create_collection(client, name, schema=schema, index_params=indexes)
         return name
 
-    def assert_precision_rows_and_search(self, client, name, model, kind, metric, index_type):
+    def assert_precision_rows_and_search(
+        self, client, name, model, kind, metric, index_type, *, indexed=False, raw_ids=()
+    ):
         index, _ = self.describe_index(client, name, "clips[emb]")
-        tolerance = vector_score_tolerance(index, kind, abs_tol=3e-3, rel_tol=3e-3)
+        tolerance = vector_score_tolerance(index, kind, indexed=indexed, abs_tol=3e-3, rel_tol=3e-3)
+        raw_tolerance = vector_score_tolerance(index, kind, abs_tol=3e-3, rel_tol=3e-3)
         rows, _ = self.query(
             client,
             name,
@@ -835,10 +845,11 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
                 scores = []
                 for hit, key in zip(hits, keys):
                     assert key in truth
-                    assert hit["distance"] == pytest.approx(truth[key], **tolerance), {
+                    budget = raw_tolerance if key[0] in raw_ids else tolerance
+                    assert hit["distance"] == pytest.approx(truth[key], **budget), {
                         "coordinate": key,
                         "metric": metric,
-                        "tolerance": tolerance,
+                        "tolerance": budget,
                         "actual": hit["distance"],
                         "expected": truth[key],
                     }
@@ -895,7 +906,7 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
         valid.add_index("clips[emb]", index_type="HNSW", metric_type=metric, params={"M": 16, "efConstruction": 200})
         self.create_index(client, name, valid)
         self.load_collection(client, name)
-        self.assert_precision_rows_and_search(client, name, model, kind, metric, "HNSW")
+        self.assert_precision_rows_and_search(client, name, model, kind, metric, "HNSW", indexed=True)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -919,11 +930,11 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
         rows = [row(i, kind) for i in range(1100)]
         model = {item["id"]: copy.deepcopy(item) for item in rows}
         self.insert(client, name, rows)
-        self.assert_precision_rows_and_search(client, name, model, kind, metric, index_type)
+        self.assert_precision_rows_and_search(client, name, model, kind, metric, index_type, indexed=False)
         self.flush(client, name)
         self.release_collection(client, name)
         self.load_collection(client, name)
-        self.assert_precision_rows_and_search(client, name, model, kind, metric, index_type)
+        self.assert_precision_rows_and_search(client, name, model, kind, metric, index_type, indexed=True)
         removed = list(range(0, 1100, 11))
         self.delete(client, name, ids=removed)
         for pk in removed:
@@ -934,4 +945,7 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
         self.flush(client, name)
         self.release_collection(client, name)
         self.load_collection(client, name)
-        self.assert_precision_rows_and_search(client, name, model, kind, metric, index_type)
+        # The replacement batch is below the sealed-index build threshold.
+        self.assert_precision_rows_and_search(
+            client, name, model, kind, metric, index_type, indexed=True, raw_ids={item["id"] for item in updates}
+        )

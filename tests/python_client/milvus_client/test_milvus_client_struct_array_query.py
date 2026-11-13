@@ -420,9 +420,9 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         rows = [make_metadata_row(schema, i) for i in range(1100)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)
-        self.assert_element_search(client, name, model, metric, index_type)
+        self.assert_element_search(client, name, model, metric, index_type, indexed=False)
         self.reload_collection(client, name)
-        self.assert_element_search(client, name, model, metric, index_type)
+        self.assert_element_search(client, name, model, metric, index_type, indexed=True)
         deleted = list(range(0, 1100, 9))
         self.delete(client, name, ids=deleted)
         for pk in deleted:
@@ -432,7 +432,10 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         model.update({row["id"]: copy.deepcopy(row) for row in changes})
         self.reload_collection(client, name)
         self.assert_metadata_rows(client, name, model)
-        self.assert_element_search(client, name, model, metric, index_type)
+        # The replacement batch is below the sealed-index build threshold.
+        self.assert_element_search(
+            client, name, model, metric, index_type, indexed=True, raw_ids={row["id"] for row in changes}
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("value_type", [DataType.INT64, DataType.VARCHAR], ids=["int64", "varchar"])

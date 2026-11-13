@@ -221,16 +221,25 @@ def vector_score(query, vector, metric):
     return dot if metric == "IP" else dot / float(np.linalg.norm(query) * np.linalg.norm(vector))
 
 
-def vector_score_tolerance(index, dtype=DataType.FLOAT_VECTOR, *, abs_tol=2e-4, rel_tol=2e-4):
-    """Score budgets for these fixed Struct Array corpora, not universal ANN guarantees."""
+def vector_score_tolerance(index, dtype=DataType.FLOAT_VECTOR, *, indexed=False, abs_tol=2e-4, rel_tol=2e-4):
+    """Keep raw controls strict; allow an ANN budget only for an established indexed path.
+
+    Struct children are VECTOR_ARRAY fields. GrowingIndexSet::StageAppender and
+    ChunkedSegmentSealedImpl::generate_interim_index exclude this type, so initial
+    growing and below-threshold sealed controls do not use interim vector indexes.
+    These budgets apply to the fixed corpora, not to arbitrary ANN workloads.
+    """
     exact = {"abs": abs_tol, "rel": rel_tol}
     if (
-        index["index_type"] not in ("HNSW", "DISKANN")
+        not indexed
+        or index["index_type"] not in ("HNSW", "DISKANN")
         or dtype not in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR)
         or (index.get("refine_quant_type") or "").upper() == "NONE"
     ):
         return exact
-    # Default ANN refinement may be quantized. Keep the same policy on both engines;
+    # The caller must establish indexed execution; collection metadata alone is
+    # insufficient for growing or small sealed populations. Default ANN refinement
+    # may be quantized. Keep the same policy on both engines;
     # FLAT, binary/integer vectors and explicitly unquantized refinement stay strict.
     metric = index["metric_type"]
     if metric == "COSINE":
