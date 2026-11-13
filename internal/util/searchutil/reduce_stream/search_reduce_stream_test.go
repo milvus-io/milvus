@@ -18,6 +18,7 @@ package reducestream
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -630,6 +632,199 @@ func TestOrderedReduceStreamAcceptsEncodedChunk(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assertSearchChunk(t, recvChunk(t, stream), []int64{1}, []float32{0.9}, []int64{1})
+}
+
+func TestSplitSearchResultReusesSingleChunk(t *testing.T) {
+	for _, shape := range []string{"plain", "nullable", "grouped", "legacy_grouped", "elements", "string_pk"} {
+		for _, encoded := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/encoded=%v", shape, encoded), func(t *testing.T) {
+				result := newSearchChunk(2, 2, []testHit{{1, .9}, {2, .8}}, []testHit{{3, .7}})
+				data := result.ResultData
+				switch shape {
+				case "nullable":
+					data.FieldsData = append(data.FieldsData, &schemapb.FieldData{
+						Type: schemapb.DataType_FloatVector, FieldId: 200,
+						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+							Dim: 2, ValidData: []bool{true, false, true},
+							Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+						}},
+					})
+				case "grouped", "legacy_grouped":
+					builder, err := typeutil.NewFieldDataBuilder(schemapb.DataType_Int64, true, 3)
+					require.NoError(t, err)
+					for _, value := range []any{int64(10), nil, int64(20)} {
+						builder.Add(value)
+					}
+					field := builder.Build()
+					field.FieldId = 200
+					if shape == "legacy_grouped" {
+						data.GroupByFieldValue = field
+					} else {
+						data.GroupByFieldValues = []*schemapb.FieldData{field, data.FieldsData[0]}
+					}
+				case "elements":
+					data.ElementIndices = &schemapb.LongArray{Data: []int64{0, 1, 2}}
+				case "string_pk":
+					data.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b", "c"}}}}
+				}
+				result.CostAggregation = &internalpb.CostAggregation{TotalRelatedDataSize: 100}
+				result.ChannelsMvcc = map[string]uint64{"channel-a": 1000}
+				result.FilterValidCounts = []int64{2, 1}
+				data.AllSearchCount = 50
+				if encoded {
+					blob, err := proto.Marshal(data)
+					require.NoError(t, err)
+					result.ResultData, result.SlicedBlob = nil, blob
+					result.SlicedNumCount = 2
+				}
+				before := proto.Clone(result)
+				chunks, err := SplitSearchResult(result, 256*1024)
+				require.NoError(t, err)
+				require.Len(t, chunks, 1)
+				require.Same(t, result, chunks[0])
+				wire, err := proto.Marshal(chunks[0])
+				require.NoError(t, err)
+				received := &internalpb.SearchResults{}
+				require.NoError(t, proto.Unmarshal(wire, received))
+				buffer := &orderedChildBuffer{}
+				decoded, err := buffer.accept(received, 2, 2)
+				require.NoError(t, err)
+				require.True(t, proto.Equal(data, decoded))
+				require.True(t, proto.Equal(before, received))
+				require.True(t, proto.Equal(before, result))
+			})
+		}
+	}
+}
+
+func TestSplitSearchResultSingleChunkThreshold(t *testing.T) {
+	hits := []testHit{{1, .9}, {2, .8}, {3, .7}}
+	firstBytes, allBytes := searchChunkBytes(t, hits[0]), searchChunkBytes(t, hits...)
+	for _, tc := range []struct {
+		name       string
+		hits       []testHit
+		chunkBytes int
+		chunks     int
+	}{
+		{"below", hits, allBytes + 1, 1},
+		{"exact", hits, allBytes, 1},
+		{"crossed_by_last_unit", hits, allBytes - 1, 1},
+		{"multiple", hits, firstBytes, 3},
+		{"oversized_unit", hits[:1], 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := newSearchChunk(1, int64(len(tc.hits)), tc.hits)
+			chunks, err := SplitSearchResult(result, tc.chunkBytes)
+			require.NoError(t, err)
+			require.Len(t, chunks, tc.chunks)
+			if tc.chunks == 1 {
+				require.Same(t, result, chunks[0])
+			} else {
+				for i, chunk := range chunks {
+					require.NotSame(t, result, chunk)
+					assertSearchChunk(t, chunk, []int64{tc.hits[i].id}, []float32{tc.hits[i].score}, []int64{1})
+				}
+			}
+		})
+	}
+}
+
+func TestSplitSearchResultDoesNotUseBlobLengthForThreshold(t *testing.T) {
+	hits := make([]testHit, 100)
+	for i := range hits {
+		hits[i] = testHit{int64(i + 1), .5}
+	}
+	result := newSearchChunk(1, 100, hits)
+	blob, err := proto.Marshal(result.ResultData)
+	require.NoError(t, err)
+	require.Greater(t, searchChunkBytes(t, hits[:99]...), len(blob))
+	result.ResultData, result.SlicedBlob = nil, blob
+	chunks, err := SplitSearchResult(result, len(blob))
+	require.NoError(t, err)
+	require.Greater(t, len(chunks), 1)
+	var ids []int64
+	for _, chunk := range chunks {
+		require.NotSame(t, result, chunk)
+		ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+	}
+	require.Len(t, ids, len(hits))
+	for i := range hits {
+		require.Equal(t, hits[i].id, ids[i])
+	}
+}
+
+func TestSplitSearchResultSingleChunkStillValidates(t *testing.T) {
+	for _, invalid := range []string{"scores", "topks", "elements"} {
+		t.Run(invalid, func(t *testing.T) {
+			result := newSearchChunk(1, 2, []testHit{{1, .9}, {2, .8}})
+			switch invalid {
+			case "scores":
+				result.ResultData.Scores = result.ResultData.Scores[:1]
+			case "topks":
+				result.ResultData.Topks = []int64{-1}
+			case "elements":
+				result.ResultData.ElementIndices = &schemapb.LongArray{Data: []int64{0}}
+			}
+			chunks, err := SplitSearchResult(result, 256*1024)
+			require.Error(t, err)
+			require.Nil(t, chunks)
+		})
+	}
+}
+
+func BenchmarkSplitSearchResultAndMarshal(b *testing.B) {
+	for _, tc := range []struct {
+		name          string
+		nq, topK, dim int
+	}{
+		{"small_scalar", 10, 100, 0},
+		{"small_vector", 1, 8, 1536},
+		{"large_scalar", 10, 1000, 0},
+		{"large_vector", 10, 100, 1536},
+	} {
+		for _, encoded := range []bool{false, true} {
+			b.Run(fmt.Sprintf("%s/encoded=%v", tc.name, encoded), func(b *testing.B) {
+				hits := make([][]testHit, tc.nq)
+				for q := range hits {
+					for i := 0; i < tc.topK; i++ {
+						hits[q] = append(hits[q], testHit{int64(i + 1), 1 / float32(i+1)})
+					}
+				}
+				result := newSearchChunk(int64(tc.nq), int64(tc.topK), hits...)
+				if tc.dim > 0 {
+					result.ResultData.FieldsData = append(result.ResultData.FieldsData, &schemapb.FieldData{
+						Type: schemapb.DataType_FloatVector, FieldId: 200,
+						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+							Dim:  int64(tc.dim),
+							Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, tc.nq*tc.topK*tc.dim)}},
+						}},
+					})
+				}
+				if encoded {
+					blob, err := proto.Marshal(result.ResultData)
+					require.NoError(b, err)
+					result.ResultData, result.SlicedBlob = nil, blob
+				}
+				chunks, err := SplitSearchResult(result, 256*1024)
+				require.NoError(b, err)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					chunks, err := SplitSearchResult(result, 256*1024)
+					if err != nil {
+						b.Fatal(err)
+					}
+					for _, chunk := range chunks {
+						_, err := proto.Marshal(&viewpb.SearchOnViewStreamResponse{Payload: &viewpb.SearchOnViewStreamResponse_Chunk{Chunk: chunk}})
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.ReportMetric(float64(len(chunks)), "chunks/op")
+			})
+		}
+	}
 }
 
 func TestSplitSearchResultPreservesQueryBoundaries(t *testing.T) {

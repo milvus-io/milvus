@@ -212,6 +212,43 @@ func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, []int64{123}, provider.selection.GetSegmentIds())
 }
 
+func TestSearchOnViewStreamReusesEncodedSingleChunk(t *testing.T) {
+	result := streamTestResult()
+	data := result.ResultData
+	blob, err := proto.Marshal(data)
+	require.NoError(t, err)
+	result.ResultData, result.SlicedBlob = nil, blob
+	result.SlicedNumCount = result.NumQueries
+	tasks := &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}
+	server := NewServer(&streamTestProvider{searchTasks: tasks}, &streamTestScheduler{result: result})
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := reduce.NewSearchGRPCReduceStream(context.Background(), client, streamTestRequest())
+	require.NoError(t, err)
+	defer stream.Close()
+
+	chunk := recvSearchStreamChunk(t, stream)
+	require.True(t, proto.Equal(result, chunk))
+	require.Nil(t, chunk.GetResultData())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, 1, tasks.releaseCount)
+
+	worker, err := reduce.NewSearchGRPCReduceStream(context.Background(), client, streamTestRequest())
+	require.NoError(t, err)
+	defer worker.Close()
+	reduced, err := searchreducestream.NewReduceStream(streamTestRequest().GetLegacyReq(),
+		[]searchreducestream.ReduceStream{worker}, 256*1024)
+	require.NoError(t, err)
+	defer reduced.Close()
+	output := recvSearchStreamChunk(t, reduced)
+	require.True(t, proto.Equal(data, output.GetResultData()))
+	require.True(t, proto.Equal(result.GetCostAggregation(), output.GetCostAggregation()))
+	require.Equal(t, result.GetChannelsMvcc(), output.GetChannelsMvcc())
+	_, err = reduced.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
 func TestSearchOnViewStreamSendsEmptyChunkWithMetadata(t *testing.T) {
 	result := &internalpb.SearchResults{
 		Status:             merr.Success(),
