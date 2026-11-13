@@ -15,6 +15,7 @@ func TestProducerAccessModeFromConfig(t *testing.T) {
 	}{
 		{value: "shared", expected: pulsar.ProducerAccessModeShared, ok: true},
 		{value: "exclusive", expected: pulsar.ProducerAccessModeExclusive, ok: true},
+		{value: "exclusiveWithFencing", expected: pulsar.ProducerAccessModeExclusiveWithFencing, ok: true},
 		{value: "waitForExclusive", expected: pulsar.ProducerAccessModeExclusive, ok: false},
 		{value: "", expected: pulsar.ProducerAccessModeExclusive, ok: false},
 	}

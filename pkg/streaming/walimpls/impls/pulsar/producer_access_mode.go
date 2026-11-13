@@ -1,10 +1,15 @@
 package pulsar
 
-import "github.com/apache/pulsar-client-go/pulsar"
+import (
+	"github.com/apache/pulsar-client-go/pulsar"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
 
 const (
-	producerAccessModeShared    = "shared"
-	producerAccessModeExclusive = "exclusive"
+	producerAccessModeShared               = "shared"
+	producerAccessModeExclusive            = "exclusive"
+	producerAccessModeExclusiveWithFencing = paramtable.PulsarProducerAccessModeExclusiveWithFencing
 )
 
 // producerAccessModeFromConfig maps the value of pulsar.producerAccessMode to the pulsar producer access mode.
@@ -15,6 +20,8 @@ func producerAccessModeFromConfig(value string) (mode pulsar.ProducerAccessMode,
 		return pulsar.ProducerAccessModeShared, true
 	case producerAccessModeExclusive:
 		return pulsar.ProducerAccessModeExclusive, true
+	case producerAccessModeExclusiveWithFencing:
+		return pulsar.ProducerAccessModeExclusiveWithFencing, true
 	default:
 		return pulsar.ProducerAccessModeExclusive, false
 	}
