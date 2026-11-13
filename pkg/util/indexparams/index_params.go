@@ -131,7 +131,11 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 
 	prepareRatio, ok := value[PrepareRatioKey]
 	if !ok {
-		ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+		// build_ratio already provided the search cache; keep it, mirroring
+		// the setSearchCache guard on the prepare_ratio branch below.
+		if !setSearchCache {
+			ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+		}
 		ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
 	} else {
 		valueMap2 := make(map[string]float64)
