@@ -470,26 +470,24 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             continue;
         }
 
+        auto budget_guard =
+            folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
+                budget.Release({batch_loading_overhead_bytes, 1});
+            });
         try {
             futures.emplace_back(
                 folly::via(
                     &pool,
                     [batch = std::move(batch),
                      shared_factory,
-                     batch_loading_overhead_bytes,
+                     budget_guard = std::move(budget_guard),
                      reader_memory_limit,
                      shared_finalizer,
                      op_ctx]() mutable {
-                        auto& budget = milvus::storage::
-                            LoadAdmissionController::GetInstance();
                         // This guard is declared before the Arrow table locals below,
                         // so their shared backing buffers are destroyed before the
                         // batch reservation is released.
-                        auto release_guard = folly::makeGuard(
-                            [&budget, batch_loading_overhead_bytes]() {
-                                budget.Release(
-                                    {batch_loading_overhead_bytes, 1});
-                            });
+                        auto release_guard = std::move(budget_guard);
                         CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
                         auto tables_result =
@@ -538,10 +536,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                     })
                     .semi());
         } catch (...) {
-            if (budget_admitted) {
-                milvus::storage::LoadAdmissionController::GetInstance().Release(
-                    {batch_loading_overhead_bytes, 1});
-            }
             append_failed_future(std::current_exception());
         }
     }

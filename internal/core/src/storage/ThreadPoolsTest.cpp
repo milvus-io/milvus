@@ -12,6 +12,9 @@
 #include <chrono>
 #include <algorithm>
 #include <stdexcept>
+#include <system_error>
+#include "segcore/memory_planner.h"
+#include "storage/LoadAdmissionController.h"
 #include <vector>
 #include <atomic>
 #include <functional>
@@ -32,6 +35,26 @@ struct ThreadPoolsTestAccess {
     static std::unique_lock<std::shared_mutex>
     LockPoolMap() {
         return std::unique_lock<std::shared_mutex>(ThreadPools::mutex_);
+    }
+
+    static ThreadPools::ExecutorPtr
+    ReplaceExecutor(ThreadPoolPriority priority,
+                    std::unique_ptr<folly::CPUThreadPoolExecutor> executor) {
+        ThreadPools::ExecutorPtr replacement(executor.release(),
+                                             ThreadPools::ExecutorDeleter{});
+        auto lock = LockPoolMap();
+        ThreadPools::thread_pool_map.at(priority).swap(replacement);
+        return replacement;
+    }
+
+    static void
+    RestoreExecutor(ThreadPoolPriority priority,
+                    ThreadPools::ExecutorPtr original) {
+        {
+            auto lock = LockPoolMap();
+            ThreadPools::thread_pool_map.at(priority).swap(original);
+        }
+        // Drain and destroy the replacement outside the registry lock.
     }
 };
 
@@ -282,4 +305,94 @@ TEST(ThreadPool, RegistryWorkersExpandAndRetireToOneAfterIdleTimeout) {
     EXPECT_TRUE(WaitForPoolState([&] { return pool.numActiveThreads() == 1; }));
     EXPECT_EQ(pool.numThreads(), 4);
     EXPECT_EQ(folly::via(&pool, [] { return 42; }).semi().get(), 42);
+}
+
+TEST(ThreadPool, RejectedBatchSubmissionReturnsAdmissionBytesAndSlots) {
+    using namespace milvus;
+    class RejectingExecutor : public folly::CPUThreadPoolExecutor {
+     public:
+        RejectingExecutor() : folly::CPUThreadPoolExecutor(1) {
+        }
+        void
+        add(folly::Func) override {
+            ++rejections;
+            throw std::system_error(
+                std::make_error_code(std::errc::not_enough_memory));
+        }
+        int rejections{0};
+    };
+    // Initialize the cached worker count before temporarily replacing HIGH.
+    (void)ThreadPools::GetLoadExecutorWorkers();
+    auto rejecting = std::make_unique<RejectingExecutor>();
+    auto* rejected = rejecting.get();
+    auto original = ThreadPoolsTestAccess::ReplaceExecutor(
+        ThreadPoolPriority::HIGH, std::move(rejecting));
+    auto restore_executor = folly::makeGuard([&] {
+        ThreadPoolsTestAccess::RestoreExecutor(ThreadPoolPriority::HIGH,
+                                               std::move(original));
+    });
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto previous_bytes = budget.CapacityBytes();
+    const auto previous_slots = budget.CapacitySlots();
+    budget.SetCapacityBytes(8);
+    budget.SetCapacitySlots(1);
+    bool submission_attempted = false;
+    auto restore_budget = folly::makeGuard([&] {
+        if (submission_attempted) {
+            // Reacquire each released dimension; a failed probe identifies the
+            // original leaked reservation. Either way, remove exactly (8, 1).
+            (void)budget.TryAcquire({8, 0},
+                                    storage::LoadAdmissionPriority::High);
+            (void)budget.TryAcquire({0, 1},
+                                    storage::LoadAdmissionPriority::High);
+            budget.Release({8, 1});
+        }
+        budget.SetCapacityBytes(previous_bytes);
+        budget.SetCapacitySlots(previous_slots);
+    });
+    ASSERT_TRUE(
+        budget.TryAcquire({8, 1}, storage::LoadAdmissionPriority::High));
+    budget.Release({8, 1});
+    int reads = 0;
+    int finalized = 0;
+    submission_attempted = true;
+    auto batches = segcore::LoadCellBatchAsync(
+        nullptr,
+        {{0, 0, 0, 1, 8}},
+        [&](size_t, int64_t, int64_t, int64_t)
+            -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+            ++reads;
+            return arrow::Status::IOError("rejected task must not read");
+        },
+        8,
+        proto::common::LoadPriority::HIGH,
+        [&](const std::vector<std::shared_ptr<arrow::Table>>&, int64_t) {
+            ++finalized;
+            return std::make_unique<GroupChunk>();
+        });
+    ASSERT_EQ(batches.size(), 1);
+    ASSERT_TRUE(batches.front().isReady());
+    EXPECT_EQ(rejected->rejections, 1);
+    EXPECT_EQ(reads, 0);
+    EXPECT_EQ(finalized, 0);
+    // A ready future must not retain admission until its result is consumed.
+    const bool bytes_returned =
+        budget.TryAcquire({8, 0}, storage::LoadAdmissionPriority::High);
+    const bool slots_returned =
+        budget.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+    EXPECT_TRUE(bytes_returned) << "submission failure leaked transient bytes";
+    EXPECT_TRUE(slots_returned) << "submission failure leaked a load slot";
+    if (bytes_returned) {
+        budget.Release({8, 0});
+    }
+    if (slots_returned) {
+        budget.Release({0, 1});
+    }
+    try {
+        std::move(batches.front()).get();
+        FAIL() << "expected executor submission failure";
+    } catch (const std::system_error& error) {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::not_enough_memory));
+    }
 }
