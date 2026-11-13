@@ -66,6 +66,30 @@ FetchContent_GetProperties( milvus-storage )
 if ( NOT milvus-storage_POPULATED )
     FetchContent_Populate( milvus-storage )
 
+    # Carry the EKS Pod Identity / ECS task role fix until milvus-storage
+    # includes it. PATCH_COMMAND is not safe to repeat on an already-patched
+    # checkout, so check first and apply the patch only when needed.
+    set( MILVUS_STORAGE_CONTAINER_CREDENTIALS_PATCH
+         "${CMAKE_CURRENT_SOURCE_DIR}/aws-container-credentials.patch" )
+    execute_process(
+        COMMAND git apply --check --reverse "${MILVUS_STORAGE_CONTAINER_CREDENTIALS_PATCH}"
+        WORKING_DIRECTORY "${milvus-storage_SOURCE_DIR}"
+        RESULT_VARIABLE MILVUS_STORAGE_PATCH_APPLIED
+        OUTPUT_QUIET ERROR_QUIET )
+    if ( NOT MILVUS_STORAGE_PATCH_APPLIED EQUAL 0 )
+        execute_process(
+            COMMAND git apply --whitespace=nowarn "${MILVUS_STORAGE_CONTAINER_CREDENTIALS_PATCH}"
+            WORKING_DIRECTORY "${milvus-storage_SOURCE_DIR}"
+            RESULT_VARIABLE MILVUS_STORAGE_PATCH_RESULT
+            OUTPUT_VARIABLE MILVUS_STORAGE_PATCH_OUTPUT
+            ERROR_VARIABLE MILVUS_STORAGE_PATCH_ERROR )
+        if ( NOT MILVUS_STORAGE_PATCH_RESULT EQUAL 0 )
+            message( FATAL_ERROR
+                     "Failed to apply ${MILVUS_STORAGE_CONTAINER_CREDENTIALS_PATCH}: "
+                     "${MILVUS_STORAGE_PATCH_OUTPUT}\n${MILVUS_STORAGE_PATCH_ERROR}" )
+        endif()
+    endif()
+
     # Adding the following target:
     # milvus-storage
     add_subdirectory( ${milvus-storage_SOURCE_DIR}/cpp
