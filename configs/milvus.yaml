@@ -872,14 +872,14 @@ dataCoord:
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
-    # The maximum number of rows in a segment. Segments are sized in bytes (maxSize), but a segment of maxSize
-    # bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a scalar index or
-    # replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and imported at
-    # maxSize bytes or maxRows rows, whichever comes first. Rows wider than maxSize / maxRows bytes (268 bytes by
-    # default) reach the byte limit first and are not affected. That width grows with the byte limit: it is 537 bytes
-    # for a collection that uses diskSegmentMaxSize, and a deployment that raises maxSize should raise maxRows in
-    # proportion to keep the same collections unaffected. The collection property collection.segment.maxRows
-    # overrides this value for one collection. 0 disables the row limit.
+    # The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+    # segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+    # scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+    # imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+    # take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+    # collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+    # deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+    # 0 disables the row limit.
     maxRows: 4000000
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%

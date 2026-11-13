@@ -387,7 +387,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		}
 
 		expectedSize := policy.GetExpectedSegmentSize(t.indexMeta, coll.ID, coll.Schema)
-		maxRows := policy.GetSegmentMaxRows(coll.Properties)
+		maxRows := policy.GetSegmentMaxRows()
 		plans := t.generatePlans(group.Segments, signal, ct, expectedSize, maxRows)
 		for _, bucket := range plans {
 			if inspectorFull() {

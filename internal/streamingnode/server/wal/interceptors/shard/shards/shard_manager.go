@@ -6,7 +6,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -222,22 +221,6 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
-	// maxRowsOverride holds the collection.segment.maxRows property carried
-	// by the current schema snapshot, stored as the value plus one so that
-	// the zero value means "not set" (also when the schema is unknown or the
-	// property does not parse). The segment alloc worker reads it without
-	// the shard manager lock, hence atomic.
-	maxRowsOverride atomic.Int64
-}
-
-// MaxRowsOverride returns the row cap the collection sets for its own
-// segments (0 for no row limit), or a negative value when it sets none and
-// dataCoord.segment.maxRows applies.
-func (c *CollectionInfo) MaxRowsOverride() int64 {
-	if c == nil {
-		return -1
-	}
-	return c.maxRowsOverride.Load() - 1
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write
@@ -250,16 +233,6 @@ type PrimaryKeyDescriptor struct {
 func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
 	c.Schema = schema
 	c.primaryKey = nil
-	// Store once: the segment alloc worker reads the value without a lock and
-	// must not observe "not set" between two stores.
-	override := int64(0)
-	if maxRows, exist, err := common.GetCollectionSegmentMaxRows(schema.GetSchema().GetProperties()); err != nil {
-		mlog.Warn(context.TODO(), "ignore an invalid collection.segment.maxRows property, dataCoord.segment.maxRows applies",
-			mlog.String("vchannel", c.VChannel), mlog.Err(err))
-	} else if exist && maxRows < math.MaxInt64 {
-		override = maxRows + 1
-	}
-	c.maxRowsOverride.Store(override)
 	if schema == nil || schema.GetSchema() == nil {
 		return
 	}

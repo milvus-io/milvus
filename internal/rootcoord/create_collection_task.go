@@ -749,10 +749,6 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
-	if _, _, err := common.GetCollectionSegmentMaxRows(t.Req.GetProperties()); err != nil {
-		return err
-	}
-
 	// Set properties for persistent
 	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0

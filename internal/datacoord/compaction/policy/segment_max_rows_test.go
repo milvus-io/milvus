@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -32,23 +31,17 @@ func TestGetSegmentMaxRows(t *testing.T) {
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "4000000"))
 	t.Cleanup(func() { params.Reset(params.DataCoordCfg.SegmentMaxRows.Key) })
 
-	// The cap does not depend on the schema: it is the configured value
-	// unless the collection property overrides it.
-	require.Equal(t, int64(4000000), GetSegmentMaxRows(nil))
-	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionTTLConfigKey: "10"}))
-	require.Equal(t, int64(1000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "1000000"}))
-	require.Equal(t, int64(9000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "9000000"}))
-	// 0 turns the cap off for the collection
-	require.Equal(t, int64(0), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "0"}))
-	// a property that does not parse is ignored
-	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "-1"}))
-	require.Equal(t, int64(4000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "many"}))
+	// The cap is the configured value for every collection: it does not read
+	// the schema and does not follow maxSize.
+	require.Equal(t, int64(4000000), GetSegmentMaxRows())
+	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxSize.Key, "4096"))
+	t.Cleanup(func() { params.Reset(params.DataCoordCfg.SegmentMaxSize.Key) })
+	require.Equal(t, int64(4000000), GetSegmentMaxRows())
 
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "0"))
-	require.Equal(t, int64(0), GetSegmentMaxRows(nil))
-	require.Equal(t, int64(1000000), GetSegmentMaxRows(map[string]string{common.CollectionSegmentMaxRowsKey: "1000000"}))
+	require.Equal(t, int64(0), GetSegmentMaxRows())
 	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "-1"))
-	require.Equal(t, int64(0), GetSegmentMaxRows(nil))
+	require.Equal(t, int64(0), GetSegmentMaxRows())
 }
 
 func TestRowCapSizing(t *testing.T) {

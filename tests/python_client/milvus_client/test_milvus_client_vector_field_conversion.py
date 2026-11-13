@@ -1,5 +1,4 @@
 import random
-import time
 
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
@@ -14,7 +13,6 @@ pk_field = "id"
 int_field = "age"
 vec_field = "vec"
 no_vector_search_msg = "has no vector field, search is not supported"
-segment_max_rows_key = "collection.segment.maxRows"
 
 
 class TestMilvusClientVectorFieldConversion(TestMilvusClientV2Base):
@@ -247,87 +245,4 @@ class TestMilvusClientVectorFieldConversion(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         assert self._count(client, collection_name) == default_nb + 100
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_segment_row_cap_survives_vector_field_conversion(self):
-        """
-        target: the segment row cap does not depend on the schema
-        method: 1. create a collection without a vector field with collection.segment.maxRows
-                2. insert several times the cap, flush
-                3. add a nullable vector field, insert rows with and without a vector, flush, compact
-                4. drop the vector field, insert, flush, compact
-                5. set the property to an invalid value
-        expected: no segment holds more than the cap plus one insert batch after any step;
-                  an invalid value is rejected
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        cap, batch = 20000, 4000
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(int_field, DataType.INT32)
-        self.create_collection(client, collection_name, schema=schema, properties={segment_max_rows_key: str(cap)})
-        described = self.describe_collection(client, collection_name)[0]
-        assert described["properties"][segment_max_rows_key] == str(cap)
-
-        def insert(start, count, with_vector):
-            for begin in range(start, start + count, batch):
-                self.insert(client, collection_name, self._rows(begin, batch, with_vector=with_vector))
-            self.flush(client, collection_name)
-
-        def segment_rows(total):
-            # A growing segment is sealed by the insert that crosses the cap, so it holds at
-            # most the cap plus one batch; a compaction output holds at most the cap.
-            deadline, rows = time.time() + 120, []
-            while time.time() < deadline:
-                rows = sorted(
-                    (s.num_rows for s in self.list_persistent_segments(client, collection_name)[0]), reverse=True
-                )
-                if sum(rows) == total:
-                    break
-                time.sleep(2)
-            assert sum(rows) == total, rows
-            assert max(rows) <= cap + batch, rows
-            return rows
-
-        def compact():
-            job_id = self.compact(client, collection_name)[0]
-            deadline = time.time() + 180
-            while time.time() < deadline:
-                if "Completed" in str(self.get_compaction_state(client, job_id)[0]):
-                    return
-                time.sleep(2)
-            raise AssertionError("compaction did not complete")
-
-        insert(0, 3 * cap, with_vector=False)
-        assert len(segment_rows(3 * cap)) >= 3
-
-        # no vector field -> vector field: the segments are not merged, new rows follow the cap
-        self.add_collection_field(
-            client, collection_name, field_name=vec_field, data_type=DataType.FLOAT_VECTOR, dim=dim, nullable=True
-        )
-        self._index(client, collection_name)
-        insert(3 * cap, cap, with_vector=False)
-        insert(4 * cap, cap, with_vector=True)
-        compact()
-        assert len(segment_rows(5 * cap)) >= 4
-
-        # vector field -> no vector field
-        self.drop_collection_field(client, collection_name, field_name=vec_field)
-        insert(5 * cap, cap, with_vector=False)
-        compact()
-        assert len(segment_rows(6 * cap)) >= 5
-        self.load_collection(client, collection_name)
-        assert self._count(client, collection_name) == 6 * cap
-
-        self.alter_collection_properties(
-            client,
-            collection_name,
-            {segment_max_rows_key: "-1"},
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: f"{segment_max_rows_key} must be a non-negative integer"},
-        )
-        self.drop_collection_properties(client, collection_name, [segment_max_rows_key])
-        assert segment_max_rows_key not in self.describe_collection(client, collection_name)[0].get("properties", {})
         self.drop_collection(client, collection_name)

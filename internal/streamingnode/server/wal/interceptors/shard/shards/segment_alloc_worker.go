@@ -36,7 +36,6 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 		wal:               m.wal.Get(),
 		schemaVersion:     schemaVersion,
 		requiresStorageV3: requiresStorageV3,
-		maxRowsOverride:   m.collection.MaxRowsOverride(),
 	}
 	w.SetLogger(m.Logger().With(
 		mlog.FieldVChannel(m.vchannel),
@@ -62,7 +61,6 @@ type segmentAllocWorker struct {
 	limitation        segmentLimitation // segment limitation determined at first attempt
 	schemaVersion     int32
 	requiresStorageV3 bool
-	maxRowsOverride   int64 // collection.segment.maxRows of the collection, negative when not set
 }
 
 // do is the main loop of the segment allocation worker.
@@ -160,6 +158,6 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	}
 
 	// Generate growing segment limitation.
-	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1, w.maxRowsOverride)
+	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
 	return nil
 }

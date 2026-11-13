@@ -6865,14 +6865,14 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.maxRows",
 		Version:      "3.0.0",
 		DefaultValue: "4000000",
-		Doc: `The maximum number of rows in a segment. Segments are sized in bytes (maxSize), but a segment of maxSize
-bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a scalar index or
-replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and imported at
-maxSize bytes or maxRows rows, whichever comes first. Rows wider than maxSize / maxRows bytes (268 bytes by
-default) reach the byte limit first and are not affected. That width grows with the byte limit: it is 537 bytes
-for a collection that uses diskSegmentMaxSize, and a deployment that raises maxSize should raise maxRows in
-proportion to keep the same collections unaffected. The collection property collection.segment.maxRows
-overrides this value for one collection. 0 disables the row limit.`,
+		Doc: `The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+0 disables the row limit.`,
 		Export: true,
 	}
 	p.SegmentMaxRows.Init(base.mgr)
