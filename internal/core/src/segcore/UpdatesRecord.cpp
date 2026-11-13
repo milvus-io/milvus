@@ -59,6 +59,17 @@ using History = absl::InlinedVector<Version*, 1>;
 
 const Version*
 Visible(const History& history, uint64_t query_ts) {
+    if (history.empty()) {
+        return nullptr;
+    }
+    const auto* latest = history.back();
+    if (query_ts >= latest->begin_ts) {
+        // A value-specific posting history may already have ended. Earlier
+        // intervals cannot become visible again after its latest interval.
+        return latest->end_ts == kInfinity || query_ts < latest->end_ts
+                   ? latest
+                   : nullptr;
+    }
     auto it = std::upper_bound(history.begin(),
                                history.end(),
                                query_ts,
