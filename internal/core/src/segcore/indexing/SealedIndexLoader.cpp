@@ -205,6 +205,9 @@ SealedIndexLoader::SealedIndexLoader(
             file_manager_context_,
             storage::ArtifactStorageNamespace::Index,
             &metadata_ctx.ctx);
+        prepared_packed_file_ =
+            std::visit([](const auto& reader) { return reader->File(); },
+                       packed_source->reader);
         resolved_family = index::ResolvePackedLoadFamily(
             adapted.family, packed_source->Metadata(), config_);
         if (adapted.family != index::families::kJsonFlat) {
@@ -408,13 +411,19 @@ SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
     if (packed_v3) {
         AssertInfo(index_load_info_.index_files.size() == 1,
                    "Packed scalar index requires one file");
+        AssertInfo(prepared_packed_file_ != nullptr,
+                   "Packed inspection did not publish file metadata");
+        index::PackedIndexSource source;
+        if (*file_manager_context_.use_async_load) {
+            source.reader = std::shared_ptr<storage::AsyncIndexEntryReader>(
+                storage::AsyncIndexEntryReader::FromFile(
+                    prepared_packed_file_));
+        } else {
+            source.reader = std::shared_ptr<storage::IndexEntryReader>(
+                storage::IndexEntryReader::FromFile(prepared_packed_file_));
+        }
         index = loader_entry.Load(
-            {index::IndexFiles{file_manager_context_,
-                               {index_load_info_.index_files.front()},
-                               index::PackedIndexStorageConfig{
-                                   storage::ArtifactStorageNamespace::Index}},
-             options,
-             cache});
+            {index::OpenedIndexSource{std::move(source)}, options, cache});
     } else if (prepared_source) {
         index = loader_entry.Load(
             {index::OpenedIndexSource{

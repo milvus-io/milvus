@@ -1009,6 +1009,56 @@ TEST_F(IndexEntryWriterV3Test, LargeDirectoryTableNeedsSecondIO) {
     VerifyPattern(entry_last.data, 64);
 }
 
+TEST_F(IndexEntryWriterV3Test, MetadataReadsOnlyMissingTailPrefix) {
+    for (const auto [data_size, meta_size] :
+         {std::pair<size_t, size_t>{1024, 16},
+          {128 * 1024, 16},
+          {128 * 1024, 70 * 1024}}) {
+        SCOPED_TRACE(meta_size);
+        const auto path = kV3FilePath + "_metadata_reuse";
+        const auto data = GeneratePattern(data_size);
+        {
+            IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+            writer.WriteEntry("data", data.data(), data.size());
+            writer.PutMeta("value", std::string(meta_size, 'x'));
+            writer.Finish();
+        }
+        auto input =
+            std::make_shared<RecordingInputStream>(CreateInputStream(path));
+        auto reader = IndexEntryReader::Open(input, input->Size());
+        EXPECT_EQ(reader->IndexMeta().at("value"), std::string(meta_size, 'x'));
+        const auto& reads = input->ReadRanges();
+        ASSERT_EQ(reads.size(), meta_size < 64 * 1024 ? 2 : 3);
+        EXPECT_EQ(reads[0].size, MILVUS_V3_MAGIC_SIZE);
+        EXPECT_EQ(reads[1].size,
+                  std::min(input->Size(), kIndexEntryTailReadBytes));
+        if (reads.size() == 3) {
+            EXPECT_EQ(reads[2].offset + reads[2].size, reads[1].offset);
+            auto short_input = std::make_shared<DelayedFailingInputStream>(
+                CreateInputStream(path),
+                std::vector<DelayedFailingInputStream::Rule>{
+                    {reads[2].offset, std::chrono::milliseconds(0), true}});
+            EXPECT_THROW(
+                IndexEntryReader::Open(short_input, short_input->Size()),
+                milvus::SegcoreError);
+        }
+        auto file = reader->File();
+        reader.reset();
+        folly::CancellationSource cancel;
+        cancel.requestCancellation();
+        auto rejected = IndexEntryReader::FromFile(file);
+        rejected->SetLoadContext(milvus::ThreadPoolPriority::LOW,
+                                 cancel.getToken());
+        EXPECT_THROW(rejected->ReadEntry("data"), milvus::SegcoreError);
+        EXPECT_EQ(reads.size(), meta_size < 64 * 1024 ? 2 : 3);
+        auto retry = IndexEntryReader::FromFile(file);
+        EXPECT_EQ(retry->ReadEntry("data").data, data);
+        // Rebinding never rereads magic, footer or metadata.
+        ASSERT_EQ(reads.size(), meta_size < 64 * 1024 ? 3 : 4);
+        EXPECT_EQ(reads.back().size, data.size());
+    }
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadDirectoryReadsOnlyFileTail) {
     const std::string file_path = kV3FilePath + "_inspect_tail_only";
     auto data = GeneratePattern(1024);
@@ -1023,7 +1073,7 @@ TEST_F(IndexEntryWriterV3Test, ReadDirectoryReadsOnlyFileTail) {
     auto input =
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto file_size = input->Size();
-    auto [directory, encryption] =
+    auto [directory, encryption, tail] =
         ReadIndexEntryDirectory(input, file_size, {});
 
     EXPECT_FALSE(encryption.has_value());
@@ -1048,7 +1098,7 @@ TEST_F(IndexEntryWriterV3Test, ReadDirectoryDoesNotPrefetchLargeMeta) {
     auto input =
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto file_size = input->Size();
-    auto [directory, encryption] =
+    auto [directory, encryption, tail] =
         ReadIndexEntryDirectory(input, file_size, {});
 
     EXPECT_FALSE(encryption.has_value());
@@ -1281,7 +1331,7 @@ TEST_F(IndexEntryEncryptedV3Test, DirectoryPreservesCiphertextSizes) {
     }
 
     auto input = CreateInputStream(file_path);
-    auto [directory, encryption] =
+    auto [directory, encryption, tail] =
         ReadIndexEntryDirectory(input, input->Size(), {});
     ASSERT_TRUE(encryption.has_value());
     const auto& slices =

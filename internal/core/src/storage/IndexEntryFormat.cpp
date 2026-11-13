@@ -41,7 +41,7 @@ IndexEntryDirectory::At(std::string_view name) const {
     return *it;
 }
 
-std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
+IndexEntryDirectoryRead
 ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
                         int64_t file_size,
                         const folly::CancellationToken& token) {
@@ -92,10 +92,19 @@ ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
         tail_size = new_tail_size;
     }
 
-    return ParseIndexEntryDirectory(
+    auto [directory, encryption] = ParseIndexEntryDirectory(
         std::span(tail_data).subspan(
             tail_size - MILVUS_V3_FOOTER_SIZE - dir_size, dir_size),
         file_size);
+    const auto retained_offset =
+        static_cast<uint64_t>(file_size) - tail_data.size();
+    tail_data.resize(tail_data.size() - needed);
+    if (tail_data.empty()) {
+        std::vector<uint8_t>().swap(tail_data);
+    }
+    return {std::move(directory),
+            std::move(encryption),
+            {retained_offset, std::move(tail_data)}};
 }
 
 size_t

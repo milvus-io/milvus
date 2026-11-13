@@ -31,6 +31,7 @@
 #include "nlohmann/json.hpp"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryFormat.h"
+#include "storage/IndexEntryFile.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -53,6 +54,15 @@ class IndexEntryReader {
          ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
+
+    // Bind fresh per-reader state to a previously validated immutable file; no I/O.
+    static std::unique_ptr<IndexEntryReader>
+    FromFile(std::shared_ptr<const IndexEntryFile> file);
+
+    std::shared_ptr<const IndexEntryFile>
+    File() const noexcept {
+        return file_;
+    }
 
     // Sequential operations may reuse parsed directory/metadata with a fresh
     // cancellation token and priority. Never change these during an active read.
@@ -118,13 +128,13 @@ class IndexEntryReader {
     // Immutable metadata available immediately after Open(); no I/O.
     const IndexEntryDirectory&
     Directory() const noexcept {
-        return directory_;
+        return file_->directory;
     }
 
     // Index properties decoded from the metadata entry (not entry locations).
     const nlohmann::json&
     IndexMeta() const noexcept {
-        return metadata_;
+        return file_->metadata;
     }
 
     IndexEntryReader(const IndexEntryReader&) = delete;
@@ -134,8 +144,8 @@ class IndexEntryReader {
  private:
     IndexEntryReader() = default;
 
-    void
-    ReadFooterAndDirectory();
+    size_t
+    ReadEntryBytes(void* destination, size_t offset, size_t bytes);
     void
     ValidateMagic();
     void
@@ -227,18 +237,10 @@ class IndexEntryReader {
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
-    std::shared_ptr<milvus::InputStream> input_;
-    int64_t file_size_ = 0;
-    int64_t collection_id_ = 0;
+    std::shared_ptr<const IndexEntryFile> file_;
+    IndexEntryTail opening_tail_;
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
     folly::CancellationToken cancellation_token_;
-
-    std::optional<IndexFileEncryption> encryption_;
-
-    std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
-
-    IndexEntryDirectory directory_;
-    nlohmann::json metadata_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;
     std::unordered_map<std::string, Entry> small_entry_cache_;

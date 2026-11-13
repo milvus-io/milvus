@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -102,8 +103,39 @@ IndexEntryDirectorySize(std::span<const uint8_t> footer, int64_t file_size);
 std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
 ParseIndexEntryDirectory(std::span<const uint8_t> bytes, int64_t file_size);
 
+// Temporary bytes retained only while opening a packed file.
+struct IndexEntryTail {
+    uint64_t offset{0};
+    std::vector<uint8_t> bytes;
+
+    // Copy an overlapping suffix; return the prefix still requiring I/O.
+    size_t
+    CopySuffix(uint64_t start, std::span<uint8_t> destination) const {
+        if (bytes.empty() || start > offset + bytes.size() ||
+            destination.size() > offset + bytes.size() - start) {
+            return destination.size();
+        }
+        const auto missing =
+            start < offset
+                ? std::min<uint64_t>(offset - start, destination.size())
+                : 0;
+        if (missing < destination.size()) {
+            std::memcpy(destination.data() + missing,
+                        bytes.data() + (start + missing - offset),
+                        destination.size() - missing);
+        }
+        return missing;
+    }
+};
+
+struct IndexEntryDirectoryRead {
+    IndexEntryDirectory directory;
+    std::optional<IndexFileEncryption> encryption;
+    IndexEntryTail tail;
+};
+
 // Reads the V3 directory using the caller's input stream; never schedules work.
-std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
+IndexEntryDirectoryRead
 ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
                         int64_t file_size,
                         const folly::CancellationToken& token);
