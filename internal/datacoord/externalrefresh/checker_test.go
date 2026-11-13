@@ -1805,7 +1805,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	})
 
 	t.Run("a refresh whose segments are all already indexed finishes in the entry pass", func(t *testing.T) {
-		// The eager task path calls this synchronously when the last task
+		// The task path requests this pass when the last task
 		// finishes, so evaluating the debt only on the next periodic tick
 		// would put a whole externalCollectionCheckInterval on every refresh -
 		// including a re-scan that changed nothing, which is the case a

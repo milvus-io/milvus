@@ -51,6 +51,73 @@ import (
 
 // ==================== Helper Functions for Manager Tests ====================
 
+// A refresh task reports its terminal state from the global task scheduler,
+// while the job processing publishes the schema through DDL. That DDL can wait
+// for a broadcast lock held by an ack callback which is itself waiting for a
+// compaction that only the scheduler can finish, so the task path must return
+// while the publish is still blocked.
+func TestRefreshTaskTerminalStateDoesNotWaitForJobProcessing(t *testing.T) {
+	paramtable.Init()
+	protoTask := &datapb.ExternalCollectionRefreshTask{
+		TaskId:         1001,
+		JobId:          1,
+		CollectionId:   100,
+		NodeId:         1,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		State:          indexpb.JobState_JobStateInProgress,
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   "iceberg",
+	}
+	refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, []*datapb.ExternalCollectionRefreshTask{protoTask})
+	mgr := NewExternalCollectionRefreshManager(t.Context(), nil, nil, newStubScheduler(), &stubAllocator{nextID: 1000},
+		refreshMeta, nil, nil, nil, nil, nil).(*Manager)
+
+	publishing := make(chan struct{})
+	release := make(chan struct{})
+	var publishOnce, releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	mgr.checker.applyJobInfo = nil
+	mgr.checker.onJobFinished = func(context.Context, *datapb.ExternalCollectionRefreshJob) {
+		publishOnce.Do(func() { close(publishing) })
+		<-release
+	}
+
+	checkerDone := make(chan struct{})
+	go func() {
+		defer close(checkerDone)
+		mgr.checker.run()
+	}()
+	defer func() {
+		unblock()
+		mgr.Stop()
+		<-checkerDone
+	}()
+
+	returned := make(chan error, 1)
+	go func() {
+		returned <- mgr.wrapTask(protoTask).UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "")
+	}()
+
+	select {
+	case err := <-returned:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("task path is blocked by the schema publish; the global task scheduler would stop")
+	}
+	select {
+	case <-publishing:
+	case <-time.After(10 * time.Second):
+		t.Fatal("checker did not process the job after the task reached a terminal state")
+	}
+	assert.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
+}
+
 func createTestRefreshMeta(t *testing.T) *ExternalCollectionRefreshMeta {
 	catalog := &StubCatalog{}
 	mt, err := NewExternalCollectionRefreshMeta(context.Background(), catalog)

@@ -186,11 +186,11 @@ type Manager struct {
 	wg        sync.WaitGroup
 
 	// notifiedJobs tracks jobs whose schema-update callback has already been
-	// delivered. It guards against concurrent invocations of handleJobFinished
-	// from the eager task path and the periodic checker tick — both paths read
-	// collection.Schema before calling schemaUpdater, so without this dedup
-	// they could both observe a stale snapshot (before the WAL broadcast
-	// propagates back into the DataCoord cache) and both broadcast.
+	// delivered. It guards against repeated invocations of handleJobFinished:
+	// each pass reads collection.Schema before calling schemaUpdater, so
+	// without this dedup a later pass could observe a stale snapshot (before
+	// the WAL broadcast propagates back into the DataCoord cache) and
+	// broadcast again.
 	// forgetJob on GC prevents unbounded growth.
 	//
 	// cleanedJobs is the same shape for the OTHER one-time side effect, the
@@ -255,11 +255,11 @@ func NewExternalCollectionRefreshManager(
 
 	// Create internal components with shared refreshMeta. The checker owns
 	// the per-job processing function that drives state aggregation, finish
-	// notification, timeout, and GC. Tasks wired by the inspector call the
-	// checker's per-job entry point synchronously when they reach a terminal
-	// state, so the schema-update callback fires before the task method
-	// returns. The checker still runs the same per-job function periodically
-	// as a safety net for missed events (e.g., after a DataCoord restart).
+	// notification, timeout, and GC. Tasks wired by the inspector ask the
+	// checker to process their job when they reach a terminal state, and the
+	// schema-update callback runs on the checker goroutine. The checker still
+	// runs the same per-job function periodically as a safety net for missed
+	// events (e.g., after a DataCoord restart).
 	// forgetJob releases the per-job dedup entries when the checker GC's
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
@@ -560,13 +560,13 @@ func (m *Manager) publishRefreshJob(ctx context.Context, job *datapb.ExternalCol
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
-// task, wiring the processFinishedJob callback so terminal transitions drive
-// per-job processing synchronously. Single source of truth for task wiring;
+// task, wiring the processFinishedJob callback so terminal transitions wake
+// the checker for that job. Single source of truth for task wiring;
 // used by both createTasksForJob (initial submission) and the inspector
 // (reload/re-enqueue paths).
 func (m *Manager) wrapTask(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 	taskWrapper := newRefreshExternalCollectionTask(t, m.refreshMeta, m.mt, m.allocator)
-	taskWrapper.processFinishedJob = m.checker.processJobByID
+	taskWrapper.processFinishedJob = m.checker.requestJobProcessing
 	return taskWrapper
 }
 
@@ -598,12 +598,12 @@ func (m *Manager) Stop() {
 }
 
 // handleJobFinished publishes the refreshed external source/spec for a job
-// whose segments are applied. It is called both eagerly (synchronously from
-// the task path via processJobByID) and from the periodic checker tick. The
+// whose segments are applied. It runs on the checker goroutine, both for jobs
+// the task path requested and from the periodic checker tick. The
 // notifiedJobs dedup map below admits at most ONE schemaUpdater call in
-// flight per jobID, and none at all once one has delivered: concurrent calls
-// from the two paths race on the mutex, the loser sees the jobID already
-// present and short-circuits. The source/spec equality check is a cheap
+// flight per jobID, and none at all once one has delivered: a later call
+// sees the jobID already present and short-circuits. The source/spec
+// equality check is a cheap
 // secondary guard (e.g., for jobs that finished with the same schema as the
 // current collection).
 //
@@ -622,7 +622,7 @@ func (m *Manager) handleJobFinished(ctx context.Context, job *datapb.ExternalCol
 		return
 	}
 
-	// Exactly-once dedup across concurrent eager + periodic paths.
+	// Exactly-once dedup across the requested and periodic passes.
 	m.notifiedMu.Lock()
 	if _, already := m.notifiedJobs[job.GetJobId()]; already {
 		m.notifiedMu.Unlock()
