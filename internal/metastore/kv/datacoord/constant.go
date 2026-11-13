@@ -34,7 +34,7 @@ const (
 	CopySegmentJobPrefix                = MetaPrefix + "/copy-segment-job"
 	CopySegmentTaskPrefix               = MetaPrefix + "/copy-segment-task"
 	CompactionTargetPrefix              = MetaPrefix + "/compaction-target"
-	compactionTargetCreateEpoch         = MetaPrefix + "/compaction-target-create-epoch"
+	compactionTargetWriteEpoch          = MetaPrefix + "/compaction-target-create-epoch"
 	compactionTargetCreateFencePrefix   = MetaPrefix + "/compaction-target-create-fence"
 	activeOptimizeTargetPrefix          = MetaPrefix + "/active-optimize-target"
 	CompactionTaskPrefix                = MetaPrefix + "/compaction-task"

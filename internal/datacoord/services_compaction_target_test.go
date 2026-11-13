@@ -209,7 +209,7 @@ func TestStandingSortConditionSaveFailureKeepsLastConfirmedDefinition(t *testing
 	}
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil).Once()
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Twice()
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
 
 	s, _ := newTargetRPCServer(t, catalog, nil)
 	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -441,8 +441,8 @@ func TestCreateCompactionTargetHoldsReplicationLockThroughConfirmation(t *testin
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
 	var persisted *datapb.CompactionTarget
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, candidate *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, candidate *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
 			require.True(t, held)
 			persisted = proto.CloneOf(candidate)
 			return true, context.DeadlineExceeded
@@ -487,7 +487,7 @@ func TestCreateOptimizeRecoversFromUnconfirmedCreateAndCollectionDrop(t *testing
 
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
-			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return(true, context.DeadlineExceeded).Once()
 			catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(nil, nil).Once()
 			s, resource := newTargetRPCServer(t, catalog, alloc)
@@ -515,7 +515,7 @@ func TestCreateOptimizeRecoversFromUnconfirmedCreateAndCollectionDrop(t *testing
 				// collection CAS. A missing target needs no stop record.
 				catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(nil, nil).Once()
 				s.meta.DropCollection(resource.GetCollectionId())
-				catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, resource.GetCollectionId()).Return(nil).Twice()
+				catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, resource.GetCollectionId(), mock.Anything).Return(nil).Twice()
 				require.NoError(t, s.DropCollectionCompactionTargets(ctx, resource.GetCollectionId()))
 				require.NoError(t, s.DropCollectionCompactionTargets(ctx, resource.GetCollectionId()))
 				listed, err := s.ListCompactionTargets(ctx, &datapb.ListCompactionTargetsRequest{})
@@ -524,10 +524,10 @@ func TestCreateOptimizeRecoversFromUnconfirmedCreateAndCollectionDrop(t *testing
 				return
 			}
 
-			catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, metastore.CompactionTargetCollectionVersion{DatabaseID: 2, Revision: 10}).Return(nil, nil).Once()
+			catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, metastore.CompactionTargetCollectionVersion{DatabaseID: 2, Revision: 10}, mock.Anything).Return(nil, nil).Once()
 			alloc.EXPECT().AllocID(mock.Anything).Return(102, nil).Once()
 			alloc.EXPECT().AllocTimestamp(mock.Anything).Return(101, nil).Once()
-			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Once()
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Once()
 			resp, err = s.CreateCompactionTarget(ctx, req)
 			require.NoError(t, merr.CheckRPCCall(resp, err))
 			require.Equal(t, int64(102), resp.GetTargetId())
@@ -560,8 +560,8 @@ func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) 
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
 			var candidate *datapb.CompactionTarget
-			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-				func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
 					candidate = proto.CloneOf(record)
 					if tc.ambiguous {
 						return true, context.DeadlineExceeded
@@ -584,7 +584,7 @@ func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) 
 				require.ErrorIs(t, merr.Error(resp.GetStatus()), tc.want)
 				require.Zero(t, resp.GetTargetId())
 				if tc.commitsLate {
-					catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, mock.Anything).Return(candidate, nil).Once()
+					catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(candidate, nil).Once()
 					listed, err := s.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
 					require.NoError(t, merr.CheckRPCCall(listed, err))
 					require.Len(t, listed.GetTargets(), 1)
@@ -767,7 +767,7 @@ func TestCompactionTargetWaitsForDropAndRetainsRecoveredHistory(t *testing.T) {
 	require.NoError(t, merr.CheckRPCCall(dropped, err))
 	require.True(t, proto.Equal(stored, records[record.GetTargetID()]))
 
-	catalog.EXPECT().DropCompactionTarget(mock.Anything, stored).Return(nil).Once()
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, stored, mock.Anything).Return(nil).Once()
 	s.compactionTargetMeta.CollectExpired(ctx, tsoutil.PhysicalTime(stored.GetInactivatedAtTS()).Add(8*24*time.Hour))
 	resp, err = s.DescribeCompactionTarget(ctx, req)
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrCompactionTargetNotFound)

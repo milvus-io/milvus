@@ -49,7 +49,7 @@ type pendingTargetCreate struct {
 type CompactionTargetMeta struct {
 	mu              sync.RWMutex
 	catalog         metastore.DataCoordCatalog
-	createEpoch     uint64
+	writeEpoch      uint64
 	targets         map[int64]*datapb.CompactionTarget
 	activeOptimize  map[int64]int64 // collection ID -> confirmed active target ID
 	pendingOptimize map[int64]int64 // collection ID -> unconfirmed create candidate ID
@@ -68,10 +68,10 @@ type CompactionTargetMeta struct {
 }
 
 // RecoverCompactionTargetMeta runs during coordinator activation, before
-// accepting requests. A Create dispatched by the previous coordinator must
+// accepting requests. A write dispatched by the previous coordinator must
 // commit before the epoch advances and appear in this snapshot, or lose its CAS.
 func RecoverCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
-	epoch, err := catalog.FenceCompactionTargetCreates(ctx)
+	epoch, err := catalog.FenceCompactionTargetWrites(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func loadCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCa
 	}
 	m := &CompactionTargetMeta{
 		catalog:            catalog,
-		createEpoch:        epoch,
+		writeEpoch:         epoch,
 		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
 		activeOptimize:     make(map[int64]int64),
 		pendingOptimize:    make(map[int64]int64),
@@ -181,7 +181,7 @@ func (m *CompactionTargetMeta) CloseCollectionScope(ctx context.Context, collect
 	}
 	// The RootCoord tombstone excludes all old writers, including a
 	// resolution that is still in flight. The generation can now be removed.
-	return m.catalog.DropCompactionTargetCreateFence(ctx, collectionID)
+	return m.catalog.DropCompactionTargetCreateFence(ctx, collectionID, m.writeEpoch)
 }
 
 func (m *CompactionTargetMeta) GetCompactionTarget(targetID int64) *datapb.CompactionTarget {
@@ -325,12 +325,7 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if scope != nil {
-		currentScope := *scope
-		currentScope.Epoch = m.createEpoch
-		scope = &currentScope
-	}
-	mayHaveCommitted, err := m.catalog.CreateCompactionTarget(ctx, candidate, scope)
+	mayHaveCommitted, err := m.catalog.CreateCompactionTarget(ctx, candidate, scope, m.writeEpoch)
 	if err == nil {
 		m.store(candidate, id)
 		return candidate, nil
@@ -401,7 +396,7 @@ func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64, scopeCl
 	var stored *datapb.CompactionTarget
 	var err error
 	if candidate.record.GetCollectionID() > 0 && !scopeClosed {
-		stored, err = m.catalog.ResolveCompactionTargetCreate(ctx, candidate.record, candidate.scope)
+		stored, err = m.catalog.ResolveCompactionTargetCreate(ctx, candidate.record, candidate.scope, m.writeEpoch)
 	} else {
 		stored, err = m.catalog.LoadCompactionTarget(ctx, id)
 	}
@@ -490,7 +485,7 @@ func (m *CompactionTargetMeta) stop(ctx context.Context, id int64, reason string
 	record.State = datapb.TargetState_TARGET_STATE_INACTIVE
 	record.StopReason = reason
 	record.InactivatedAtTS = tsoutil.ComposeTSByTime(time.Now())
-	stored, changed, err := m.catalog.StopCompactionTarget(ctx, record)
+	stored, changed, err := m.catalog.StopCompactionTarget(ctx, record, m.writeEpoch)
 	if err != nil {
 		m.mu.Lock()
 		m.unconfirmedStops[id] = struct{}{}

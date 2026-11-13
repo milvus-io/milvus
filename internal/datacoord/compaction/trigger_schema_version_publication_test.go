@@ -91,7 +91,7 @@ func TestStandingSchemaVersionPublishesRealV3Results(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	t.Cleanup(broadcast.ResetBroadcaster)
 	broadcast.Register(broadcaster)
-	manager, err := targets.NewCompactionTargetMetaForTest(ctx, mt.Catalog)
+	manager, err := targets.RecoverCompactionTargetMeta(ctx, mt.Catalog)
 	require.NoError(t, err)
 	tasks, err := ctask.NewCompactionTaskMeta(ctx, mt.Catalog)
 	require.NoError(t, err)

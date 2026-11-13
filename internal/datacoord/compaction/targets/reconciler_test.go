@@ -45,11 +45,11 @@ func TestCompactionTargetReconcilerResolvesLostStopBeforePlanning(t *testing.T) 
 				Intent: datapb.TargetIntent_INTENT_REWRITE, Rewrite: &datapb.CompactionTargetRewrite{},
 			}
 			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil)
-			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 			catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(1000000)).Return(nil, nil).Maybe()
 			persisted := proto.CloneOf(record)
-			catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-				func(_ context.Context, next *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+			catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, next *datapb.CompactionTarget, _ uint64) (*datapb.CompactionTarget, bool, error) {
 					if committed {
 						persisted = proto.CloneOf(next)
 					}
@@ -108,11 +108,11 @@ func TestCompactionTargetGCRefreshesUnconfirmedStopsIndependently(t *testing.T) 
 	for _, record := range []*datapb.CompactionTarget{expired, unreadable} {
 		catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.MatchedBy(func(next *datapb.CompactionTarget) bool {
 			return next.GetTargetID() == record.GetTargetID()
-		})).Return(nil, false, context.DeadlineExceeded).Once()
+		}), mock.Anything).Return(nil, false, context.DeadlineExceeded).Once()
 	}
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, expired.GetTargetID()).Return(terminal, nil).Once()
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, unreadable.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
-	catalog.EXPECT().DropCompactionTarget(mock.Anything, terminal).Return(nil).Once()
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, terminal, mock.Anything).Return(nil).Once()
 
 	manager, err := NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
@@ -148,12 +148,12 @@ func TestCompactionTargetReconcilerKeepsOptimizeScopeUntilTerminalSave(t *testin
 	}
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil)
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(1000000)).Return(nil, nil).Maybe()
-	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).Return(nil, false, merr.ErrIoFailed).Once()
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(nil, false, merr.ErrIoFailed).Once()
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Maybe()
-	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, next *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, next *datapb.CompactionTarget, _ uint64) (*datapb.CompactionTarget, bool, error) {
 			return proto.CloneOf(next), true, nil
 		}).Once()
 	manager, err := NewCompactionTargetMetaForTest(ctx, catalog)

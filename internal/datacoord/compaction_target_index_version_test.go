@@ -353,7 +353,7 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
 	}
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{confirmed, sortTarget}, nil)
 	next := proto.CloneOf(confirmed)
 	next.ConditionRevision++
@@ -361,8 +361,8 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 	previousCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, confirmed) })
 	nextCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, next) })
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, confirmed.GetTargetID()).Return(confirmed, nil).Times(3)
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(merr.ErrIoFailed).Once()
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(nil).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition, mock.Anything).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition, mock.Anything).Return(nil).Once()
 	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
 
 	for _, seg := range []*datapb.SegmentInfo{

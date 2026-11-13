@@ -290,9 +290,9 @@ func (_c *DataCoordCatalog_ChannelExists_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// CreateCompactionTarget provides a mock function with given fields: ctx, record, collection
-func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion) (bool, error) {
-	ret := _m.Called(ctx, record, collection)
+// CreateCompactionTarget provides a mock function with given fields: ctx, record, collection, epoch
+func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion, epoch uint64) (bool, error) {
+	ret := _m.Called(ctx, record, collection, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCompactionTarget")
@@ -300,17 +300,17 @@ func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) (bool, error)); ok {
-		return rf(ctx, record, collection)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion, uint64) (bool, error)); ok {
+		return rf(ctx, record, collection, epoch)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) bool); ok {
-		r0 = rf(ctx, record, collection)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion, uint64) bool); ok {
+		r0 = rf(ctx, record, collection, epoch)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) error); ok {
-		r1 = rf(ctx, record, collection)
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion, uint64) error); ok {
+		r1 = rf(ctx, record, collection, epoch)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -327,13 +327,14 @@ type DataCoordCatalog_CreateCompactionTarget_Call struct {
 //   - ctx context.Context
 //   - record *datapb.CompactionTarget
 //   - collection *metastore.CompactionTargetCollectionVersion
-func (_e *DataCoordCatalog_Expecter) CreateCompactionTarget(ctx interface{}, record interface{}, collection interface{}) *DataCoordCatalog_CreateCompactionTarget_Call {
-	return &DataCoordCatalog_CreateCompactionTarget_Call{Call: _e.mock.On("CreateCompactionTarget", ctx, record, collection)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) CreateCompactionTarget(ctx interface{}, record interface{}, collection interface{}, epoch interface{}) *DataCoordCatalog_CreateCompactionTarget_Call {
+	return &DataCoordCatalog_CreateCompactionTarget_Call{Call: _e.mock.On("CreateCompactionTarget", ctx, record, collection, epoch)}
 }
 
-func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion)) *DataCoordCatalog_CreateCompactionTarget_Call {
+func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion, epoch uint64)) *DataCoordCatalog_CreateCompactionTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*metastore.CompactionTargetCollectionVersion))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*metastore.CompactionTargetCollectionVersion), args[3].(uint64))
 	})
 	return _c
 }
@@ -343,7 +344,7 @@ func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Return(mayHaveCommitted 
 	return _c
 }
 
-func (_c *DataCoordCatalog_CreateCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) (bool, error)) *DataCoordCatalog_CreateCompactionTarget_Call {
+func (_c *DataCoordCatalog_CreateCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion, uint64) (bool, error)) *DataCoordCatalog_CreateCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -583,17 +584,17 @@ func (_c *DataCoordCatalog_DropChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// DropCompactionTarget provides a mock function with given fields: ctx, record
-func (_m *DataCoordCatalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
-	ret := _m.Called(ctx, record)
+// DropCompactionTarget provides a mock function with given fields: ctx, record, epoch
+func (_m *DataCoordCatalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, epoch uint64) error {
+	ret := _m.Called(ctx, record, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropCompactionTarget")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget) error); ok {
-		r0 = rf(ctx, record)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, uint64) error); ok {
+		r0 = rf(ctx, record, epoch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -609,13 +610,14 @@ type DataCoordCatalog_DropCompactionTarget_Call struct {
 // DropCompactionTarget is a helper method to define mock.On call
 //   - ctx context.Context
 //   - record *datapb.CompactionTarget
-func (_e *DataCoordCatalog_Expecter) DropCompactionTarget(ctx interface{}, record interface{}) *DataCoordCatalog_DropCompactionTarget_Call {
-	return &DataCoordCatalog_DropCompactionTarget_Call{Call: _e.mock.On("DropCompactionTarget", ctx, record)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) DropCompactionTarget(ctx interface{}, record interface{}, epoch interface{}) *DataCoordCatalog_DropCompactionTarget_Call {
+	return &DataCoordCatalog_DropCompactionTarget_Call{Call: _e.mock.On("DropCompactionTarget", ctx, record, epoch)}
 }
 
-func (_c *DataCoordCatalog_DropCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget)) *DataCoordCatalog_DropCompactionTarget_Call {
+func (_c *DataCoordCatalog_DropCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget, epoch uint64)) *DataCoordCatalog_DropCompactionTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(uint64))
 	})
 	return _c
 }
@@ -625,22 +627,22 @@ func (_c *DataCoordCatalog_DropCompactionTarget_Call) Return(_a0 error) *DataCoo
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget) error) *DataCoordCatalog_DropCompactionTarget_Call {
+func (_c *DataCoordCatalog_DropCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, uint64) error) *DataCoordCatalog_DropCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// DropCompactionTargetCreateFence provides a mock function with given fields: ctx, collectionID
-func (_m *DataCoordCatalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64) error {
-	ret := _m.Called(ctx, collectionID)
+// DropCompactionTargetCreateFence provides a mock function with given fields: ctx, collectionID, epoch
+func (_m *DataCoordCatalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64, epoch uint64) error {
+	ret := _m.Called(ctx, collectionID, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropCompactionTargetCreateFence")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) error); ok {
+		r0 = rf(ctx, collectionID, epoch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -656,13 +658,14 @@ type DataCoordCatalog_DropCompactionTargetCreateFence_Call struct {
 // DropCompactionTargetCreateFence is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-func (_e *DataCoordCatalog_Expecter) DropCompactionTargetCreateFence(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
-	return &DataCoordCatalog_DropCompactionTargetCreateFence_Call{Call: _e.mock.On("DropCompactionTargetCreateFence", ctx, collectionID)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) DropCompactionTargetCreateFence(ctx interface{}, collectionID interface{}, epoch interface{}) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+	return &DataCoordCatalog_DropCompactionTargetCreateFence_Call{Call: _e.mock.On("DropCompactionTargetCreateFence", ctx, collectionID, epoch)}
 }
 
-func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) Run(run func(ctx context.Context, collectionID int64, epoch uint64)) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
 	})
 	return _c
 }
@@ -672,7 +675,7 @@ func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) Return(_a0 erro
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) RunAndReturn(run func(context.Context, int64, uint64) error) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1624,12 +1627,12 @@ func (_c *DataCoordCatalog_DropStatsTask_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// FenceCompactionTargetCreates provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) FenceCompactionTargetCreates(ctx context.Context) (uint64, error) {
+// FenceCompactionTargetWrites provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) FenceCompactionTargetWrites(ctx context.Context) (uint64, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for FenceCompactionTargetCreates")
+		panic("no return value specified for FenceCompactionTargetWrites")
 	}
 
 	var r0 uint64
@@ -1652,30 +1655,30 @@ func (_m *DataCoordCatalog) FenceCompactionTargetCreates(ctx context.Context) (u
 	return r0, r1
 }
 
-// DataCoordCatalog_FenceCompactionTargetCreates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FenceCompactionTargetCreates'
-type DataCoordCatalog_FenceCompactionTargetCreates_Call struct {
+// DataCoordCatalog_FenceCompactionTargetWrites_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FenceCompactionTargetWrites'
+type DataCoordCatalog_FenceCompactionTargetWrites_Call struct {
 	*mock.Call
 }
 
-// FenceCompactionTargetCreates is a helper method to define mock.On call
+// FenceCompactionTargetWrites is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) FenceCompactionTargetCreates(ctx interface{}) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
-	return &DataCoordCatalog_FenceCompactionTargetCreates_Call{Call: _e.mock.On("FenceCompactionTargetCreates", ctx)}
+func (_e *DataCoordCatalog_Expecter) FenceCompactionTargetWrites(ctx interface{}) *DataCoordCatalog_FenceCompactionTargetWrites_Call {
+	return &DataCoordCatalog_FenceCompactionTargetWrites_Call{Call: _e.mock.On("FenceCompactionTargetWrites", ctx)}
 }
 
-func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+func (_c *DataCoordCatalog_FenceCompactionTargetWrites_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_FenceCompactionTargetWrites_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) Return(_a0 uint64, _a1 error) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+func (_c *DataCoordCatalog_FenceCompactionTargetWrites_Call) Return(_a0 uint64, _a1 error) *DataCoordCatalog_FenceCompactionTargetWrites_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) RunAndReturn(run func(context.Context) (uint64, error)) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+func (_c *DataCoordCatalog_FenceCompactionTargetWrites_Call) RunAndReturn(run func(context.Context) (uint64, error)) *DataCoordCatalog_FenceCompactionTargetWrites_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3227,9 +3230,9 @@ func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) RunAndReturn(run func
 	return _c
 }
 
-// ResolveCompactionTargetCreate provides a mock function with given fields: ctx, candidate, collection
-func (_m *DataCoordCatalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error) {
-	ret := _m.Called(ctx, candidate, collection)
+// ResolveCompactionTargetCreate provides a mock function with given fields: ctx, candidate, collection, epoch
+func (_m *DataCoordCatalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion, epoch uint64) (*datapb.CompactionTarget, error) {
+	ret := _m.Called(ctx, candidate, collection, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ResolveCompactionTargetCreate")
@@ -3237,19 +3240,19 @@ func (_m *DataCoordCatalog) ResolveCompactionTargetCreate(ctx context.Context, c
 
 	var r0 *datapb.CompactionTarget
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error)); ok {
-		return rf(ctx, candidate, collection)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion, uint64) (*datapb.CompactionTarget, error)); ok {
+		return rf(ctx, candidate, collection, epoch)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) *datapb.CompactionTarget); ok {
-		r0 = rf(ctx, candidate, collection)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion, uint64) *datapb.CompactionTarget); ok {
+		r0 = rf(ctx, candidate, collection, epoch)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.CompactionTarget)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) error); ok {
-		r1 = rf(ctx, candidate, collection)
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion, uint64) error); ok {
+		r1 = rf(ctx, candidate, collection, epoch)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3266,13 +3269,14 @@ type DataCoordCatalog_ResolveCompactionTargetCreate_Call struct {
 //   - ctx context.Context
 //   - candidate *datapb.CompactionTarget
 //   - collection metastore.CompactionTargetCollectionVersion
-func (_e *DataCoordCatalog_Expecter) ResolveCompactionTargetCreate(ctx interface{}, candidate interface{}, collection interface{}) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
-	return &DataCoordCatalog_ResolveCompactionTargetCreate_Call{Call: _e.mock.On("ResolveCompactionTargetCreate", ctx, candidate, collection)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) ResolveCompactionTargetCreate(ctx interface{}, candidate interface{}, collection interface{}, epoch interface{}) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+	return &DataCoordCatalog_ResolveCompactionTargetCreate_Call{Call: _e.mock.On("ResolveCompactionTargetCreate", ctx, candidate, collection, epoch)}
 }
 
-func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) Run(run func(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) Run(run func(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion, epoch uint64)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(metastore.CompactionTargetCollectionVersion))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(metastore.CompactionTargetCollectionVersion), args[3].(uint64))
 	})
 	return _c
 }
@@ -3282,7 +3286,7 @@ func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) Return(_a0 *datap
 	return _c
 }
 
-func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion, uint64) (*datapb.CompactionTarget, error)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4278,9 +4282,9 @@ func (_c *DataCoordCatalog_SaveStatsTask_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// StopCompactionTarget provides a mock function with given fields: ctx, record
-func (_m *DataCoordCatalog) StopCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
-	ret := _m.Called(ctx, record)
+// StopCompactionTarget provides a mock function with given fields: ctx, record, epoch
+func (_m *DataCoordCatalog) StopCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, epoch uint64) (*datapb.CompactionTarget, bool, error) {
+	ret := _m.Called(ctx, record, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for StopCompactionTarget")
@@ -4289,25 +4293,25 @@ func (_m *DataCoordCatalog) StopCompactionTarget(ctx context.Context, record *da
 	var r0 *datapb.CompactionTarget
 	var r1 bool
 	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error)); ok {
-		return rf(ctx, record)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, uint64) (*datapb.CompactionTarget, bool, error)); ok {
+		return rf(ctx, record, epoch)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget) *datapb.CompactionTarget); ok {
-		r0 = rf(ctx, record)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, uint64) *datapb.CompactionTarget); ok {
+		r0 = rf(ctx, record, epoch)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*datapb.CompactionTarget)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget) bool); ok {
-		r1 = rf(ctx, record)
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, uint64) bool); ok {
+		r1 = rf(ctx, record, epoch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, *datapb.CompactionTarget) error); ok {
-		r2 = rf(ctx, record)
+	if rf, ok := ret.Get(2).(func(context.Context, *datapb.CompactionTarget, uint64) error); ok {
+		r2 = rf(ctx, record, epoch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -4323,13 +4327,14 @@ type DataCoordCatalog_StopCompactionTarget_Call struct {
 // StopCompactionTarget is a helper method to define mock.On call
 //   - ctx context.Context
 //   - record *datapb.CompactionTarget
-func (_e *DataCoordCatalog_Expecter) StopCompactionTarget(ctx interface{}, record interface{}) *DataCoordCatalog_StopCompactionTarget_Call {
-	return &DataCoordCatalog_StopCompactionTarget_Call{Call: _e.mock.On("StopCompactionTarget", ctx, record)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) StopCompactionTarget(ctx interface{}, record interface{}, epoch interface{}) *DataCoordCatalog_StopCompactionTarget_Call {
+	return &DataCoordCatalog_StopCompactionTarget_Call{Call: _e.mock.On("StopCompactionTarget", ctx, record, epoch)}
 }
 
-func (_c *DataCoordCatalog_StopCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget)) *DataCoordCatalog_StopCompactionTarget_Call {
+func (_c *DataCoordCatalog_StopCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget, epoch uint64)) *DataCoordCatalog_StopCompactionTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(uint64))
 	})
 	return _c
 }
@@ -4339,7 +4344,7 @@ func (_c *DataCoordCatalog_StopCompactionTarget_Call) Return(current *datapb.Com
 	return _c
 }
 
-func (_c *DataCoordCatalog_StopCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error)) *DataCoordCatalog_StopCompactionTarget_Call {
+func (_c *DataCoordCatalog_StopCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, uint64) (*datapb.CompactionTarget, bool, error)) *DataCoordCatalog_StopCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4405,17 +4410,17 @@ func (_c *DataCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, .
 	return _c
 }
 
-// UpdateStandingCompactionTarget provides a mock function with given fields: ctx, previous, next
-func (_m *DataCoordCatalog) UpdateStandingCompactionTarget(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget) error {
-	ret := _m.Called(ctx, previous, next)
+// UpdateStandingCompactionTarget provides a mock function with given fields: ctx, previous, next, epoch
+func (_m *DataCoordCatalog) UpdateStandingCompactionTarget(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget, epoch uint64) error {
+	ret := _m.Called(ctx, previous, next, epoch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateStandingCompactionTarget")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget) error); ok {
-		r0 = rf(ctx, previous, next)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget, uint64) error); ok {
+		r0 = rf(ctx, previous, next, epoch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -4432,13 +4437,14 @@ type DataCoordCatalog_UpdateStandingCompactionTarget_Call struct {
 //   - ctx context.Context
 //   - previous *datapb.CompactionTarget
 //   - next *datapb.CompactionTarget
-func (_e *DataCoordCatalog_Expecter) UpdateStandingCompactionTarget(ctx interface{}, previous interface{}, next interface{}) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
-	return &DataCoordCatalog_UpdateStandingCompactionTarget_Call{Call: _e.mock.On("UpdateStandingCompactionTarget", ctx, previous, next)}
+//   - epoch uint64
+func (_e *DataCoordCatalog_Expecter) UpdateStandingCompactionTarget(ctx interface{}, previous interface{}, next interface{}, epoch interface{}) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+	return &DataCoordCatalog_UpdateStandingCompactionTarget_Call{Call: _e.mock.On("UpdateStandingCompactionTarget", ctx, previous, next, epoch)}
 }
 
-func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) Run(run func(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget)) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) Run(run func(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget, epoch uint64)) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*datapb.CompactionTarget))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*datapb.CompactionTarget), args[3].(uint64))
 	})
 	return _c
 }
@@ -4448,7 +4454,7 @@ func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) Return(_a0 error
 	return _c
 }
 
-func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget) error) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget, uint64) error) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }

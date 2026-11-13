@@ -114,7 +114,7 @@ func (m *CompactionTargetMeta) SyncStanding(
 	next.Enabled = proto.Bool(enabled)
 	next.Properties = maps.Clone(properties)
 	next.ConditionRevision++
-	if err := m.catalog.UpdateStandingCompactionTarget(ctx, previous, next); err != nil {
+	if err := m.catalog.UpdateStandingCompactionTarget(ctx, previous, next, m.writeEpoch); err != nil {
 		confirmation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		stored, readErr := m.catalog.LoadCompactionTarget(confirmation, id)
