@@ -164,8 +164,10 @@ TEST(Grep, EmptyLinesNulAndBomArePreserved) {
     ASSERT_EQ(result.LineCount(1), 1);
     EXPECT_TRUE(result.Content(1, 0).empty());
     EXPECT_EQ(result.GetSpan(1, 0, 0).end, 0);
-    ASSERT_EQ(result.SpanCount(2, 0), 2);
-    EXPECT_EQ(result.GetSpan(2, 0, 1).start, 2);
+    ASSERT_EQ(result.SpanCount(2, 0), 3);
+    EXPECT_EQ(result.GetSpan(2, 0, 1).start, 1);
+    EXPECT_EQ(result.GetSpan(2, 0, 2).start, 2);
+    EXPECT_EQ(result.GetSpan(2, 0, 2).end, 2);
     EXPECT_EQ(result.Content(3, 0), binary);
     EXPECT_EQ(result.Content(4, 0).size(), 3);
     auto empty = session.ExecuteBatch({}, Budget());
@@ -194,11 +196,30 @@ TEST(Grep, TypedOptionsAndMultiplePatterns) {
         line.ExecuteBatch({"error\nxerror\nerror"}, Budget()).LineCount(0), 2);
 }
 
+TEST(Grep, ByteModePreservesPartialCharacterSpans) {
+    auto session = Compile(R"((?-u:\xA9))").CreateSession();
+    auto result = session.ExecuteBatch({"é"}, Budget());
+    ASSERT_EQ(result.LineCount(0), 1);
+    EXPECT_EQ(result.Content(0, 0), "é");
+    ASSERT_EQ(result.SpanCount(0, 0), 1);
+    EXPECT_EQ(result.GetSpan(0, 0, 0).start, 1);
+    EXPECT_EQ(result.GetSpan(0, 0, 0).end, 2);
+}
+
+TEST(Grep, AbsoluteAnchorSpansAreLineLocal) {
+    auto session = Compile(R"(\Aerror)").CreateSession();
+    auto result = session.ExecuteBatch({"prefix\nerror\nlast\n"}, Budget());
+    EXPECT_TRUE(result.Selected(0));
+    ASSERT_EQ(result.LineCount(0), 1);
+    EXPECT_EQ(result.Content(0, 0), "error");
+    ASSERT_EQ(result.SpanCount(0, 0), 1);
+    EXPECT_EQ(result.GetSpan(0, 0, 0).start, 0);
+    EXPECT_EQ(result.GetSpan(0, 0, 0).end, 5);
+}
+
 TEST(Grep, CompileErrorsPreserveStatusAndPhase) {
     ExpectError(
         [] { Compile("["); }, Status::InvalidPattern, Operation::Compile);
-    ExpectError(
-        [] { Compile("(?-u:a)"); }, Status::InvalidPattern, Operation::Compile);
     ExpectError([] { Compile(std::string(1, static_cast<char>(0xff))); },
                 Status::InvalidUtf8,
                 Operation::Compile);

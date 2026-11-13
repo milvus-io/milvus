@@ -384,3 +384,65 @@ func TestComputedJSONMergeSizeBudget(t *testing.T) {
 		}
 	}
 }
+
+// Exercise worker replies through timestamp reduction, RPC serialization and
+// the proxy page operator. Details and element lists must select the same row.
+func TestGrepElementResultsAcrossReductionAndPaging(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		limit, offset int64
+		ids           []int64
+		lists         [][]int32
+	}{
+		{"limit inside document", 2, 0, []int64{1}, [][]int32{{1, 3}}},
+		{"offset and limit inside documents", 3, 1, []int64{1, 2}, [][]int32{{3, 5}, {2}}},
+		{"across shards", 4, 2, []int64{1, 2, 3}, [][]int32{{5}, {2}, {0, 4}}},
+		{"unlimited", -1, 0, []int64{1, 2, 3, 4}, [][]int32{{1, 3, 5}, {2}, {0, 4}, {7}}},
+		{"past end", 2, 20, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			makeResult := func(ids, timestamps []int64, label string, lists ...[]int32) *internalpb.RetrieveResults {
+				r := computedJSONFixture(ids, timestamps, label)
+				r.ElementLevel = true
+				for _, list := range lists {
+					r.ElementIndices = append(r.ElementIndices, &internalpb.ElementIndices{Indices: list})
+				}
+				return r
+			}
+			// The new version of PK 2 has fewer elements and different details.
+			a := makeResult([]int64{1, 2}, []int64{10, 10}, "old", []int32{1, 3, 5}, []int32{0, 1, 2, 3})
+			b := makeResult([]int64{2, 3}, []int64{20, 20}, "new", []int32{2}, []int32{0, 4})
+			c := makeResult([]int64{4}, []int64{10}, "other shard", []int32{7})
+			workerLimit := tc.limit
+			if workerLimit > 0 {
+				workerLimit += tc.offset
+			}
+			merged, err := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 1<<20, workerLimit, nil).Run(context.Background(), nil, []*internalpb.RetrieveResults{a, b})
+			require.NoError(t, err)
+			wire, err := proto.Marshal(merged[0].(*internalpb.RetrieveResults))
+			require.NoError(t, err)
+			decoded := &internalpb.RetrieveResults{}
+			require.NoError(t, proto.Unmarshal(wire, decoded))
+			out, err := NewSortAndCheckPKPageOperator(reduce.IReduceNoOrder, nil, tc.limit, tc.offset).Run(context.Background(), nil, []*internalpb.RetrieveResults{decoded, c})
+			require.NoError(t, err)
+			got := out[0].(*internalpb.RetrieveResults)
+			require.True(t, got.ElementLevel)
+			require.Equal(t, tc.ids, got.GetIds().GetIntId().GetData())
+			require.Len(t, got.ElementIndices, len(tc.lists))
+			require.Len(t, got.ComputedResults[0].GetScalars().GetJsonData().Data, len(tc.ids))
+			for i, id := range tc.ids {
+				require.Equal(t, tc.lists[i], got.ElementIndices[i].Indices)
+				label := "old"
+				if id == 2 || id == 3 {
+					label = "new"
+				}
+				if id == 4 {
+					label = "other shard"
+				}
+				want := computedJSONFixture([]int64{id}, []int64{0}, label)
+				require.JSONEq(t, string(want.ComputedResults[0].GetScalars().GetJsonData().Data[0]), string(got.ComputedResults[0].GetScalars().GetJsonData().Data[i]))
+			}
+			require.Equal(t, []int32{0, 1, 2, 3}, a.ElementIndices[1].Indices, "inputs must remain unchanged")
+		})
+	}
+}

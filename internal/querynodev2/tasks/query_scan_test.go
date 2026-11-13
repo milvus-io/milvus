@@ -170,7 +170,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 			require.Equal(t, schemapb.DataType_JSON, result.ComputedResults[0].Type)
 			details := result.ComputedResults[0].GetScalars().GetJsonData().Data
 			require.Len(t, details, 1)
-			require.JSONEq(t, `[{"content":"timeout twenty","line_number":1,"line_start_offset":0,"starts":[0],"ends":[7]}]`, string(details[0]))
+			require.JSONEq(t, `[{"type":"match","content":"timeout twenty","line_number":1,"line_start_offset":0,"starts":[0],"ends":[7]}]`, string(details[0]))
 		})
 	}
 	t.Run("renamed final output", func(t *testing.T) {
@@ -323,8 +323,17 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 	require.NoError(t, paramtable.Get().Save(capItem.Key, "1"))
 	capped, err := run("-e timeout", true)
 	require.NoError(t, err)
+	// A soft threshold does not truncate candidates before the first batch.
+	require.Equal(t, []int64{20}, capped.GetIds().GetIntId().GetData())
+	batchItem := &paramtable.Get().FunctionCfg.GrepBatchSize
+	oldBatch := batchItem.GetValue()
+	defer paramtable.Get().Save(batchItem.Key, oldBatch)
+	require.NoError(t, paramtable.Get().Save(batchItem.Key, "1"))
+	capped, err = run("-e timeout", true)
+	require.NoError(t, err)
 	require.Zero(t, typeutil.GetSizeOfIDs(capped.GetIds()))
-	require.True(t, capped.GetHasMoreResult())
+	require.False(t, capped.GetHasMoreResult())
+	require.NoError(t, paramtable.Get().Save(batchItem.Key, oldBatch))
 	for _, value := range []string{"bad", "-1", "9223372036854775808", ""} {
 		t.Run("invalid maxScanRows="+value, func(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(capItem.Key, value))

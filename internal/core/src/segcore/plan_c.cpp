@@ -254,18 +254,13 @@ SetRetrievePlanTakeForOutputAllowed(CRetrievePlan c_plan, bool allowed) {
 }
 
 CStatus
-SetRetrievePlanMode(CRetrievePlan c_plan,
-                    CRetrieveMode mode,
-                    int64_t max_candidate_rows) {
+SetRetrievePlanMode(CRetrievePlan c_plan, CRetrieveMode mode) {
     try {
         AssertInfo(c_plan != nullptr, "retrieve plan is null");
         AssertInfo(mode == RetrieveModeNormal || mode == RetrieveModeCandidates,
                    "invalid retrieve mode: {}",
                    static_cast<int>(mode));
-        AssertInfo(max_candidate_rows >= 0,
-                   "candidate row cap must be non-negative");
         auto* plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
-        plan->max_candidate_rows_ = max_candidate_rows;
         plan->mode_ = mode == RetrieveModeCandidates
                           ? milvus::query::RetrieveMode::Candidates
                           : milvus::query::RetrieveMode::Normal;
