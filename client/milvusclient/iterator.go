@@ -263,7 +263,12 @@ func (it *queryIterator) composeIteratorExpr() string {
 		}
 		return fmt.Sprintf("(%s) and %s", expr, pkFilter)
 	case entity.FieldTypeVarChar:
-		pkFilter := fmt.Sprintf(`%s > "%s"`, pkName, it.lastPK)
+		// Quote the primary key as a Go string literal. The server unquotes a
+		// string literal with strconv.Unquote (see planparserv2.convertEscapeSingle),
+		// so strconv.Quote round-trips any value, including one that contains a
+		// double quote, a backslash or a newline. Interpolating the raw value
+		// instead produced an invalid filter such as `ID > "a"b"`.
+		pkFilter := fmt.Sprintf("%s > %s", pkName, strconv.Quote(fmt.Sprintf("%v", it.lastPK)))
 		if len(expr) == 0 {
 			return pkFilter
 		}
