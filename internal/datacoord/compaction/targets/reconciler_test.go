@@ -44,15 +44,15 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 
 	require.NoError(t, err)
 	views := events[policy.TriggerTypeSingle]
-	require.Len(t, views, 3)
+	require.Len(t, views, 2)
 	segmentIDs := make([]int64, 0, len(views))
 	for _, cv := range views {
-		require.Equal(t, int64(100), cv.GetTriggerID())
+		require.Zero(t, cv.GetTriggerID())
 		require.Equal(t, int64(10), cv.GetGroupLabel().PartitionID)
 		require.Equal(t, "ch-1", cv.GetGroupLabel().Channel)
 		segmentIDs = append(segmentIDs, segmentIDsFromViews(cv.GetSegmentsView())...)
 	}
-	require.ElementsMatch(t, []int64{1, 3, 4}, segmentIDs)
+	require.ElementsMatch(t, []int64{1, 4}, segmentIDs)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -64,12 +64,12 @@ func TestCompactionTargetReconcilerSatisfiedTargetEmitsNoWork(t *testing.T) {
 		CollectionID: 1,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
 		ExpectedTS:   200,
-		TailLimit:    1,
+		TailLimit:    0,
 		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
 	}
 	targetMeta := NewLoadedCompactionTargetMeta(t, ctx, record)
 	mt := newCompactionTargetReconcilerTestMeta(targetMeta,
-		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+		sortedTargetSegment(1, 1, 10, "ch-1", 200, 199, false),
 	)
 
 	events, err := newCompactionTargetReconcilerForTest(mt).Trigger(ctx)
@@ -86,7 +86,7 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 		TargetID:     100,
 		CollectionID: 1,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		Properties:   compactionTargetSegmentIDProperties([]int64{1}),
+		Rewrite:      &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{1}},
 		ExpectedTS:   200,
 		TailLimit:    0,
 		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
@@ -95,7 +95,7 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 		TargetID:     200,
 		CollectionID: 1,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		Properties:   compactionTargetSegmentIDProperties([]int64{2}),
+		Rewrite:      &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{2}},
 		ExpectedTS:   200,
 		TailLimit:    0,
 		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
@@ -111,17 +111,14 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 	require.NoError(t, err)
 	views := events[policy.TriggerTypeSingle]
 	require.Len(t, views, 2)
-	segmentsByTarget := make(map[int64][]int64, len(views))
+	var segmentIDs []int64
 	for _, cv := range views {
-		segmentsByTarget[cv.GetTriggerID()] = segmentIDsFromViews(cv.GetSegmentsView())
+		segmentIDs = append(segmentIDs, segmentIDsFromViews(cv.GetSegmentsView())...)
 	}
-	require.Equal(t, map[int64][]int64{
-		100: {1},
-		200: {2},
-	}, segmentsByTarget)
+	require.ElementsMatch(t, []int64{1, 2}, segmentIDs)
 }
 
-func TestCompactionTargetReconcilerLimitsEventsWithoutSkippingSatisfaction(t *testing.T) {
+func TestCompactionTargetReconcilerPlansCompleteMatchAndChecksSatisfaction(t *testing.T) {
 	enableCompactionTargetReconciler(t)
 	paramtable.Get().Save(Params.DataCoordCfg.TargetCompactionMaxEvents.Key, "1")
 	t.Cleanup(func() {
@@ -133,7 +130,7 @@ func TestCompactionTargetReconcilerLimitsEventsWithoutSkippingSatisfaction(t *te
 		TargetID:     100,
 		CollectionID: 1,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		Properties:   compactionTargetSegmentIDProperties([]int64{1, 2}),
+		Rewrite:      &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{1, 2}},
 		ExpectedTS:   200,
 		TailLimit:    0,
 		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
@@ -142,7 +139,7 @@ func TestCompactionTargetReconcilerLimitsEventsWithoutSkippingSatisfaction(t *te
 		TargetID:     200,
 		CollectionID: 1,
 		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		Properties:   compactionTargetSegmentIDProperties([]int64{3}),
+		Rewrite:      &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{3}},
 		ExpectedTS:   200,
 		TailLimit:    0,
 		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
@@ -157,7 +154,7 @@ func TestCompactionTargetReconcilerLimitsEventsWithoutSkippingSatisfaction(t *te
 	events, err := reconciler.Reconcile(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[policy.TriggerTypeSingle], 1)
+	require.Len(t, events[policy.TriggerTypeSingle], 2)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(200).GetState())
 
@@ -597,6 +594,9 @@ func newCompactionTargetReconcilerTestMeta(targetMeta *CompactionTargetMeta, seg
 		Segments:  meta.NewSegmentsInfo(store),
 		MetaStore: store,
 	}
+	for _, record := range targetMeta.GetCompactionTargets() {
+		mt.AddCollection(&meta.CollectionInfo{ID: record.GetCollectionID(), Schema: &schemapb.CollectionSchema{}})
+	}
 	for _, segment := range segments {
 		mt.Segments.SetSegment(segment.GetID(), segment)
 	}
@@ -621,4 +621,27 @@ func segmentIDsFromViews(views []*view.SegmentView) []int64 {
 		segmentIDs = append(segmentIDs, cv.ID)
 	}
 	return segmentIDs
+}
+
+func TestCompactionTargetReconcilerReoffersSortWithAutoCompactionOff(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
+		Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+	})
+
+	record := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE, ExpectedTS: 200,
+	}
+	targetMeta := NewLoadedCompactionTargetMeta(t, t.Context(), record)
+	unsorted := targetSegmentWithDataTS(1, 1, 10, "ch-1", 0, 199, false)
+	mt := newCompactionTargetReconcilerTestMeta(targetMeta, unsorted)
+	events, err := newCompactionTargetReconcilerForTest(mt).Reconcile(t.Context())
+	require.NoError(t, err)
+	require.Len(t, events[policy.TriggerTypeSort], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[policy.TriggerTypeSort][0].GetSegmentsView()))
+	require.Empty(t, events[policy.TriggerTypeSingle])
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }

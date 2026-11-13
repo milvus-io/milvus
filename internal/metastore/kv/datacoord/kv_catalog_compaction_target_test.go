@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -25,7 +26,9 @@ import (
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestCatalogCompactionTargetSuite(t *testing.T) {
@@ -46,7 +49,7 @@ func (s *CatalogCompactionTargetSuite) SetupTest() {
 	s.catalog = NewCatalog(s.metakv, rootPath, "")
 }
 
-func (s *CatalogCompactionTargetSuite) TestSaveListUpdateDrop() {
+func (s *CatalogCompactionTargetSuite) TestCreateListStopAndRemove() {
 	record := &datapb.CompactionTarget{
 		TargetID:      10,
 		CollectionID:  100,
@@ -58,13 +61,15 @@ func (s *CatalogCompactionTargetSuite) TestSaveListUpdateDrop() {
 		ActivatedAtTS: 301,
 	}
 
-	s.Require().NoError(s.catalog.SaveCompactionTarget(s.ctx, record))
+	_, err := s.catalog.CreateCompactionTarget(s.ctx, record)
+	s.Require().NoError(err)
 	s.True(proto.Equal(record, s.loadRecord(10)))
 
 	unknownTarget := proto.Clone(record).(*datapb.CompactionTarget)
 	unknownTarget.TargetID = 11
 	unknownTarget.Intent = datapb.TargetIntent(999)
-	s.Require().NoError(s.catalog.SaveCompactionTarget(s.ctx, unknownTarget))
+	_, err = s.catalog.CreateCompactionTarget(s.ctx, unknownTarget)
+	s.Require().NoError(err)
 
 	records, err := s.catalog.ListCompactionTargets(s.ctx)
 	s.Require().NoError(err)
@@ -72,8 +77,17 @@ func (s *CatalogCompactionTargetSuite) TestSaveListUpdateDrop() {
 	s.Equal(datapb.TargetIntent_INTENT_REWRITE, records[0].GetIntent())
 	s.Equal(datapb.TargetIntent(999), records[1].GetIntent())
 
-	s.Require().NoError(s.catalog.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE, 500))
-	updated := s.loadRecord(10)
+	stop := &datapb.CompactionTarget{TargetID: 10, State: datapb.TargetState_TARGET_STATE_INACTIVE,
+		InactivatedAtTS: 500, StopReason: "operator_dropped"}
+	updated, changed, err := s.catalog.StopCompactionTarget(s.ctx, stop)
+	s.Require().NoError(err)
+	s.True(changed)
+	stop.InactivatedAtTS = 900
+	stop.StopReason = "satisfied"
+	repeated, changed, err := s.catalog.StopCompactionTarget(s.ctx, stop)
+	s.Require().NoError(err)
+	s.False(changed)
+	s.True(proto.Equal(updated, repeated))
 	s.Equal(int64(10), updated.GetTargetID())
 	s.Equal(int64(100), updated.GetCollectionID())
 	s.Equal(map[string]string{"segment_ids": "[1,2]"}, updated.GetProperties())
@@ -93,11 +107,6 @@ func (s *CatalogCompactionTargetSuite) TestListReturnsUnmarshalError() {
 	s.Nil(records)
 }
 
-func (s *CatalogCompactionTargetSuite) TestUpdateStateReturnsLoadError() {
-	err := s.catalog.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE, 0)
-	s.Error(err)
-}
-
 func (s *CatalogCompactionTargetSuite) loadRecord(targetID int64) *datapb.CompactionTarget {
 	value, err := s.metakv.Load(s.ctx, buildCompactionTargetPath(targetID))
 	s.Require().NoError(err)
@@ -108,6 +117,7 @@ func (s *CatalogCompactionTargetSuite) loadRecord(targetID int64) *datapb.Compac
 
 type catalogCompactionTargetMemoryKV struct {
 	memkv.MemoryKV
+	writes sync.Mutex
 }
 
 var _ kv.MetaKv = (*catalogCompactionTargetMemoryKV)(nil)
@@ -135,4 +145,23 @@ func (m *catalogCompactionTargetMemoryKV) GetPath(key string) string {
 
 func (m *catalogCompactionTargetMemoryKV) CompareVersionAndSwap(context.Context, string, int64, string) (bool, error) {
 	panic("unexpected CompareVersionAndSwap")
+}
+
+func (m *catalogCompactionTargetMemoryKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	m.writes.Lock()
+	defer m.writes.Unlock()
+	for _, pred := range preds {
+		value, err := m.MemoryKV.Load(ctx, pred.Key())
+		switch pred.Type() {
+		case predicates.PredTypeNotExist:
+			if err == nil {
+				return merr.ErrCompactionPlanConflict
+			}
+		case predicates.PredTypeEqual:
+			if err != nil || !pred.IsTrue(value) {
+				return merr.ErrCompactionPlanConflict
+			}
+		}
+	}
+	return m.MemoryKV.MultiSaveAndRemove(ctx, saves, removals)
 }

@@ -87,7 +87,7 @@ func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
 	return false
 }
 
-func canTriggerSortCompaction(segment *meta.SegmentInfo) bool {
+func CanTriggerSortCompaction(segment *meta.SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&

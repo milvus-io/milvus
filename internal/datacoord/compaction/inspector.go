@@ -26,7 +26,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
@@ -104,44 +103,7 @@ type Inspector struct {
 }
 
 func (c *Inspector) GetCompactionInfo(ctx context.Context, triggerID int64) *policy.CompactionInfo {
-	tasks := c.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
-	info := policy.SummaryCompactionState(triggerID, tasks)
-	if triggerID == -1 {
-		return info
-	}
-
-	targetMeta := c.compactionTargetMeta
-	if targetMeta == nil {
-		return info
-	}
-	target, runtimeActive := targetMeta.GetCompactionTargetStatus(triggerID)
-	if target == nil {
-		return info
-	}
-	// An invalid or future task state must remain fail-closed. Target lifecycle
-	// state can refine pending/completed semantics, but cannot classify a task
-	// that summaryCompactionState did not recognize.
-	if info.UnclassifiedCnt != 0 {
-		return info
-	}
-	switch target.GetState() {
-	case datapb.TargetState_TARGET_STATE_ACTIVE:
-		if !runtimeActive {
-			info.State = commonpb.CompactionState_UndefiedState
-		} else {
-			// A target remains pending until reconciliation marks it inactive,
-			// even when an earlier event has already completed.
-			info.State = commonpb.CompactionState_Executing
-		}
-	case datapb.TargetState_TARGET_STATE_INACTIVE:
-		if info.ExecutingCnt != 0 {
-			return info
-		}
-		info.State = commonpb.CompactionState_Completed
-	default:
-		info.State = commonpb.CompactionState_UndefiedState
-	}
-	return info
+	return policy.SummaryCompactionState(triggerID, c.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID))
 }
 
 func (c *Inspector) GetCompactionTasksNumBySignalID(triggerID int64) int {
@@ -595,6 +557,9 @@ func (c *Inspector) getCompactionTask(planID int64) ctask.CompactionTask {
 }
 
 func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+	if c.compactionTargetMeta != nil {
+		defer c.compactionTargetMeta.LockCollectionAdmission(task.GetCollectionID())()
+	}
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {

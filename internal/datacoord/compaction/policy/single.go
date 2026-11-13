@@ -125,7 +125,7 @@ func (policy *SingleCompactionPolicy) TriggerSegmentSortCompaction(
 		log.Info(ctx, "skip sort compaction for external collection", mlog.FieldCollectionID(collection.ID))
 		return nil
 	}
-	if !canTriggerSortCompaction(segment) {
+	if !CanTriggerSortCompaction(segment) {
 		log.Warn(ctx, "fail to apply triggerSegmentSortCompaction",
 			mlog.String("state", segment.GetState().String()),
 			mlog.String("level", segment.GetLevel().String()),
@@ -199,7 +199,7 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 	}
 	triggerableSegments := policy.Meta.SelectSegments(ctx, meta.WithCollection(collectionID),
 		meta.SegmentFilterFunc(func(seg *meta.SegmentInfo) bool {
-			return canTriggerSortCompaction(seg) &&
+			return CanTriggerSortCompaction(seg) &&
 				!policy.Meta.IsSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {

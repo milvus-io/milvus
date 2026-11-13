@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -2226,102 +2225,20 @@ func TestManualCompaction(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("test manual rewrite target returns durable target id when guard enabled", func(t *testing.T) {
+	t.Run("target mode directs legacy rewrite and sizing callers to target API", func(t *testing.T) {
 		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
-		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
-
-		catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(t)
-		targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-		require.NoError(t, err)
-
-		handler := meta.NewNMockHandler(t)
-		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{}, nil)
-		inspector := compaction.NewMockCompactionInspector(t)
-		versionManager := index.NewMockVersionManager(t)
-		versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
-
-		svr := &Server{allocator: alloc}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta.Meta{}
-		svr.compactionTargetMeta = targetMeta
-		svr.compactionTriggerManager = compaction.NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
-
-		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
-			CollectionID: 1,
-			SegmentIds:   []int64{10, 20},
-		})
-
-		require.NoError(t, err)
-		require.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		require.Equal(t, int64(100), resp.GetCompactionID())
-		require.Zero(t, resp.GetCompactionPlanCount())
-
-		record := records[100]
-		require.NotNil(t, record)
-		require.Equal(t, datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
-		require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
-		require.Equal(t, int32(0), record.GetTailLimit())
-		require.Equal(t, uint64(200), record.GetActivatedAtTS())
-		require.Equal(t, uint64(200), record.GetExpectedTS())
-		require.Equal(t, int64(1), record.GetCollectionID())
-		segmentIDs, ok := targets.CompactionTargetSegmentIDs(record)
-		require.True(t, ok)
-		require.Equal(t, []int64{10, 20}, segmentIDs)
-	})
-
-	t.Run("test manual rewrite target rejects unsupported filters", func(t *testing.T) {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-		for _, test := range []struct {
-			name    string
-			request *milvuspb.ManualCompactionRequest
-		}{
-			{
-				name: "partition",
-				request: &milvuspb.ManualCompactionRequest{
-					CollectionID: 1,
-					PartitionId:  2,
-				},
-			},
-			{
-				name: "channel",
-				request: &milvuspb.ManualCompactionRequest{
-					CollectionID: 1,
-					Channel:      "ch-1",
-				},
-			},
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+		for _, req := range []*milvuspb.ManualCompactionRequest{
+			{CollectionID: 1},
+			{CollectionID: 1, TargetSize: 1024},
 		} {
-			t.Run(test.name, func(t *testing.T) {
-				alloc := allocator.NewMockAllocator(t)
-
-				catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(t)
-				targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-				require.NoError(t, err)
-
-				handler := meta.NewNMockHandler(t)
-				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{}, nil)
-				inspector := compaction.NewMockCompactionInspector(t)
-				versionManager := index.NewMockVersionManager(t)
-				versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
-
-				svr := &Server{allocator: alloc}
-				svr.stateCode.Store(commonpb.StateCode_Healthy)
-				svr.meta = &meta.Meta{}
-				svr.compactionTargetMeta = targetMeta
-				svr.compactionTriggerManager = compaction.NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
-
-				resp, err := svr.ManualCompaction(context.Background(), test.request)
-
-				require.NoError(t, err)
-				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
-				require.Zero(t, resp.GetCompactionID())
-				require.Empty(t, records)
-			})
+			resp, err := server.ManualCompaction(t.Context(), req)
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrOperationNotSupported)
+			require.Contains(t, resp.GetStatus().GetReason(), "CreateCompactionTarget")
+			require.Zero(t, resp.GetCompactionID())
 		}
 	})
 

@@ -135,6 +135,7 @@ type Server struct {
 	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	collectionDropped                   func(context.Context, int64) (bool, error)
+	checkCompactionTargetReplication    func(context.Context) error
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -273,17 +274,18 @@ func WithPKIndexService(svc *pkindexservice.Service) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		notifyStatsChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
-		pkindexService:      pkindexservice.New(),
+		ctx:                              ctx,
+		quitCh:                           make(chan struct{}),
+		factory:                          factory,
+		flushCh:                          make(chan UniqueID, 1024),
+		notifyIndexChan:                  make(chan UniqueID, 1024),
+		notifyStatsChan:                  make(chan UniqueID, 1024),
+		dataNodeCreator:                  defaultDataNodeCreatorFunc,
+		importJobLock:                    lock.NewKeyLock[int64](),
+		metricsCacheManager:              metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:                   metricsinfo.NewMetricsRequest(),
+		pkindexService:                   pkindexservice.New(),
+		checkCompactionTargetReplication: validateCompactionTargetReplication,
 	}
 
 	for _, opt := range opts {
@@ -815,7 +817,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 			return err
 		})
 
-		if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		if Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
 			g.Go(func() error {
 				var err error
 				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)

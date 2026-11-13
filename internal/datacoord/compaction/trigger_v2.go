@@ -75,10 +75,9 @@ type CompactionTriggerManager struct {
 	handler   meta.Handler
 	allocator allocator.Allocator
 
-	meta                 *meta.Meta
-	indexMeta            *index.IndexMeta
-	compactionTargetMeta *targets.CompactionTargetMeta
-	policies             map[TickerType]policy.CompactionPolicy
+	meta      *meta.Meta
+	indexMeta *index.IndexMeta
+	policies  map[TickerType]policy.CompactionPolicy
 
 	l0Policy                    *policy.L0CompactionPolicy
 	clusteringPolicy            *policy.ClusteringCompactionPolicy
@@ -97,13 +96,12 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	versionManager index.IndexEngineVersionManager,
 ) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator:            alloc,
-		handler:              handler,
-		inspector:            inspector,
-		meta:                 mt,
-		indexMeta:            indexMeta,
-		compactionTargetMeta: compactionTargetMeta,
-		policies:             make(map[TickerType]policy.CompactionPolicy),
+		allocator: alloc,
+		handler:   handler,
+		inspector: inspector,
+		meta:      mt,
+		indexMeta: indexMeta,
+		policies:  make(map[TickerType]policy.CompactionPolicy),
 	}
 	// Initialize policies and keep separate pointers for frequently accessed ones
 
@@ -114,7 +112,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	m.forceMergePolicy = policy.NewForceMergeCompactionPolicy(mt, indexMeta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = policy.NewStorageVersionUpgradePolicy(mt, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = policy.NewBumpSchemaVersionPolicy(mt, m.allocator, m.handler)
-	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+	if compactionTargetMeta != nil {
 		m.targetReconciler = targets.NewCompactionTargetReconciler(mt, indexMeta, compactionTargetMeta, handler)
 	}
 
@@ -236,7 +234,7 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 		return
 	}
 
-	if m.inspector.isFull() {
+	if tickerType != TargetTicker && m.inspector.isFull() {
 		mlog.RatedInfo(ctx, rate.Limit(10), "Skip dispatching compaction events since inspector is full",
 			mlog.String("policy", pol.Name()))
 		return
@@ -279,9 +277,6 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"compaction is not supported for external collection")
 	}
-	if IsTargetBasedManualRewriteCompactionRequest(req) {
-		return m.saveManualRewriteCompactionTarget(ctx, req)
-	}
 
 	var triggerID UniqueID
 	var views []view.CompactionView
@@ -306,45 +301,6 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		}
 	}
 	return triggerID, nil
-}
-
-func isManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
-	return req != nil &&
-		!req.GetMajorCompaction() &&
-		!req.GetL0Compaction() &&
-		req.GetTargetSize() == 0
-}
-
-func IsTargetBasedManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
-	return Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
-		isManualRewriteCompactionRequest(req)
-}
-
-func (m *CompactionTriggerManager) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
-	if req.GetPartitionId() > 0 || req.GetChannel() != "" {
-		return 0, merr.WrapErrParameterInvalidMsg(
-			"target-based manual rewrite compaction does not support partition or channel filters")
-	}
-	if m.meta == nil {
-		return 0, merr.WrapErrServiceInternal("data coord meta is not initialized")
-	}
-	if m.meta.IsCollectionCompactionBlocked(req.GetCollectionID()) {
-		return 0, merr.WrapErrCompactionBlocked(fmt.Sprintf(
-			"collection %d has pending snapshot or unloaded snapshot RefIndex",
-			req.GetCollectionID()))
-	}
-	targetMeta := m.compactionTargetMeta
-	if targetMeta == nil {
-		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
-	}
-	record, err := targets.NewManualRewriteCompactionTarget(req.GetCollectionID(), req.GetSegmentIds()).Create(ctx, m.allocator)
-	if err != nil {
-		return 0, err
-	}
-	if err := targetMeta.SaveCompactionTarget(ctx, record); err != nil {
-		return 0, err
-	}
-	return record.GetTargetID(), nil
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType policy.CompactionTriggerType,
@@ -561,10 +517,19 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		totalRows += s.NumOfRows
 	}
 
+	triggerID := cv.GetTriggerID()
+	if triggerID == 0 {
+		triggerID, err = m.allocator.AllocID(ctx)
+		if err != nil {
+			log.Warn(ctx, "failed to allocate compaction trigger ID", mlog.Err(err))
+			return
+		}
+	}
+
 	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
 		PlanID:                 planID,
-		TriggerID:              cv.(*policy.MixSegmentView).TriggerID,
+		TriggerID:              triggerID,
 		State:                  datapb.CompactionTaskState_pipelining,
 		StartTime:              now,
 		CollectionTtl:          cv.GetCollectionTTL().Nanoseconds(),

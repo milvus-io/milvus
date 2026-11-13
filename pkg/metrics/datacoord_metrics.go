@@ -286,6 +286,15 @@ var (
 			stageLabelName,
 		})
 
+	DataCoordCompactionTargetDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "compaction_target_duration_seconds",
+			Help:      "Time from activation to first durable satisfaction of a finite compaction target",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 20),
+		}, []string{"family"})
+
 	ImportJobLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -609,6 +618,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordCompactionLatency)
+	registry.MustRegister(DataCoordCompactionTargetDuration)
 	registry.MustRegister(ImportJobLatency)
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)

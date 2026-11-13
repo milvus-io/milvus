@@ -19,17 +19,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -251,14 +248,6 @@ func (s *CompactionTriggerManagerSuite) setIndexMeta(im *index.IndexMeta) {
 	}
 }
 
-// setCompactionTargetMeta installs targetMeta on the trigger manager and on its target reconciler.
-func (s *CompactionTriggerManagerSuite) setCompactionTargetMeta(targetMeta *targets.CompactionTargetMeta) {
-	s.triggerManager.compactionTargetMeta = targetMeta
-	if s.triggerManager.targetReconciler != nil {
-		s.triggerManager.targetReconciler.CompactionTargetMeta = targetMeta
-	}
-}
-
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := meta.NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{}, nil)
@@ -442,11 +431,6 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
 
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
-
 	handler := meta.NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{
 		ID: 1,
@@ -471,65 +455,6 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	s.Error(err)
 	s.Contains(err.Error(), "external collection")
 	s.Zero(targetID)
-	s.Empty(records)
-}
-
-func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhenGuardEnabled() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
-
-	handler := meta.NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&meta.CollectionInfo{}, nil)
-	s.triggerManager.handler = handler
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
-	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
-
-	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
-		CollectionID: s.testLabel.CollectionID,
-		SegmentIds:   []int64{20, 10},
-	})
-
-	s.Require().NoError(err)
-	s.Equal(int64(100), targetID)
-	record := records[100]
-	s.Require().NotNil(record)
-	s.Equal(datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
-	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
-	s.Equal(uint64(200), record.GetExpectedTS())
-	s.Equal(uint64(200), record.GetActivatedAtTS())
-	segmentIDs, ok := targets.CompactionTargetSegmentIDs(record)
-	s.True(ok)
-	s.Equal([]int64{10, 20}, segmentIDs)
-}
-
-func (s *CompactionTriggerManagerSuite) TestManualTriggerRejectsRewriteTargetWhenSnapshotBlocksCollection() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
-	snapshotMeta := snapshot.CreateTestSnapshotMetaLoaded(s.T())
-	s.meta.CompactionProtection = snapshotMeta
-	snapshotMeta.SetSnapshotPending(s.testLabel.CollectionID)
-
-	handler := meta.NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&meta.CollectionInfo{}, nil)
-	s.triggerManager.handler = handler
-
-	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
-		CollectionID: s.testLabel.CollectionID,
-	})
-
-	s.ErrorIs(err, merr.ErrCompactionBlocked)
-	s.Zero(targetID)
-	s.Empty(records)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {

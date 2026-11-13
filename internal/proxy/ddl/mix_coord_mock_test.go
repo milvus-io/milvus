@@ -84,6 +84,8 @@ type showPartitionsFuncType func(ctx context.Context, request *milvuspb.ShowPart
 var _ types.MixCoordClient = (*MixCoordMock)(nil)
 
 type MixCoordMock struct {
+	// RPCs without fixture behavior use the embedded client.
+	datapb.DataCoordClient
 	nodeID  typeutil.UniqueID
 	address string
 

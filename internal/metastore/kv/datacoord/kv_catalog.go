@@ -23,8 +23,11 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -37,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1198,7 +1202,11 @@ func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.Compact
 	applyFn := func(key []byte, value []byte) error {
 		record := &datapb.CompactionTarget{}
 		if err := proto.Unmarshal(value, record); err != nil {
-			return err
+			return merr.WrapErrSerializationFailed(err, "unmarshal compaction target at %s", key)
+		}
+		path := buildCompactionTargetPath(record.GetTargetID())
+		if record.GetTargetID() <= 0 || (string(key) != path && string(key) != kc.MetaKv.GetPath(path)) {
+			return merr.WrapErrDataIntegrityMsg("compaction target identity does not match key %s", key)
 		}
 		records = append(records, record)
 		return nil
@@ -1211,36 +1219,79 @@ func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.Compact
 	return records, nil
 }
 
-func (kc *Catalog) SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
-	if record == nil {
-		return nil
-	}
-	cloned := proto.Clone(record).(*datapb.CompactionTarget)
-	key, value, err := buildCompactionTargetKV(cloned)
-	if err != nil {
-		return err
-	}
-	return kc.SaveByBatch(ctx, map[string]string{key: value})
+func (kc *Catalog) LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error) {
+	record, _, err := kc.loadCompactionTarget(ctx, targetID)
+	return record, err
 }
 
-func (kc *Catalog) UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
+func (kc *Catalog) loadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, string, error) {
 	key := buildCompactionTargetPath(targetID)
 	value, err := kc.MetaKv.Load(ctx, key)
-	if err != nil {
-		return err
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, "", nil
 	}
-
+	if err != nil {
+		return nil, "", err
+	}
 	record := &datapb.CompactionTarget{}
 	if err := proto.Unmarshal([]byte(value), record); err != nil {
-		return err
+		return nil, "", merr.WrapErrSerializationFailed(err, "unmarshal compaction target %d", targetID)
 	}
-	record.State = state
-	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
-		record.InactivatedAtTS = inactivatedAtTS
-	} else {
-		record.InactivatedAtTS = 0
+	if record.GetTargetID() != targetID {
+		return nil, "", merr.WrapErrDataIntegrityMsg("compaction target %d identity does not match its key", targetID)
 	}
-	return kc.SaveCompactionTarget(ctx, record)
+	return record, value, nil
+}
+
+func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (bool, error) {
+	key, value, err := buildCompactionTargetKV(record)
+	if err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.KeyNotExist(key))
+	return targetCreateMayHaveCommitted(err), err
+}
+
+func targetCreateMayHaveCommitted(err error) bool {
+	if err == nil {
+		return false
+	}
+	if merr.IsCanceledOrTimeout(err) || tikverr.IsErrorUndetermined(err) {
+		return true
+	}
+	// etcd preserves the original RPC error underneath the IO classification.
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.Internal, codes.Unknown:
+		_, isRPCError := status.FromError(err)
+		return isRPCError
+	default:
+		return false
+	}
+}
+
+func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+	id := stopped.GetTargetID()
+	current, raw, err := kc.loadCompactionTarget(ctx, id)
+	if err != nil || current == nil || current.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE {
+		return current, false, err
+	}
+	if current.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE {
+		return nil, false, merr.WrapErrDataIntegrityMsg("compaction target %d has invalid state %d", id, current.GetState())
+	}
+	current.State = stopped.GetState()
+	current.InactivatedAtTS = stopped.GetInactivatedAtTS()
+	current.StopReason = stopped.GetStopReason()
+	key, value, err := buildCompactionTargetKV(current)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.ValueEqual(key, raw)); err != nil {
+		return nil, false, err
+	}
+	return current, true, nil
 }
 
 func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {

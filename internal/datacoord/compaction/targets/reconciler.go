@@ -1,12 +1,18 @@
 package targets
 
 import (
+	"cmp"
 	"context"
+	"slices"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -36,10 +42,10 @@ func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, co
 }
 
 func (reconciler *CompactionTargetReconciler) Enable() bool {
-	return paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
-		reconciler != nil &&
+	return reconciler != nil &&
 		reconciler.meta != nil &&
-		reconciler.CompactionTargetMeta != nil
+		reconciler.CompactionTargetMeta != nil &&
+		paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
 }
 
 func (reconciler *CompactionTargetReconciler) Name() string {
@@ -51,93 +57,116 @@ func (reconciler *CompactionTargetReconciler) Trigger(ctx context.Context) (map[
 }
 
 func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (map[policy.CompactionTriggerType][]view.CompactionView, error) {
-	events := map[policy.CompactionTriggerType][]view.CompactionView{
-		policy.TriggerTypeSingle: nil,
-	}
+	events := map[policy.CompactionTriggerType][]view.CompactionView{}
 	if !reconciler.Enable() {
 		return events, nil
 	}
 
-	targetMeta := reconciler.CompactionTargetMeta
-	targets := targetMeta.GetActiveCompactionTargets()
-	if len(targets) == 0 {
-		return events, nil
-	}
-	maxEvents := paramtable.Get().DataCoordCfg.TargetCompactionMaxEvents.GetAsInt()
-
-	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
-	for _, target := range targets {
-		record := target.Clone()
-		matches := reconciler.meta.SelectSegments(ctx, target.MatchFilters()...)
-		// Satisfaction uses semantic matches before temporary execution
-		// blockers. A snapshot-protected segment must keep the target active
-		// until the snapshot releases it.
-		if target.Satisfied(matches) {
-			satisfiedTargets = append(satisfiedTargets, record)
+	manager := reconciler.CompactionTargetMeta
+	records := manager.GetActiveCompactionTargets()
+	matches := make(map[int64]*meta.SegmentInfo)
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !reconciler.meta.GetCollection(record.GetCollectionID()).IsCreated() {
 			continue
 		}
-		remaining := maxEvents - len(events[policy.TriggerTypeSingle])
-		if remaining <= 0 {
+		observation, err := ObserveRewrite(ctx, reconciler.meta, record, false)
+		if err == nil && len(observation.Match) == 0 {
+			err = reconciler.finishRewrite(ctx, record, &observation)
+		}
+		if err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "reconcile compaction target failed",
+				mlog.Int64("targetID", record.GetTargetID()),
+				mlog.FieldCollectionID(record.GetCollectionID()), mlog.Err(err))
 			continue
 		}
-		events[policy.TriggerTypeSingle] = append(
-			events[policy.TriggerTypeSingle],
-			reconciler.compactionViews(ctx, record, target.CompactionType(), matches, remaining)...,
-		)
-	}
-
-	for _, record := range satisfiedTargets {
-		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE); err != nil {
-			return events, err
+		for _, segment := range observation.Match {
+			matches[segment.GetID()] = segment
 		}
-		mlog.Info(ctx, "compaction target satisfied",
-			mlog.Int64("targetID", record.GetTargetID()),
-			mlog.FieldCollectionID(record.GetCollectionID()))
 	}
-	return events, nil
-}
 
-func (reconciler *CompactionTargetReconciler) compactionViews(
-	ctx context.Context,
-	record *datapb.CompactionTarget,
-	compactionType datapb.CompactionType,
-	matches []*meta.SegmentInfo,
-	limit int,
-) []view.CompactionView {
-	blockedCollections := make(map[int64]bool)
+	// Duplicate targets contribute one physical input per round. Keep the
+	// Target out of the Task's TriggerID so the Task survives independently.
 	sharedSelectable := make([]*meta.SegmentInfo, 0, len(matches))
+	blocked := make(map[int64]bool)
+	ttls := make(map[int64]time.Duration)
 	for _, segment := range matches {
 		collectionID := segment.GetCollectionID()
-		blocked, checked := blockedCollections[collectionID]
+		collectionBlocked, checked := blocked[collectionID]
 		if !checked {
-			blocked = reconciler.meta.IsCollectionCompactionBlocked(collectionID)
-			blockedCollections[collectionID] = blocked
-		}
-		if blocked || !policy.IsSharedCompactionSelectable(reconciler.meta, segment) {
-			continue
-		}
-		sharedSelectable = append(sharedSelectable, segment)
-	}
-
-	switch compactionType {
-	case datapb.CompactionType_MixCompaction:
-		selectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
-		views := make([]view.CompactionView, 0, min(len(selectable), limit))
-		for _, segment := range selectable {
-			if len(views) >= limit {
-				break
+			collection := reconciler.meta.GetCollection(collectionID)
+			collectionBlocked = !collection.IsCreated() || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(collectionID)
+			if !collectionBlocked {
+				ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
+				if err != nil {
+					mlog.RatedWarn(ctx, rate.Limit(1), "could not determine collection TTL for compaction target",
+						mlog.FieldCollectionID(collectionID), mlog.Err(err))
+					collectionBlocked = true
+				}
+				ttls[collectionID] = ttl
 			}
-			segmentViews := view.GetViewsByInfo(segment)
-			views = append(views, &policy.MixSegmentView{
-				Label:     segmentViews[0].Label,
-				Segments:  segmentViews,
-				TriggerID: record.GetTargetID(),
-			})
+			blocked[collectionID] = collectionBlocked
 		}
-		return views
-	default:
-		return nil
+		if !collectionBlocked && policy.IsSharedCompactionSelectable(reconciler.meta, segment) {
+			// Reoffer eligible Sort work for a matched segment if its
+			// reactive notification was missed, including with auto off.
+			if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() && policy.CanTriggerSortCompaction(segment) {
+				views := view.GetViewsByInfo(segment)
+				events[policy.TriggerTypeSort] = append(events[policy.TriggerTypeSort], &policy.MixSegmentView{
+					Label: views[0].Label, Segments: views, CollectionTTL: ttls[collectionID],
+				})
+				continue
+			}
+			sharedSelectable = append(sharedSelectable, segment)
+		}
 	}
+	selectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	slices.SortFunc(selectable, func(a, b *meta.SegmentInfo) int {
+		if a.GetCollectionID() != b.GetCollectionID() {
+			return cmp.Compare(a.GetCollectionID(), b.GetCollectionID())
+		}
+		return cmp.Compare(a.GetID(), b.GetID())
+	})
+	for _, segment := range selectable {
+		views := view.GetViewsByInfo(segment)
+		events[policy.TriggerTypeSingle] = append(events[policy.TriggerTypeSingle], &policy.MixSegmentView{
+			Label:         views[0].Label,
+			Segments:      views,
+			CollectionTTL: ttls[segment.GetCollectionID()],
+		})
+	}
+	return events, ctx.Err()
+}
+
+func (reconciler *CompactionTargetReconciler) finishRewrite(ctx context.Context, record *datapb.CompactionTarget, observation *RewriteObservation) error {
+	manager := reconciler.CompactionTargetMeta
+	defer manager.LockCollectionAdmission(record.GetCollectionID())()
+	return manager.Stop(ctx, record.GetTargetID(), StopSatisfied, func(current *datapb.CompactionTarget) (bool, error) {
+		if current.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE ||
+			!reconciler.meta.GetCollection(current.GetCollectionID()).IsCreated() {
+			return false, nil
+		}
+		// The collection snapshot is the stop decision point. It observes
+		// replacement atomically and includes data published since the first
+		// observation. The admission lock keeps new tasks from taking inputs
+		// between this check and the terminal save.
+		currentObservation, err := ObserveRewrite(ctx, reconciler.meta, current, false)
+		if err != nil {
+			return false, err
+		}
+		*observation = currentObservation
+		if len(currentObservation.Match) != 0 {
+			return false, nil
+		}
+		for _, segment := range currentObservation.Scope {
+			if reconciler.meta.IsSegmentCompacting(segment.GetID()) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 }
 
 func (reconciler *CompactionTargetReconciler) filterMixCompactionSelectable(

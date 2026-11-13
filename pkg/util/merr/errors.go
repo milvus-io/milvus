@@ -313,7 +313,10 @@ var (
 	// This is a business-level rejection, not an internal fault: the compaction scheduler
 	// should recognize it and retry with low-frequency backoff instead of triggering alerts.
 	// Marked retryable so callers do not misinterpret it as a hard failure.
-	ErrCompactionBlocked = newMilvusError("compaction blocked by snapshot protection", 2317, true)
+	ErrCompactionBlocked                    = newMilvusError("compaction blocked by snapshot protection", 2317, true)
+	ErrCompactionTargetNotFound             = newMilvusError("compaction target not found", 2318, false)
+	ErrCompactionTargetCreateOutcomeUnknown = newMilvusError("compaction target creation outcome is unknown", 2319, false)
+	ErrCompactionTargetScopeUnavailable     = newMilvusError("compaction target scope cannot be resolved", 2320, false)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 

@@ -156,125 +156,6 @@ func TestSummaryCompactionState(t *testing.T) {
 	})
 }
 
-func TestGetCompactionInfoUsesTargetRuntimeState(t *testing.T) {
-	ctx := context.Background()
-	targetMeta := targets.NewLoadedCompactionTargetMeta(t, ctx,
-		&datapb.CompactionTarget{
-			TargetID:     100,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     200,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     300,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     400,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			Properties: map[string]string{
-				targets.CompactionTargetPropertySegmentIDs: "not-json",
-			},
-			State: datapb.TargetState_TARGET_STATE_ACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     500,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     600,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     700,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
-		},
-		&datapb.CompactionTarget{
-			TargetID:     800,
-			CollectionID: 1,
-			Intent:       datapb.TargetIntent_INTENT_REWRITE,
-			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
-		},
-	)
-	compactionTaskMeta := ctask.NewCompactionTaskMetaOverCatalog(nil)
-	for _, task := range []*datapb.CompactionTask{
-		{
-			TriggerID: 300,
-			PlanID:    1,
-			State:     datapb.CompactionTaskState_completed,
-		},
-		{
-			TriggerID: 500,
-			PlanID:    2,
-			State:     datapb.CompactionTaskState_unknown,
-		},
-		{
-			TriggerID: 600,
-			PlanID:    3,
-			State:     datapb.CompactionTaskState_unknown,
-		},
-		{
-			TriggerID:     700,
-			PlanID:        4,
-			State:         datapb.CompactionTaskState_cleaned,
-			TerminalState: datapb.CompactionTaskState_executing,
-		},
-		{
-			TriggerID: 800,
-			PlanID:    5,
-			State:     datapb.CompactionTaskState_executing,
-		},
-	} {
-		if compactionTaskMeta.CompactionTasks[task.GetTriggerID()] == nil {
-			compactionTaskMeta.CompactionTasks[task.GetTriggerID()] = make(map[int64]*datapb.CompactionTask)
-		}
-		compactionTaskMeta.CompactionTasks[task.GetTriggerID()][task.GetPlanID()] = task
-	}
-	inspector := &Inspector{
-		compactionTaskMeta:   compactionTaskMeta,
-		compactionTargetMeta: targetMeta,
-	}
-
-	active := inspector.GetCompactionInfo(ctx, 100)
-	inactive := inspector.GetCompactionInfo(ctx, 200)
-	materialized := inspector.GetCompactionInfo(ctx, 300)
-	inert := inspector.GetCompactionInfo(ctx, 400)
-	inactiveWithUnknownTask := inspector.GetCompactionInfo(ctx, 500)
-	activeWithUnknownTask := inspector.GetCompactionInfo(ctx, 600)
-	activeWithInvalidCleanedTask := inspector.GetCompactionInfo(ctx, 700)
-	inactiveWithExecutingTask := inspector.GetCompactionInfo(ctx, 800)
-	unknown := inspector.GetCompactionInfo(ctx, 999)
-
-	assert.Equal(t, commonpb.CompactionState_Executing, active.State)
-	assert.Equal(t, 0, active.ExecutingCnt)
-	assert.Equal(t, commonpb.CompactionState_Completed, inactive.State)
-	assert.Equal(t, 0, inactive.CompletedCnt)
-	assert.Equal(t, commonpb.CompactionState_Executing, materialized.State)
-	assert.Equal(t, 1, materialized.CompletedCnt)
-	assert.Equal(t, commonpb.CompactionState_UndefiedState, inert.State)
-	assert.Equal(t, commonpb.CompactionState_UndefiedState, inactiveWithUnknownTask.State)
-	assert.Equal(t, commonpb.CompactionState_UndefiedState, activeWithUnknownTask.State)
-	assert.Equal(t, commonpb.CompactionState_UndefiedState, activeWithInvalidCleanedTask.State)
-	assert.Equal(t, commonpb.CompactionState_Executing, inactiveWithExecutingTask.State)
-	assert.Equal(t, 1, inactiveWithExecutingTask.ExecutingCnt)
-	assert.Equal(t, commonpb.CompactionState_UndefiedState, unknown.State)
-}
-
 func TestSetCompactionTaskStatePreservesTerminalOutcome(t *testing.T) {
 	for _, terminalState := range []datapb.CompactionTaskState{
 		datapb.CompactionTaskState_completed,
@@ -1525,4 +1406,22 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
 	s.Nil(compactTask)
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
+}
+
+func TestCompactionTargetIDDoesNotRefineLegacyTaskStatus(t *testing.T) {
+	ctx := t.Context()
+	manager := targets.NewLoadedCompactionTargetMeta(t, ctx, &datapb.CompactionTarget{
+		TargetID: 1234, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 100,
+	})
+	taskMeta := ctask.NewCompactionTaskMetaOverCatalog(nil)
+	inspector := &Inspector{compactionTaskMeta: taskMeta, compactionTargetMeta: manager}
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, inspector.GetCompactionInfo(ctx, 1234).State)
+
+	taskMeta.SaveCompactionTaskMemory(&datapb.CompactionTask{
+		PlanID: 1, TriggerID: 1234, State: datapb.CompactionTaskState_completed,
+	})
+	info := inspector.GetCompactionInfo(ctx, 1234)
+	assert.Equal(t, commonpb.CompactionState_Completed, info.State)
+	assert.Equal(t, 1, info.CompletedCnt)
 }
