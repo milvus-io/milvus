@@ -32,6 +32,7 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/contracts/query/ReaderCaps.h"
+#include "index/growing/GrowingBuildOptions.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/indexing/FieldIndexCapability.h"
 
@@ -160,6 +161,9 @@ class GrowingIndexSet {
  private:
     mutable std::shared_mutex mutex_;
     AppenderMap appenders_;
+    // Capture at segment construction; schema reopen on an existing segment
+    // must not adopt a later hot update when staging a new field owner.
+    index::GrowingBuildOptions growing_build_options_;
 };
 
 }  // namespace milvus::segcore

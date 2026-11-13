@@ -246,6 +246,11 @@ GrowingIndexSet::Initialize(const Schema& schema,
                             const SegcoreConfig& segcore_config,
                             int64_t segment_id,
                             const InsertRecordGrowing& insert_record) {
+    growing_build_options_ = {
+        segcore_config.get_enable_async_growing_index_build(),
+        segcore_config.get_async_growing_index_finalize_budget_ms(),
+        segcore_config.get_async_growing_index_catchup_deadline_ms(),
+        segcore_config.get_growing_index_build_pool_ratio()};
     AppenderMap staged;
     for (const auto& [field_id, field_meta] : schema.get_fields()) {
         auto appender = StageAppender(field_meta,
@@ -359,7 +364,8 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
             config.GetSearchBaseParams(),
             std::move(source),
             source_backed,
-            build_thread_num);
+            build_thread_num,
+            growing_build_options_);
     };
 
     std::unique_ptr<index::IGrowingIndex> owner;
