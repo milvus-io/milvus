@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -40,9 +41,16 @@ func TestOpenManager(t *testing.T) {
 
 func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
 	builders := newInterceptorBuilders()
-	assert.Len(t, builders, 7)
-	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
-	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
+	assert.Len(t, builders, 6)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[5])
+}
+
+func TestShardOwnsTimeTickAndPKIndex(t *testing.T) {
+	builders := newInterceptorBuilders()
+	require.Len(t, builders, 6)
+	assert.IsType(t, replicate.NewInterceptorBuilder(), builders[3])
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
 }
 
 func TestIdempotencyInterceptorRunsOutermost(t *testing.T) {

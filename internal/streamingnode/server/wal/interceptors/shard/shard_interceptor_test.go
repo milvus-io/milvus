@@ -68,10 +68,9 @@ func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing
 }
 
 func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -104,10 +103,9 @@ func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 }
 
 func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -460,10 +458,9 @@ func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *
 }
 
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -498,10 +495,9 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	defer item.SwapTempValue(old)
 
 	allocWALSchemaForTest(t, 1, "v1", 3)
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -544,10 +540,9 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	defer item.SwapTempValue(old)
 
 	allocWALSchemaForTest(t, 1, "v1", 0)
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -590,10 +585,9 @@ func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
 	old := item.SwapTempValue("true")
 	defer item.SwapTempValue(old)
 
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -620,10 +614,9 @@ func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
 }
 
 func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T) {
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()
@@ -651,10 +644,9 @@ func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T)
 func TestShardInterceptor(t *testing.T) {
 	mockErr := errors.New("mock error")
 
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()

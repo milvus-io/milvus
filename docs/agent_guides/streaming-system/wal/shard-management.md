@@ -10,6 +10,16 @@ source/spec. Only the `schema` mask flushes/fences segment allocation; ordinary
 metadata updates keep SchemaVersion unchanged. RecoveryStorage applies the same
 mask semantics. `collection.on.truncating` remains coordinator/DataCoord state.
 
+## Write orchestration
+
+The shard builder owns primary key decisions and the internal TimeTick and
+segment-assignment chain. Decisions run before TimeTick allocation. A duplicate
+insert enters that chain as BeginTxn, Insert, companion Delete and CommitTxn.
+A client CommitTxn gets its companion Delete before the session enters OnCommit.
+Derived messages use the internal chain, so they do not repeat the decision or
+acquire the outer WAL lock again. Shard forwards TimeTick graceful shutdown and
+closes its internal stages. Segment assignment still runs after TimeTick.
+
 ## Seal Policies
 
 Growing segments are sealed when any registered policy triggers. See `internal/streamingnode/server/wal/interceptors/shard/policy/seal_policy.go` for the full list of policies.
