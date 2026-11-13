@@ -100,7 +100,7 @@ func MatchesSortCompaction(segment *meta.SegmentInfo) bool {
 }
 
 func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
-	allDiskIndex := indexMeta.AllDenseWithDiskIndex(collectionID, schema)
+	allDiskIndex := indexMeta != nil && indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 	if allDiskIndex {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024

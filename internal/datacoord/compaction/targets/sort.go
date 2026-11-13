@@ -150,6 +150,7 @@ type SortObservation struct {
 func ObserveSort(ctx context.Context, mt *meta.Meta) (SortObservation, error) {
 	var observation SortObservation
 	internal := make(map[int64]bool)
+	var rowErr error
 	for _, segment := range mt.SelectSegments(ctx, meta.SegmentFilterFunc(policy.MatchesSortCompaction)) {
 		if err := ctx.Err(); err != nil {
 			return SortObservation{}, err
@@ -166,10 +167,19 @@ func ObserveSort(ctx context.Context, mt *meta.Meta) (SortObservation, error) {
 		}
 		rows := segment.GetNumOfRows()
 		if rows < 0 || rows > math.MaxInt64-observation.Rows {
-			return SortObservation{}, merr.WrapErrDataIntegrityMsg("invalid SORT observation row count at segment %d", segment.GetID())
+			if rowErr == nil {
+				rowErr = merr.WrapErrDataIntegrityMsg("invalid SORT observation row count at segment %d", segment.GetID())
+			}
+			if rows < 0 {
+				continue
+			}
+		} else {
+			observation.Rows += rows
 		}
-		observation.Rows += rows
 		observation.Match = append(observation.Match, segment)
 	}
-	return observation, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return SortObservation{}, err
+	}
+	return observation, rowErr
 }

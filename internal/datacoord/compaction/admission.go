@@ -136,8 +136,10 @@ func (a *compactionAdmission) available(now time.Time, producer Producer, capaci
 		}
 	}
 	if !contested {
+		// Keep at most a burst of prior service so the first producer to
+		// ask after a depletion cannot claim every partial refill.
 		for i := range a.service {
-			a.service[i].admitted = 0
+			a.service[i].admitted = min(a.service[i].admitted, int64(a.config.capacity))
 		}
 	} else if others > 0 {
 		// A source without recent demand rejoins at the current service

@@ -202,8 +202,7 @@ func (reconciler *CompactionTargetReconciler) observeStandingSort(ctx context.Co
 	}
 	observation, err := ObserveSort(ctx, reconciler.meta)
 	if err != nil {
-		mlog.RatedWarn(ctx, rate.Limit(1), "could not observe Standing SORT compaction target", mlog.Err(err))
-		return nil
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not fully observe Standing SORT compaction target", mlog.Err(err))
 	}
 	return observation.Match
 }
