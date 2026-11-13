@@ -109,6 +109,7 @@ impl StemmerLanguageParser for &str {
         match self.to_lowercase().as_str() {
             "arabic" => Ok(Algorithm::Arabic),
             "arabig" => Ok(Algorithm::Arabic), // typo
+            "czech" => Ok(Algorithm::Czech),
             "danish" => Ok(Algorithm::Danish),
             "dutch" => Ok(Algorithm::Dutch),
             "english" => Ok(Algorithm::English),
@@ -138,6 +139,9 @@ impl StemmerLanguageParser for &str {
 mod tests {
     use std::{collections::HashSet, ffi::c_void};
 
+    use rust_stemmers::Algorithm;
+
+    use super::StemmerLanguageParser;
     use crate::analyzer::create_analyzer;
     use crate::index_reader::IndexReaderWrapper;
     use crate::index_writer::IndexWriterWrapper;
@@ -216,5 +220,21 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result, HashSet::from([0]));
+    }
+
+    #[test]
+    fn test_czech_language() {
+        assert!(matches!("czech".into_language(), Ok(Algorithm::Czech)));
+    }
+
+    #[test]
+    fn test_czech_language_case_insensitive() {
+        assert!(matches!("Czech".into_language(), Ok(Algorithm::Czech)));
+        assert!(matches!("CZECH".into_language(), Ok(Algorithm::Czech)));
+    }
+
+    #[test]
+    fn test_unsupported_language() {
+        assert!("klingon".into_language().is_err());
     }
 }
