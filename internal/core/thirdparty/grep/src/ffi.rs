@@ -67,6 +67,8 @@ pub struct MgGrepMatchOptions {
     /// 0: unlimited; 1: max_count is present (including zero).
     pub has_max_count: u32,
     pub max_count: u64,
+    pub before_context: u64,
+    pub after_context: u64,
 }
 
 /// At least one pattern; ordered OR. Empty patterns are valid. No literal
@@ -95,8 +97,9 @@ pub struct MgGrepSpan {
     pub end: u64,
 }
 
-/// Complete matching line, minus only its terminal LF. Other bytes remain.
-/// Every returned line has at least one span. Empty content is {NULL,0}.
+/// Complete matching or context line, minus only its terminal LF. Other bytes remain.
+/// Context lines have zero spans; matching lines have at least one span.
+/// Empty content is {NULL,0}.
 #[repr(C)]
 pub struct MgGrepLine {
     pub content: MgGrepBytes,
@@ -491,6 +494,8 @@ unsafe fn inputs<'a>(
 
 fn options(o: MgGrepMatchOptions) -> Result<MatchOptions, Error> {
     Ok(MatchOptions {
+        before_context: o.before_context,
+        after_context: o.after_context,
         max_count: match o.has_max_count {
             0 => None,
             1 => Some(o.max_count),
@@ -755,15 +760,17 @@ mod tests {
                 offset_of!(MgGrepMatchOptions, boundary),
                 offset_of!(MgGrepMatchOptions, has_max_count),
                 offset_of!(MgGrepMatchOptions, max_count),
+                offset_of!(MgGrepMatchOptions, before_context),
+                offset_of!(MgGrepMatchOptions, after_context),
             ),
-            (24, 8, 12, 16)
+            (40, 8, 12, 16, 24, 32)
         );
         assert_eq!(
             (
                 size_of::<MgGrepSpecView>(),
                 offset_of!(MgGrepSpecView, options)
             ),
-            (40, 16)
+            (56, 16)
         );
         assert_eq!(
             (

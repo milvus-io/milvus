@@ -33,6 +33,8 @@ pub struct MatchOptions {
     pub boundary: Boundary,
     /// Maximum matching lines per input. None is unlimited; Some(0) matches nothing.
     pub max_count: Option<u64>,
+    pub before_context: u64,
+    pub after_context: u64,
 }
 
 /// Strictly positive service limits. Engine limits are approximate and do not
@@ -50,6 +52,8 @@ pub struct Plan(Arc<PlanData>);
 struct PlanData {
     matcher: RegexMatcher,
     max_count: Option<u64>,
+    before_context: u64,
+    after_context: u64,
     condition: LiteralCondition,
     condition_payload: Vec<u8>,
 }
@@ -121,6 +125,8 @@ impl Plan {
         Ok(Self(Arc::new(PlanData {
             matcher,
             max_count: options.max_count,
+            before_context: options.before_context,
+            after_context: options.after_context,
             condition,
             condition_payload,
         })))
@@ -141,6 +147,10 @@ impl Plan {
 
     pub(crate) fn matcher(&self) -> RegexMatcher {
         self.0.matcher.clone()
+    }
+
+    pub(crate) fn context(&self) -> (u64, u64) {
+        (self.0.before_context, self.0.after_context)
     }
 
     pub(crate) fn max_count(&self) -> Option<u64> {

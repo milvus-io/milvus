@@ -616,3 +616,127 @@ fn max_count_does_not_bypass_validation_or_cancellation() {
         ));
     }
 }
+
+#[test]
+fn context_windows_match_a_line_union_oracle() {
+    // Independently form the union of windows around the first -m hits.
+    // Repeated content, CR, Unicode, NUL, blank lines and terminal LF all
+    // retain their original byte coordinates. Each input is independent.
+    let inputs = [
+        "",
+        "\n",
+        "前\r\nhit\n\n中\0\nhit hit\n尾\n",
+        "hit\nhit\nx\nx\nx\nhit",
+        "no hit here",
+        "miss\nmiss",
+    ];
+    for before in [0, 1, 2, u64::MAX] {
+        for after in [0, 1, 2, u64::MAX] {
+            for max_count in [None, Some(0), Some(1), Some(2)] {
+                for pattern in ["hit", ""] {
+                    let options = MatchOptions {
+                        before_context: before,
+                        after_context: after,
+                        max_count,
+                        ..Default::default()
+                    };
+                    let result = search(&[pattern], options, &inputs);
+                    for (text, actual) in inputs.iter().zip(&result.texts) {
+                        let lines: Vec<_> = text.split_terminator('\n').collect();
+                        let hits: Vec<_> = lines
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, line)| line.contains(pattern))
+                            .take(max_count.unwrap_or(u64::MAX).min(usize::MAX as u64) as usize)
+                            .map(|(i, _)| i)
+                            .collect();
+                        let mut expected = Vec::new();
+                        let mut offset = 0;
+                        for (i, line) in lines.iter().enumerate() {
+                            if hits.iter().any(|&hit| {
+                                if i <= hit {
+                                    (hit - i) as u64 <= before
+                                } else {
+                                    (i - hit) as u64 <= after
+                                }
+                            }) {
+                                expected.push((
+                                    i as u64 + 1,
+                                    offset,
+                                    *line,
+                                    line.contains(pattern),
+                                ));
+                            }
+                            offset += line.len() as u64 + 1;
+                        }
+                        let actual: Vec<_> = actual
+                            .lines
+                            .iter()
+                            .map(|line| {
+                                (
+                                    line.line_number,
+                                    line.line_start_offset,
+                                    line.content.as_ref(),
+                                    !line.spans.is_empty(),
+                                )
+                            })
+                            .collect();
+                        assert_eq!(
+                            actual, expected,
+                            "{options:?}, pattern={pattern:?}, text={text:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn context_budget_validation_and_session_reuse() {
+    let text = format!("{}\nhit\n{}", "前".repeat(1000), "后".repeat(1000));
+    let overhead = ResultOverhead::default();
+    let mut plain = Session::new(&plan(&["hit"], MatchOptions::default()));
+    assert!(plain
+        .execute_accounted(&[text.as_bytes()], 1024, overhead)
+        .is_ok());
+    for (before_context, after_context) in [(1, 0), (0, 1), (u64::MAX, u64::MAX)] {
+        let options = MatchOptions {
+            before_context,
+            after_context,
+            max_count: Some(1),
+            ..Default::default()
+        };
+        let p = plan(&["hit"], options);
+        // Context never changes the necessary NGRAM condition.
+        assert_eq!(
+            p.condition_payload(),
+            plan(&["hit"], MatchOptions::default()).condition_payload()
+        );
+        let mut session = Session::new(&p);
+        assert!(matches!(
+            session.execute_accounted(&[text.as_bytes()], 1024, overhead),
+            Err(Error::ResourceLimit(LimitKind::ResultBytes))
+        ));
+        let result = session
+            .execute_accounted(&[b"a\nhit\nb", b"miss"], execution_limits(), overhead)
+            .unwrap();
+        assert_eq!(
+            result.texts[0].lines.len(),
+            1 + usize::from(before_context > 0) + usize::from(after_context > 0)
+        );
+        assert!(result.texts[1].lines.is_empty());
+        assert!(matches!(
+            session.execute_accounted(&[b"hit\n\xff"], execution_limits(), overhead),
+            Err(Error::InvalidUtf8 {
+                kind: InputKind::Text,
+                ..
+            })
+        ));
+        session.cancellation_token().cancel();
+        assert!(matches!(
+            session.execute_accounted(&[text.as_bytes()], execution_limits(), overhead),
+            Err(Error::Cancelled)
+        ));
+    }
+}

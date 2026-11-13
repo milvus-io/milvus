@@ -76,11 +76,114 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			spec, err := grep.Parse("-e timeout", 65536)
 			require.NoError(t, err)
 			req := native.ScanRequest{FieldID: 101, Limit: 1, Spec: *spec, CompileLimits: native.CompileLimits{MaxRegexBytes: 1048576, MaxDFACacheBytes: 1048576}, ExecutionLimits: native.ExecutionLimits{BatchSize: 128, MaxResultBytes: 1048576}}
-			result, err := adapter.ScanGrep(context.Background(), offsets, req)
+			result, err := scanGrepOffsets(adapter, context.Background(), offsets, req)
 			require.NoError(t, err)
 			require.Equal(t, []int{2}, result.Positions)
 			require.True(t, arrow.TypeEqual(native.GrepDetailsType(), result.Details.DataType()))
 			result.Release()
+			t.Run("record batch companion columns and sliced offsets", func(t *testing.T) {
+				lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+				for i := 0; i < 3; i++ {
+					lists.Append(true)
+					lists.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{1, 3}, nil)
+				}
+				list := lists.NewArray()
+				lists.Release()
+				slice := array.NewSlice(offsets, 1, 4)
+				record := array.NewRecord(arrow.NewSchema([]arrow.Field{
+					{Name: "$query_element_indices", Type: list.DataType()},
+					{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64},
+				}, nil), []arrow.Array{list, slice}, 3)
+				list.Release()
+				slice.Release()
+				result, err := adapter.ScanGrep(context.Background(), record, req)
+				record.Release()
+				require.NoError(t, err)
+				defer result.Release()
+				require.Equal(t, []int{1}, result.Positions)
+				require.Equal(t, 1, result.Details.Len())
+			})
+			t.Run("element quota counts only matching documents", func(t *testing.T) {
+				lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+				for _, count := range []int{10, 10, 4, 2} {
+					lists.Append(true)
+					lists.ValueBuilder().(*array.Int32Builder).AppendValues(make([]int32, count), nil)
+				}
+				values := lists.NewArray()
+				lists.Release()
+				record := array.NewRecord(arrow.NewSchema([]arrow.Field{
+					{Name: types.QueryElementIndicesFieldName, Type: values.DataType()},
+					{Name: types.SegOffsetFieldName, Type: arrow.PrimitiveTypes.Int64},
+				}, nil), []arrow.Array{values, offsets}, 4)
+				values.Release()
+				defer record.Release()
+				for _, tc := range []struct {
+					limit     int64
+					positions []int
+				}{
+					{2, []int{2}}, {4, []int{2}}, {5, []int{2, 3}}, {100, []int{2, 3}},
+				} {
+					request := req
+					request.Limit = tc.limit
+					got, err := adapter.ScanGrep(context.Background(), record, request)
+					require.NoError(t, err)
+					require.Equal(t, tc.positions, got.Positions)
+					got.Release()
+				}
+				// No element column retains document-count semantics.
+				request := req
+				request.Limit = 2
+				got, err := scanGrepOffsets(adapter, context.Background(), offsets, request)
+				require.NoError(t, err)
+				require.Equal(t, []int{2, 3}, got.Positions)
+				got.Release()
+			})
+			t.Run("context and request buffers", func(t *testing.T) {
+				for _, tc := range []struct {
+					args      string
+					matchLine int
+				}{
+					{"-A1 -e '^timeout$'", 0},
+					{"-B1 -e 'timeout timeout'", 1},
+					{"-C1 -m1 -e timeout", 0},
+				} {
+					spec, err := grep.Parse(tc.args, 65536)
+					require.NoError(t, err)
+					request := req
+					request.Spec = *spec
+					request.Limit = 4
+					request.ExecutionLimits.BatchSize = 1
+					result, err := scanGrepOffsets(adapter, context.Background(), offsets, request)
+					require.NoError(t, err)
+					var lines []struct {
+						Content         string `json:"content"`
+						Starts          []int  `json:"starts"`
+						LineNumber      int    `json:"line_number"`
+						LineStartOffset int    `json:"line_start_offset"`
+					}
+					require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(result.Details.Len()-1), &lines))
+					result.Release()
+					require.Len(t, lines, 2)
+					require.Equal(t, "timeout", lines[0].Content)
+					require.Equal(t, "timeout timeout", lines[1].Content)
+					require.NotEmpty(t, lines[tc.matchLine].Starts)
+					if tc.args == "-C1 -m1 -e timeout" {
+						require.Equal(t, []int{0, 8}, lines[1].Starts)
+					} else {
+						require.Empty(t, lines[1-tc.matchLine].Starts)
+					}
+					require.Equal(t, 2, lines[1].LineNumber)
+					require.Equal(t, 8, lines[1].LineStartOffset)
+				}
+				// The packed request also supports an empty pattern buffer.
+				spec, err := grep.Parse(`-C1 -e ""`, 65536)
+				require.NoError(t, err)
+				request := req
+				request.Spec = *spec
+				result, err := scanGrepOffsets(adapter, context.Background(), offsets, request)
+				require.NoError(t, err)
+				result.Release()
+			})
 			t.Run("per-field max-count", func(t *testing.T) {
 				for _, tc := range []struct {
 					args            string
@@ -98,7 +201,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					request.Spec = *spec
 					request.Limit = 4
 					request.ExecutionLimits.BatchSize = 1
-					result, err := adapter.ScanGrep(context.Background(), offsets, request)
+					result, err := scanGrepOffsets(adapter, context.Background(), offsets, request)
 					require.NoError(t, err)
 					require.Len(t, result.Positions, tc.rows)
 					if tc.rows > 0 {
@@ -118,20 +221,20 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			t.Run("errors", func(t *testing.T) {
 				zeroSpec := req
 				zeroSpec.Spec = grep.Spec{}
-				result, err := adapter.ScanGrep(context.Background(), offsets, zeroSpec)
+				result, err := scanGrepOffsets(adapter, context.Background(), offsets, zeroSpec)
 				require.Nil(t, result)
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 				invalid := req
 				invalidSpec, err := grep.Parse("-e '['", 65536)
 				require.NoError(t, err)
 				invalid.Spec = *invalidSpec
-				result, err = adapter.ScanGrep(context.Background(), offsets, invalid)
+				result, err = scanGrepOffsets(adapter, context.Background(), offsets, invalid)
 				require.Nil(t, result)
 				require.Error(t, err)
 				require.Equal(t, merr.InputError, merr.GetErrorType(err))
 				invalid = req
 				invalid.ExecutionLimits.MaxResultBytes = 1
-				result, err = adapter.ScanGrep(context.Background(), offsets, invalid)
+				result, err = scanGrepOffsets(adapter, context.Background(), offsets, invalid)
 				require.Nil(t, result)
 				require.Error(t, err)
 				require.Equal(t, merr.InputError, merr.GetErrorType(err))
@@ -143,7 +246,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 				require.NoError(t, err)
 				invalid.Spec = *compileSpec
 				invalid.CompileLimits.MaxRegexBytes = 1
-				result, err = adapter.ScanGrep(context.Background(), offsets, invalid)
+				result, err = scanGrepOffsets(adapter, context.Background(), offsets, invalid)
 				require.Nil(t, result)
 				require.Error(t, err)
 				require.Equal(t, merr.InputError, merr.GetErrorType(err))
@@ -155,12 +258,12 @@ func TestGrepSegmentAdapter(t *testing.T) {
 				require.False(t, merr.IsRetryableErr(remote))
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				result, err = adapter.ScanGrep(ctx, offsets, req)
+				result, err = scanGrepOffsets(adapter, ctx, offsets, req)
 				require.Nil(t, result)
 				require.ErrorIs(t, err, context.Canceled)
 				deadlineCtx, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 				defer deadlineCancel()
-				result, err = adapter.ScanGrep(deadlineCtx, offsets, req)
+				result, err = scanGrepOffsets(adapter, deadlineCtx, offsets, req)
 				require.Nil(t, result)
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			})
@@ -174,7 +277,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					}
 					invalidOffsets := builder.NewInt64Array()
 					builder.Release()
-					result, err := adapter.ScanGrep(context.Background(), invalidOffsets, req)
+					result, err := scanGrepOffsets(adapter, context.Background(), invalidOffsets, req)
 					invalidOffsets.Release()
 					require.Nil(t, result)
 					require.Error(t, err)
@@ -199,11 +302,11 @@ func TestGrepSegmentAdapter(t *testing.T) {
 				// The guard starts observing Done only after ScanGrep's entry
 				// check. Cancel there so this exercises the native error path,
 				// rather than racing a timer against the Go entry check.
-				result, err := adapter.ScanGrep(grepCancelOnDoneContext{Context: ctx, cancel: cancel}, manyOffsets, req)
+				result, err := scanGrepOffsets(adapter, grepCancelOnDoneContext{Context: ctx, cancel: cancel}, manyOffsets, req)
 				require.Nil(t, result)
 				require.ErrorIs(t, ctx.Err(), context.Canceled)
 				require.ErrorIs(t, err, merr.ErrSegcoreFollyCancel)
-				result, err = adapter.ScanGrep(context.Background(), offsets, req)
+				result, err = scanGrepOffsets(adapter, context.Background(), offsets, req)
 				require.NoError(t, err)
 				result.Release()
 			})
@@ -216,7 +319,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					wg.Add(1)
 					go func(i int) {
 						defer wg.Done()
-						results[i], errors[i] = adapter.ScanGrep(context.Background(), offsets, req)
+						results[i], errors[i] = scanGrepOffsets(adapter, context.Background(), offsets, req)
 					}(i)
 				}
 				wg.Wait()
@@ -288,7 +391,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 				defer candidates.Release()
 				scan := req
 				scan.ExecutionLimits.BatchSize = 1
-				first, err := adapter.ScanGrep(context.Background(), candidates, scan)
+				first, err := scanGrepOffsets(adapter, context.Background(), candidates, scan)
 				require.NoError(t, err)
 				jsonBytes := uint64(len(first.Details.(*array.Binary).Value(0))) + 16
 				first.Release()
@@ -303,7 +406,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					t.Run(tc.name, func(t *testing.T) {
 						scan.Limit = 2
 						scan.ExecutionLimits.MaxResultBytes = tc.budget
-						result, err := adapter.ScanGrep(context.Background(), candidates, scan)
+						result, err := scanGrepOffsets(adapter, context.Background(), candidates, scan)
 						defer result.Release()
 						require.Nil(t, result)
 						require.Error(t, err)
@@ -329,4 +432,11 @@ type grepCancelOnDoneContext struct {
 func (ctx grepCancelOnDoneContext) Done() <-chan struct{} {
 	ctx.cancel()
 	return ctx.Context.Done()
+}
+
+// Keep scalar-offset fixtures concise while exercising the RecordBatch ABI.
+func scanGrepOffsets(segment native.Segment, ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+	record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64}}, nil), []arrow.Array{offsets}, int64(offsets.Len()))
+	defer record.Release()
+	return segment.ScanGrep(ctx, record, req)
 }

@@ -77,6 +77,8 @@ struct MatchOptions {
     CaseMode case_mode = CaseMode::Sensitive;
     Boundary boundary = Boundary::None;
     std::optional<uint64_t> max_count;
+    uint64_t before_context = 0;
+    uint64_t after_context = 0;
 };
 
 // Compile limits have no production defaults; callers supply positive budgets.
@@ -157,6 +159,7 @@ class Result {
 
     bool
     Selected(size_t text) const;
+    // Includes context lines. A selected document always contains a match.
     size_t
     LineCount(size_t text) const;
     // Original field coordinates: one-based line and zero-based UTF-8 byte offset.
@@ -164,6 +167,7 @@ class Result {
     LineNumber(size_t text, size_t line) const;
     uint64_t
     LineStartOffset(size_t text, size_t line) const;
+    // Zero spans identify context; zero-width matches still have a span.
     size_t
     SpanCount(size_t text, size_t line) const;
     Span

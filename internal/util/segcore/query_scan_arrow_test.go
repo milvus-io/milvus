@@ -151,3 +151,84 @@ func TestQueryScanArrowTransport(t *testing.T) {
 		})
 	}
 }
+
+// Verify the real candidate -> C Arrow -> Go boundary, independent of the
+// public QueryScan element-filter restriction which remains enabled.
+func TestQueryScanElementCandidatesArrow(t *testing.T) {
+	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
+	require.NoError(t, initcore.InitLocalChunkManager(filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)))
+	require.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name:   "element_candidates",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "items", Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "items[price]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}}},
+		}}},
+	}
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 456, Schema: schema})
+	require.NoError(t, err)
+	defer collection.Release()
+	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{Collection: collection, SegmentID: 456, SegmentType: segcore.SegmentTypeGrowing})
+	require.NoError(t, err)
+	defer segment.Release()
+	predicate := &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+		StructName: "items", ElementExpr: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+			ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, IsElementLevel: true},
+			Op:         planpb.OpType_GreaterThan,
+			Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 50}},
+		}}},
+	}}}
+	expr, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Limit: 1, Predicates: predicate}}, OutputFieldIds: []int64{100}})
+	require.NoError(t, err)
+	plan, err := segcore.NewRetrievePlan(collection, expr, typeutil.MaxTimestamp, 0, 0, 0, 0)
+	require.NoError(t, err)
+	defer plan.Delete()
+	require.NoError(t, plan.EnableCandidateMode(0))
+	check := func(wantOffsets []int64, wantLists [][]int32, more bool) {
+		t.Helper()
+		result, err := segment.RetrieveAsArrow(ctx, plan)
+		require.NoError(t, err)
+		header, record, err := result.GetResult()
+		require.NoError(t, err)
+		result.Release()
+		defer record.Release()
+		require.True(t, header.ElementLevel)
+		require.Empty(t, header.ElementIndices)
+		require.Empty(t, header.Offset)
+		require.Equal(t, more, header.HasMoreResult)
+		require.EqualValues(t, len(wantOffsets), record.NumRows())
+		require.EqualValues(t, 2, record.NumCols())
+		require.Equal(t, "$query_element_indices", record.Schema().Field(1).Name)
+		offsets := record.Column(0).(*array.Int64)
+		lists := record.Column(1).(*array.List)
+		values := lists.ListValues().(*array.Int32)
+		for i, offset := range wantOffsets {
+			require.Equal(t, offset, offsets.Value(i))
+			start, end := lists.ValueOffsets(i)
+			require.Equal(t, wantLists[i], values.Int32Values()[start:end])
+		}
+	}
+	check(nil, nil, false)
+	long := func(v ...int64) *schemapb.ScalarField {
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: v}}}
+	}
+	_, err = segment.Insert(ctx, &segcore.InsertRequest{
+		RowIDs: []int64{0, 1, 2}, Timestamps: []uint64{1, 1, 1},
+		Record: &segcorepb.InsertRecord{NumRows: 3, FieldsData: []*schemapb.FieldData{
+			{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: long(30, 10, 20)}},
+			{FieldId: 101, Type: schemapb.DataType_Array, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64,
+					Data: []*schemapb.ScalarField{long(60, 10, 80), long(10, 60, 70, 80), long(10, 20)},
+				}},
+			}}},
+		}},
+	})
+	require.NoError(t, err)
+	check([]int64{1, 0}, [][]int32{{1, 2, 3}, {0, 2}}, false)
+	require.NoError(t, plan.EnableCandidateMode(1))
+	check([]int64{1}, [][]int32{{1, 2, 3}}, true)
+}

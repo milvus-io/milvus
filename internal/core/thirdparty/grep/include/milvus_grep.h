@@ -62,6 +62,8 @@ typedef struct {
    */
   uint32_t has_max_count;
   uint64_t max_count;
+  uint64_t before_context;
+  uint64_t after_context;
 } MgGrepMatchOptions;
 
 /**
@@ -100,8 +102,9 @@ typedef struct {
 } MgGrepSpan;
 
 /**
- * Complete matching line, minus only its terminal LF. Other bytes remain.
- * Every returned line has at least one span. Empty content is {NULL,0}.
+ * Complete matching or context line, minus only its terminal LF. Other bytes remain.
+ * Context lines have zero spans; matching lines have at least one span.
+ * Empty content is {NULL,0}.
  */
 typedef struct {
   MgGrepBytes content;

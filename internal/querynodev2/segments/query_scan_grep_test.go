@@ -37,7 +37,11 @@ import (
 
 type grepScanFunc func(context.Context, *array.Int64, native.ScanRequest) (*native.ScanResult, error)
 
-func (f grepScanFunc) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (f grepScanFunc) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	var offsets *array.Int64
+	if input != nil {
+		offsets = input.Column(input.Schema().FieldIndices("$seg_offset")[0]).(*array.Int64)
+	}
 	return f(ctx, offsets, req)
 }
 
@@ -97,7 +101,9 @@ func TestQueryScanGrepReadGateRetry(t *testing.T) {
 					return success, nil
 				}),
 			}
-			result, err := segment.ScanGrep(ctx, offsets, req)
+			record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64}}, nil), []arrow.Array{offsets}, int64(offsets.Len()))
+			defer record.Release()
+			result, err := segment.ScanGrep(ctx, record, req)
 			defer result.Release()
 			require.Equal(t, tc.calls, calls)
 			require.Nil(t, failed.Details)

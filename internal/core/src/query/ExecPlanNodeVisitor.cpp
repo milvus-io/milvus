@@ -264,6 +264,14 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     retrieve_result.total_data_cnt_ = 0;
 
     auto active_count = segment->get_active_count(timestamp_);
+    if (retrieve_candidate_budget_ && active_count == 0) {
+        retrieve_result.has_more_result = false;
+        retrieve_result.element_level_ =
+            dynamic_cast<const plan::ElementFilterBitsNode*>(
+                node.plannodes_.get()) != nullptr;
+        retrieve_result_opt_ = std::move(retrieve_result);
+        return;
+    }
 
     // Get plan
     auto plan = plan::PlanFragment(node.plannodes_);
@@ -307,6 +315,10 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     RetrieveResult& tmp_retrieve_result,
     const segcore::SegmentInternalInterface* segment,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    // Preserve element mode even when execution produces no rows.
+    tmp_retrieve_result.element_level_ =
+        dynamic_cast<const plan::ElementFilterBitsNode*>(
+            node.plannodes_.get()) != nullptr;
     if (result == nullptr) {
         // Return empty field_data arrays with correct schema (0 rows, N columns)
         // to ensure result structure matches the expected output type.
@@ -342,10 +354,20 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             auto struct_element_offsets =
                 query_context->get_struct_element_offsets();
             auto [doc_offsets, element_indices, has_more] =
-                segment->find_first_n_element(node.limit_,
+                segment->find_first_n_element(retrieve_candidate_budget_
+                                                  ? segcore::Unlimited
+                                                  : node.limit_,
                                               view,
                                               struct_element_offsets.get(),
                                               node.query_iterator_cursor_);
+            if (retrieve_candidate_budget_ &&
+                retrieve_candidate_max_rows_ > 0 &&
+                doc_offsets.size() >
+                    static_cast<size_t>(retrieve_candidate_max_rows_)) {
+                doc_offsets.resize(retrieve_candidate_max_rows_);
+                element_indices.resize(retrieve_candidate_max_rows_);
+                has_more = true;
+            }
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
             tmp_retrieve_result.has_more_result = has_more;

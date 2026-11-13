@@ -45,11 +45,13 @@ const (
 // not a valid parsed specification. Field identity and budgets belong to the
 // request, not this value.
 type Spec struct {
-	patterns    []string
-	patternKind PatternKind
-	caseMode    CaseMode
-	boundary    Boundary
-	maxCount    *uint64
+	patterns      []string
+	patternKind   PatternKind
+	caseMode      CaseMode
+	boundary      Boundary
+	maxCount      *uint64
+	beforeContext uint64
+	afterContext  uint64
 }
 
 // PatternCount returns the number of parsed patterns.
@@ -62,6 +64,9 @@ func (s Spec) Pattern(index int) string { return s.patterns[index] }
 func (s Spec) PatternKind() PatternKind { return s.patternKind }
 func (s Spec) CaseMode() CaseMode       { return s.caseMode }
 func (s Spec) Boundary() Boundary       { return s.boundary }
+
+func (s Spec) BeforeContext() uint64 { return s.beforeContext }
+func (s Spec) AfterContext() uint64  { return s.afterContext }
 
 // MaxCount limits matching lines per field value. An absent limit is unlimited;
 // an explicitly supplied zero selects no records.

@@ -155,9 +155,6 @@ func TestQueryChainReprAndExecutionBoundary(t *testing.T) {
 func TestQueryPlanChainExecutionChecks(t *testing.T) {
 	plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}}, QuerynodeFunctionChains: []*schemapb.FunctionChain{queryChainFixture()}}
 	for name, mutate := range map[string]func(*planpb.QueryPlanNode){
-		"element": func(q *planpb.QueryPlanNode) {
-			q.Predicates = &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{}}}
-		},
 		"count":       func(q *planpb.QueryPlanNode) { q.IsCount = true },
 		"group":       func(q *planpb.QueryPlanNode) { q.GroupByFieldIds = []int64{100} },
 		"aggregation": func(q *planpb.QueryPlanNode) { q.Aggregates = []*planpb.Aggregate{{}} },
@@ -181,6 +178,10 @@ func TestQueryPlanChainExecutionChecks(t *testing.T) {
 	require.True(t, proto.Equal(plan.QuerynodeFunctionChains[0], prepared.Chain))
 	require.NotSame(t, plan.QuerynodeFunctionChains[0], prepared.Chain)
 	require.Len(t, prepared.InputPlan.Inputs, 1)
+	plan.GetQuery().Predicates = &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{StructName: "items"}}}
+	prepared, err = PrepareQueryPlanChainExecution(plan, querySchemaFixture(), false)
+	require.NoError(t, err)
+	require.NotNil(t, prepared)
 	plan.QuerynodeFunctionChains[0].Ops[0].Inputs = []string{"missing"}
 	prepared, err = PrepareQueryPlanChainExecution(plan, querySchemaFixture(), false)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)

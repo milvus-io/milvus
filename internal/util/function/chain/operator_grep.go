@@ -135,15 +135,13 @@ func (o *GrepOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorRes
 	if input.NumChunks() != 1 {
 		return nil, merr.WrapErrServiceInternalMsg("grep requires one segment and one logical query chunk")
 	}
-	columns, err := o.ReadInputColumns("grep", input)
-	if err != nil {
-		return nil, err
+	columns := make([]arrow.Array, 0, len(input.ColumnNames()))
+	for _, name := range input.ColumnNames() {
+		columns = append(columns, input.Column(name).Chunk(0))
 	}
-	offsets, ok := columns[0].Chunk(0).(*array.Int64)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be Int64")
-	}
-	result, err := o.segment.ScanGrep(ctx.Context(), offsets, o.request)
+	record := array.NewRecord(input.Schema(), columns, input.NumRows())
+	defer record.Release()
+	result, err := o.segment.ScanGrep(ctx.Context(), record, o.request)
 	defer result.Release()
 	if err != nil {
 		return nil, merr.Wrap(err, "execute grep runner")

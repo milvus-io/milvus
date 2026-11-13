@@ -57,7 +57,7 @@ func TestParse(t *testing.T) {
 
 func TestParseRejectsUnsupportedAndMalformedArguments(t *testing.T) {
 	for _, input := range []string{
-		`-C 2 -e a`, `-C 0 -e a`, `-iC0 -e a`, `-U -e a`, `-P -e a`, `-S -s -e a`,
+		`-U -e a`, `-P -e a`, `-S -s -e a`,
 		`--no-fixed-strings -F -e a`, `--passthrough -e a`, `--regexp-file=file`,
 		`-h -e a`, `--help -e a`, `-V -e a`, `--version -e a`, `--unknown -e a`,
 		`--reg=a`, `--ignore-case=false -e a`, `--fixed-strings= -e a`,
@@ -158,6 +158,44 @@ func TestParseMaxCount(t *testing.T) {
 		}
 		if remote := merr.Error(merr.Status(err)); merr.IsRetryableErr(remote) {
 			t.Fatalf("invalid count must not be retried: %v", remote)
+		}
+	}
+}
+
+func TestParseContext(t *testing.T) {
+	for _, tc := range []struct {
+		args          string
+		before, after uint64
+	}{
+		{"-A2 -e hit", 0, 2}, {"-B 3 -e hit", 3, 0}, {"-iC2 -e hit", 2, 2},
+		{"--after-context=2 --before-context 3 -e hit", 3, 2},
+		{"--context 2 -e hit", 2, 2}, {"--context=0 -e hit", 0, 0},
+		{"-A0 -C3 -e hit", 3, 0}, {"-C3 -A0 -e hit", 3, 0},
+		{"-B1 -C3 -e hit", 1, 3}, {"-C3 -B1 -e hit", 1, 3},
+		{"-A1 -A2 -C3 -C4 -B0 -e hit", 0, 2},
+		{"-e -A -e -B -e -C", 0, 0},
+		{"-C18446744073709551615 -e hit", ^uint64(0), ^uint64(0)},
+	} {
+		t.Run(tc.args, func(t *testing.T) {
+			spec, err := Parse(tc.args, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if spec.BeforeContext() != tc.before || spec.AfterContext() != tc.after {
+				t.Fatalf("context = (%d,%d), want (%d,%d)", spec.BeforeContext(), spec.AfterContext(), tc.before, tc.after)
+			}
+		})
+	}
+	for _, flag := range []string{"-A", "-B", "-C", "--after-context", "--before-context", "--context"} {
+		_, err := Parse("-e hit "+flag, 65536)
+		if !errors.Is(err, merr.ErrParameterMissing) {
+			t.Fatalf("%s: %v", flag, err)
+		}
+		for _, value := range []string{"-1", "+1", "1.5", "1_000", "0x10", "18446744073709551616", "-e", "''"} {
+			spec, err := Parse(flag+" "+value+" -e hit", 65536)
+			if spec != nil || !errors.Is(err, merr.ErrParameterInvalid) || merr.IsRetryableErr(merr.Error(merr.Status(err))) {
+				t.Fatalf("%s %s: %#v %v", flag, value, spec, err)
+			}
 		}
 	}
 }

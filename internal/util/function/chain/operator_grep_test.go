@@ -49,10 +49,17 @@ func grepTestRepr(t *testing.T) *OperatorRepr {
 
 type (
 	grepTestRunner  func(context.Context, *array.Int64, int64) (*native.ScanResult, error)
-	grepTestSegment struct{ run grepTestRunner }
+	grepTestSegment struct {
+		run     grepTestRunner
+		inspect func(arrow.Record)
+	}
 )
 
-func (s grepTestSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (s grepTestSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	if s.inspect != nil {
+		s.inspect(input)
+	}
+	offsets := input.Column(input.Schema().FieldIndices(types.SegOffsetFieldName)[0]).(*array.Int64)
 	return s.run(ctx, offsets, req.Limit)
 }
 
@@ -93,6 +100,35 @@ func grepTestFrame(t *testing.T, pool memory.Allocator, values string) *DataFram
 	b.SetChunkSizes([]int64{int64(column.Len())})
 	require.NoError(t, b.addColumn(types.SegOffsetFieldName, column))
 	return b.Build()
+}
+
+func TestGrepRecordBatchSharesCompanionColumns(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	builder := NewDataFrameBuilder().SetChunkSizes([]int64{2})
+	defer builder.Release()
+	lists := selectionTestColumn(t, pool, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1,3],[0]]`)
+	require.NoError(t, builder.addColumn(types.QueryElementIndicesFieldName, lists))
+	require.NoError(t, builder.addColumn(types.SegOffsetFieldName, selectionTestColumn(t, pool, arrow.PrimitiveTypes.Int64, `[7,9]`)))
+	input := builder.Build()
+	defer input.Release()
+	runner := grepTestSegment{
+		inspect: func(record arrow.Record) {
+			require.Same(t, lists.Chunk(0), record.Column(0))
+			require.Same(t, input.Column(types.SegOffsetFieldName).Chunk(0), record.Column(1))
+		},
+		run: func(context.Context, *array.Int64, int64) (*native.ScanResult, error) {
+			return &native.ScanResult{Positions: []int{1}, Details: grepTestDetails(t, pool, "["+grepHit+"]")}, nil
+		},
+	}
+	binding := types.FunctionBuildContext{QueryScan: &types.QueryScanBuildContext{FieldID: 101, QueryLimit: 1, Segment: runner}}
+	op, err := NewGrepOpFromReprWithContext(grepTestRepr(t), binding)
+	require.NoError(t, err)
+	output, err := ExecuteOperator(types.NewFuncContext(pool), input, op)
+	require.NoError(t, err)
+	defer output.Release()
+	selected := output.Column(types.QueryElementIndicesFieldName).Chunk(0).(*array.List)
+	require.Equal(t, []int32{0}, selected.ListValues().(*array.Int32).Int32Values())
 }
 
 func TestGrepSelectionDetailsAndLimitSnapshot(t *testing.T) {
@@ -154,7 +190,7 @@ func TestGrepPreparationAndCapability(t *testing.T) {
 	result, err := ExecuteOperator(binding.execution(context.Background(), pool), input, op)
 	require.Nil(t, result)
 	require.ErrorIs(t, err, syntaxErr)
-	repr.Params["arguments"].Value = &schemapb.FunctionParamValue_StringValue{StringValue: `-C 2 -e x`}
+	repr.Params["arguments"].Value = &schemapb.FunctionParamValue_StringValue{StringValue: `-U -e x`}
 	_, err = NewGrepOpFromReprWithContext(repr, binding.Build)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
@@ -283,7 +319,8 @@ type nativeTextTestSegment struct {
 	reads   atomic.Int64
 }
 
-func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	offsets := input.Column(input.Schema().FieldIndices(types.SegOffsetFieldName)[0]).(*array.Int64)
 	s.entered <- req
 	if req.FieldID != 101 || req.Spec.PatternCount() != 1 || req.Spec.Pattern(0) != "timeout" || req.Spec.CaseMode() != grep.CaseInsensitive {
 		return nil, merr.WrapErrServiceInternalMsg("wrong grep preparation or shared pattern mutation")

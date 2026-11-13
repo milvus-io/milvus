@@ -296,9 +296,6 @@ TEST_P(RetrieveCandidatesTest, BudgetsAndCancellation) {
     auto offsets_only =
         segment->Retrieve(nullptr, plan.get(), 100, kRows * 8, false);
     EXPECT_EQ(offsets_only->offset_size(), kRows);
-    // No visible rows: the offsets fit, but serialized metadata exceeds budget.
-    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 1, 1, false); },
-               InvalidParameter);
     ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 100, 0, false); },
                UnexpectedError);
     folly::CancellationSource cancellation;
@@ -307,6 +304,24 @@ TEST_P(RetrieveCandidatesTest, BudgetsAndCancellation) {
         nullptr, plan.get(), 100, 4096, false, cancellation.getToken(), 0, 0));
     EXPECT_ANY_THROW(segment->RetrieveIdentitiesByOffsets(
         nullptr, plan.get(), nullptr, 0, true, cancellation.getToken()));
+}
+
+TEST_P(RetrieveCandidatesTest, SerializedMetadataBudget) {
+    SetMode(RetrieveModeCandidates);
+    // Keep active rows, but match only a row newer than the query timestamp.
+    // A timestamp before every insert short-circuits growing retrieval and
+    // produces a zero-byte result, so it cannot exercise this budget check.
+    auto filter = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(pk, std::get<1>(GetParam()), {}),
+        std::vector<proto::plan::GenericValue>{PkValue(20)});
+    plan->plan_node_->plannodes_ = test::CreateRetrievePlanByExpr(filter);
+    auto empty = segment->Retrieve(nullptr, plan.get(), 15, 4096, false);
+    ASSERT_EQ(empty->offset_size(), 0);
+    ASSERT_GT(empty->all_retrieve_count(), 0);
+    ASSERT_GT(empty->ByteSizeLong(), 1);
+    // No offsets to allocate: only serialized metadata exceeds the budget.
+    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 15, 1, false); },
+               InvalidParameter);
 }
 
 TEST_P(RetrieveCandidatesTest, CandidateRowCap) {

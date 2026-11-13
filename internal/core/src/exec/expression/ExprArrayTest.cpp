@@ -7008,6 +7008,71 @@ RunElementLevelMatrix(const ElementLevelFixture& f,
 
 }  // namespace
 
+TEST(Expr, QueryScanElementCandidates) {
+    auto f = BuildElementLevelMatrixFixture();
+    auto predicate = ElementLevelExprs::Unary(
+        ElementLevelExprs::Scalar(f.a, DataType::INT64),
+        proto::plan::GreaterThan,
+        ElementLevelExprs::Int(-1000));
+    RunElementLevelMatrix(
+        f,
+        [&](SegmentInternalInterface* segment, bool, const std::string& kind) {
+            SCOPED_TRACE(kind);
+            auto plan = std::make_unique<query::RetrievePlan>(
+                segment->get_schema_snapshot());
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            auto mvcc = std::make_shared<plan::MvccNode>("candidate_mvcc");
+            plan->plan_node_->plannodes_ =
+                std::make_shared<plan::ElementFilterBitsNode>(
+                    "element_candidates",
+                    predicate,
+                    "s",
+                    std::vector<plan::PlanNodePtr>{mvcc});
+            plan->plan_node_->limit_ = segcore::Unlimited;
+            auto expected = segment->Retrieve(nullptr,
+                                              plan.get(),
+                                              MAX_TIMESTAMP,
+                                              DEFAULT_MAX_OUTPUT_SIZE,
+                                              false);
+            ASSERT_GT(expected->offset_size(), 1);
+            plan->plan_node_->limit_ = 1;
+            plan->mode_ = query::RetrieveMode::Candidates;
+            auto actual = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            ASSERT_TRUE(actual->element_level());
+            ASSERT_EQ(actual->offset_size(), expected->offset_size());
+            ASSERT_EQ(actual->element_indices_size(), actual->offset_size());
+            for (int i = 0; i < actual->offset_size(); ++i) {
+                EXPECT_EQ(actual->offset(i), expected->offset(i));
+                EXPECT_EQ(actual->element_indices(i).SerializeAsString(),
+                          expected->element_indices(i).SerializeAsString());
+            }
+            EXPECT_TRUE(actual->fields_data().empty());
+            EXPECT_FALSE(actual->has_ids());
+            EXPECT_FALSE(actual->has_more_result());
+            plan->max_candidate_rows_ = 1;
+            auto capped = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            ASSERT_EQ(capped->offset_size(), 1);
+            EXPECT_TRUE(capped->has_more_result());
+            EXPECT_EQ(capped->element_indices(0).SerializeAsString(),
+                      expected->element_indices(0).SerializeAsString());
+            plan->max_candidate_rows_ = 0;
+            try {
+                segment->Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, 8, false);
+                FAIL() << "expected candidate byte-budget failure";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), InvalidParameter);
+            }
+        });
+}
+
 TEST(Expr, ElementLevelFilterOnElementNullableSubFields) {
     auto f = BuildElementLevelMatrixFixture();
     ASSERT_EQ(f.num_elements(), 11);
