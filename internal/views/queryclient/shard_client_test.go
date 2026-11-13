@@ -2,11 +2,11 @@ package queryclient
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -428,7 +428,6 @@ func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.Wo
 		return f.searchResponse, nil
 	}
 	return &viewpb.SearchOnViewResponse{}, nil
-
 }
 
 func (f *fakeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {

@@ -248,8 +248,10 @@ func (*fakeLegacyQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {
 	return nil, nil
 }
 
-var _ searchreducestream.ReduceStream = (*fakeLegacySearchStream)(nil)
-var _ queryreducestream.ReduceStream = (*fakeLegacyQueryStream)(nil)
+var (
+	_ searchreducestream.ReduceStream = (*fakeLegacySearchStream)(nil)
+	_ queryreducestream.ReduceStream  = (*fakeLegacyQueryStream)(nil)
+)
 
 func newQueryViewSearchTask(t *testing.T, legacy queryclient.LegacyClient, topK int64) *SearchTask {
 	t.Helper()
@@ -360,7 +362,8 @@ func TestQueryScanStreamComputedResultsMatchBatch(t *testing.T) {
 							}
 							input.FieldsData = append(input.FieldsData, makeTestInt64Field(1, "", timestamps))
 							input.ComputedResults[0].FieldId = 300 + child // Computed identities are names, not IDs.
-							jsonField := &schemapb.FieldData{FieldName: "scan.matches", Type: schemapb.DataType_JSON,
+							jsonField := &schemapb.FieldData{
+								FieldName: "scan.matches", Type: schemapb.DataType_JSON,
 								Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: details}}}},
 							}
 							input.ComputedResults = append(input.ComputedResults, jsonField)
@@ -1083,7 +1086,7 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 }
 
 func TestQueryTaskGroupedOrderByDrainErrors(t *testing.T) {
-	for _, tail := range []error{io.EOF, io.ErrUnexpectedEOF, context.Canceled} {
+	for _, tail := range []error{io.EOF, io.ErrUnexpectedEOF, context.Canceled, context.DeadlineExceeded} {
 		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
 			{chunk: newFinalQueryChunk([]int64{3, 2}, 10)},
 			{chunk: newFinalQueryChunk([]int64{1}, 20)},
@@ -1102,7 +1105,12 @@ func TestQueryTaskGroupedOrderByDrainErrors(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []int64{3, 2, 1}, task.resultBuf.Collect()[0].GetFieldsData()[0].GetScalars().GetLongData().GetData())
 		} else {
-			require.ErrorIs(t, err, tail)
+			if merr.IsCanceledOrTimeout(tail) {
+				require.True(t, merr.IsCanceledOrTimeout(err))
+				require.Equal(t, merr.Code(tail), merr.Code(err))
+			} else {
+				require.ErrorIs(t, err, tail)
+			}
 			require.Empty(t, task.resultBuf.Collect())
 		}
 		require.Equal(t, 3, stream.next)
@@ -1143,7 +1151,9 @@ func TestQueryTaskConsumesElementChunks(t *testing.T) {
 	task := newQueryViewQueryTask(t, nil, 4)
 	output, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
 		{chunk: &internalpb.RetrieveResults{Status: merr.Success(), ElementLevel: true}},
-		{chunk: first}, {chunk: second}, {err: io.ErrUnexpectedEOF},
+		{chunk: first},
+		{chunk: second},
+		{err: io.ErrUnexpectedEOF},
 	}})
 	require.NoError(t, err)
 	require.True(t, output.GetElementLevel())

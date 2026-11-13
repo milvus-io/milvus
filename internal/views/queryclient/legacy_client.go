@@ -2,9 +2,9 @@ package queryclient
 
 import (
 	"context"
-	"errors"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 

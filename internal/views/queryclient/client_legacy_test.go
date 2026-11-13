@@ -2,13 +2,13 @@ package queryclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -194,8 +194,10 @@ func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
 			)
 			result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
 				AllowStreaming: enabled, ReduceStreamChunkBytes: 1,
-				Req: &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
-					Nq: 1, Topk: 2, GroupSize: 2, GroupByFieldIds: []int64{101}, MetricType: "IP"},
+				Req: &internalpb.SearchRequest{
+					CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+					Nq: 1, Topk: 2, GroupSize: 2, GroupByFieldIds: []int64{101}, MetricType: "IP",
+				},
 			})
 			require.NoError(t, err)
 			if !enabled {
@@ -634,8 +636,10 @@ func TestLegacyClientQueryGlobalAggregateStreams(t *testing.T) {
 			client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1},
 				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: plan}}, service,
 				&legacyResolver{vchannels: []string{shard.VChannel}})
-			req := &internalpb.RetrieveRequest{CollectionID: 100, Limit: typeutil.Unlimited,
-				Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 100}}}
+			req := &internalpb.RetrieveRequest{
+				CollectionID: 100, Limit: typeutil.Unlimited,
+				Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 100}},
+			}
 			result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
 				Req: req, AllowStreaming: true, ReduceStreamChunkBytes: 1,
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
@@ -883,6 +887,7 @@ func (c *legacyServiceClient) QueryOnViewStream(ctx context.Context, node qviews
 		recv: []fakeQueryStreamRecv{{chunk: c.queryResults[req.GetShardId().GetVchannel()]}},
 	}, nil
 }
+
 func legacySearchPlan(shardID qviews.ShardID, node qviews.QueryNode) *viewpb.QueryPlan {
 	return &viewpb.QueryPlan{
 		ShardId: shardID.IntoProto(),

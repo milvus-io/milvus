@@ -83,7 +83,7 @@ func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	require.Equal(t, []int64{20, 30, 40}, task.reducedSubResults[0].GetResults().GetIds().GetIntId().GetData())
 	require.Equal(t, []int64{50, 60}, task.reducedSubResults[1].GetResults().GetIds().GetIntId().GetData())
 	require.Equal(t, []float32{.1, .2}, task.reducedSubResults[1].GetResults().GetScores())
-	require.Equal(t, []string{"IP", "L2"}, task.reducedSubMetrics)
+	require.Equal(t, []searchScoreInfo{newSearchScoreInfo("IP", false), newSearchScoreInfo("L2", false)}, task.reducedSubScoreInfos)
 	require.EqualValues(t, 3, task.reducedFeatureBits)
 	require.Equal(t, 1, first.closeCalls)
 	require.Equal(t, 1, second.closeCalls)
@@ -172,7 +172,7 @@ func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
 						require.NoError(t, err)
 						defer stream.Close()
 						task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
-						actual, _, err := task.consumeSearchResultStream(stream, request, metric, func(*internalpb.SearchResults) {})
+						actual, _, err := task.consumeSearchResultStream(stream, request, newSearchScoreInfo(metric, false), func(*internalpb.SearchResults) {})
 						require.NoError(t, err)
 						require.True(t, proto.Equal(batch.GetResults(), actual.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), actual.GetResults())
 					})
@@ -188,7 +188,7 @@ func TestHybridGroupStreamingEmptyCandidates(t *testing.T) {
 	require.NoError(t, err)
 	defer stream.Close()
 	task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
-	result, _, err := task.consumeSearchResultStream(stream, request, "IP", func(*internalpb.SearchResults) {})
+	result, _, err := task.consumeSearchResultStream(stream, request, newSearchScoreInfo("IP", false), func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, []int64{0, 0}, result.GetResults().GetTopks())
 	require.Zero(t, typeutil.GetSizeOfIDs(result.GetResults().GetIds()))
@@ -256,7 +256,7 @@ func (s *SearchPipelineSuite) TestHybridStreamingHandoffMatchesBatch() {
 			s.Require().NoError(err)
 			reduced, err := op.run(context.Background(), s.span, inputs)
 			s.Require().NoError(err)
-			streamed, _, err := p.RunFromReduced(context.Background(), s.span, reduced[0].([]*milvuspb.SearchResults), reduced[1].([]string), segcore.StorageCost{})
+			streamed, _, err := p.RunFromReduced(context.Background(), s.span, reduced[0].([]*milvuspb.SearchResults), reduced[1].([]searchScoreInfo), segcore.StorageCost{})
 			s.Require().NoError(err)
 			s.Equal(batch.GetResults(), streamed.GetResults())
 		})
@@ -304,13 +304,18 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 								if strategy == "function-score" {
 									return // function_score with sub-search chains is rejected by request validation.
 								}
-								task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l0FunctionChain(), l1LimitFunctionChain(2)}
+								task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{
+									l0FunctionChain(mapOp("$score", "num_combine", columnArg("$score"), columnArg("$score"))),
+									l1LimitFunctionChain(2),
+								}
 								task.queryInfos = []*planpb.QueryInfo{{}, {}}
 							}
 							task.rankParams.limit, task.rankParams.offset, task.rankParams.roundDecimal = 2, 1, -1
 							task.hybridSubSearchInfos = make([]hybridSubSearchInfo, 2)
 							batch := make([]*milvuspb.SearchResults, 2)
 							streams := make([]searchreducestream.ReduceStream, 2)
+							rewritten := task.subSearchScoresRewritten()
+							s.Equal([]bool{tc.name == "worker-l0-l1", false}, rewritten)
 							for index, kind := range tc.kinds {
 								task.SubReqs[index].Nq, task.SubReqs[index].Topk = nq, 4
 								task.SubReqs[index].Offset = int64(index)
@@ -365,15 +370,16 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 									children[channel], err = searchreducestream.NewShardReduceStream(request, workers, 20)
 									s.Require().NoError(err)
 								}
-								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset(), false)
+								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset(), scoreRewrittenAt(rewritten, index))
 								s.Require().NoError(err)
 								streams[index], err = searchreducestream.NewReduceStream(request, children, 20)
 								s.Require().NoError(err)
 							}
 							s.Require().True(task.supportsStreamingReduce())
-							streamed, metrics, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
+							streamed, scoreInfos, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
 							s.Require().NoError(err)
 							for i := range batch {
+								s.Equal(newSearchScoreInfo(metric, scoreRewrittenAt(rewritten, i)), scoreInfos[i])
 								if len(batch[i].GetResults().GetScores()) == 0 {
 									s.Empty(streamed[i].GetResults().GetScores())
 									s.Zero(typeutil.GetSizeOfIDs(streamed[i].GetResults().GetIds()))
@@ -385,9 +391,9 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 							pipeline, err := newPipeline(hybridSearchPipe, task)
 							s.Require().NoError(err)
 							s.Require().NoError(pipeline.AddNodes(task, endNode))
-							expected, _, err := pipeline.RunFromReduced(context.Background(), s.span, batch, metrics, segcore.StorageCost{})
+							expected, _, err := pipeline.RunFromReduced(context.Background(), s.span, batch, scoreInfos, segcore.StorageCost{})
 							s.Require().NoError(err)
-							actual, _, err := pipeline.RunFromReduced(context.Background(), s.span, streamed, metrics, segcore.StorageCost{})
+							actual, _, err := pipeline.RunFromReduced(context.Background(), s.span, streamed, scoreInfos, segcore.StorageCost{})
 							s.Require().NoError(err)
 							s.Equal(expected.GetResults(), actual.GetResults())
 						})

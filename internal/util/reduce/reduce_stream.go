@@ -18,9 +18,10 @@ package reduce
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )

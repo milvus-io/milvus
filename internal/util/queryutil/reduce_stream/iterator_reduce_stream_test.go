@@ -73,8 +73,11 @@ func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
 		mode  reduce.IReduceType
 		limit int64
 	}{
-		{reduce.IReduceNoOrder, 10}, {reduce.IReduceInOrder, 10}, {reduce.IReduceInOrderForBest, 10},
-		{reduce.IReduceInOrder, typeutil.Unlimited}, {reduce.IReduceInOrderForBest, typeutil.Unlimited},
+		{reduce.IReduceNoOrder, 10},
+		{reduce.IReduceInOrder, 10},
+		{reduce.IReduceInOrderForBest, 10},
+		{reduce.IReduceInOrder, typeutil.Unlimited},
+		{reduce.IReduceInOrderForBest, typeutil.Unlimited},
 	} {
 		mode := tc.mode
 		for _, shardLocal := range []bool{false, true} {

@@ -296,7 +296,7 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				streams[reqIdx], err = searchreducestream.NewHybridGroupReduceStream(request, children, 1)
 				require.NoError(t, err)
 			}
-			streamed, metrics, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
+			streamed, scoreInfos, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
 			require.NoError(t, err)
 			for i := range results {
 				fillFieldNames(task.schema.CollectionSchema, streamed[i].GetResults())
@@ -306,7 +306,7 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			require.NoError(t, err)
 			ranked, err := ranker.run(ctx, span, reduced...)
 			require.NoError(t, err)
-			streamRanked, err := ranker.run(ctx, span, streamed, metrics)
+			streamRanked, err := ranker.run(ctx, span, streamed, scoreInfos)
 			require.NoError(t, err)
 			require.True(t, proto.Equal(ranked[0].(*milvuspb.SearchResults), streamRanked[0].(*milvuspb.SearchResults)))
 			assembler, err := newHybridAssembleOperator(task, nil)

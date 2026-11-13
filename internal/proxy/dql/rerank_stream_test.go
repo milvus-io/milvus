@@ -305,6 +305,7 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 		{name: "L0 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
 		{name: "boost only", workerOnly: true, boost: true},
 		{name: "L1 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
+		{name: "L1 limit only", workerOnly: true},
 		{name: "L0 and L1", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
 		{name: "L0 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
 		{name: "L1 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
@@ -412,6 +413,9 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 								Stage: stage, Ops: []*schemapb.FunctionChainOp{mapOp("$score", "num_combine", columnArg("$score"), columnArg("rank"))},
 							})
 						}
+						if tc.name == "L1 limit only" {
+							task.request.FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(4)}
+						}
 
 						var batchShards []*internalpb.SearchResults
 						var vchannels []searchreducestream.ReduceStream
@@ -485,6 +489,7 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 						legacy.searchResult = &queryclient.LegacySearchResult{Stream: stream}
 						require.True(t, task.supportsStreamingReduce())
 						require.NoError(t, task.executeByQueryView(ctx))
+						require.Equal(t, newSearchScoreInfo(metric, len(tc.workerStages) > 0), task.reducedScoreInfo)
 						require.True(t, legacy.lastSearchRequest.AllowStreaming)
 						require.Empty(t, task.resultBuf.Collect())
 						for _, leaf := range leaves {

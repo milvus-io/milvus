@@ -18,13 +18,13 @@ package viewquery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -77,6 +77,7 @@ type sendStatusSearchStream struct {
 func (s *sendStatusSearchStream) Send(*viewpb.SearchOnViewStreamRequest) error {
 	return s.state.sendErr
 }
+
 func (s *sendStatusSearchStream) Recv() (*viewpb.SearchOnViewStreamResponse, error) {
 	return nil, s.state.recvErr
 }
@@ -500,16 +501,20 @@ func TestQueryOnViewStreamPreservesComputedResults(t *testing.T) {
 		if empty {
 			ids, details = nil, nil
 		}
-		result := &internalpb.RetrieveResults{Status: merr.Success(),
-			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
-			FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64,
+		result := &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100, Type: schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
 			}},
-			ComputedResults: []*schemapb.FieldData{{FieldName: "matches", Type: schemapb.DataType_JSON,
+			ComputedResults: []*schemapb.FieldData{{
+				FieldName: "matches", Type: schemapb.DataType_JSON,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: details}}}},
 			}},
 		}
-		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{{Name: "scan",
+		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{{
+			Name:  "scan",
 			Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan, OutputColumns: []string{"matches"},
 			Ops: []*schemapb.FunctionChainOp{{Op: "grep", Inputs: []string{"text"}, Outputs: []string{"matches"}}},
 		}}}

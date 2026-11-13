@@ -82,6 +82,7 @@ func (c *compositeViewQueryServiceClient) QueryOnViewStream(ctx context.Context,
 		return nil, invalidWorkNodeError(node)
 	}
 }
+
 func invalidWorkNodeError(node qviews.WorkNode) error {
 	if node == nil {
 		return viewerror.NewUnknownError("nil query view work node")

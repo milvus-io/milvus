@@ -84,20 +84,26 @@ func TestRetrieveUnitComputedBytes(t *testing.T) {
 func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
 	result.FieldsData = append(result.FieldsData,
-		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldId: 102,
+		&schemapb.FieldData{
+			Type: schemapb.DataType_VarChar, FieldId: 102,
 			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "", "longer"}}},
-			}}},
-		&schemapb.FieldData{Type: schemapb.DataType_JSON, FieldId: 103,
+			}},
+		},
+		&schemapb.FieldData{
+			Type: schemapb.DataType_JSON, FieldId: 103,
 			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte("{}"), nil, []byte("[1]")}}},
-			}}},
-		&schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 104, ValidData: []bool{true, false, true},
+			}},
+		},
+		&schemapb.FieldData{
+			Type: schemapb.DataType_SparseFloatVector, FieldId: 104, ValidData: []bool{true, false, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
 				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 					Contents: [][]byte{make([]byte, 8), make([]byte, 16)},
 				}},
-			}}},
+			}},
+		},
 	)
 	calculator := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
 	for row := 0; row < 3; row++ {
@@ -123,10 +129,12 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 
 func TestBuildRetrieveChunkReusesSources(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
-	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 104,
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_SparseFloatVector, FieldId: 104,
 		ValidData: []bool{true, false, true}, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
 			Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{make([]byte, 8), make([]byte, 16)}}},
-		}}})
+		}},
+	})
 	other := proto.Clone(result).(*internalpb.RetrieveResults)
 	other.GetFieldsData()[1].GetVectors().GetSparseFloatVector().Contents[0][0] = 3
 	for i := range other.GetIds().GetIntId().Data {
@@ -164,8 +172,10 @@ func TestRetrieveUnitByteSizeVectorArray(t *testing.T) {
 		if valid {
 			array.Data = []*schemapb.VectorField{{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}
 		}
-		result.FieldsData = append(result.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_ArrayOfVector, FieldId: 101,
-			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: []bool{valid}, Data: &schemapb.VectorField_VectorArray{VectorArray: array}}}})
+		result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+			Type: schemapb.DataType_ArrayOfVector, FieldId: 101,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: []bool{valid}, Data: &schemapb.VectorField_VectorArray{VectorArray: array}}},
+		})
 		unit := queryReduceUnit{result: result}
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)

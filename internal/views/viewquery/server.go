@@ -2,9 +2,9 @@ package viewquery
 
 import (
 	"context"
-	"errors"
 	"io"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
