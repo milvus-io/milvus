@@ -155,10 +155,10 @@ func TestSearchTaskRequerySchemaChangeRebuildsProjection(t *testing.T) {
 	}}})
 	require.NoError(t, err)
 	request := &milvuspb.SearchRequest{
-		CollectionName:   "test_collection",
-		Dsl:              "id >= 0",
-		OutputFields:     []string{"clips"},
-		PlaceholderGroup: placeholder,
+		CollectionName: "test_collection",
+		Dsl:            "id >= 0",
+		OutputFields:   []string{"clips"},
+		SearchInput:    &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
 		SearchParams: []*commonpb.KeyValuePair{
 			{Key: AnnsFieldKey, Value: "vector"},
 			{Key: TopKKey, Value: "1"},
