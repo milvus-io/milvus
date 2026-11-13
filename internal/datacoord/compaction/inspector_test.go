@@ -207,6 +207,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(s.mockCatalog)
 	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	s.handler = NewCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, s.mockCleaner, s.mockAlloc, nil, mockScheduler, mockScheduler, index.NewTestVersionManager())
 	s.mockHandler = meta.NewNMockHandler(s.T())
@@ -732,6 +733,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.NoError(err)
 	t := handler.getCompactionTask(1)
 	s.NotNil(t)
+	s.Equal(uint64(1000), t.GetTaskProto().GetCreateTs())
 	task.PlanID = 2
 	err = s.handler.EnqueueCompaction(task)
 	s.NoError(err)

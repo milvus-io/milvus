@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
@@ -640,4 +641,24 @@ func TestTxnWithPredicates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConditionalCreatePreservesExistingValue(t *testing.T) {
+	ctx := t.Context()
+	kv := NewTiKV(txnClient, "/tikv/test/conditional-create")
+	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
+
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"target": "first"}, nil, predicates.KeyNotExist("target")))
+	require.Error(t, kv.MultiSaveAndRemove(ctx, map[string]string{"target": "second"}, nil, predicates.KeyNotExist("target")))
+	current, err := kv.Load(ctx, "target")
+	require.NoError(t, err)
+	require.Equal(t, "first", current)
+
+	previousCommit := commitTxn
+	defer func() { commitTxn = previousCommit }()
+	commitTxn = func(context.Context, *transaction.KVTxn) error {
+		return tikverr.ErrResultUndetermined
+	}
+	err = kv.MultiSaveAndRemove(ctx, map[string]string{"new": "value"}, nil, predicates.KeyNotExist("new"))
+	require.True(t, tikverr.IsErrorUndetermined(err), "got %v", err)
 }

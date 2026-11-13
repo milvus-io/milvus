@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
@@ -109,6 +110,9 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
+	compactionTargetCollection       func(context.Context, int64) (*datapb.CompactionTargetResource, bool, error)
+	checkCompactionTargetReplication func(context.Context) error
+
 	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
@@ -219,6 +223,12 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 }
 
 // WithSegmentManager returns an Option to set SegmentManager
+// WithCompactionTargetCollection wires authoritative RootCoord identity into
+// DataCoord. The DataCoord collection cache is used for physical scheduling.
+func WithCompactionTargetCollection(lookup func(context.Context, int64) (*datapb.CompactionTargetResource, bool, error)) Option {
+	return func(s *Server) { s.compactionTargetCollection = lookup }
+}
+
 func WithSegmentManager(manager segment.Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
@@ -229,15 +239,16 @@ func WithSegmentManager(manager segment.Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                              ctx,
+		quitCh:                           make(chan struct{}),
+		factory:                          factory,
+		flushCh:                          make(chan UniqueID, 1024),
+		notifyIndexChan:                  make(chan UniqueID, 1024),
+		dataNodeCreator:                  defaultDataNodeCreatorFunc,
+		importJobLock:                    lock.NewKeyLock[int64](),
+		metricsCacheManager:              metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:                   metricsinfo.NewMetricsRequest(),
+		checkCompactionTargetReplication: validateCompactionTargetReplication,
 	}
 
 	for _, opt := range opts {
@@ -756,9 +767,12 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 func (s *Server) initCompaction() {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.meta.Catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.SetCompactionTargetMeta(s.compactionTargetMeta)
 	cph.LoadMeta()
 	s.compactionInspector = cph
-	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.indexEngineVersionManager)
+	manager := compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.indexEngineVersionManager)
+	manager.SetCompactionTargetMeta(s.compactionTargetMeta)
+	s.compactionTriggerManager = manager
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
@@ -1361,6 +1375,7 @@ func (s *Server) listLoadedSegments(ctx context.Context) ([]int64, error) {
 
 // domainMetas holds the per-domain metas that Server owns.
 type domainMetas struct {
+	compactionTargetMeta          *targets.CompactionTargetMeta
 	indexMeta                     *index.IndexMeta
 	analyzeMeta                   *analyze.AnalyzeMeta
 	partitionStatsMeta            *partitionstats.PartitionStatsMeta
@@ -1420,6 +1435,14 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 			out.snapshotMeta, err = snapshot.NewSnapshotMeta(ctx, catalog, chunkManager)
 			return err
 		})
+
+		if Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+			g.Go(func() error {
+				var err error
+				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+				return err
+			})
+		}
 
 		return func() (meta.SegmentIndexCatalog, meta.CompactionProtection) {
 			return out.indexMeta, out.snapshotMeta

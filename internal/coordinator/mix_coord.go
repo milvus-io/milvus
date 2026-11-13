@@ -104,7 +104,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
-	dataCoordServer := datacoord.CreateServer(c, factory)
+	dataCoordServer := datacoord.CreateServer(c, factory, datacoord.WithCompactionTargetCollection(rootCoordServer.CompactionTargetCollection))
 
 	return &mixCoordImpl{
 		ctx:              ctx,

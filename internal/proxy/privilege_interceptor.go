@@ -97,6 +97,10 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		if authorizationDisabled() {
 			return ctx, nil
 		}
+        if _, ok := req.(*milvuspb.CreateCompactionTargetRequest); ok {
+            // The handler checks Compaction on the current stable identity.
+            return ctx, nil
+        }
 		mlog.RatedDebug(ctx, rate.Limit(60), "PrivilegeInterceptor", mlog.String("type", reflect.TypeOf(req).String()))
 		privilegeReq := collectionMetadataPrivilegeRequest(req)
 		privilegeExt, err := funcutil.GetPrivilegeExtObj(privilegeReq)

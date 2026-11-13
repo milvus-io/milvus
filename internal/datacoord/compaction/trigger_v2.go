@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
@@ -52,6 +53,7 @@ const (
 	SingleTicker
 	BumpSchemaVersionTicker
 	StorageVersionTicker
+	TargetTicker
 )
 
 type TriggerManager interface {
@@ -120,6 +122,12 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	return m
 }
 
+func (m *CompactionTriggerManager) SetCompactionTargetMeta(targetMeta *targets.CompactionTargetMeta) {
+	if targetMeta != nil {
+		m.policies[TargetTicker] = targets.NewCompactionTargetReconciler(m.meta, m.indexMeta, targetMeta, m.handler)
+	}
+}
+
 // InitForceMergeMemoryQuerier initializes the topology querier for force merge auto calculation
 func (m *CompactionTriggerManager) InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface) {
 	if m.forceMergePolicy != nil {
@@ -177,6 +185,9 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, ClusteringTicker)
 		case <-singleTicker.C:
 			m.handleTicker(ctx, SingleTicker)
+			if m.policies[TargetTicker] != nil {
+				m.handleTicker(ctx, TargetTicker)
+			}
 		case <-storageVersionTicker.C:
 			m.handleTicker(ctx, StorageVersionTicker)
 		case <-bumpSchemaVersionTicker.C:
@@ -208,7 +219,7 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 		return
 	}
 
-	if m.inspector.isFull() {
+	if tickerType != TargetTicker && m.inspector.isFull() {
 		mlog.RatedInfo(ctx, rate.Limit(10), "Skip dispatching compaction events since inspector is full",
 			mlog.String("policy", pol.Name()))
 		return
@@ -478,10 +489,19 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		totalRows += s.NumOfRows
 	}
 
+	triggerID := cv.GetTriggerID()
+	if triggerID == 0 {
+		triggerID, err = m.allocator.AllocID(ctx)
+		if err != nil {
+			log.Warn(ctx, "failed to allocate compaction trigger ID", mlog.Err(err))
+			return
+		}
+	}
+
 	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
 		PlanID:                 planID,
-		TriggerID:              cv.(*policy.MixSegmentView).TriggerID,
+		TriggerID:              triggerID,
 		State:                  datapb.CompactionTaskState_pipelining,
 		StartTime:              now,
 		CollectionTtl:          cv.GetCollectionTTL().Nanoseconds(),

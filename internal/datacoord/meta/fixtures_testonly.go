@@ -1225,6 +1225,26 @@ func (s *MockMixCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetS
 	panic("implement me")
 }
 
+func (s *MockMixCoord) CreateCompactionTarget(ctx context.Context, req *datapb.CreateCompactionTargetRequest) (*datapb.CreateCompactionTargetResponse, error) {
+	return nil, nil
+}
+
+func (s *MockMixCoord) GetCompactionTargetBinding(ctx context.Context, req *datapb.GetCompactionTargetBindingRequest) (*datapb.GetCompactionTargetBindingResponse, error) {
+	return nil, nil
+}
+
+func (s *MockMixCoord) DescribeCompactionTarget(ctx context.Context, req *datapb.DescribeCompactionTargetRequest) (*datapb.DescribeCompactionTargetResponse, error) {
+	return nil, nil
+}
+
+func (s *MockMixCoord) ListCompactionTargets(ctx context.Context, req *datapb.ListCompactionTargetsRequest) (*datapb.ListCompactionTargetsResponse, error) {
+	return nil, nil
+}
+
+func (s *MockMixCoord) DropCompactionTarget(ctx context.Context, req *datapb.DropCompactionTargetRequest) (*datapb.DropCompactionTargetResponse, error) {
+	return nil, nil
+}
+
 func (s *MockMixCoord) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	panic("implement me")
 }
@@ -1581,5 +1601,13 @@ func BuildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommit
 	return message.BroadcastResultCommitImportMessageV2{
 		Message: message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *messagespb.CommitImportMessageBody](broadcastMsg),
 		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func NewTestMetaForCompactionTargets() *Meta {
+	return &Meta{
+		Ctx:         context.Background(),
+		Segments:    NewSegmentsInfo(),
+		Collections: typeutil.NewConcurrentMap[int64, *CollectionInfo](),
 	}
 }

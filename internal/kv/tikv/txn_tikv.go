@@ -453,17 +453,8 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	for _, pred := range preds {
-		key := kv.GetPath(pred.Key())
-		val, err := txn.Get(ctx, []byte(key))
-		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-			return loggingErr
-		}
-		if !pred.IsTrue(val.Value) {
-			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
+	if loggingErr = kv.checkPredicates(ctx, txn, preds); loggingErr != nil {
+		return loggingErr
 	}
 
 	// use complement to remove keys that are not in saves
@@ -496,10 +487,28 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 
 	err = kv.executeTxn(ctx, txn)
 	if err != nil {
-		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemove", err.Error())
+		loggingErr = merr.WrapErrIoFailedErr(err, "Failed to commit for MultiSaveAndRemove")
 		return loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removals", removals))
+	return nil
+}
+
+func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
+	for _, pred := range preds {
+		key := kv.GetPath(pred.Key())
+		value, err := txn.Get(ctx, []byte(key))
+		if pred.Target() == predicates.PredTargetKeyExistence && pred.Type() == predicates.PredTypeNotExist &&
+			tikverr.IsErrNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return merr.WrapErrIoFailedErr(err, "failed to read predicate target %s", pred.Key())
+		}
+		if !pred.IsTrue(value.Value) {
+			return merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+		}
+	}
 	return nil
 }
 
@@ -521,17 +530,8 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	for _, pred := range preds {
-		key := kv.GetPath(pred.Key())
-		val, err := txn.Get(ctx, []byte(key))
-		if err != nil {
-			loggingErr = merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-			return loggingErr
-		}
-		if !pred.IsTrue(val.Value) {
-			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
+	if loggingErr = kv.checkPredicates(ctx, txn, preds); loggingErr != nil {
+		return loggingErr
 	}
 
 	// Remove keys with prefix
@@ -584,7 +584,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 
 	err = kv.executeTxn(ctx, txn)
 	if err != nil {
-		loggingErr = merr.WrapErrIoFailedReason("Failed to commit for MultiSaveAndRemoveWithPrefix", err.Error())
+		loggingErr = merr.WrapErrIoFailedErr(err, "Failed to commit for MultiSaveAndRemoveWithPrefix")
 		return loggingErr
 	}
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removals", removals))

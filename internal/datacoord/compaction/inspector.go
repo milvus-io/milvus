@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -77,12 +78,12 @@ type Inspector struct {
 	cleaningGuard lock.RWMutex
 	cleaningTasks map[int64]ctask.CompactionTask // planID -> task
 
-	meta               meta.CompactionMeta
-	compactionTaskMeta *ctask.CompactionTaskMeta
-	indexMeta          *index.IndexMeta
-	analyzeMeta        *analyze.AnalyzeMeta
-	partitionStatsMeta *partitionstats.PartitionStatsMeta
-	// compactionTargetMeta refines the state of a trigger that has a compaction target; nil disables it.
+	meta                 meta.CompactionMeta
+	compactionTaskMeta   *ctask.CompactionTaskMeta
+	indexMeta            *index.IndexMeta
+	analyzeMeta          *analyze.AnalyzeMeta
+	partitionStatsMeta   *partitionstats.PartitionStatsMeta
+	compactionTargetMeta *targets.CompactionTargetMeta
 
 	// partitionStatsCleaner removes stale partition stats versions; clustering tasks share it.
 	partitionStatsCleaner partitionstats.PartitionStatsCleaner
@@ -504,7 +505,17 @@ func (c *Inspector) getCompactionTask(planID int64) ctask.CompactionTask {
 	return t
 }
 
+func (c *Inspector) SetCompactionTargetMeta(targets *targets.CompactionTargetMeta) {
+	c.compactionTargetMeta = targets
+}
+
 func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+	if c.compactionTargetMeta != nil {
+		defer c.compactionTargetMeta.LockCollectionAdmission(task.GetCollectionID())()
+		if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task); err != nil {
+			return err
+		}
+	}
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {
@@ -517,7 +528,21 @@ func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 		return err
 	}
 
-	t.SetTask(t.ShadowClone(ctask.SetStartTime(time.Now().Unix())))
+	admitted := t.ShadowClone(ctask.SetStartTime(time.Now().Unix()))
+	switch task.GetType() {
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_ClusteringCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		admitted.CreateTs, err = c.allocator.AllocTimestamp(context.TODO())
+		if err == nil && admitted.GetCreateTs() == 0 {
+			err = merr.WrapErrServiceInternalMsg("allocator returned a zero compaction admission timestamp")
+		}
+		if err != nil {
+			c.meta.SetSegmentsCompacting(context.TODO(), task.GetInputSegments(), false)
+			log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+			return err
+		}
+	}
+	t.SetTask(admitted)
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)

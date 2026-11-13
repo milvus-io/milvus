@@ -126,15 +126,26 @@ func SummaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *Co
 }
 
 func IsNormalManualCompactionCandidate(mt *meta.Meta, segment *meta.SegmentInfo) bool {
+	return IsNormalManualCompactionSegment(segment) &&
+		IsSharedCompactionSelectable(mt, segment) &&
+		IsMixCompactionSelectable(segment)
+}
+
+func IsNormalManualCompactionSegment(segment *meta.SegmentInfo) bool {
 	return meta.IsSegmentHealthy(segment) &&
 		meta.IsFlushed(segment) &&
-		!segment.IsCompacting &&
 		!segment.GetIsImporting() &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetLevel() != datapb.SegmentLevel_L2 &&
-		!segment.GetIsInvisible() &&
-		(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-		!mt.IsSegmentCompactionProtected(segment.GetID())
+		segment.GetLevel() != datapb.SegmentLevel_L2
+}
+
+func IsSharedCompactionSelectable(mt *meta.Meta, segment *meta.SegmentInfo) bool {
+	return !segment.IsCompacting && !mt.IsSegmentCompactionProtected(segment.GetID())
+}
+
+func IsMixCompactionSelectable(segment *meta.SegmentInfo) bool {
+	return !segment.GetIsInvisible() &&
+		(segment.GetIsSorted() || segment.GetIsSortedByNamespace())
 }
 
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
@@ -250,7 +261,7 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
-func canTriggerSortCompaction(segment *meta.SegmentInfo) bool {
+func CanTriggerSortCompaction(segment *meta.SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&

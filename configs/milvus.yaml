@@ -850,6 +850,7 @@ dataCoord:
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
   compaction:
+    enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true

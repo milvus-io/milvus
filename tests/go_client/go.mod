@@ -97,3 +97,5 @@ require (
 )
 
 replace github.com/milvus-io/milvus/pkg/v3 => ../../pkg
+
+replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/XuanYang-cn/milvus-proto/go-api/v3 v3.0.0-20261113081652-1befcc750a11

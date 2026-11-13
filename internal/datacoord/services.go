@@ -1377,6 +1377,12 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
+		(req.GetTargetSize() != 0 || (!req.GetMajorCompaction() && !req.GetL0Compaction())) {
+		resp.Status = merr.Status(merr.WrapErrOperationNotSupportedMsg("use CreateCompactionTarget for REWRITE or OPTIMIZE"))
+		return resp, nil
+	}
+
 	var id int64
 	var err error
 	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {

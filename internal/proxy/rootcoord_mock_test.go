@@ -75,6 +75,7 @@ type describeCollectionFuncType func(ctx context.Context, request *milvuspb.Desc
 type showPartitionsFuncType func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 type MixCoordMock struct {
+	datapb.DataCoordClient
 	nodeID  typeutil.UniqueID
 	address string
 

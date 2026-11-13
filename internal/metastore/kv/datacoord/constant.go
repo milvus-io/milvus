@@ -33,6 +33,7 @@ const (
 	PreImportTaskV3Prefix               = MetaPrefix + "/preimport-v3-task"
 	CopySegmentJobPrefix                = MetaPrefix + "/copy-segment-job"
 	CopySegmentTaskPrefix               = MetaPrefix + "/copy-segment-task"
+	CompactionTargetPrefix              = MetaPrefix + "/compaction-target"
 	CompactionTaskPrefix                = MetaPrefix + "/compaction-task"
 	AnalyzeTaskPrefix                   = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix            = MetaPrefix + "/partition-stats"
