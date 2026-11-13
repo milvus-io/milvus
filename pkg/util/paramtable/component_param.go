@@ -361,6 +361,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -803,6 +804,23 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
+	p.ManifestFFIConcurrency = ParamItem{
+		Key:          "common.storage.manifestFFIConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Formatter: func(v string) string {
+			return strconv.Itoa(min(2048, max(1, getAsInt(v))))
+		},
+		Doc: "Maximum number of goroutines that may concurrently execute blocking milvus-storage manifest FFI calls " +
+			"in one process. cgo pins each such goroutine to an OS thread, so unbounded concurrency across the " +
+			"synchronous manifest transaction/filesystem entry points and the async manifest executor workers inflates " +
+			"thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is " +
+			"process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at " +
+			"first manifest I/O, changes require restart.",
+		Export: false,
+	}
+	p.ManifestFFIConcurrency.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
