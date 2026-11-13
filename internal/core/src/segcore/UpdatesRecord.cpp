@@ -57,6 +57,61 @@ struct Version {
 // remains append-only, with random access for binary search. GC is out of scope.
 using History = absl::InlinedVector<Version*, 1>;
 
+// Sparse lookup remains indexed, while correction scans compact entries.
+// Fixed blocks keep histories stable across append and pending publication.
+class OffsetHistories {
+ public:
+    struct Entry {
+        int64_t offset = 0;
+        History history;
+    };
+    static constexpr size_t kBlockSize = 1024;
+
+    History&
+    operator[](int64_t offset) {
+        auto found = positions_.find(offset);
+        if (found != positions_.end()) {
+            return At(found->second).history;
+        }
+        if (size_ == blocks_.size() * kBlockSize) {
+            blocks_.push_back(std::make_unique<Entry[]>(kBlockSize));
+        }
+        // A failed insertion may leave an empty block, but no visible entry.
+        positions_.emplace(offset, size_);
+        auto& entry = At(size_++);
+        entry.offset = offset;
+        return entry.history;
+    }
+
+    const History*
+    Find(int64_t offset) const {
+        auto found = positions_.find(offset);
+        return found == positions_.end() ? nullptr : &At(found->second).history;
+    }
+
+    template <typename Visitor>
+    void
+    ForEach(Visitor&& visit) const {
+        size_t remaining = size_;
+        for (const auto& block : blocks_) {
+            const auto count = std::min(remaining, kBlockSize);
+            for (size_t i = 0; i < count; ++i) {
+                visit(block[i].offset, block[i].history);
+            }
+            remaining -= count;
+        }
+    }
+
+ private:
+    Entry&
+    At(size_t position) const {
+        return blocks_[position / kBlockSize][position % kBlockSize];
+    }
+    std::unordered_map<int64_t, size_t> positions_;
+    std::vector<std::unique_ptr<Entry[]>> blocks_;
+    size_t size_ = 0;
+};
+
 const Version*
 Visible(const History& history, uint64_t query_ts) {
     if (history.empty()) {
@@ -174,7 +229,7 @@ struct Field {
     // Writer-only current posting location, indexed by row offset. Base slots
     // enter the per-value lookup map lazily when their row is first updated.
     std::vector<PostingPosition> current_postings;
-    std::unordered_map<int64_t, History> offsets;
+    OffsetHistories offsets;
     UpdatesRecord::BaseReader base_reader;
     uint64_t base_index_rows = 0, updated_cells = 0;
     std::unique_ptr<AllDataVersionedIndex> index;
@@ -437,12 +492,13 @@ UpdatesRecord::VisitUpdates(
     const std::function<void(int64_t, const UpdateValue&)>& visit) const {
     std::shared_lock lock(impl_->mutex);
     uint64_t count = 0;
-    for (const auto& [offset, history] : impl_->GetField(field_id).offsets) {
-        if (auto* version = Visible(history, query_ts)) {
-            visit(offset, *version->value);
-            ++count;
-        }
-    }
+    impl_->GetField(field_id).offsets.ForEach(
+        [&](int64_t offset, const History& history) {
+            if (auto* version = Visible(history, query_ts)) {
+                visit(offset, *version->value);
+                ++count;
+            }
+        });
     impl_->correction_rows.fetch_add(count, std::memory_order_relaxed);
 }
 
@@ -670,10 +726,9 @@ UpdatesRecord::Gather(int64_t field_id,
         base_reader = field.base_reader;
         for (size_t i = 0; i < offsets.size(); ++i) {
             impl_->ValidateOffset(offsets[i]);
-            auto it = field.offsets.find(offsets[i]);
-            const auto* version = it == field.offsets.end()
-                                      ? nullptr
-                                      : Visible(it->second, query_ts);
+            const auto* history = field.offsets.Find(offsets[i]);
+            const auto* version =
+                history ? Visible(*history, query_ts) : nullptr;
             if (version)
                 result[i] = version->value;
             else {
