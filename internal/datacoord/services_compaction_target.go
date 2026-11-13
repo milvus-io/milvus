@@ -430,8 +430,8 @@ func (s *Server) DropCompactionTarget(ctx context.Context, req *datapb.DropCompa
 		if !targets.IsRewrite(record) || record.GetCollectionID() == 0 {
 			return false, merr.WrapErrOperationNotSupportedMsg("target family does not support operator drop")
 		}
-		if resource.GetDeleted() {
-			return false, merr.WrapErrPrivilegeNotPermitted("compaction target collection is unavailable")
+		if resource.GetDeleted() && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+			return false, merr.WrapErrServiceNotReadyMsg("compaction target scope is closing")
 		}
 		return true, nil
 	})
