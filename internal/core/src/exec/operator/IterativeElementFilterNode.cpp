@@ -59,7 +59,7 @@ PhyIterativeElementFilterNode::PhyIterativeElementFilterNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> exprs;
     exprs.emplace_back(element_filter_node->element_filter());
-    element_exprs_ = std::make_unique<ExprSet>(exprs, exec_context);
+    element_exprs_ = std::make_unique<ExprSet>(exprs, exec_context, true);
 }
 
 void

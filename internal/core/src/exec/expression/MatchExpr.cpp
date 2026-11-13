@@ -172,6 +172,7 @@ ProcessContiguousRows(int64_t row_count,
 template <MatchType match_type, bool all_valid>
 void
 ProcessOffsetRows(const OffsetVector* row_offsets,
+                  const OffsetVector* output_positions,
                   const IStructElementOffsets* struct_element_offsets,
                   const TargetBitmapView& match_bitset,
                   const TargetBitmapView& valid_bitset,
@@ -193,7 +194,7 @@ ProcessOffsetRows(const OffsetVector* row_offsets,
                                                   match_bitset,
                                                   valid_bitset,
                                                   threshold)) {
-            result_bitset[i] = true;
+            result_bitset[output_positions ? (*output_positions)[i] : i] = true;
         }
         elem_cursor += row_elem_count;
     }
@@ -206,6 +207,7 @@ DispatchMatchProcessing(bool use_offset_input,
                         int64_t row_start,
                         int64_t elem_start,
                         const OffsetVector* row_offsets,
+                        const OffsetVector* output_positions,
                         const IStructElementOffsets* struct_element_offsets,
                         const TargetBitmapView& match_bitset,
                         const TargetBitmapView& valid_bitset,
@@ -213,6 +215,7 @@ DispatchMatchProcessing(bool use_offset_input,
                         int64_t threshold) {
     if (use_offset_input) {
         ProcessOffsetRows<match_type, all_valid>(row_offsets,
+                                                 output_positions,
                                                  struct_element_offsets,
                                                  match_bitset,
                                                  valid_bitset,
@@ -250,34 +253,81 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(struct_element_offsets != nullptr,
                "Struct element offsets not available");
 
-    int64_t batch_rows;
+    const int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return;
+    }
+
+    const auto& candidates = context.get_bitmap_input();
+    const bool has_candidates = !candidates.empty() && !candidates.all();
+    const bool select_rows =
+        has_candidates &&
+        (has_offset_input_ || inputs_[0]->SupportOffsetInput());
+    if (select_rows && !has_offset_input_) {
+        use_element_offsets_ = true;
+    }
+    const bool use_offsets = has_offset_input_ || use_element_offsets_;
+    OffsetVector selected_rows;
+    OffsetVector output_positions;
+    const OffsetVector* row_offsets = input;
+    if (select_rows || (use_offsets && input == nullptr)) {
+        selected_rows.reserve(batch_rows);
+        if (select_rows) {
+            output_positions.reserve(batch_rows);
+        }
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            // In offset mode the bitmap is indexed by input position, not
+            // by the segment row ID. Retain duplicates and input order.
+            if (select_rows && !candidates[i]) {
+                continue;
+            }
+            selected_rows.push_back(input ? (*input)[i] : current_pos_ + i);
+            if (select_rows) {
+                output_positions.push_back(i);
+            }
+        }
+        row_offsets = &selected_rows;
+    }
+
     int64_t elem_start;
     int64_t elem_count;
     FixedVector<int32_t> element_offsets_storage;
     EvalCtx eval_ctx(context.get_exec_context());
 
-    if (has_offset_input_) {
-        // offset_input mode: process all input row_ids at once
-        batch_rows = input->size();
+    if (use_offsets) {
+        // Expand only candidate rows, then reduce/scatter in the same order.
         element_offsets_storage =
-            struct_element_offsets->RowOffsetsToElementOffsets(*input);
+            struct_element_offsets->RowOffsetsToElementOffsets(*row_offsets);
         eval_ctx.set_offset_input(&element_offsets_storage);
         elem_start = 0;
         elem_count = element_offsets_storage.size();
     } else {
         // Sequential batch mode
-        batch_rows = std::min(batch_size_, active_count_ - current_pos_);
         auto start_range =
             struct_element_offsets->ElementIDRangeOfRow(current_pos_);
         auto end_range = struct_element_offsets->ElementIDRangeOfRow(
             current_pos_ + batch_rows);
         elem_start = start_range.first;
         elem_count = end_range.first - elem_start;
-    }
-
-    if (batch_rows <= 0) {
-        result = nullptr;
-        return;
+        if (has_candidates) {
+            // Some element predicates require sequential execution. Keep their
+            // row cursors aligned and supply candidates in element coordinates.
+            FixedVector<int32_t> starts(batch_rows + 1);
+            struct_element_offsets->CopyRowElementStarts(
+                current_pos_, batch_rows, starts.data());
+            TargetBitmap element_candidates(elem_count, false);
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                if (candidates[i] && starts[i] < starts[i + 1]) {
+                    element_candidates.set(starts[i] - elem_start,
+                                           starts[i + 1] - starts[i],
+                                           true);
+                }
+            }
+            eval_ctx.set_bitmap_input(std::move(element_candidates));
+        }
     }
 
     result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
@@ -292,7 +342,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     VectorPtr match_result;
     if (elem_count > 0) {
         inputs_[0]->Eval(eval_ctx, match_result);
-    } else if (!has_offset_input_) {
+    } else if (!use_offsets) {
         // Keep element-level child expressions aligned across all-empty batches.
         inputs_[0]->MoveCursor();
     }
@@ -302,7 +352,13 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                    "batch, elem_count={}",
                    elem_count);
         if (MatchEmptyElements(match_type, threshold)) {
-            bitset_view.set();
+            if (select_rows) {
+                for (const auto position : output_positions) {
+                    bitset_view[position] = true;
+                }
+            } else {
+                bitset_view.set();
+            }
         }
         ApplyStructRowValidity(
             col_vec.get(), field_meta.get_id(), input, batch_rows);
@@ -332,11 +388,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         switch (match_type) {
             case MatchType::MatchAny:
                 DispatchMatchProcessing<MatchType::MatchAny, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    row_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -345,11 +402,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchAll:
                 DispatchMatchProcessing<MatchType::MatchAll, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    row_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -358,11 +416,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchLeast:
                 DispatchMatchProcessing<MatchType::MatchLeast, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    row_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -371,11 +430,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchMost:
                 DispatchMatchProcessing<MatchType::MatchMost, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    row_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -384,11 +444,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchExact:
                 DispatchMatchProcessing<MatchType::MatchExact, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    row_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,

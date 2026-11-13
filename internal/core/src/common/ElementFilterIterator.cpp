@@ -109,10 +109,11 @@ ElementFilterIterator::FetchAndFilterBatch() {
                "ElementFilterIterator: evaluation result size mismatch");
 
     TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+    TargetBitmapView validview(col_vec->GetValidRawData(), col_vec_size);
 
     // Step 4: Filter elements based on evaluation results and cache them
     for (size_t i = 0; i < element_ids_buffer_.size(); ++i) {
-        if (bitsetview[i]) {
+        if (bitsetview[i] && validview[i]) {
             // Element passes filter, cache it
             filtered_buffer_.emplace_back(element_ids_buffer_[i],
                                           distances_buffer_[i]);
