@@ -1,0 +1,54 @@
+name: FIPS strict build checks
+
+# A full MILVUS_FIPS_STRICT build takes hours, so this covers the fipsstrict tag
+# combinations and the Makefile guards when those files change.
+on:
+  pull_request:
+    paths:
+      - 'pkg/util/fips/**'
+      - 'configs/ssl/**'
+      - 'scripts/build_fips_provider.sh'
+      - 'scripts/build_plan_parser.sh'
+      - 'Makefile'
+      - '.github/workflows/fips-strict.yaml'
+
+jobs:
+  fips-strict:
+    name: FIPS strict checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: pkg/go.mod
+          cache-dependency-path: pkg/go.sum
+      - name: Install OpenSSL headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: Test strict
+        working-directory: pkg
+        env:
+          GOEXPERIMENT: boringcrypto
+        run: go test -tags dynamic,test,fipsstrict -count=1 -v ./util/fips/...
+      - name: Test BoringCrypto without strict
+        working-directory: pkg
+        env:
+          GOEXPERIMENT: boringcrypto
+        run: go test -tags dynamic,test -count=1 -v ./util/fips/...
+      - name: Test default
+        working-directory: pkg
+        run: go test -tags dynamic,test -count=1 -v ./util/fips/...
+      - name: Strict without BoringCrypto must not compile
+        working-directory: pkg
+        run: '! go build -tags dynamic,fipsstrict ./util/fips/'
+      - name: Check Makefile guards
+        run: |
+          make -n milvus MILVUS_FIPS_ENABLED=ON MILVUS_FIPS_STRICT=ON | grep -q fipsstrict
+          make -n plan-parser-lib MILVUS_FIPS_ENABLED=ON MILVUS_FIPS_STRICT=ON | grep -q 'PLAN_PARSER_GO_TAGS="fipsstrict"'
+          ! make -n milvus | grep -q fipsstrict
+          ! make -n milvus MILVUS_FIPS_STRICT=ON
+          ! make -n milvus MILVUS_FIPS_ENABLED=ON MILVUS_FIPS_STRICT=ON TANTIVY_ANALYZER_REMOTE_TLS=ON
+      - name: Check provider script syntax
+        run: bash -n scripts/build_fips_provider.sh
