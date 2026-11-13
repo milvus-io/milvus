@@ -3,6 +3,7 @@ package dql
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -415,6 +416,30 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 		s.Equal(4*dim, cap(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector().GetData()))
 	})
 
+	s.Run("no group by sizes buffers for every query", func() {
+		const (
+			nq    = 3
+			limit = 2
+		)
+		multiQueryShard := func(ids []int64, scores []float32) *schemapb.SearchResultData {
+			r := presizeShardResult(limit, ids, scores, nil)
+			r.NumQueries = nq
+			r.Topks = []int64{limit, limit, limit}
+			r.ElementIndices = &schemapb.LongArray{Data: make([]int64, len(ids))}
+			return r
+		}
+		ret, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{
+			multiQueryShard([]int64{1, 2, 3, 4, 5, 6}, []float32{9, 7, 9, 7, 9, 7}),
+			multiQueryShard([]int64{11, 12, 13, 14, 15, 16}, []float32{8, 6, 8, 6, 8, 6}),
+		}, nq, limit, metric.IP, schemapb.DataType_Int64, 0)
+		s.Require().NoError(err)
+		// Every query keeps limit rows, so each buffer holds nq*limit rows.
+		s.Equal([]int64{1, 11, 3, 13, 5, 15}, ret.GetResults().GetIds().GetIntId().GetData())
+		s.Equal(nq*limit, cap(ret.GetResults().GetIds().GetIntId().GetData()))
+		s.Equal(nq*limit, cap(ret.GetResults().GetElementIndices().GetData()))
+		s.Equal(nq*limit, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+	})
+
 	s.Run("group by without hits keeps typed columns", func() {
 		empty := presizeShardResult(topk, nil, nil, nil)
 		empty.Topks = []int64{0}
@@ -422,6 +447,100 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 		s.Require().NoError(err)
 		s.Require().Len(ret.GetResults().GetFieldsData(), 2)
 		s.NotNil(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector())
+	})
+}
+
+// TestReduceBoundsBuffersByHits checks that reduce sizes its buffers from the
+// rows its inputs hold rather than from the requested nq*groupSize*limit, so a
+// large request over a handful of hits cannot exhaust Proxy memory (#54787).
+func (s *SearchReduceUtilTestSuite) TestReduceBoundsBuffersByHits() {
+	const (
+		// The largest request the default limits allow: largeTopK * maxGroupSize.
+		topk      = 1_000_000
+		groupSize = 10
+		inputRows = 4
+		// The reduce itself needs a few KB; a single buffer sized from
+		// groupSize*topk would take at least 80MB.
+		allocBudget = 8 << 20
+	)
+	withElementIndices := func(r *schemapb.SearchResultData) *schemapb.SearchResultData {
+		r.ElementIndices = &schemapb.LongArray{Data: make([]int64, len(r.GetIds().GetIntId().GetData()))}
+		return r
+	}
+	singleField := func() []*schemapb.SearchResultData {
+		return []*schemapb.SearchResultData{
+			withElementIndices(presizeShardResult(topk, []int64{1, 2}, []float32{9, 7}, []int64{2, 1})),
+			withElementIndices(presizeShardResult(topk, []int64{3, 4}, []float32{8, 6}, []int64{1, 2})),
+		}
+	}
+	multiField := func() []*schemapb.SearchResultData {
+		shards := singleField()
+		for i, groups := range [][2][]string{{{"A", "B"}, {"X", "X"}}, {{"B", "A"}, {"X", "X"}}} {
+			shards[i].GroupByFieldValue = nil
+			shards[i].GroupByFieldValues = []*schemapb.FieldData{
+				multiGroupByTestStringField(101, groups[0]),
+				multiGroupByTestStringField(102, groups[1]),
+			}
+		}
+		return shards
+	}
+	ctx := context.Background()
+
+	// allocated reports the bytes reduce allocates, which catches buffers that
+	// are not reachable from the result.
+	allocated := func(reduceFn func() *schemapb.SearchResultData) (*schemapb.SearchResultData, uint64) {
+		reduceFn() // warm up lazily initialized state, such as paramtable
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		ret := reduceFn()
+		runtime.ReadMemStats(&after)
+		return ret, after.TotalAlloc - before.TotalAlloc
+	}
+	assertBounded := func(ret *schemapb.SearchResultData, bytes uint64, wantIDs []int64) {
+		s.Equal(wantIDs, ret.GetIds().GetIntId().GetData())
+		s.Equal([]int64{inputRows}, ret.GetTopks())
+		s.LessOrEqual(cap(ret.GetIds().GetIntId().GetData()), inputRows)
+		s.LessOrEqual(cap(ret.GetElementIndices().GetData()), inputRows)
+		s.LessOrEqual(cap(ret.GetFieldsData()[0].GetScalars().GetLongData().GetData()), inputRows)
+		s.Less(bytes, uint64(allocBudget))
+	}
+
+	s.Run("single field group by", func() {
+		ret, bytes := allocated(func() *schemapb.SearchResultData {
+			ret, err := reduceSearchResultDataWithGroupBy(ctx, singleField(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, groupSize, []int64{101}, false)
+			s.Require().NoError(err)
+			return ret.GetResults()
+		})
+		// Rows are emitted bucket by bucket in first-seen group order.
+		assertBounded(ret, bytes, []int64{1, 4, 3, 2})
+	})
+
+	s.Run("multi field group by", func() {
+		ret, bytes := allocated(func() *schemapb.SearchResultData {
+			ret, err := reduceSearchResultDataWithGroupBy(ctx, multiField(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, groupSize, []int64{101, 102}, false)
+			s.Require().NoError(err)
+			return ret.GetResults()
+		})
+		assertBounded(ret, bytes, []int64{1, 4, 3, 2})
+	})
+
+	s.Run("multi field search aggregation", func() {
+		ret, bytes := allocated(func() *schemapb.SearchResultData {
+			ret, err := reduceSearchResultDataWithGroupBy(ctx, multiField(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, groupSize, []int64{101, 102}, true)
+			s.Require().NoError(err)
+			return ret.GetResults()
+		})
+		// Search aggregation streams rows in score order.
+		assertBounded(ret, bytes, []int64{1, 3, 2, 4})
+	})
+
+	s.Run("no group by", func() {
+		ret, bytes := allocated(func() *schemapb.SearchResultData {
+			ret, err := reduceSearchResultDataNoGroupBy(ctx, singleField(), 1, topk, metric.IP, schemapb.DataType_Int64, 0)
+			s.Require().NoError(err)
+			return ret.GetResults()
+		})
+		assertBounded(ret, bytes, []int64{1, 3, 2, 4})
 	})
 }
 
