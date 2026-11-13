@@ -176,6 +176,17 @@ class Expr {
         return false;
     }
 
+    // Called when this expression's output feeds a null-rejecting consumer:
+    // one that treats an UNKNOWN (NULL) row exactly like FALSE, such as the
+    // top-level filter, which folds UNKNOWN into the excluded set. Nodes
+    // whose operands keep that property (AND/OR) override this to accept the
+    // mark and propagate it to their inputs; everywhere else (in particular
+    // NOT, where FALSE and UNKNOWN produce different results) the default
+    // no-op stops the propagation.
+    virtual void
+    MarkNullRejecting() {
+    }
+
     virtual std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
@@ -1799,10 +1810,20 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
 class ExprSet {
  public:
+    // null_rejecting: the consumer of these expressions' output treats
+    // UNKNOWN rows exactly like FALSE (e.g. a filter that folds UNKNOWN into
+    // the excluded set); lets conjunctions drop UNKNOWN rows from their
+    // active sets early. See Expr::MarkNullRejecting.
     explicit ExprSet(const std::vector<expr::TypedExprPtr>& logical_exprs,
-                     ExecContext* exec_ctx)
+                     ExecContext* exec_ctx,
+                     bool null_rejecting = false)
         : exec_ctx_(exec_ctx) {
         exprs_ = CompileExpressions(logical_exprs, exec_ctx);
+        if (null_rejecting) {
+            for (auto& compiled_expr : exprs_) {
+                compiled_expr->MarkNullRejecting();
+            }
+        }
     }
 
     virtual ~ExprSet() = default;

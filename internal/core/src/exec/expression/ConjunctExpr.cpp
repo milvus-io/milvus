@@ -41,11 +41,17 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 
 TargetBitmap
 PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
-    // AND still needs TRUE or UNKNOWN rows; OR needs FALSE or UNKNOWN rows.
+    // A null-rejecting AND only needs TRUE rows. Other ANDs keep UNKNOWN
+    // rows active too; an OR always needs FALSE or UNKNOWN rows.
     const size_t size = vec->size();
     TargetBitmapView data(vec->GetRawData(), size);
     TargetBitmapView valid(vec->GetValidRawData(), size);
     if (is_and_) {
+        if (null_rejecting_) {
+            TargetBitmap active_rows(data);
+            active_rows.inplace_and(valid, size);  // data & valid
+            return active_rows;
+        }
         TargetBitmap active_rows(valid);
         active_rows.inplace_sub(data, size);  // valid & ~data
         active_rows.flip();                   // data | ~valid
