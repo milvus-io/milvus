@@ -64,7 +64,7 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 		require.NoError(t, s.initMeta())
 		require.Empty(t, s.meta.GetAll(ctx))
 		// QueryView runtime owns load recovery; initMeta only restores resource groups.
-		deps := newDefaultQViewsRuntimeDependencies(storage, client, nil, s.mixCoord)
+		deps := newDefaultQViewsRuntimeDependencies(storage, queryview.NewQueryViewCatalog(storage, "coord"), client, nil, s.mixCoord)
 		require.Equal(t, []string{"p1", "p2"}, deps.pchannels)
 		t.Cleanup(func() {
 			deps.queryNodeManager.Close()
@@ -104,7 +104,7 @@ func TestDefaultQViewsRuntimeSources(t *testing.T) {
 			VirtualChannelNames: []string{"p_1v0"}, Schema: &schemapb.CollectionSchema{Version: 3},
 		}, nil).Build()
 		client, _ := kvfactory.GetEtcdAndPath()
-		deps := newDefaultQViewsRuntimeDependencies(nil, client, nil, &coordMocks.MixCoord{})
+		deps := newDefaultQViewsRuntimeDependencies(nil, nil, client, nil, &coordMocks.MixCoord{})
 		defer deps.queryNodeManager.Close()
 		defer deps.streamingCoordClient.Close()
 		defer deps.streamingNodeHandler.Close()
