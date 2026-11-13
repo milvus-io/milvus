@@ -30,7 +30,7 @@ type Task interface {
 	GetTaskState() taskcommon.State
 	GetTaskSlot() int64
 	// GetTaskResource is the coordinator-side cpu/memory estimate the scheduler
-	// places on and the request ships. Never zero, and always placeable: a
+	// places on and the request ships. Never zero; subject to memory admission. A
 	// family whose inputs are still resolving answers with an upper bound on
 	// itself, and one whose inputs are gone for good answers with the configured
 	// floor, which is enough to reach the code that retires it.

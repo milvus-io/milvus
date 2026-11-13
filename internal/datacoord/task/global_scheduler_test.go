@@ -1055,3 +1055,38 @@ func TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices(t *testing.T) {
 	assert.Empty(t, scheduler.pendingTasks.TaskIDs(), "a task that can never price itself must not be re-queued forever")
 	assert.False(t, scheduler.runningTasks.Contain(1), "a terminal task must not enter runningTasks")
 }
+
+// Exercise the dispatch loop with both compatibility slots and CPU exhausted.
+// Only the fifth task is held back: the first four reserve all 4GiB of memory.
+func TestGlobalScheduler_schedulePricedTasksUntilMemoryIsFull(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 0,
+			TotalMemory: 4 * pickGiB, AvailableMemory: 4 * pickGiB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	for id := int64(1); id <= 5; id++ {
+		task := NewMockTask(t)
+		var dispatched atomic.Bool
+		task.EXPECT().GetTaskID().Return(id).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(128)).Once()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 8, Memory: pickGiB}, true).Once()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		if id <= 4 {
+			task.EXPECT().CreateTaskOnWorker(int64(1), cluster).Run(func(_ int64, _ session.Cluster) {
+				dispatched.Store(true)
+			}).Once()
+		}
+		scheduler.Enqueue(task)
+	}
+	scheduler.schedule()
+	assert.Equal(t, 4, scheduler.runningTasks.Len())
+	assert.Equal(t, []int64{5}, scheduler.pendingTasks.TaskIDs())
+}
