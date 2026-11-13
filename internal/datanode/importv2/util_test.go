@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -366,58 +367,163 @@ func Test_PickSegment(t *testing.T) {
 		vchannel    = "ch-0"
 		partitionID = 10
 	)
-	task := &ImportTask{
-		req: &datapb.ImportRequest{
-			RequestSegments: []*datapb.ImportRequestSegment{
-				{
-					SegmentID:   100,
-					PartitionID: partitionID,
-					Vchannel:    vchannel,
-				},
-				{
-					SegmentID:   101,
-					PartitionID: partitionID,
-					Vchannel:    vchannel,
-				},
-				{
-					SegmentID:   102,
-					PartitionID: partitionID,
-					Vchannel:    vchannel,
-				},
-				{
-					SegmentID:   103,
-					PartitionID: partitionID,
-					Vchannel:    vchannel,
-				},
-			},
-		},
+	newSegments := func(vchannel string, partitionID int64, ids ...int64) []*datapb.ImportRequestSegment {
+		return lo.Map(ids, func(id int64, _ int) *datapb.ImportRequestSegment {
+			return &datapb.ImportRequestSegment{SegmentID: id, PartitionID: partitionID, Vchannel: vchannel}
+		})
+	}
+	// spread returns max-min of the sizes assigned to the given segments.
+	spread := func(assigned map[int64]int64, ids ...int64) int64 {
+		sizes := lo.Map(ids, func(id int64, _ int) int64 { return assigned[id] })
+		return lo.Max(sizes) - lo.Min(sizes)
 	}
 
-	importedSize := map[int64]int{}
+	t.Run("equal pieces rotate over the segments", func(t *testing.T) {
+		// IDs are deliberately out of order: ties go to the smallest ID.
+		segments := newSegments(vchannel, partitionID, 102, 100, 103, 101)
+		picker := NewSegmentPicker()
+		picked := make([]int64, 0)
+		for i := 0; i < 9; i++ {
+			id, err := picker.PickSegment(segments, vchannel, partitionID, 1024)
+			assert.NoError(t, err)
+			picked = append(picked, id)
+		}
+		assert.Equal(t, []int64{100, 101, 102, 103, 100, 101, 102, 103, 100}, picked)
+	})
 
-	totalSize := 8 * 1024 * 1024 * 1024
-	batchSize := 1 * 1024 * 1024
+	t.Run("every segment gets data once pieces reach segments", func(t *testing.T) {
+		segments := newSegments(vchannel, partitionID, 100, 101, 102, 103)
+		picker := NewSegmentPicker()
+		seen := typeutil.NewSet[int64]()
+		for _, size := range []int64{1, 1 << 30, 7, 4096} {
+			id, err := picker.PickSegment(segments, vchannel, partitionID, size)
+			assert.NoError(t, err)
+			seen.Insert(id)
+		}
+		assert.Equal(t, 4, seen.Len())
+	})
 
-	for totalSize > 0 {
-		picked, err := PickSegment(task.req.GetRequestSegments(), vchannel, partitionID)
-		assert.NoError(t, err)
-		importedSize[picked] += batchSize
-		totalSize -= batchSize
-	}
-	expectSize := 2 * 1024 * 1024 * 1024
-	fn := func(actual int) {
-		t.Logf("actual=%d, expect*0.8=%f, expect*1.2=%f", actual, float64(expectSize)*0.9, float64(expectSize)*1.1)
-		assert.True(t, float64(actual) > float64(expectSize)*0.8)
-		assert.True(t, float64(actual) < float64(expectSize)*1.2)
-	}
-	fn(importedSize[int64(100)])
-	fn(importedSize[int64(101)])
-	fn(importedSize[int64(102)])
-	fn(importedSize[int64(103)])
+	t.Run("uneven pieces go to the least loaded segment", func(t *testing.T) {
+		segments := newSegments(vchannel, partitionID, 100, 101, 102)
+		picker := NewSegmentPicker()
+		assigned := make(map[int64]int64)
+		r := rand.New(rand.NewSource(1))
+		maxPiece := int64(0)
+		for i := 0; i < 1000; i++ {
+			size := r.Int63n(16*1024*1024) + 1
+			maxPiece = max(maxPiece, size)
+			least := lo.Min([]int64{assigned[100], assigned[101], assigned[102]})
+			id, err := picker.PickSegment(segments, vchannel, partitionID, size)
+			assert.NoError(t, err)
+			assert.Equal(t, least, assigned[id], "piece %d did not go to the least loaded segment", i)
+			assigned[id] += size
+			// The gap between segments never exceeds the largest single piece.
+			assert.LessOrEqual(t, spread(assigned, 100, 101, 102), maxPiece)
+		}
+	})
 
-	// test no candidate segments found
-	_, err := PickSegment(task.req.GetRequestSegments(), "ch-2", 20)
-	assert.Error(t, err)
+	t.Run("zero sized pieces still rotate", func(t *testing.T) {
+		segments := newSegments(vchannel, partitionID, 100, 101, 102)
+		picker := NewSegmentPicker()
+		seen := typeutil.NewSet[int64]()
+		for i := 0; i < 3; i++ {
+			id, err := picker.PickSegment(segments, vchannel, partitionID, 0)
+			assert.NoError(t, err)
+			seen.Insert(id)
+		}
+		assert.Equal(t, 3, seen.Len())
+	})
+
+	t.Run("buckets are balanced independently", func(t *testing.T) {
+		segments := append(newSegments("ch-0", 10, 100, 101), newSegments("ch-0", 20, 200, 201)...)
+		segments = append(segments, newSegments("ch-1", 10, 300, 301)...)
+		picker := NewSegmentPicker()
+		// Loading one bucket heavily must not change the picks of the others.
+		for i := 0; i < 10; i++ {
+			id, err := picker.PickSegment(segments, "ch-0", 10, 1<<30)
+			assert.NoError(t, err)
+			assert.Contains(t, []int64{100, 101}, id)
+		}
+		for _, bucket := range []struct {
+			vchannel    string
+			partitionID int64
+			expect      []int64
+		}{
+			{"ch-0", 20, []int64{200, 201, 200}},
+			{"ch-1", 10, []int64{300, 301, 300}},
+		} {
+			for _, expect := range bucket.expect {
+				id, err := picker.PickSegment(segments, bucket.vchannel, bucket.partitionID, 1024)
+				assert.NoError(t, err)
+				assert.Equal(t, expect, id)
+			}
+		}
+	})
+
+	t.Run("concurrent picks keep the segments balanced", func(t *testing.T) {
+		const (
+			workers   = 16
+			perWorker = 500
+			pieceSize = int64(1024 * 1024)
+		)
+		segments := newSegments(vchannel, partitionID, 100, 101, 102, 103)
+		picker := NewSegmentPicker()
+		var (
+			mu       sync.Mutex
+			assigned = make(map[int64]int64)
+			wg       sync.WaitGroup
+		)
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < perWorker; i++ {
+					id, err := picker.PickSegment(segments, vchannel, partitionID, pieceSize)
+					assert.NoError(t, err)
+					mu.Lock()
+					assigned[id] += pieceSize
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		// No pick is lost: with equal pieces and a pick count divisible by
+		// the segment count, every segment ends up with exactly the same size.
+		for _, id := range []int64{100, 101, 102, 103} {
+			assert.Equal(t, int64(workers*perWorker/4)*pieceSize, assigned[id])
+		}
+	})
+
+	t.Run("no candidate segments", func(t *testing.T) {
+		segments := newSegments(vchannel, partitionID, 100, 101)
+		picker := NewSegmentPicker()
+		_, err := picker.PickSegment(segments, "ch-2", 20, 1024)
+		assert.Error(t, err)
+		_, err = picker.PickSegment(segments, vchannel, 20, 1024)
+		assert.Error(t, err)
+		_, err = picker.PickSegment(nil, vchannel, partitionID, 1024)
+		assert.Error(t, err)
+	})
+
+	t.Run("task clones share the picker", func(t *testing.T) {
+		req := &datapb.ImportRequest{
+			Schema:          &schemapb.CollectionSchema{},
+			RequestSegments: newSegments(vchannel, partitionID, 100, 101),
+		}
+		for _, task := range []Task{NewImportTask(req, nil, nil, nil), NewL0ImportTask(req, nil, nil, nil)} {
+			pickerOf := func(task Task) *SegmentPicker {
+				switch tt := task.(type) {
+				case *ImportTask:
+					return tt.picker
+				case *L0ImportTask:
+					return tt.picker
+				}
+				return nil
+			}
+			assert.NotNil(t, pickerOf(task))
+			assert.Same(t, pickerOf(task), pickerOf(task.Clone()))
+		}
+	})
 }
 
 func Test_CheckRowsEqual(t *testing.T) {

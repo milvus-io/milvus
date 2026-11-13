@@ -19,8 +19,8 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -167,18 +167,56 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
-func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) (int64, error) {
-	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
-		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
-	})
+// SegmentPicker chooses the target segment for every piece of data an import
+// task syncs. Within one (vchannel, partition) it always picks the segment that
+// has been assigned the least data so far, so the preallocated segments fill up
+// evenly: their assigned sizes never differ by more than the largest single
+// piece, and every segment receives data once the number of pieces reaches the
+// number of segments.
+//
+// The assigned size is only meaningful for comparing segments against each
+// other. It is not the metric DataCoord sizes segments with, so it must not be
+// compared against the segment max size.
+//
+// A picker lives as long as its task and is shared by the task's clones. Files
+// of one task are imported concurrently, so it is safe for concurrent use.
+type SegmentPicker struct {
+	mu       sync.Mutex
+	assigned map[int64]int64 // segmentID -> size assigned so far
+}
 
-	if len(candidates) == 0 {
+func NewSegmentPicker() *SegmentPicker {
+	return &SegmentPicker{assigned: make(map[int64]int64)}
+}
+
+// PickSegment returns the least loaded candidate segment of the given vchannel
+// and partition, and charges size to it. Ties go to the smallest segment ID.
+// The size is charged at pick time rather than after the data is written,
+// otherwise concurrent callers would all see the same segment as the least
+// loaded one.
+func (p *SegmentPicker) PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64, size int64) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	picked, found := int64(0), false
+	for _, info := range segments {
+		if info.GetVchannel() != vchannel || info.GetPartitionID() != partitionID {
+			continue
+		}
+		id := info.GetSegmentID()
+		if !found || p.assigned[id] < p.assigned[picked] ||
+			(p.assigned[id] == p.assigned[picked] && id < picked) {
+			picked, found = id, true
+		}
+	}
+	if !found {
 		return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s and partition %d",
 			vchannel, partitionID)
 	}
-
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return candidates[r.Intn(len(candidates))].GetSegmentID(), nil
+	// Charge at least 1 so that zero-sized pieces still rotate across the
+	// segments instead of all landing on the smallest segment ID.
+	p.assigned[picked] += max(size, 1)
+	return picked, nil
 }
 
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
