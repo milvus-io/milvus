@@ -119,6 +119,50 @@ class TestCompactionTargets(TestBase):
         dropped = self.target_request("drop", {"targetId": target_id})
         assert dropped["code"] != 0, dropped
 
+    def test_list_all_standing_compaction_targets(self):
+        families = {
+            "SORT",
+            "SIZE",
+            "INDEX_VERSION",
+            "SCHEMA_VERSION",
+            "STORAGE_VERSION",
+            "STORAGE_FORMAT",
+            "DELETE_CLEANUP",
+            "TTL",
+        }
+        deadline = time.monotonic() + 60
+        while True:
+            result = self.target_request("list", {"includeSystem": True})
+            assert result["code"] == 0, result
+            sources = [item for item in result["data"] if item.get("other", {}).get("condition") in families]
+            if {item["other"]["condition"] for item in sources} == families:
+                break
+            assert time.monotonic() < deadline, result
+            time.sleep(1)
+
+        ids = {item["targetId"] for item in sources}
+        assert len(sources) == len(ids) == len(families)
+        for source in sources:
+            assert source["collectionId"] == "0"
+            assert source["state"] == "COMPACTION_TARGET_STATE_ACTIVE"
+            assert source["other"]["clusterWide"]
+            assert "remainingRows" not in source
+            parameters = {item["key"]: item["value"] for item in source["other"]["parameters"]}
+            assert parameters["enabled"] in {"true", "false"}
+            if source["other"]["condition"] == "SIZE":
+                assert parameters["planner"] == "two_tier"
+                assert int(parameters["max_size_bytes"]) > 0
+                assert int(parameters["disk_max_size_bytes"]) > 0
+            if parameters["enabled"] == "false":
+                described = self.target_request("describe", {"targetId": source["targetId"]})
+                assert described["code"] == 0, described
+                assert described["data"]["other"] == source["other"]
+                assert "remainingRows" not in described["data"]
+
+        scoped = self.target_request("list", {"dbName": "default", "includeSystem": True})
+        assert scoped["code"] == 0, scoped
+        assert ids.isdisjoint(item["targetId"] for item in scoped["data"])
+
     @pytest.mark.parametrize(
         "extra", [{}, {"optimize": {"inputTargetSizeBytes": "1"}, "rewrite": {}}, {"rewrite": {"partitionId": "1"}}]
     )
