@@ -120,6 +120,27 @@ through Describe while compatible demands share physical work. Mix uses the
 writer settings read at dispatch and publishes its output version and
 manifest through the ordinary task path.
 
+### Standing Delete Cleanup and TTL
+
+Delete Cleanup and TTL each keep one cluster-wide ID. The coordinator confirms
+their independent conditions in the catalog before planning. Both follow global
+auto compaction and preserve their active IDs across disablement and restart.
+Describe reports matching rows even when a collection opt-out, snapshot,
+in-flight task, visibility, importing, or index readiness delays execution.
+
+Delete Cleanup uses the published deltalog count, byte size, and delete-to-row
+ratio. TTL uses the existing timestamp and expiration quantiles, and import
+commit time when available. Negative strict tolerance disables the strict
+comparison. Zero uses the collection TTL directly, and positive tolerance
+adds the configured hours. Describe and List expose the saved
+`strict_tolerance_hours`, with `-1` representing every disabled value.
+
+Compatible cleanup demands share a Mix task. L2 follows the Single policy's
+eligibility and a nonempty replacement is published as L1. L1 and older levels
+retain the automatic Mix sort and index requirements. The Mix task uses the
+collection TTL and schema captured during planning, and filters rows using the
+worker clock. Reconciliation checks published output again on the next round.
+
 ### Compatibility and verification
 
 `dataCoord.compaction.enableTargetBasedCompaction` is a default-off startup

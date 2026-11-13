@@ -336,6 +336,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case record.GetIntent() == datapb.TargetIntent_INTENT_INDEX_VERSION && targets.HasStandingCondition(record) && record.GetEnabled():
 		rows, observationErr = targets.ObserveIndexVersion(ctx, s.meta, s.indexMeta, record)
 		observed = true
+	case targets.IsStandingCleanup(record) && record.GetEnabled():
+		rows, observationErr = targets.ObserveCleanup(ctx, s.meta, record)
+		observed = true
 	case record.GetIntent() == datapb.TargetIntent_INTENT_SCHEMA_VERSION && targets.HasStandingCondition(record) && record.GetEnabled():
 		rows, observationErr = targets.ObserveSchemaVersion(ctx, s.meta)
 		observed = true
@@ -398,6 +401,10 @@ func publicStandingConditionKeys(intent datapb.TargetIntent) []string {
 		return []string{"storage_version"}
 	case datapb.TargetIntent_INTENT_STORAGE_FORMAT:
 		return []string{"storage_format"}
+	case datapb.TargetIntent_INTENT_DELETE_CLEANUP:
+		return []string{targets.DeletedRatioKey, targets.MaxDeltalogCountKey, targets.MaxDeltalogBytesKey}
+	case datapb.TargetIntent_INTENT_TTL:
+		return []string{targets.ExpiredRatioKey, targets.MaxExpiredBytesKey, targets.StrictToleranceHoursKey}
 	default:
 		return nil
 	}
