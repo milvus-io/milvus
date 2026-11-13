@@ -1,7 +1,7 @@
 # Grep: QueryScan Execution and ripgrep Integration
 
 - **Created:** 2026-10-08
-- **Updated:** 2026-11-02
+- **Updated:** 2026-11-04
 - **Scope:** Current Grep implementation: matching engine, QueryScan execution,
   in-process Arrow transport and distributed computed results.
 - **Engine dependency:** ripgrep `15.2.0`, commit `e89fff89ac9af12e8d4ce9d5fd07beb408ca730f`
@@ -19,8 +19,8 @@ binds each segment; native code compiles one matcher and creates one session per
 segment call. GrepOp returns row selection and JSON details. The pipeline reads
 identities separately afterward. Each sealed native Grep call acquires its own
 read lease and captures its own snapshot. Candidate, identity and output reads
-do not share a request-owned snapshot object. The current runner reads candidate
-text directly; there is no additional Grep index-bitmap stage.
+do not share a request-owned snapshot object. Sealed segments may use NGRAM candidate bitmaps and bounded probing before
+reading text; see [Grep NGRAM acceleration](20261103-grep-ngram-index.md).
 
 `milvus-grep-core` is a local path dependency of `tantivy-binding`. The final Rust
 artifact remains `libtantivy_binding.a`, linked into `milvus_core`. The C++ Grep
@@ -37,7 +37,7 @@ remains separate because it also serves other operators.
 - [Grep and `=~` filter semantics](#54-grep-and--filter-semantics)
 - [Engine ownership](#6-ownership-and-concurrency)
 - [Budgets and failure semantics](#7-budgets-cancellation-and-failure-semantics)
-- [Verification and historical measurements](#11-verification-and-recorded-results)
+- [Verification](#11-verification)
 - [Planned element_filter support](#13-planned-support-element_filter-with-grep)
 
 ## 1. Motivation and Integration Context
@@ -75,14 +75,14 @@ input; values are never concatenated across records. C++ skips database NULLs
 and retains the mapping from batch positions to segment offsets.
 
 The request supplies an rg-style `arguments` string and a separate field name.
-Supported flags are repeated `-e`, `-F`, `-i`/`-s`, and `-w`/`-x`, including the
+Supported flags are repeated `-e`, `-F`, `-i`/`-s`, `-w`/`-x`, and `-m`, including the
 exact aliases in [the argument grammar](#51-argument-string-grammar-and-whitelist).
 Parsing and compilation happen on the execution node. The matcher performs no
 file traversal, external command execution, network access or terminal output.
 
 Matching is LF line-oriented. Matching details include line numbers and line
 start byte offsets within the field. Context, multiline, smart case, CRLF normalization,
-fragment-only output, per-field match limits,
+fragment-only output,
 inversion, counts, PCRE2, transcoding and replacement are unsupported. The
 parser rejects unlisted flags, including flags whose supplied value would make
 them a no-op. There is no fallback to a different matcher.
@@ -553,9 +553,8 @@ selected output rows. Export does not decode or re-encode Grep JSON.
 
 ### Client decoding
 
-Decode each `matches.scalars.json_data.data` entry with `json.loads`. The local
-E2E script `tests/scripts/grep_query_e2e.py` compares the resulting line content
-and UTF-8 byte spans against its oracle.
+Decode each `matches.scalars.json_data.data` entry with `json.loads`. Validate
+the resulting line content and UTF-8 byte spans against an independent oracle.
 
 ## 5. Parsing and C API
 
@@ -634,9 +633,10 @@ produces the following logical spec (field identity is resolved by GrepOp on Que
 | `-s` | `--case-sensitive` | Case-sensitive; also the default |
 | `-w` | `--word-regexp` | Word boundary mode |
 | `-x` | `--line-regexp` | Whole-line boundary mode |
+| `-m COUNT` | `--max-count COUNT` | Keep the first COUNT matching lines per field value; omitted means unlimited |
 
-Support attached `-ePATTERN` and `--regexp=PATTERN`. Short flags can be grouped
-(e.g. `-Fi`); `e` consumes the remainder of its token or the next token.
+Support attached `-ePATTERN`, `--regexp=PATTERN`, `-mCOUNT`, and `--max-count=COUNT`. Short flags can be grouped
+(e.g. `-Fi` or `-im2`); `e` and `m` consume the remainder of their token or the next token.
 The next token after a separated `-e` is always its value, even if it starts
 with `-`: `-e -C` searches for the pattern `-C`, not context. A missing next token
 is an error. Boolean flags take no values; `--ignore-case=false` is invalid.
@@ -645,6 +645,10 @@ Do not support abbreviated long names or unlisted negated aliases.
 Repeated `-e` appends patterns, including empty ones; `-e ""` is valid. Patterns
 are compiled as one ordered OR expression, not searched independently. Repeated
 `-F`, `-w`, or `-x` is idempotent. For `-i`/`-s`, the last occurrence wins.
+For repeated `-m`/`--max-count`, the last occurrence wins. COUNT is a decimal
+uint64 (0 through 18446744073709551615); negative, signed, fractional, empty,
+overflowing and non-decimal values are rejected. A missing value is a typed
+ParameterMissing error; a malformed value is ParameterInvalid.
 Combining `-w` and `-x` is an error, irrespective of order, rather than inheriting
 rg's precedence. `--` ends options, but all following positional tokens are
 rejected. A final bare `--` is allowed if a pattern was already supplied.
@@ -687,7 +691,7 @@ spec, err := grep.Parse(
 The byte limit is positive and supplied by the factory from
 `function.grep.maxArgumentBytes`; see [resource limits](#71-resource-limits)
 for defaults. `Spec` contains ordered patterns and
-matching enums, not field IDs, database metadata, native handles or a wire
+matching enums and an optional matching-line cap, not field IDs, database metadata, native handles or a wire
 representation. Its fields are private and only the parser populates them.
 Read-only accessors do not expose the backing pattern slice; the zero value is invalid.
 
@@ -699,11 +703,45 @@ checks request cancellation before and after construction. The parser does not
 translate C ABI statuses. Parsing success does not establish regex validity: `-e '['` produces a
 Spec, but native compilation rejects it before matching.
 
+#### Per-field matching-line cap (`-m` / `--max-count`)
+
+`-m M` is independent of Query limit/offset. Query limit counts matching records;
+`-m` keeps the first M matching LF-delimited lines of each field value. Every
+retained line includes all of its spans; multiple patterns or occurrences on
+one line still count as one line. Line numbers and byte offsets refer to the
+original field and are not renumbered after skipped lines. Counters reset for
+every input, including repeated segment offsets, and across native batches.
+Without `-m`, all matching lines are returned as before. Context and multiline
+options remain unsupported.
+
+The count is matching configuration, not a service resource budget. Rust stops
+before matching the next line once the cap is reached; retained output still
+has to fit the existing byte budget, and errors never become partial success.
+The memory-only API continues to validate all supplied input UTF-8 before any
+matching, including bytes beyond the matching-line cap, and cancellation remains
+observable. This cap does not promise to avoid UTF-8 validation or LOB reads
+already performed by the segment adapter.
+
+`-m 0` still parses and compiles the pattern, then the segment adapter returns
+a typed empty result without querying NGRAM or reading field values. It does
+not hide invalid regexes or an already-cancelled request. Positive `-m` values
+do not change NGRAM necessary conditions or bounded VARCHAR prefix-scan
+eligibility. The prefix row budget uses Query's record limit, not the per-field
+matching-line cap; a separate byte budget also bounds the prefix. There is no
+match-ratio decision.
+
+The raw `arguments` string already travels to the execution node, so no RPC
+proto change is needed. Go Spec, the Go/C++ scan options, and C++/Rust match
+options carry the count and its presence. The generated Rust C header and all
+native/Go consumers must be rebuilt together because this is a same-build ABI.
+
 ### 5.2 Normalized Spec and Input Contract
 
 The normalized matching options are `pattern_kind` (regex/literal), `case_mode`
-(sensitive/insensitive), and `boundary` (none/word/line). Zero initialization
-selects regex, case-sensitive, no boundary restriction. Reject unknown enum
+(sensitive/insensitive), `boundary` (none/word/line), and optional `max_count`.
+The in-process C ABIs represent presence separately as `has_max_count` (0/1),
+so explicit zero and unlimited remain distinct. Zero initialization selects
+regex, case-sensitive, no boundary or matching-line-count restriction. Reject unknown enum
 values when constructing the Go specification and at the Rust compile boundary.
 Word mode uses the pinned builder's
 Unicode word matching semantics; it is not a tokenizer or Chinese segmentation.
@@ -764,8 +802,9 @@ The Rust/C API has one output shape:
   is its zero-based UTF-8 byte offset, including preceding newline bytes.
   Count unmatched and empty lines too, and reset coordinates for each input.
   Do not duplicate matched text or return roles or field identifiers.
-- Success includes all matching lines and spans for every input in the batch.
-  The batch API has no first-hit early return or silent truncation. The C++
+- Success includes matching lines up to the explicit per-field `-m` cap,
+  with all spans on each retained line, for every input in the batch. Without
+  that cap all matching lines are retained; there is no silent budget truncation. The C++
   runner caps the number of inputs in each call by the remaining Query match
   quota, so it never needs to truncate a returned record. Resource failure,
   deadline and cancellation produce no Result.
@@ -913,7 +952,11 @@ failure propagates as `std::bad_alloc` to the existing cgo OOM handler.
 | QuotaConfig.MaxOutputSize | Native matching-result byte budget; separately used for combined ordinary and computed output checks | Shared configuration |
 | Request context | Execution deadline and cancellation | Request-defined |
 
-The function settings are refreshable and fall back to defaults for invalid or out-of-range values. Operators and candidate plans read settings at their respective preparation boundaries. Read batch size is independent of remaining match quota. Native matching stops at input exhaustion or its record cap. See [function_param.go](../../../pkg/util/paramtable/function_param.go), [operator_grep.go](../../../internal/util/function/chain/operator_grep.go) and [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
+The function settings are refreshable and fall back to defaults for invalid or out-of-range values. Operators and candidate plans read settings at their respective preparation boundaries. Ordinary scan/index read batches are independent of remaining match quota; Probe may use smaller reads bounded by that quota. Native matching stops at input exhaustion or its record cap. See [function_param.go](../../../pkg/util/paramtable/function_param.go), [operator_grep.go](../../../internal/util/function/chain/operator_grep.go) and [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
+
+The NGRAM-specific eligibility rules, bounded VARCHAR prefix scanning with row
+and byte budgets, and candidate ownership are maintained in the
+[Grep NGRAM index design](20261103-grep-ngram-index.md#6-segment-routing-and-execution).
 
 The final QueryNode output size check sums the protobuf sizes of both FieldsData
 and ComputedResults against the same MaxOutputSize limit. Computed values also
@@ -942,7 +985,8 @@ between calls when the Query match cap is reached; it never turns a budget or
 execution failure into partial success. Resource exhaustion,
 invalid input and cancellation discard that call's output and return
 `*out_result=NULL`. No details are silently truncated to fit a budget. Success
-returns all matching lines and spans for every input field in that batch. If a
+returns matching lines up to the requested per-field `-m` cap and all spans
+on each retained line, for every input field in that batch. If a
 later batch fails, the caller fails the request rather than publishing earlier batches as a
 complete success. Soft detail truncation is unsupported.
 
@@ -1095,7 +1139,7 @@ integration tests are mandatory even when the crate's own tests pass.
 | Worker execution and merge | `internal/querynodev2/segments/{query_scan,query_scan_merge}.go` |
 | Field export and distributed computed reduction | `internal/util/function/chain/converter.go`, `internal/util/queryutil/computed_results.go` |
 
-## 11. Verification and Recorded Results
+## 11. Verification
 
 ### Go parser verification
 
@@ -1127,9 +1171,11 @@ internal/core/output/unittest/all_tests --gtest_filter='Grep.*:GrepFault.*:*Grep
 
 ### Acceptance Cases
 
-The following matrix is for phase one. Context, multiline, fragments, counts,
-and per-field match limits are not enabled by these tests and need separate
-acceptance contracts when implemented.
+The original matrix below covers phase one. Context, multiline, fragments and
+count-only output remain unsupported. Per-field `-m` coverage additionally
+checks numeric syntax/presence, repeated flags, zero/unlimited, per-record and
+per-batch reset, full spans and coordinates, Query record limits, NGRAM/probe
+paths, unreadable LOB avoidance for zero, and failure/cancellation preservation.
 
 | Area | Required cases |
 |---|---|
@@ -1147,6 +1193,8 @@ acceptance contracts when implemented.
 Use a standalone search probe to trace file/network/process activity after
 initialization, with relevant detailed logs suppressed. Separate loader,
 allocator, and input page-fault effects from active external operations.
+
+Measured NGRAM and bounded VARCHAR prefix-scan results, including their distinct baselines and timing scopes, are maintained in [the NGRAM design, Section 7: Performance Test Results](20261103-grep-ngram-index.md#7-performance-test-results). The benchmark dimensions below remain acceptance targets rather than completed measurements.
 
 Benchmark short/long records, low/high match density, multiple batch sizes,
 and concurrent Sessions. Measure Proxy forwarding, execution-side parsing/compilation, and steady-state
@@ -1173,93 +1221,6 @@ consumer; successful matching alone does not establish error or retry behavior.
 - Run real QueryNode tasks with both ordinary transport settings, and ordinary
   Query regressions. Standalone E2E must cover growing/sealed VarChar/TEXT and
   final ordinary fields; it does not replace multi-process cluster testing.
-
-### Historical validation records
-
-The following records were retained from the Arrow transport and computed-result
-design notes. They describe those earlier runs and were not rerun as part of
-this documentation consolidation. Revision IDs and local artifact paths identify
-historical measurements, not reproducible repository fixtures.
-
-#### Arrow transport validation (2026-10-19)
-
-The native library and Go server were rebuilt together. Validation passed:
-
-- 1,200 randomized Arrow/protobuf reducer comparisons, plus malformed-column
-  validation (nulls, duplicate names, wrong types and offset alignment).
-- `internal/util/segcore/...`, `internal/querynodev2/tasks/...`, and
-  `internal/util/function/chain/...` package tests with `dynamic,test` and
-  `-gcflags="all=-N -l"`.
-- Targeted segments tests for QueryScan merge, ordinary PK merge, field fetch,
-  QueryNode pipeline and retrieval routing.
-- Standalone extended smoke E2E: 124 correctness checks covering VarChar/TEXT,
-  growing/sealed segments, complex regexes and final ordinary/detail outputs.
-  Test-owned collections were removed successfully.
-
-Cancellation tests respect the existing asynchronous completion race: a short
-native read may finish successfully before cancellation is delivered, and that
-result must still be released. No extra cancellation checkpoints were added.
-OOM/allocator failures were not fault-injected; the existing Arrow status mapper
-and native future error propagation are reused. This run validates correctness,
-not a measured throughput or latency improvement.
-
-#### Computed-result validation before the performance comparison
-
-- Full queryutil, proxy/dql and querynodev2/tasks package tests passed.
-- Targeted segments QueryScan tests passed, including released/sliced Arrow and
-  uint64-to-int64 overflow rejection. Ordinary Query task coverage passed.
-- Internal/public wire contract tests and full fastpb/resource suites passed.
-  The existing RetrieveResults decoder folds field 22 through protoMerge;
-  no production codec change is needed. Differential tests cover duplicate
-  message occurrences and truncated input before updating the descriptor hash.
-- Current generated Python client + standalone extended E2E: 132 checks passed,
-  no collection cleanup errors. Production binary build succeeded.
-- Multi-source reduction across a serialized worker response and Proxy paging
-  is covered in tests. A multi-process cluster deployment was not exercised.
-- Performance was not measured in that functional validation run. The later
-  comparison is recorded below.
-
-#### Historical workload replay (2026-10-26)
-
-Replay revision `6474b1cbf1` was compared with the recorded 2026-10-20 run of
-`c39c00788c`. The replay reused the same `short_10k` corpus, verified by SHA-256
-`c862d5e954f14a90800e2c4273983ae16541ffdcc1b13e785d19cac00e084cd3`.
-Both workloads used 10,000 sealed rows, two shards, Strong consistency,
-Query limit 10,000, offset zero and GOMAXPROCS=48. Each concurrency group ran
-for 30 seconds. Both runs used a per-segment match cap of 10,000.
-
-Both Go builds used `dynamic,sonic,with_jemalloc,bytedance_tango` tags and normal
-optimizations. The replay required `-ldflags=-checklinkname=0` and loaded the
-current Grep native implementation compiled with `-O3`. Latency covers RPC and
-protobuf decoding; full JSON correctness checks ran during warm-up, with row-ID
-checks on each timed response. All eight groups passed: 172,313 requests, zero
-errors. Test collections were removed and the test instance was stopped.
-
-| Matching documents | Concurrency | Historical QPS | Current QPS | QPS change | Historical P95 (ms) | Current P95 (ms) |
-| --- | --- | --- | --- | --- | --- | --- |
-| 10 | 4 | 317.4 | 329.0 | +3.6% | 17.95 | 17.34 |
-| 10 | 8 | 823.6 | 824.3 | +0.1% | 12.97 | 12.85 |
-| 10 | 16 | 1526.7 | 1554.7 | +1.8% | 12.87 | 12.55 |
-| 10 | 32 | 1855.5 | 1886.1 | +1.6% | 24.83 | 24.31 |
-| 1116 | 4 | 85.3 | 87.7 | +2.8% | 62.06 | 60.49 |
-| 1116 | 8 | 194.5 | 202.6 | +4.2% | 57.25 | 52.24 |
-| 1116 | 16 | 286.0 | 396.7 | +38.7% | 84.83 | 50.53 |
-| 1116 | 32 | 253.8 | 459.4 | +81.0% | 200.90 | 96.65 |
-
-The 10-hit query was `QSPARSE0010`; the 1,116-hit query was
-`(?i:warning|error|failed)`. Low-hit throughput was approximately unchanged.
-The high-hit workload scaled better at concurrency 16/32. At concurrency 32,
-server CPU use also increased from about 17.9 to 36.4 cores. This is evidence
-of higher throughput with more CPU utilization, not lower per-query resource
-cost. These are single historical/replay runs, not repeated trials establishing
-statistical significance. Other code and build differences exist between the
-revisions, so the improvement cannot be attributed solely to JSON encoding.
-
-Raw local artifacts for this run were
-`/tmp/milvus-concurrency-perf-20261020/report.json` and
-`/tmp/grep-json-history-replay-7dba39ni/report.json`; they are not repository
-fixtures. The table above preserves the comparison independently of those
-local files. No multi-process cluster performance claim is made.
 
 ## 12. Remaining Validation Questions
 

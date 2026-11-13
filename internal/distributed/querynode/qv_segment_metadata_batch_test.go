@@ -2,7 +2,9 @@ package grpcquerynode
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -90,6 +93,89 @@ func TestQueryViewMetadataBatchGrouping(t *testing.T) {
 			} else {
 				require.Equal(t, []int64{4}, req.SegmentIDs)
 			}
+		}
+		require.Empty(t, provider.pending)
+	})
+}
+
+func TestQueryViewMetadataBatchConcurrentSnapshotsRetainSegmentArtifacts(t *testing.T) {
+	paramtable.Init()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int64
+		startReaders := make(chan struct{})
+		provider := newBatchMetadataTestProvider(t, t.Context(), func(_ context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+			generation := calls.Add(1)
+			if generation == 2 {
+				close(startReaders)
+			}
+			response := batchMetadataSuccess(req)
+			for _, result := range response.Results {
+				index := result.LoadInfo.IndexInfos[0]
+				index.IndexID += generation * 1000
+				index.IndexFilePaths = []string{fmt.Sprintf("index/%d/%d", result.SegmentID, generation)}
+				index.IndexParams = []*commonpb.KeyValuePair{{Key: "generation", Value: fmt.Sprint(generation)}}
+			}
+			return response, nil
+		})
+		type result struct {
+			segmentID int64
+			info      *querypb.SegmentLoadInfo
+			err       error
+		}
+		readBatch := func() map[int64]*querypb.SegmentLoadInfo {
+			results := make(chan result, 16)
+			var waiters sync.WaitGroup
+			for waiter := range 16 {
+				segmentID := int64(waiter%2 + 1)
+				waiters.Go(func() {
+					snapshot, err := provider.GetQueryViewSegmentLoadInfo(t.Context(), 1, segmentID)
+					results <- result{segmentID: segmentID, info: snapshot.LoadInfo, err: err}
+				})
+			}
+			synctest.Wait()
+			time.Sleep(queryViewMetadataBatchWait)
+			waiters.Wait()
+			close(results)
+			infos := make(map[int64]*querypb.SegmentLoadInfo)
+			for item := range results {
+				require.NoError(t, item.err)
+				if previous := infos[item.segmentID]; previous != nil {
+					require.Same(t, previous, item.info, "waiters in one batch share the immutable segment snapshot")
+				}
+				infos[item.segmentID] = item.info
+			}
+			return infos
+		}
+		first := readBatch()
+		require.EqualValues(t, 1, calls.Load())
+		expected := make(map[int64]*querypb.SegmentLoadInfo)
+		for id, info := range first {
+			expected[id] = proto.Clone(info).(*querypb.SegmentLoadInfo)
+		}
+		var changed atomic.Bool
+		var readers sync.WaitGroup
+		for range 4 {
+			readers.Go(func() {
+				<-startReaders
+				for range 256 {
+					for id, info := range first {
+						if !proto.Equal(info, expected[id]) {
+							changed.Store(true)
+						}
+					}
+				}
+			})
+		}
+		second := readBatch()
+		readers.Wait()
+		require.EqualValues(t, 2, calls.Load())
+		require.False(t, changed.Load(), "a later batch changed artifacts held by an earlier consumer")
+		for id, info := range second {
+			require.NotSame(t, first[id], info)
+			require.EqualValues(t, 2100+id, info.IndexInfos[0].IndexID)
+			require.Equal(t, []string{fmt.Sprintf("index/%d/2", id)}, info.IndexInfos[0].IndexFilePaths)
+			require.Equal(t, "2", info.IndexInfos[0].IndexParams[0].Value)
+			require.True(t, proto.Equal(first[id], expected[id]))
 		}
 		require.Empty(t, provider.pending)
 	})

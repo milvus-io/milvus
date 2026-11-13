@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type TriggerScope = api.TriggerScope
@@ -25,12 +26,14 @@ type triggerQueue struct {
 	dirtyColls  map[int64]struct{}
 
 	signal     chan struct{}
+	completion *syncutil.Future[error]
 	retries    triggerBatch
 	retryAt    time.Time
 	retryDelay time.Duration
 }
 
 type triggerBatch struct {
+	completion  *syncutil.Future[error]
 	scan        bool
 	dirtyNodes  map[int64]struct{}
 	dirtyShards map[qviews.ShardID]struct{}
@@ -68,7 +71,22 @@ func newTriggerQueue() *triggerQueue {
 func (q *triggerQueue) add(scopes ...TriggerScope) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.addLocked(scopes...)
+}
 
+// addWithCompletion joins only the pending batch. Once takePending detaches it,
+// later callers get a new completion, even while the previous pass is running.
+func (q *triggerQueue) addWithCompletion(scopes ...TriggerScope) *syncutil.Future[error] {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.completion == nil {
+		q.completion = syncutil.NewFuture[error]()
+	}
+	q.addLocked(scopes...)
+	return q.completion
+}
+
+func (q *triggerQueue) addLocked(scopes ...TriggerScope) {
 	if len(scopes) == 0 {
 		q.scan = true
 		q.notifyLocked()
@@ -116,6 +134,7 @@ func (q *triggerQueue) takePending() triggerBatch {
 		q.queuedAt = time.Time{}
 	}
 	pending := triggerBatch{
+		completion:  q.completion,
 		scan:        q.scan,
 		dirtyNodes:  q.dirtyNodes,
 		dirtyShards: q.dirtyShards,
@@ -123,6 +142,7 @@ func (q *triggerQueue) takePending() triggerBatch {
 	}
 
 	q.scan = false
+	q.completion = nil
 	q.dirtyNodes = make(map[int64]struct{})
 	q.dirtyShards = make(map[qviews.ShardID]struct{})
 	q.dirtyColls = make(map[int64]struct{})

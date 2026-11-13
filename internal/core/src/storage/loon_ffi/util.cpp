@@ -544,9 +544,8 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         if (r.rfind("usgov", 0) == 0 || r.rfind("usdod", 0) == 0) {
             return "core.usgovcloudapi.net";
         }
-        if (r.rfind("germany", 0) == 0) {
-            return "core.cloudapi.de";
-        }
+        // Microsoft Cloud Germany (core.cloudapi.de) closed in October 2021;
+        // germanywestcentral and germanynorth are public Azure regions.
         return "core.windows.net";
     }
     return "";
@@ -565,6 +564,19 @@ StripURIScheme(const std::string& addr) {
 // family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
 // region) equals the host string. Keep list in sync with Go
 // externalspec.IsCloudEndpointHost.
+// IsAzureStorageAuthority returns true for the bare Azure Storage
+// authorities that azure://<authority>/<container>/<blob> names. An Azure
+// container name cannot contain a dot, so such a host is never a container.
+static bool
+IsAzureStorageAuthority(const std::string& host) {
+    std::string h = host;
+    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return h == "core.windows.net" || h == "core.chinacloudapi.cn" ||
+           h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
+}
+
 static bool
 IsCloudEndpointHost(const std::string& host) {
     std::string h = host;
@@ -949,7 +961,16 @@ InjectExternalSpecProperties(
         // regardless of whether DeriveEndpoint string-matches. This prevents
         // misclassifying `s3://s3.amazonaws.com/bucket/key` as AWS-form when
         // spec.region is a regional value.
-        bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
+        // A bare Azure Storage authority is the endpoint the source names, so
+        // it also wins over the region-derived authority.
+        std::string spec_cp = spec_cloud_provider;
+        std::transform(spec_cp.begin(),
+                       spec_cp.end(),
+                       spec_cp.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        bool uri_host_is_cloud_endpoint =
+            IsCloudEndpointHost(host) ||
+            (spec_cp == "azure" && IsAzureStorageAuthority(host));
         if (!uri_host_is_cloud_endpoint && !derived.empty() &&
             StripURIScheme(derived) != host) {
             milvus_storage::api::SetValue(

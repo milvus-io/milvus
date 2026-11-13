@@ -461,8 +461,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             group_->Prepare(op_ctx);
             // Interface contract: null offsets means iterate over ALL rows
             // (see ChunkedColumnInterface::BulkIsValid). Scan chunk by chunk,
-            // pinning each group chunk once — mirrors the BulkRawStringAt
-            // full-scan branch.
+            // pinning each group chunk once.
             int64_t current_offset = 0;
             for (cid_t cid = 0; cid < num_chunks(); ++cid) {
                 auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
@@ -836,47 +835,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 milvus::fastmem::FastMemcpy(
                     dst_vec + i * element_sizeof, value, element_sizeof);
             });
-    }
-
-    void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const override {
-        if (!IsChunkedVariableColumnDataType(data_type_) ||
-            data_type_ == DataType::JSON) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] BulkRawStringAt only supported for "
-                      "ProxyChunkColumn of "
-                      "variable length type(except Json)");
-        }
-        if (offsets == nullptr) {
-            group_->Prepare(op_ctx);
-            int64_t current_offset = 0;
-            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
-                auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
-                auto chunk = group_chunk.get()->GetChunk(field_id_);
-                auto chunk_rows = chunk->RowNums();
-                for (int64_t i = 0; i < chunk_rows; ++i) {
-                    auto valid = chunk->isValid(i);
-                    auto value =
-                        static_cast<StringChunk*>(chunk.get())->operator[](i);
-                    fn(value, current_offset + i, valid);
-                }
-                current_offset += chunk_rows;
-            }
-        } else {
-            ForEachResolvedRow(
-                op_ctx,
-                offsets,
-                count,
-                [&fn](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
-                    auto valid = chunk->isValid(offset_in_chunk);
-                    auto value = static_cast<StringChunk*>(chunk)->operator[](
-                        offset_in_chunk);
-                    fn(value, i, valid);
-                });
-        }
     }
 
     void

@@ -23,7 +23,7 @@ def main():
     args = parser.parse_args()
     core = Path(__file__).resolve().parents[1]
     tantivy = core.parent / "tantivy/tantivy-binding"
-    symbols = ["mg_grep_compile", "mg_grep_plan_free", "mg_grep_session_create",
+    symbols = ["mg_grep_compile", "mg_grep_plan_free", "mg_grep_plan_condition", "mg_grep_session_create",
                "mg_grep_session_cancel", "mg_grep_session_free", "mg_grep_execute_batch",
                "mg_grep_result_view", "mg_grep_result_free"]
     with tempfile.TemporaryDirectory(prefix="milvus-grep-native-") as tmp:
@@ -60,7 +60,7 @@ def main():
                 core / "tests" / source, "-L" + str(tmp), "-lgrep_abi",
                 "-Wl,-rpath," + str(tmp), "-o", output)
             run(output)
-        print("Eight exported symbols and native C11/C++17 ABI calls passed.")
+        print(f"{len(symbols)} exported symbols and native C11/C++17 ABI calls passed.")
 
 
 if __name__ == "__main__":

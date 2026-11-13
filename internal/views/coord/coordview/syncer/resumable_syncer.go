@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
@@ -23,9 +24,10 @@ import (
 // Close stops the loop but does NOT drain pending views.
 // Use DrainPendingIfNodeLost after Close for node loss scenarios.
 type resumableSyncer struct {
-	node    qviews.WorkNode
-	client  ViewSyncClient
-	pending *pendingSyncQueryViews
+	feedbackHandler ViewFeedbackHandler
+	node            qviews.WorkNode
+	client          ViewSyncClient
+	pending         *pendingSyncQueryViews
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -36,14 +38,16 @@ func newResumableSyncer(
 	ctx context.Context,
 	node qviews.WorkNode,
 	client ViewSyncClient,
+	feedbackHandler ViewFeedbackHandler,
 ) *resumableSyncer {
 	ctx, cancel := context.WithCancel(ctx)
 	rs := &resumableSyncer{
-		node:    node,
-		client:  client,
-		pending: newPendingSyncQueryViews(),
-		ctx:     ctx,
-		cancel:  cancel,
+		feedbackHandler: feedbackHandler,
+		node:            node,
+		client:          client,
+		pending:         newPendingSyncQueryViews(),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	rs.wg.Add(1)
 	go rs.loop()
@@ -203,6 +207,11 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			return receivedResponse
 		}
 
+		if feedback := resp.GetViewFeedback(); feedback != nil {
+			rs.receiveViewFeedback(feedback)
+			receivedResponse = true
+			continue
+		}
 		viewsResp := resp.GetViews()
 		if viewsResp == nil {
 			if resp.GetClose() != nil {
@@ -216,6 +225,24 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			rs.pending.MatchResponse(pb)
 		}
 	}
+}
+
+func (rs *resumableSyncer) receiveViewFeedback(report *viewpb.ViewFeedbackReport) {
+	node, ok := rs.node.(qviews.StreamingNode)
+	if !ok || rs.feedbackHandler == nil {
+		return
+	}
+	window := qviews.ViewFeedbackWindow{StartUnixNanos: report.GetWindowStartUnixNanos(), EndUnixNanos: report.GetWindowEndUnixNanos(), Shards: make(map[qviews.ShardID]qviews.ViewFeedback, len(report.GetShards()))}
+	for _, sample := range report.GetShards() {
+		id := sample.GetShardId()
+		if id == nil || funcutil.ToPhysicalChannel(id.GetVchannel()) != node.PChannel {
+			continue
+		}
+		window.Shards[qviews.FromProtoShardID(id)] = qviews.ViewFeedback{
+			ShardID: qviews.FromProtoShardID(id), RequestCount: sample.GetRequestCount(), LastAccessUnixNanos: sample.GetLastAccessUnixNanos(),
+		}
+	}
+	rs.feedbackHandler.OnViewFeedback(window)
 }
 
 // rePush sends all pending entries for this node through the stream in batches

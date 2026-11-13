@@ -13,9 +13,13 @@
 #include <folly/ScopeGuard.h>
 #include <fmt/format.h>
 #include <limits>
+#include <cmath>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "common/CGoCatch.h"
 #include "grep/Grep.h"
+#include "grep/IndexCondition.h"
+#include "index/contracts/query/INgramReader.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
@@ -142,6 +146,7 @@ struct GrepInputBatch {
     int64_t count = 0;
     std::optional<Views> pinned;
     std::unique_ptr<DataArray> owned;
+    std::vector<int64_t> owned_positions;
     std::vector<Views> text_pins;
     std::vector<std::optional<std::string_view>> inline_text;
 
@@ -156,6 +161,9 @@ struct GrepInputBatch {
                 return std::nullopt;
             }
             return views[index];
+        }
+        if (!owned_positions.empty()) {
+            index = owned_positions[index];
         }
         const auto& validity = GetFieldDataRowValidData(*owned);
         if (!validity.empty() && !validity[index]) {
@@ -230,38 +238,113 @@ TryReadInlineTextBatch(const ChunkedColumnInterface* column,
     return true;
 }
 
-GrepInputBatch
-ReadGrepBatch(const SegmentInternalInterface* segment,
-              const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
-              milvus::OpContext* op_ctx,
+// Compute the original read window before pruning. In particular, keep
+// read-ahead offset validation and chunk boundaries independent of candidates.
+int64_t
+GrepReadCount(const SegmentInternalInterface* segment,
               const FieldMeta& meta,
               const int64_t* offsets,
               int64_t max_rows,
               int64_t rows,
               bool use_views,
               const ChunkedColumnInterface* view_column) {
-    const auto field = meta.get_id();
-    GrepInputBatch batch;
     AssertInfo(offsets[0] >= 0 && offsets[0] < rows,
                "grep offset out of range");
-    if (view_column != nullptr && meta.get_data_type() == DataType::TEXT) {
-        batch.count = max_rows;
-        // TEXT prefetch spans chunks; do not truncate its read-ahead at the
-        // first chunk boundary or at the remaining match limit.
-        for (int64_t i = 0; i < batch.count; ++i) {
-            AssertInfo(offsets[i] >= 0 && offsets[i] < rows,
-                       "grep offset out of range");
+    const auto field = meta.get_id();
+    int64_t chunk_begin = 0, chunk_end = rows;
+    if (view_column && meta.get_data_type() != DataType::TEXT) {
+        const auto& boundaries = view_column->GetNumRowsUntilChunk();
+        const auto end =
+            std::upper_bound(boundaries.begin(), boundaries.end(), offsets[0]);
+        AssertInfo(end != boundaries.begin() && end != boundaries.end(),
+                   "grep offset out of column range");
+        chunk_begin = *(end - 1);
+        chunk_end = *end;
+    }
+    const auto chunk =
+        !view_column && use_views
+            ? segment->get_chunk_by_offset(field, offsets[0]).first
+            : 0;
+    int64_t count = 1;
+    while (count < max_rows) {
+        const auto offset = offsets[count];
+        AssertInfo(offset >= 0 && offset < rows, "grep offset out of range");
+        if (offset < chunk_begin || offset >= chunk_end ||
+            (!view_column && use_views &&
+             segment->get_chunk_by_offset(field, offset).first != chunk)) {
+            break;
         }
+        ++count;
+    }
+    return count;
+}
+
+// LOB take can coalesce repeated row references. Fetch each input row once,
+// then expose repeated views in input order without copying large documents.
+void
+ReadOwnedGrepBatch(const SegmentInternalInterface* segment,
+                   const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+                   milvus::OpContext* op_ctx,
+                   const FieldMeta& meta,
+                   const int64_t* offsets,
+                   GrepInputBatch& batch) {
+    const auto end = offsets + batch.count;
+    const bool unique_sorted =
+        std::adjacent_find(
+            offsets, end, [](int64_t a, int64_t b) { return a >= b; }) == end;
+    if (meta.get_data_type() != DataType::TEXT || unique_sorted) {
+        batch.owned = BulkSubscriptWithSnapshot(segment,
+                                                snapshot,
+                                                op_ctx,
+                                                meta.get_id(),
+                                                meta,
+                                                offsets,
+                                                batch.count);
+        return;
+    }
+    std::unordered_map<int64_t, int64_t> positions;
+    std::vector<int64_t> unique_offsets;
+    positions.reserve(batch.count);
+    unique_offsets.reserve(batch.count);
+    batch.owned_positions.reserve(batch.count);
+    for (int64_t i = 0; i < batch.count; ++i) {
+        auto [entry, inserted] =
+            positions.try_emplace(offsets[i], unique_offsets.size());
+        if (inserted)
+            unique_offsets.push_back(offsets[i]);
+        batch.owned_positions.push_back(entry->second);
+    }
+    batch.owned = BulkSubscriptWithSnapshot(segment,
+                                            snapshot,
+                                            op_ctx,
+                                            meta.get_id(),
+                                            meta,
+                                            unique_offsets.data(),
+                                            unique_offsets.size());
+    if (unique_offsets.size() == static_cast<size_t>(batch.count)) {
+        batch.owned_positions.clear();
+    }
+}
+
+GrepInputBatch
+ReadGrepBatch(const SegmentInternalInterface* segment,
+              const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+              milvus::OpContext* op_ctx,
+              const FieldMeta& meta,
+              const int64_t* offsets,
+              int64_t count,
+              bool use_views,
+              const ChunkedColumnInterface* view_column) {
+    const auto field = meta.get_id();
+    GrepInputBatch batch;
+    batch.count = count;
+    if (view_column != nullptr && meta.get_data_type() == DataType::TEXT) {
         if (!TryReadInlineTextBatch(view_column, op_ctx, offsets, batch)) {
-            batch.owned = BulkSubscriptWithSnapshot(
-                segment, snapshot, op_ctx, field, meta, offsets, batch.count);
+            ReadOwnedGrepBatch(segment, snapshot, op_ctx, meta, offsets, batch);
         }
         return batch;
     }
     if (view_column != nullptr) {
-        // The request snapshot owns this sealed column under the read lease.
-        // Locate only the first row. All subsequent rows in this read batch
-        // must lie in the same chunk, even when offsets are sparse or unsorted.
         const auto& boundaries = view_column->GetNumRowsUntilChunk();
         const auto end =
             std::upper_bound(boundaries.begin(), boundaries.end(), offsets[0]);
@@ -269,46 +352,18 @@ ReadGrepBatch(const SegmentInternalInterface* segment,
                    "grep offset out of column range");
         const int64_t chunk = std::distance(boundaries.begin(), end) - 1;
         const int64_t chunk_begin = *(end - 1);
-        const int64_t chunk_end = *end;
-        while (batch.count < max_rows) {
-            const auto offset = offsets[batch.count];
-            // Preserve read-ahead validation: a bad offset within the configured
-            // read batch fails even when an earlier row satisfies the limit.
-            AssertInfo(offset >= 0 && offset < rows,
-                       "grep offset out of range");
-            if (offset < chunk_begin || offset >= chunk_end) {
-                break;
-            }
-            ++batch.count;
-        }
-        FixedVector<int32_t> local_offsets(batch.count);
-        for (int64_t i = 0; i < batch.count; ++i) {
+        FixedVector<int32_t> local_offsets(count);
+        for (int64_t i = 0; i < count; ++i) {
             const auto relative = offsets[i] - chunk_begin;
             AssertInfo(relative <= std::numeric_limits<int32_t>::max(),
                        "grep chunk offset exceeds int32");
             local_offsets[i] = relative;
         }
-        // Pin through the same column used for addressing; do not re-capture
-        // published state or repeat the field lookup in the segment wrapper.
         batch.pinned.emplace(
             view_column->StringViewsByOffsets(op_ctx, chunk, local_offsets));
-        return batch;
-    }
-    const auto chunk =
-        use_views ? segment->get_chunk_by_offset(field, offsets[0]).first : 0;
-    auto& count = batch.count;
-    count = 1;
-    // Read ahead independently of the remaining match quota. TEXT uses
-    // the LOB-aware bulk reader, which can group references by file.
-    while (count < max_rows) {
-        auto off = offsets[count];
-        AssertInfo(off >= 0 && off < rows, "grep offset out of range");
-        if (use_views &&
-            segment->get_chunk_by_offset(field, off).first != chunk)
-            break;
-        ++count;
-    }
-    if (use_views) {
+    } else if (use_views) {
+        const auto chunk =
+            segment->get_chunk_by_offset(field, offsets[0]).first;
         FixedVector<int32_t> local_offsets(count);
         for (int64_t i = 0; i < count; ++i) {
             auto relative =
@@ -320,15 +375,130 @@ ReadGrepBatch(const SegmentInternalInterface* segment,
         batch.pinned.emplace(segment->chunk_views_by_offsets<std::string_view>(
             op_ctx, field, chunk, local_offsets));
     } else {
-        batch.owned = BulkSubscriptWithSnapshot(
-            segment, snapshot, op_ctx, field, meta, offsets, count);
+        ReadOwnedGrepBatch(segment, snapshot, op_ctx, meta, offsets, batch);
     }
     return batch;
+}
+
+// Retain a request reader while deciding whether to query it. Preparation does not
+// enumerate postings; a successful probe can finish without candidate lookup.
+struct GrepIndex {
+    index::IIndexReaderBasePtr owner;
+    const index::INgramReader* reader;
+    RegexLiteralCondition condition;
+};
+
+enum class GrepMode { Scan, Probe, Index };
+
+constexpr int64_t kProbeMinRows = 32;
+constexpr int64_t kProbeMaxRows = 256;
+constexpr size_t kProbeMaxBytes = 256 * 1024;
+
+struct GrepProbeBudget {
+    int64_t row_limit;
+    int64_t rows = 0;
+    size_t bytes = 0;
+    int64_t largest_batch = 0;
+    bool exhausted = false;
+
+    int64_t
+    NextReadCount(int64_t available, int64_t remaining_matches) const {
+        const auto growth = rows == 0 ? kProbeMinRows : largest_batch * 2;
+        return std::min(
+            {available, row_limit - rows, remaining_matches, growth});
+    }
+
+    void
+    TrimAndCharge(GrepInputBatch& batch) {
+        // Probe only borrows VARCHAR views. Inspect lengths before passing any
+        // value to the matcher; an oversized value stays in the index suffix.
+        const auto available = batch.count;
+        int64_t accepted = 0;
+        while (accepted < available && rows < row_limit) {
+            const auto value = batch.Text(accepted);
+            const auto length = value ? value->size() : 0;
+            if (length > kProbeMaxBytes - bytes) {
+                exhausted = true;
+                break;
+            }
+            bytes += length;
+            ++rows;  // NULLs, empty values, and repeated positions also count.
+            ++accepted;
+        }
+        batch.count = accepted;
+        largest_batch = std::max(largest_batch, accepted);
+        exhausted = exhausted || rows == row_limit || bytes == kProbeMaxBytes;
+    }
+};
+
+// Creates only sealed, whole-field NGRAM readers with complete row coverage.
+// Loading errors propagate; they are not index ineligibility.
+std::optional<GrepIndex>
+PrepareGrepIndex(const SegmentInternalInterface* segment,
+                 milvus::OpContext* op_ctx,
+                 const FieldMeta& meta,
+                 const Plan& plan,
+                 int64_t size,
+                 int64_t rows) {
+    if (segment->type() != SegmentType::Sealed || size == 0) {
+        return std::nullopt;
+    }
+    const auto registrations = segment->IndexRegistrations(meta.get_id());
+    if (std::none_of(
+            registrations.begin(), registrations.end(), [](const auto& r) {
+                return r.kind == IndexKind::Ngram && r.json_path.empty();
+            })) {
+        return std::nullopt;
+    }
+    auto condition = DecodeLiteralConditionTree(plan.ConditionPayload());
+    if (condition.IsTrue()) {
+        return std::nullopt;
+    }
+    const auto capabilities =
+        segment->ResolveIndexCapability(op_ctx, meta.get_id());
+    for (const auto& entry : capabilities.entries()) {
+        if (!entry.caps.ngram_candidates || entry.caps.nested ||
+            !entry.json_path.empty() ||
+            entry.value_type != meta.get_data_type()) {
+            continue;
+        }
+        auto owner = segment->CreateIndexReader(op_ctx, entry.key);
+        if (!owner || owner->CoordDomain() != index::Domain::Row ||
+            owner->Count() != rows ||
+            owner->ValueType() != meta.get_data_type()) {
+            continue;
+        }
+        const auto* reader =
+            dynamic_cast<const index::INgramReader*>(owner.get());
+        if (!reader || !reader->CanHandleConditionTree(condition)) {
+            continue;
+        }
+        return GrepIndex{std::move(owner), reader, std::move(condition)};
+    }
+    return std::nullopt;
+}
+
+TargetBitmap
+BuildGrepCandidates(const GrepIndex& index,
+                    const int64_t* offsets,
+                    int64_t size,
+                    int64_t rows) {
+    TargetBitmap candidates(static_cast<size_t>(rows), false);
+    for (int64_t i = 0; i < size; ++i) {
+        // Invalid offsets remain subject to original read-window validation.
+        // Include repeated row IDs when they occur again in the unread suffix.
+        if (offsets[i] >= 0 && offsets[i] < rows) {
+            candidates.set(offsets[i]);
+        }
+    }
+    index.reader->ConditionTreeCandidates(index.condition, candidates);
+    return candidates;
 }
 
 void
 MatchGrepBatch(const GrepInputBatch& batch,
                int64_t begin,
+               const int64_t* original_positions,
                Session& session,
                const CGrepScanOptions& opt,
                GrepResultBuilder& output) {
@@ -348,7 +518,9 @@ MatchGrepBatch(const GrepInputBatch& batch,
                 continue;
             }
             texts.push_back(*text);
-            input_positions.push_back(begin + consumed - 1);
+            input_positions.push_back(original_positions
+                                          ? original_positions[consumed - 1]
+                                          : begin + consumed - 1);
         }
         if (texts.empty())
             continue;
@@ -379,7 +551,8 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     AssertInfo(opt.batch_size > 0 && opt.limit > 0 && opt.max_regex_bytes > 0 &&
                    opt.max_dfa_cache_bytes > 0 && opt.max_result_bytes > 0,
                "invalid grep service budgets or limit");
-    AssertInfo(opt.pattern_kind <= 1 && opt.case_mode <= 1 && opt.boundary <= 2,
+    AssertInfo(opt.pattern_kind <= 1 && opt.case_mode <= 1 &&
+                   opt.boundary <= 2 && opt.has_max_count <= 1,
                "invalid normalized grep options");
     auto check = [&] {
         if (cancel_token.isCancellationRequested()) {
@@ -400,12 +573,20 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     AssertInfo(meta.get_data_type() == DataType::VARCHAR ||
                    meta.get_data_type() == DataType::TEXT,
                "grep requires a text field");
-    auto plan =
-        grep::Plan::Compile(patterns,
-                            {static_cast<grep::PatternKind>(opt.pattern_kind),
-                             static_cast<grep::CaseMode>(opt.case_mode),
-                             static_cast<grep::Boundary>(opt.boundary)},
-                            {opt.max_regex_bytes, opt.max_dfa_cache_bytes});
+    auto plan = grep::Plan::Compile(
+        patterns,
+        {static_cast<grep::PatternKind>(opt.pattern_kind),
+         static_cast<grep::CaseMode>(opt.case_mode),
+         static_cast<grep::Boundary>(opt.boundary),
+         opt.has_max_count ? std::optional<uint64_t>(opt.max_count)
+                           : std::nullopt},
+        {opt.max_regex_bytes, opt.max_dfa_cache_bytes});
+    if (opt.has_max_count && opt.max_count == 0) {
+        // Compile first so -m 0 does not hide invalid patterns. No postings or
+        // original text are needed when no matching lines may be returned.
+        check();
+        return GrepResultBuilder{}.Finish();
+    }
     auto session = plan.CreateSession();
     folly::CancellationCallback cancel(
         cancel_token,
@@ -425,21 +606,96 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                            segment->HasFieldData(field) &&
                            (!snapshot || view_column != nullptr);
 
+    auto index = PrepareGrepIndex(segment, &op_ctx, meta, plan, size, rows);
+    // A borrowed view lets Probe check byte lengths without materializing an
+    // unbounded batch. TEXT and VARCHAR without such views remain index-first.
+    auto mode = !index ? GrepMode::Scan
+                : meta.get_data_type() == DataType::VARCHAR && use_views
+                    ? GrepMode::Probe
+                    : GrepMode::Index;
+    // Saturate before multiplying: unlike the former policy, all positive
+    // limits may use Probe, including values larger than INT64_MAX / 2.
+    const auto probe_row_budget =
+        std::min(size,
+                 opt.limit >= kProbeMaxRows / 2
+                     ? kProbeMaxRows
+                     : std::max(kProbeMinRows, 2 * opt.limit));
+    GrepProbeBudget probe{probe_row_budget};
+    std::optional<TargetBitmap> candidates;
+    if (mode == GrepMode::Index) {
+        candidates = BuildGrepCandidates(*index, offsets, size, rows);
+        index.reset();
+    }
+    const auto* read_column =
+        (use_views || borrow_inline_text) ? view_column : nullptr;
+    std::vector<int64_t> selected_offsets, original_positions;
     GrepResultBuilder output;
-    for (int64_t begin = 0; begin < size && output.Count() < opt.limit;) {
+    int64_t begin = 0;
+    int64_t window_end = 0;
+    while (begin < size && output.Count() < opt.limit) {
         check();
-        auto batch = ReadGrepBatch(
-            segment,
-            snapshot,
-            &op_ctx,
-            meta,
-            offsets + begin,
-            std::min<int64_t>(opt.batch_size, size - begin),
-            rows,
-            use_views,
-            (use_views || borrow_inline_text) ? view_column : nullptr);
-        MatchGrepBatch(batch, begin, session, opt, output);
-        begin += batch.count;
+        if (begin == window_end) {
+            // Validate the original window before any smaller probe reads.
+            // Keep this boundary even when a probe switches to the index.
+            window_end = begin + GrepReadCount(segment,
+                                               meta,
+                                               offsets + begin,
+                                               std::min<int64_t>(opt.batch_size,
+                                                                 size - begin),
+                                               rows,
+                                               use_views,
+                                               read_column);
+        }
+        if (mode == GrepMode::Index && !candidates) {
+            // Switch once. Do not repeat postings queries per window.
+            candidates = BuildGrepCandidates(
+                *index, offsets + begin, size - begin, rows);
+            index.reset();
+        }
+        auto input_count = mode == GrepMode::Probe
+                               ? probe.NextReadCount(window_end - begin,
+                                                     opt.limit - output.Count())
+                               : window_end - begin;
+        const int64_t* read_offsets = offsets + begin;
+        int64_t read_count = input_count;
+        if (candidates) {
+            selected_offsets.clear();
+            original_positions.clear();
+            for (int64_t i = 0; i < input_count; ++i) {
+                if ((*candidates)[offsets[begin + i]]) {
+                    selected_offsets.push_back(offsets[begin + i]);
+                    original_positions.push_back(begin + i);
+                }
+            }
+            read_offsets = selected_offsets.data();
+            read_count = selected_offsets.size();
+        }
+        if (read_count != 0) {
+            auto batch = ReadGrepBatch(segment,
+                                       snapshot,
+                                       &op_ctx,
+                                       meta,
+                                       read_offsets,
+                                       read_count,
+                                       use_views,
+                                       read_column);
+            if (mode == GrepMode::Probe) {
+                probe.TrimAndCharge(batch);
+                input_count = batch.count;
+            }
+            MatchGrepBatch(batch,
+                           begin,
+                           candidates ? original_positions.data() : nullptr,
+                           session,
+                           opt,
+                           output);
+        }
+        begin += input_count;
+        if (mode == GrepMode::Probe && probe.exhausted) {
+            // The next iteration queries only the unread suffix. If input is
+            // exhausted or the limit is satisfied, no lookup is needed.
+            mode = GrepMode::Index;
+        }
     }
     return output.Finish();
 }

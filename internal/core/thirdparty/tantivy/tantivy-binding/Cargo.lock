@@ -2907,6 +2907,8 @@ dependencies = [
  "cbindgen",
  "grep",
  "memchr",
+ "prost",
+ "prost-build",
  "regex-syntax 0.8.6",
 ]
 

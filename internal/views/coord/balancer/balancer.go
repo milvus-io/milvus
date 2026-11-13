@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // Balancer is the scheduling controller that reconciles dirty shards into
@@ -108,6 +109,12 @@ func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 	b.queue.add(scopes...)
 }
 
+// TriggerWithCompletion enqueues scoped work and returns the pending batch's
+// result. The caller owns cancellation and runtime shutdown while waiting.
+func (b *DefaultBalancer) TriggerWithCompletion(scopes ...TriggerScope) *syncutil.Future[error] {
+	return b.queue.addWithCompletion(scopes...)
+}
+
 func (b *DefaultBalancer) loop(ctx context.Context) {
 	defer b.wg.Done()
 
@@ -187,11 +194,17 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	timer := reconcileTotal.Begin()
 	defer timer.EndError(&retErr)
 	b.reconcileMu.Lock()
-	defer b.reconcileMu.Unlock()
+	var pending triggerBatch
+	defer func() {
+		b.reconcileMu.Unlock()
+		if pending.completion != nil {
+			pending.completion.Set(retErr)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	pending := b.queue.takePending()
+	pending = b.queue.takePending()
 	b.scanRequested = b.scanRequested || pending.scan
 	if !pending.hasScopes() && !b.scanning && !b.scanRequested {
 		return nil

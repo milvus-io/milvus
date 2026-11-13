@@ -131,6 +131,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	// the plan always echoes the actual view's shard ID so Phase 2 targets the
 	// real replica.
 	viewShardID := qviews.NewShardIDFromQVMeta(lease.Meta)
+	w.queryViewHandler.RecordShardAccess(viewShardID)
 
 	mvccTimer := planMVCC.Begin()
 	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, shardID.VChannel)
