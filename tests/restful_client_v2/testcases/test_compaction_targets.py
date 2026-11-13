@@ -87,6 +87,35 @@ class TestCompactionTargets(TestBase):
         assert final["data"]["stopReason"] == "satisfied"
         assert final["data"]["stoppedAt"] == target["stoppedAt"]
 
+    def test_standing_sort_exposes_confirmed_cluster_condition(self):
+        deadline = time.monotonic() + 60
+        while True:
+            result = self.target_request("list", {"includeSystem": True})
+            assert result["code"] == 0, result
+            standing = [item for item in result["data"] if item.get("other", {}).get("condition") == "SORT"]
+            if standing:
+                break
+            assert time.monotonic() < deadline, result
+            time.sleep(1)
+
+        assert len(standing) == 1, standing
+        sort = standing[0]
+        assert sort["collectionId"] == "0"
+        assert sort["state"] == "COMPACTION_TARGET_STATE_ACTIVE"
+        assert sort["other"]["clusterWide"]
+        assert sort["other"]["parameters"] in ([{"key": "enabled", "value": "true"}], [{"key": "enabled", "value": "false"}])
+        assert "remainingRows" not in sort
+
+        target_id = sort["targetId"]
+        described = self.target_request("describe", {"targetId": target_id})
+        assert described["code"] == 0, described
+        assert described["data"]["other"] == sort["other"]
+        hidden = self.target_request("list", {})
+        assert hidden["code"] == 0, hidden
+        assert target_id not in [item["targetId"] for item in hidden["data"]]
+        dropped = self.target_request("drop", {"targetId": target_id})
+        assert dropped["code"] != 0, dropped
+
     @pytest.mark.parametrize(
         "extra", [{}, {"optimize": {"inputTargetSizeBytes": "1"}, "rewrite": {}}, {"rewrite": {"partitionId": "1"}}]
     )

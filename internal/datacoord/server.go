@@ -354,7 +354,9 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 	if err = retry.Do(s.ctx, func() error {
 		return s.recoverCompactionTargetScopes(s.ctx)
@@ -774,9 +776,20 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
+func (s *Server) initCompaction() error {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.meta.Catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		if err := cph.InitAdmission(); err != nil {
+			return err
+		}
+	}
+	if s.compactionTargetMeta != nil {
+		item := &Params.DataCoordCfg.TargetCompactionMaxEvents
+		if item.IsSetByUser() {
+			mlog.Warn(s.ctx, "deprecated configuration has no effect on target reconciliation", mlog.String("key", item.Key))
+		}
+	}
 	cph.SetCompactionTargetMeta(s.compactionTargetMeta)
 	cph.LoadMeta()
 	s.compactionInspector = cph
@@ -785,6 +798,7 @@ func (s *Server) initCompaction() {
 	s.compactionTriggerManager = manager
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {

@@ -38,10 +38,11 @@ import (
 // support l2 single segment only for now
 // todo: move l1 single compaction here
 type SingleCompactionPolicy struct {
-	Meta      *meta.Meta
-	IndexMeta *index.IndexMeta
-	allocator allocator.Allocator
-	handler   meta.Handler
+	Meta         *meta.Meta
+	IndexMeta    *index.IndexMeta
+	StandingSort bool
+	allocator    allocator.Allocator
+	handler      meta.Handler
 }
 
 // Ensure singleCompactionPolicy implements CompactionPolicy interface
@@ -268,10 +269,13 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 		return nil, nil, 0, err
 	}
 
-	sortViews, err := policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
-	if err != nil {
-		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
-		return nil, nil, 0, err
+	var sortViews []view.CompactionView
+	if !policy.StandingSort {
+		sortViews, err = policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
+		if err != nil {
+			log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
+			return nil, nil, 0, err
+		}
 	}
 	if !IsCollectionAutoCompactionEnabled(collection) {
 		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")

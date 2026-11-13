@@ -69,6 +69,7 @@ func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, al
 	}
 	segmentMeta.AddCollection(collection)
 	s := &Server{allocator: alloc, meta: segmentMeta, targetCompactionEnabled: true}
+	s.handler = meta.NewMockHandlerWithMeta(segmentMeta)
 	s.compactionTargetCollection = func(_ context.Context, id int64) (*datapb.CompactionTargetResource, bool, error) {
 		current := segmentMeta.GetCollection(id)
 		if current == nil {
@@ -93,6 +94,133 @@ func rewriteRPCRequest(resource *datapb.CompactionTargetResource, roots ...int64
 			Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: roots},
 		},
 	}
+}
+
+func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
+	enableTestCompactionTargets(t)
+	sortConfig := &Params.DataCoordCfg.EnableSortCompaction
+	previous := sortConfig.SwapTempValue("true")
+	t.Cleanup(func() { sortConfig.SwapTempValue(previous) })
+
+	ctx := t.Context()
+	catalog, records := targets.NewCompactionTargetTestCatalog(t)
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(200, nil).Maybe()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(110), nil).Maybe()
+	s, _ := newTargetRPCServer(t, catalog, alloc)
+	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L2,
+		State: commonpb.SegmentState_Flushed, IsInvisible: true, NumOfRows: 7,
+	}))
+	s.meta.SetSegmentCompacting(10, true)
+	runRound := func() int {
+		t.Helper()
+		reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, s.handler, s.allocator, s.compactionTargetCollectionAvailable)
+		events, err := reconciler.Reconcile(ctx)
+		require.NoError(t, err)
+		n := 0
+		for _, pools := range events {
+			for _, pool := range pools {
+				plans, err := pool.Plan()
+				require.NoError(t, err)
+				n += len(plans)
+			}
+		}
+		return n
+	}
+	require.Zero(t, runRound())
+
+	list := func(req *datapb.ListCompactionTargetsRequest) []*datapb.CompactionTargetReadModel {
+		t.Helper()
+		resp, err := s.ListCompactionTargets(ctx, req)
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		return resp.GetTargets()
+	}
+	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{}))
+	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{IncludeSystem: true, DbName: "default"}))
+	active := &datapb.ListCompactionTargetsRequest{IncludeSystem: true, States: []datapb.TargetState{datapb.TargetState_TARGET_STATE_ACTIVE}}
+	standing := list(active)
+	require.Len(t, standing, 1)
+	id := standing[0].GetTargetId()
+	require.Equal(t, int64(200), id)
+	require.True(t, standing[0].GetEnabled())
+	require.Nil(t, standing[0].RemainingRows)
+	require.Equal(t, datapb.TargetIntent_INTENT_SORT, standing[0].GetIntent())
+	require.NotNil(t, records[200])
+
+	describe := func() *datapb.CompactionTargetReadModel {
+		t.Helper()
+		resp, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{
+			TargetId: id, Collection: &datapb.CompactionTargetResource{},
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		return resp.GetTarget()
+	}
+	require.Equal(t, int64(7), describe().GetRemainingRows())
+	dropped, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{
+		TargetId: id, Collection: &datapb.CompactionTargetResource{},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(dropped, err), merr.ErrOperationNotSupported)
+
+	restart := func() {
+		t.Helper()
+		var err error
+		s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+		require.NoError(t, err)
+	}
+	sortConfig.SwapTempValue("false")
+	restart()
+	require.Zero(t, runRound())
+	require.Len(t, records, 1)
+	disabled := describe()
+	require.False(t, disabled.GetEnabled())
+	require.NotNil(t, disabled.Enabled)
+	require.Nil(t, disabled.RemainingRows)
+	require.Zero(t, disabled.GetCheckedAt())
+	require.Equal(t, id, list(active)[0].GetTargetId())
+
+	sortConfig.SwapTempValue("true")
+	restart()
+	s.meta.SetSegmentCompacting(10, false)
+	require.Equal(t, 1, runRound())
+	require.Len(t, records, 1)
+	require.True(t, describe().GetEnabled())
+}
+
+func TestStandingSortConditionSaveFailureKeepsLastConfirmedDefinition(t *testing.T) {
+	enableTestCompactionTargets(t)
+	sortConfig := &Params.DataCoordCfg.EnableSortCompaction
+	previous := sortConfig.SwapTempValue("false")
+	t.Cleanup(func() { sortConfig.SwapTempValue(previous) })
+
+	ctx := t.Context()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	record := &datapb.CompactionTarget{
+		TargetID: 44, Intent: datapb.TargetIntent_INTENT_SORT, TailLimit: -1,
+		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
+	}
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Twice()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
+
+	s, _ := newTargetRPCServer(t, catalog, nil)
+	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L1,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 7,
+	}))
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, s.handler, s.allocator, s.compactionTargetCollectionAvailable)
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	for _, views := range events {
+		require.Empty(t, views)
+	}
+
+	resp, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{
+		TargetId: record.GetTargetID(), Collection: &datapb.CompactionTargetResource{},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.True(t, resp.GetTarget().GetEnabled())
+	require.Equal(t, int64(7), resp.GetTarget().GetRemainingRows())
 }
 
 func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {
@@ -329,7 +457,7 @@ func TestCompactionTargetWaitsForDropAndRetainsRecoveredHistory(t *testing.T) {
 	t.Cleanup(broadcast.ResetBroadcaster)
 	broadcast.Register(broadcaster)
 
-	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, nil, s.compactionTargetCollectionAvailable)
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, s.handler, s.allocator, s.compactionTargetCollectionAvailable)
 	_, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
 	req := &datapb.DescribeCompactionTargetRequest{TargetId: record.GetTargetID(), Collection: resource}
