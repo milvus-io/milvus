@@ -127,6 +127,11 @@ type SegmentView struct {
 	DeltaRowCount int
 }
 
+func (s *SegmentView) GetID() int64                  { return s.ID }
+func (s *SegmentView) GetEarliestTs() uint64         { return s.EarliestTS }
+func (s *SegmentView) GetSegmentSize() int64         { return s.SegmentSize }
+func (s *SegmentView) GetResidualSegmentSize() int64 { return s.ResidualSize }
+
 func (s *SegmentView) Clone() *SegmentView {
 	return &SegmentView{
 		ID:            s.ID,

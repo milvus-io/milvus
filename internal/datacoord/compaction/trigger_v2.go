@@ -18,12 +18,12 @@ package compaction
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
@@ -117,6 +117,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 		m.singlePolicy.StandingSort = true
 		m.targetReconciler = targets.NewCompactionTargetReconciler(mt, indexMeta, compactionTargetMeta, handler, alloc)
 		m.targetReconciler.SetIndexVersionManager(versionManager)
+		m.targetReconciler.SetTaskMeta(compactionTaskMeta)
 	}
 
 	// Initialize policies map for ticker handling
@@ -307,7 +308,11 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		return 0, err
 	}
 	for triggerType, views := range events {
-		if m.notify(ctx, triggerType, views, false) && m.inspector.GetCompactionTasksNumBySignalID(triggerID) == 0 {
+		limited, err := m.notify(ctx, triggerType, views, false)
+		if err != nil {
+			return 0, err
+		}
+		if limited && m.inspector.GetCompactionTasksNumBySignalID(triggerID) == 0 {
 			return 0, merr.WrapErrServiceUnavailableMsg("compaction task admission is temporarily limited")
 		}
 	}
@@ -333,7 +338,7 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 
 // notify submits the views of one trigger type. When capped, it stops once the
 // inspector is full and leaves the rest to later runs.
-func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) bool {
+func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) (bool, error) {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
 	for _, cv := range views {
@@ -343,7 +348,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.
 				if capped && m.inspector.isFull() {
 					log.RatedInfo(ctx, rate.Limit(1), "Stop submitting compactions since inspector is full",
 						mlog.String("eventType", eventType.String()))
-					return true
+					return true, nil
 				}
 				log.Info(ctx, "Success to trigger a compaction, try to submit",
 					mlog.String("eventType", eventType.String()),
@@ -365,12 +370,15 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.
 					err = m.SubmitBumpSchemaVersionViewToScheduler(ctx, outView)
 				}
 				if errors.Is(err, ErrAdmissionLimited) {
-					return true
+					return true, nil
+				}
+				if !capped && errors.Is(err, errClusteringOverlapsOptimize) {
+					return false, err
 				}
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, cv view.CompactionView) error {

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -33,10 +34,15 @@ type CompactionTargetReconciler struct {
 	handler              meta.Handler
 	allocator            allocator.Allocator
 	versionManager       index.IndexEngineVersionManager
+	taskMeta             *task.CompactionTaskMeta
 }
 
 func (reconciler *CompactionTargetReconciler) SetIndexVersionManager(manager index.IndexEngineVersionManager) {
 	reconciler.versionManager = manager
+}
+
+func (reconciler *CompactionTargetReconciler) SetTaskMeta(tasks *task.CompactionTaskMeta) {
+	reconciler.taskMeta = tasks
 }
 
 func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, alloc allocator.Allocator) *CompactionTargetReconciler {
@@ -66,11 +72,16 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
 	matches := make(map[int64]*meta.SegmentInfo)
+	optimizeInputs := make(map[int64]optimizeInput)
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if !reconciler.meta.GetCollection(record.GetCollectionID()).IsCreated() {
+			continue
+		}
+		if IsOptimize(record) {
+			reconciler.observeOptimize(ctx, record, optimizeInputs)
 			continue
 		}
 		observation, err := ObserveRewrite(ctx, reconciler.meta, record, false)
@@ -122,7 +133,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	})
 	slices.SortFunc(rewriteSelectable, compareSegment)
 	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
-	events[policy.TriggerTypeSingle] = targetViews(rewriteSelectable, eligible, false)
+	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible)
 	return events, ctx.Err()
 }
 

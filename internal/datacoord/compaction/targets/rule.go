@@ -70,11 +70,7 @@ func ObserveRewrite(ctx context.Context, mt *meta.Meta, record *datapb.Compactio
 		if !policy.IsNormalManualCompactionSegment(segment) {
 			continue
 		}
-		start := segment.GetEarliestTs()
-		if start == 0 {
-			start = meta.SegmentEffectiveTs(segment.SegmentInfo)
-		}
-		if start >= record.GetExpectedTS() {
+		if dataStart(segment) >= record.GetExpectedTS() {
 			continue
 		}
 		observation.Scope = append(observation.Scope, segment)

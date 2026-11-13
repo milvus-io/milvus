@@ -49,4 +49,6 @@ type CompactionAdmissionOptions struct {
 	// DependencySort is set by the producer of a Sort needed to complete an
 	// already-admitted parent task. It bypasses only the pending/running cap.
 	DependencySort bool
+	// SizeCompaction marks a SIZE package for the final dynamic scope check.
+	SizeCompaction bool
 }

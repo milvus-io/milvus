@@ -35,6 +35,10 @@ import (
 // accepted tasks enters the queue separately from new work.
 var ErrAdmissionLimited = errors.New("compaction task admission limited")
 
+// errClusteringOverlapsOptimize distinguishes the manual RPC conflict from
+// a local input conflict. The wrapped error keeps the existing wire code.
+var errClusteringOverlapsOptimize = errors.New("clustering overlaps an OPTIMIZE target")
+
 type (
 	Producer         = meta.CompactionProducer
 	AdmissionOptions = meta.CompactionAdmissionOptions

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -346,6 +347,84 @@ func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {
 	require.Equal(t, uint64(100), record.GetExpectedTS())
 	require.Equal(t, uint64(100), record.GetActivatedAtTS())
 	require.Equal(t, int64(7), record.GetTotalRows())
+}
+
+func TestCreateOptimizeConflictPrecedesCurrentSizeMinimum(t *testing.T) {
+	enableTestCompactionTargets(t)
+	const existingID int64 = 101
+	const size int64 = 1024 * 1024 * 1024
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t, &datapb.CompactionTarget{
+		TargetID: existingID, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 100, ActivatedAtTS: 100, TailLimit: 1, TotalRows: proto.Int64(0),
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: size, ActualTargetSizeBytes: size},
+	})
+	s, resource := newTargetRPCServer(t, catalog, nil)
+
+	for _, requested := range []int64{size, 1} {
+		response, err := s.CreateCompactionTarget(t.Context(), &datapb.CreateCompactionTargetRequest{
+			Collection: resource,
+			Target:     &datapb.CreateCompactionTargetRequest_InputTargetSizeBytes{InputTargetSizeBytes: requested},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrCompactionPlanConflict)
+		require.Contains(t, response.GetStatus().GetReason(), "101")
+		require.Contains(t, response.GetStatus().GetReason(), "not admitted")
+		require.False(t, response.GetStatus().GetRetriable())
+		require.Zero(t, response.GetTargetId())
+	}
+	require.Len(t, persisted, 1)
+}
+
+func TestCreateOptimizePersistsOneSizeForEmptyScopeAndLateGroups(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	const mib = 1024 * 1024
+	const targetID int64 = 101
+	params := &Params.DataCoordCfg
+	require.NoError(t, Params.Save(params.SegmentMaxSize.Key, "1"))
+	t.Cleanup(func() { Params.Reset(params.SegmentMaxSize.Key) })
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(targetID, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(100, nil).Once()
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t)
+	s, resource := newTargetRPCServer(t, catalog, alloc)
+	topology := view.NewMockCollectionTopologyQuerier(t)
+	topology.EXPECT().GetCollectionTopology(mock.Anything, int64(1)).Return(&view.CollectionTopology{CollectionID: 1}, nil).Once()
+	s.compactionTargetTopology = topology
+	response, err := s.CreateCompactionTarget(ctx, &datapb.CreateCompactionTargetRequest{
+		Collection: resource,
+		Target:     &datapb.CreateCompactionTargetRequest_InputTargetSizeBytes{InputTargetSizeBytes: 3 * mib},
+	})
+	require.NoError(t, merr.CheckRPCCall(response, err))
+	require.Equal(t, targetID, response.GetTargetId())
+	require.Equal(t, int64(3*mib), response.GetOptimize().GetInputTargetSizeBytes())
+	require.Equal(t, int64(mib), response.GetOptimize().GetActualTargetSizeBytes())
+	require.Zero(t, response.GetTotalRows())
+
+	require.NoError(t, Params.Save(params.SegmentMaxSize.Key, "8"))
+	s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+	require.NoError(t, err)
+	// 0.95E and 1.05E are inclusive even though E is not a multiple of 20.
+	for _, fact := range []struct{ id, group, size, rows int64 }{
+		{11, 1, mib - mib/20, 10},
+		{12, 1, mib + mib/20, 20},
+		{13, 2, mib - mib/20 - 1, 7},
+		{14, 3, mib + mib/20 + 1, 9},
+	} {
+		s.meta.Segments.SetSegment(fact.id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: fact.id, CollectionID: 1, PartitionID: fact.group, InsertChannel: "ch",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: fact.rows,
+			Stats: &datapb.Statistics{InsertBinlogSize: fact.size, TimestampFrom: 90},
+		}))
+	}
+	described, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{Collection: resource, TargetId: targetID})
+	require.NoError(t, merr.CheckRPCCall(described, err))
+	require.True(t, proto.Equal(response.GetOptimize(), described.GetTarget().GetOptimize()))
+	require.Equal(t, int64(16), described.GetTarget().GetRemainingRows())
+	require.NotNil(t, described.GetTarget().TotalRows)
+	require.Zero(t, described.GetTarget().GetTotalRows())
+	stopped, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{Collection: resource, TargetId: targetID})
+	require.NoError(t, merr.CheckRPCCall(stopped, err))
+	require.Equal(t, targets.StopOperatorDropped, persisted[targetID].GetStopReason())
 }
 
 func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) {

@@ -42,9 +42,11 @@ const (
 )
 
 type CompactionTargetMeta struct {
-	mu      sync.RWMutex
-	catalog metastore.DataCoordCatalog
-	targets map[int64]*datapb.CompactionTarget
+	mu              sync.RWMutex
+	catalog         metastore.DataCoordCatalog
+	targets         map[int64]*datapb.CompactionTarget
+	activeOptimize  map[int64]int64 // collection ID -> confirmed active target ID
+	pendingOptimize map[int64]int64 // collection ID -> unconfirmed create candidate ID
 	// A failed stop may already have reached storage. Refresh the durable
 	// record before making another decision about this Target.
 	unconfirmedStops   map[int64]struct{}
@@ -67,6 +69,8 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 	m := &CompactionTargetMeta{
 		catalog:            catalog,
 		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
+		activeOptimize:     make(map[int64]int64),
+		pendingOptimize:    make(map[int64]int64),
 		unconfirmedStops:   make(map[int64]struct{}),
 		unconfirmedCreates: make(map[int64]*datapb.CompactionTarget),
 		unconfirmedDeletes: make(map[int64]struct{}),
@@ -77,6 +81,13 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 	}
 	for _, record := range records {
 		m.targets[record.GetTargetID()] = record
+		if isActiveOptimize(record) {
+			id := record.GetCollectionID()
+			if m.activeOptimize[id] != 0 {
+				return nil, merr.WrapErrDataIntegrityMsg("multiple active OPTIMIZE targets for collection %d", id)
+			}
+			m.activeOptimize[id] = record.GetTargetID()
+		}
 	}
 	return m, nil
 }
@@ -194,7 +205,7 @@ func (m *CompactionTargetMeta) GetActiveCompactionTargets() []*datapb.Compaction
 	defer m.mu.RUnlock()
 	records := make([]*datapb.CompactionTarget, 0, len(m.targets))
 	for _, record := range m.targets {
-		if record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && IsRewrite(record) {
+		if record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && (IsRewrite(record) || IsOptimize(record)) {
 			records = append(records, proto.CloneOf(record))
 		}
 	}
@@ -208,10 +219,19 @@ func IsRewrite(record *datapb.CompactionTarget) bool {
 func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if previous := m.targets[id]; isActiveOptimize(previous) && m.activeOptimize[previous.GetCollectionID()] == id {
+		delete(m.activeOptimize, previous.GetCollectionID())
+	}
+	if pending := m.unconfirmedCreates[id]; IsOptimize(pending) {
+		delete(m.pendingOptimize, pending.GetCollectionID())
+	}
 	if record == nil {
 		delete(m.targets, id)
 	} else {
 		m.targets[id] = proto.CloneOf(record)
+		if isActiveOptimize(record) {
+			m.activeOptimize[record.GetCollectionID()] = id
+		}
 	}
 	delete(m.unconfirmedStops, id)
 	delete(m.unconfirmedCreates, id)
@@ -219,16 +239,24 @@ func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) 
 }
 
 func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion, validate func() error) (*datapb.CompactionTarget, error) {
+	if IsOptimize(candidate) {
+		defer m.LockCollectionAdmission(candidate.GetCollectionID())()
+	}
 	if collectionID := candidate.GetCollectionID(); collectionID != 0 {
 		m.collectionWrites.Lock(collectionID)
 		defer m.collectionWrites.Unlock(collectionID)
 	}
-	id := candidate.GetTargetID()
-	m.writes.Lock(id)
-	defer m.writes.Unlock(id)
+	if IsOptimize(candidate) {
+		if err := m.CheckOptimizeConflict(ctx, candidate.GetCollectionID()); err != nil {
+			return nil, err
+		}
+	}
 	if err := validate(); err != nil {
 		return nil, err
 	}
+	id := candidate.GetTargetID()
+	m.writes.Lock(id)
+	defer m.writes.Unlock(id)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -249,6 +277,9 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 	}
 	m.mu.Lock()
 	m.unconfirmedCreates[id] = proto.CloneOf(candidate)
+	if IsOptimize(candidate) {
+		m.pendingOptimize[candidate.GetCollectionID()] = id
+	}
 	m.mu.Unlock()
 	mlog.Warn(ctx, "could not confirm compaction target creation",
 		mlog.Int64("targetID", id), mlog.FieldCollectionID(candidate.GetCollectionID()),
@@ -347,6 +378,15 @@ func (m *CompactionTargetMeta) refreshUnconfirmedCreates(ctx context.Context) {
 // Stop revalidates the current record before the first transition. A satisfied
 // transition runs its full observation while the current Target is serialized.
 func (m *CompactionTargetMeta) Stop(ctx context.Context, id int64, reason string, validate func(*datapb.CompactionTarget) (bool, error)) error {
+	if reason == StopOperatorDropped {
+		record, err := m.Read(ctx, id)
+		if err != nil {
+			return err
+		}
+		if IsOptimize(record) {
+			defer m.LockCollectionAdmission(record.GetCollectionID())()
+		}
+	}
 	found, err := m.stop(ctx, id, reason, validate)
 	if !found && err == nil {
 		return merr.Wrapf(merr.ErrCompactionTargetNotFound, "target ID %d", id)
@@ -412,12 +452,24 @@ func observeSatisfaction(record *datapb.CompactionTarget) {
 	family := "other"
 	if IsRewrite(record) {
 		family = "rewrite"
+	} else if IsOptimize(record) {
+		family = "optimize"
 	}
 	elapsed := tsoutil.PhysicalTime(record.GetInactivatedAtTS()).Sub(tsoutil.PhysicalTime(record.GetActivatedAtTS()))
 	metrics.DataCoordCompactionTargetDuration.WithLabelValues(family).Observe(max(0, elapsed.Seconds()))
 }
 
 func NewRewriteRecord(ctx context.Context, alloc allocator.Allocator, collectionID int64, roots []int64) (*datapb.CompactionTarget, error) {
+	record, err := newFiniteRecord(ctx, alloc, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	record.Intent = datapb.TargetIntent_INTENT_REWRITE
+	record.Rewrite = &datapb.CompactionTargetRewrite{RootSegmentIds: roots}
+	return record, nil
+}
+
+func newFiniteRecord(ctx context.Context, alloc allocator.Allocator, collectionID int64) (*datapb.CompactionTarget, error) {
 	id, err := alloc.AllocID(ctx)
 	if err != nil {
 		return nil, err
@@ -432,8 +484,6 @@ func NewRewriteRecord(ctx context.Context, alloc allocator.Allocator, collection
 	return &datapb.CompactionTarget{
 		TargetID:      id,
 		CollectionID:  collectionID,
-		Intent:        datapb.TargetIntent_INTENT_REWRITE,
-		Rewrite:       &datapb.CompactionTargetRewrite{RootSegmentIds: roots},
 		ExpectedTS:    ts,
 		ActivatedAtTS: ts,
 	}, nil

@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -134,6 +135,7 @@ func (s *Server) CreateCompactionTarget(ctx context.Context, req *datapb.CreateC
 	if err == nil {
 		resp.TargetId = record.GetTargetID()
 		resp.TotalRows = record.GetTotalRows()
+		resp.Optimize = record.GetOptimize()
 	}
 	return resp, nil
 }
@@ -176,10 +178,31 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 	if err := validate(); err != nil {
 		return nil, err
 	}
-	if rewrite == nil {
-		return nil, merr.WrapErrOperationNotSupportedMsg("OPTIMIZE compaction targets are unavailable")
+	collection := s.meta.GetCollection(resource.GetCollectionId())
+	if !collection.IsCreated() || !proto.Equal(liveCompactionTargetResource(collection), resource) {
+		return nil, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
 	}
-	candidate, err := targets.NewRewriteRecord(ctx, s.allocator, resource.GetCollectionId(), roots)
+	scope := &metastore.CompactionTargetCollectionVersion{
+		DatabaseID: collection.DatabaseID,
+		Revision:   resource.GetRevision(),
+	}
+	if rewrite == nil {
+		if err := s.compactionTargetMeta.CheckOptimizeConflict(ctx, collection.ID); err != nil {
+			return nil, err
+		}
+		minimumSize := policy.GetExpectedSegmentSize(s.indexMeta, collection.ID, collection.Schema)
+		candidate, err := targets.NewOptimizeRecord(ctx, s.allocator, s.meta, collection, s.compactionTargetTopology, req.GetInputTargetSizeBytes(), minimumSize)
+		if err != nil {
+			return nil, err
+		}
+		return s.compactionTargetMeta.Create(ctx, candidate, scope, func() error {
+			if err := validate(); err != nil {
+				return err
+			}
+			return targets.CheckClusteringConflict(ctx, s.meta, s.compactionTaskMeta, candidate)
+		})
+	}
+	candidate, err := targets.NewRewriteRecord(ctx, s.allocator, collection.ID, roots)
 	if err != nil {
 		return nil, err
 	}
@@ -188,14 +211,6 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 		return nil, err
 	}
 	candidate.TotalRows = proto.Int64(observation.Rows)
-	collection := s.meta.GetCollection(resource.GetCollectionId())
-	if !collection.IsCreated() {
-		return nil, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
-	}
-	scope := &metastore.CompactionTargetCollectionVersion{
-		DatabaseID: collection.DatabaseID,
-		Revision:   resource.GetRevision(),
-	}
 	return s.compactionTargetMeta.Create(ctx, candidate, scope, validate)
 }
 
@@ -305,6 +320,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case !resource.GetDeleted() && targets.IsRewrite(record):
 		observation, err := targets.ObserveRewrite(ctx, s.meta, record, false)
 		rows, observed, observationErr = observation.Rows, true, err
+	case !resource.GetDeleted() && targets.IsOptimize(record):
+		observation, err := targets.ObserveOptimize(ctx, s.meta, record)
+		rows, observed, observationErr = observation.Rows, true, err
 	case targets.IsStandingSort(record) && record.GetEnabled():
 		observation, err := targets.ObserveSort(ctx, s.meta)
 		rows, observed, observationErr = observation.Rows, true, err
@@ -412,7 +430,7 @@ func (s *Server) listCompactionTargets(ctx context.Context, req *datapb.ListComp
 		if req.GetCollectionId() > 0 && collectionID != req.GetCollectionId() {
 			continue
 		}
-		if !req.GetIncludeSystem() && !targets.IsRewrite(record) && record.GetOptimize() == nil {
+		if !req.GetIncludeSystem() && !targets.IsRewrite(record) && !targets.IsOptimize(record) {
 			continue
 		}
 		if len(req.GetStates()) > 0 && !slices.Contains(req.GetStates(), record.GetState()) {
@@ -460,7 +478,7 @@ func (s *Server) DropCompactionTarget(ctx context.Context, req *datapb.DropCompa
 		if !proto.Equal(resource, req.GetCollection()) {
 			return false, merr.WrapErrServiceUnavailableMsg("compaction target resource changed during authorization")
 		}
-		if !targets.IsRewrite(record) || record.GetCollectionID() == 0 {
+		if (!targets.IsRewrite(record) && !targets.IsOptimize(record)) || record.GetCollectionID() == 0 {
 			return false, merr.WrapErrOperationNotSupportedMsg("target family does not support operator drop")
 		}
 		if resource.GetDeleted() && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
