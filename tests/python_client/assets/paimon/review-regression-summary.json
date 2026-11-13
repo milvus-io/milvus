@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-13",
+  "review_base": "ccaf545f75ba1bead39a6c4f03d68f28a9003a83",
+  "scope": "Review fixes; local Python runner against isolated Cell deployments. Not a Jenkins e2e result.",
+  "helper_regression": {
+    "passed": 105,
+    "fixture": 56,
+    "l3_driver": 40,
+    "switch_sensitivity": 9
+  },
+  "ci_entry_contract": {
+    "passed": 10
+  },
+  "old_scenario_mutation_control": {
+    "injected_faults": 6,
+    "missed": 6
+  },
+  "fixed_scenario_mutation_control": {
+    "injected_faults": 6,
+    "rejected": 6,
+    "correct_backend_controls": 3,
+    "kind": "Offline backend simulations executing actual E2E scenario methods"
+  },
+  "ordinary_switch_runtime": {
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 101.03,
+    "cases": [
+      "test_paimon_same_collection_mode_switch",
+      "test_paimon_format_switch_and_failed_override[parquet]",
+      "test_paimon_format_switch_and_failed_override[lance-table]"
+    ],
+    "workers": 2
+  },
+  "dedicated_l3_runtime": {
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 270.04,
+    "cases": [
+      "test_refresh_timeout_publication_contract[after-apply]",
+      "test_refresh_timeout_publication_contract[before-apply]",
+      "test_refresh_timeout_publication_contract[wait-disabled]"
+    ],
+    "workers": 0
+  },
+  "post_run": {
+    "ordinary": {
+      "collections": [],
+      "server_commit": "4f95cb61d84",
+      "healthy": true
+    },
+    "l3": {
+      "collections": [],
+      "server_commit": "4f95cb6",
+      "healthy": true,
+      "active_gates": [],
+      "active_control_lease": false,
+      "config_overrides": [],
+      "runtime_config": {
+        "dataCoord.externalCollection.refreshWaitForIndex": false,
+        "dataCoord.externalCollectionJobTimeout": 600
+      }
+    }
+  }
+}

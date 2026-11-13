@@ -1,0 +1,2 @@
+# Unified-diff context prefixes intentionally precede tabs and empty lines.
+l3_test_hooks.patch -whitespace

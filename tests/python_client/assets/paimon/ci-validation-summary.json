@@ -1,0 +1,751 @@
+{
+  "date": "2026-11-13",
+  "validation_kind": "Linux Kubernetes CI-compatible invocation; not a Jenkins e2e check result for PR #55507",
+  "reference_ci": {
+    "feature_pr": 51897,
+    "build": 1036,
+    "url": "https://jenkins-milvus-ci.milvus.io/job/MILVUS-CI-V2-PR-PIPELINES/job/milvus-e2e-tcus-pipeline/1036/",
+    "pipeline_revision": "c7d6c3e2d8b6b65a570427ad96c88d3ba3daf63f",
+    "server_source": "4f95cb61d849bd4ecb03fa1f641179825a58b05d",
+    "file_discovery": "CaseLabel.L0/L1 source filter before pytest",
+    "shards_with_ordinary_paimon": 1,
+    "default_shards_with_paimon_l3": 0
+  },
+  "runner": {
+    "image": "harbor.tencent-stage.zilliz.cn/devops/pytestenv-helm@sha256:e0dd2bee54be68e1bf66a3fa0ed20c8467e8b569720adedf721477e75e6388bc",
+    "python": "3.12.11",
+    "pymilvus": "3.1.0rc106",
+    "requirements": "tests/python_client/requirements.txt",
+    "environment_setup": "tests/scripts/ci-util-4am.sh; task venv owns pytest and py entrypoints",
+    "workers": 8
+  },
+  "root_collection": {
+    "selected": 9488,
+    "deselected": 9293,
+    "paimon_l01": 26,
+    "paimon_l3": 0,
+    "exit_code": 0
+  },
+  "ordinary_execution": {
+    "passed": 27,
+    "paimon_passed": 26,
+    "existing_external_control_passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "reruns": 0,
+    "seconds": 92.2,
+    "workers": 8,
+    "tags": [
+      "L0",
+      "L1"
+    ],
+    "dist": "loadgroup",
+    "case_timeout": 1200,
+    "configured_reruns": 2,
+    "junit_sha256": "d5d62c017452b1bd9b7b5bc5d733474e6ad5877523ba0aed133c5c68c99819cc"
+  },
+  "l3_execution": {
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 149.59,
+    "workers": 0,
+    "entry": "tests/scripts/ci_paimon_external_l3.sh",
+    "access_mode": "service",
+    "projected_service_account": true,
+    "personal_kubeconfig": false,
+    "cell_cli_required": false,
+    "junit_sha256": "2a43e66aaa0423eb77a1233dffc35f45a717fe61cbbfadbc5db84b4640ba0da1",
+    "phases": [
+      {
+        "case": "test_refresh_timeout_publication_contract[after-apply]",
+        "seconds": 62.18,
+        "access_mode": "service",
+        "session_binding": {
+          "datacoord": [
+            "10.8.143.229:22125"
+          ],
+          "rootcoord": [
+            "10.8.143.229:22125"
+          ]
+        },
+        "inspections": [
+          {
+            "actual_index_tasks": [
+              {
+                "build_id": "470432797476493783",
+                "collection_id": "470432797475493683",
+                "field_id": 104,
+                "field_name": "embedding",
+                "index_id": "470432797475993719",
+                "index_name": "embedding",
+                "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797475493683/470432797475493684/470432797475993775\",\"size\":3865}",
+                "observed_at": 1794563812693,
+                "phase": "after-apply",
+                "segment_id": "470432797475993775",
+                "target_snapshot_id": 4,
+                "task_spec_snapshot_id": 4
+              }
+            ],
+            "apply_blocked_before_publication": false,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 0,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 4096,
+              "state": "InProgress",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 1794563812207,
+            "job_id": "470432797475993769",
+            "live_segments": [
+              {
+                "id": "470432797475993775",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": true,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812155,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInit"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812663,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInProgress"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563837308,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshFailed"
+                }
+              ],
+              "wait_seen": {
+                "collection_id": "470432797475493683",
+                "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                "index_wait_started_time": 1794563812207,
+                "job_id": "470432797475993769",
+                "observed_at": 1794563836806,
+                "segments_applied": true,
+                "snapshot_id": 4,
+                "start_time": 1794563811960,
+                "state": "RefreshInProgress"
+              },
+              "sample_count": 51
+            },
+            "raw_job_state": "RefreshFailed",
+            "s2_indexes_blocked": true,
+            "segments_applied": true
+          },
+          {
+            "actual_index_tasks": [
+              {
+                "build_id": "470432797476493783",
+                "collection_id": "470432797475493683",
+                "field_id": 104,
+                "field_name": "embedding",
+                "index_id": "470432797475993719",
+                "index_name": "embedding",
+                "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797475493683/470432797475493684/470432797475993775\",\"size\":3865}",
+                "observed_at": 1794563812693,
+                "phase": "after-apply",
+                "segment_id": "470432797475993775",
+                "target_snapshot_id": 4,
+                "task_spec_snapshot_id": 4
+              }
+            ],
+            "apply_blocked_before_publication": false,
+            "background_index_completed_without_refresh_retry": true,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 4096,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 0,
+              "state": "Finished",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 1794563812207,
+            "job_id": "470432797475993769",
+            "live_segments": [
+              {
+                "id": "470432797475993775",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": true,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812155,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInit"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812663,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInProgress"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563837308,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshFailed"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563847364,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshFailed"
+                }
+              ],
+              "wait_seen": {
+                "collection_id": "470432797475493683",
+                "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                "index_wait_started_time": 1794563812207,
+                "job_id": "470432797475993769",
+                "observed_at": 1794563836806,
+                "segments_applied": true,
+                "snapshot_id": 4,
+                "start_time": 1794563811960,
+                "state": "RefreshInProgress"
+              },
+              "sample_count": 71
+            },
+            "raw_job_state": "RefreshFailed",
+            "s2_indexes_blocked": false,
+            "segments_applied": true
+          },
+          {
+            "actual_index_tasks": [
+              {
+                "build_id": "470432797476493783",
+                "collection_id": "470432797475493683",
+                "field_id": 104,
+                "field_name": "embedding",
+                "index_id": "470432797475993719",
+                "index_name": "embedding",
+                "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797475493683/470432797475493684/470432797475993775\",\"size\":3865}",
+                "observed_at": 1794563812693,
+                "phase": "after-apply",
+                "segment_id": "470432797475993775",
+                "target_snapshot_id": 4,
+                "task_spec_snapshot_id": 4
+              }
+            ],
+            "apply_blocked_before_publication": false,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 4096,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 0,
+              "state": "Finished",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 1794563812207,
+            "job_id": "470432797475993769",
+            "live_segments": [
+              {
+                "id": "470432797475993775",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": true,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812155,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInit"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563812663,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshInProgress"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563837308,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshFailed"
+                },
+                {
+                  "collection_id": "470432797475493683",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                  "index_wait_started_time": 1794563812207,
+                  "job_id": "470432797475993769",
+                  "observed_at": 1794563851890,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563811960,
+                  "state": "RefreshFailed"
+                }
+              ],
+              "wait_seen": {
+                "collection_id": "470432797475493683",
+                "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_36436c14f8",
+                "index_wait_started_time": 1794563812207,
+                "job_id": "470432797475993769",
+                "observed_at": 1794563836806,
+                "segments_applied": true,
+                "snapshot_id": 4,
+                "start_time": 1794563811960,
+                "state": "RefreshInProgress"
+              },
+              "sample_count": 80
+            },
+            "raw_job_state": "RefreshFailed",
+            "s2_indexes_blocked": false,
+            "segments_applied": true
+          }
+        ]
+      },
+      {
+        "case": "test_refresh_timeout_publication_contract[before-apply]",
+        "seconds": 59.843,
+        "access_mode": "service",
+        "session_binding": {
+          "datacoord": [
+            "10.8.143.229:22125"
+          ],
+          "rootcoord": [
+            "10.8.143.229:22125"
+          ]
+        },
+        "inspections": [
+          {
+            "actual_index_tasks": [],
+            "apply_blocked_before_publication": true,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 4096,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 0,
+              "state": "Finished",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 0,
+            "job_id": "470432797477494142",
+            "live_segments": [
+              {
+                "id": "470432797476994087",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": false,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563867654,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshInit"
+                },
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563891284,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshFailed"
+                },
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563891798,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshFailed"
+                }
+              ],
+              "sample_count": 49
+            },
+            "raw_job_state": "RefreshFailed",
+            "s2_indexes_blocked": false,
+            "segments_applied": false
+          },
+          {
+            "actual_index_tasks": [],
+            "apply_blocked_before_publication": true,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 4096,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 0,
+              "state": "Finished",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 0,
+            "job_id": "470432797477494142",
+            "live_segments": [
+              {
+                "id": "470432797477994346",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": false,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563867654,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshInit"
+                },
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563891284,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshFailed"
+                },
+                {
+                  "collection_id": "470432797476994077",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5179051001",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797477494142",
+                  "observed_at": 1794563909403,
+                  "segments_applied": false,
+                  "snapshot_id": 4,
+                  "start_time": 1794563867556,
+                  "state": "RefreshFailed"
+                }
+              ],
+              "sample_count": 84
+            },
+            "raw_job_state": "RefreshFailed",
+            "s2_indexes_blocked": false,
+            "segments_applied": false
+          }
+        ]
+      },
+      {
+        "case": "test_refresh_timeout_publication_contract[wait-disabled]",
+        "seconds": 27.372,
+        "access_mode": "service",
+        "session_binding": {
+          "datacoord": [
+            "10.8.143.229:22125"
+          ],
+          "rootcoord": [
+            "10.8.143.229:22125"
+          ]
+        },
+        "inspections": [
+          {
+            "actual_index_tasks": [
+              {
+                "build_id": "470432797479494544",
+                "collection_id": "470432797478494468",
+                "field_id": 104,
+                "field_name": "embedding",
+                "index_id": "470432797478994482",
+                "index_name": "embedding",
+                "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797478494468/470432797478494469/470432797478994535\",\"size\":3873}",
+                "observed_at": 1794563927581,
+                "phase": "wait-disabled",
+                "segment_id": "470432797478994535",
+                "target_snapshot_id": 4,
+                "task_spec_snapshot_id": 4
+              }
+            ],
+            "apply_blocked_before_publication": false,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 0,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 4096,
+              "state": "InProgress",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 0,
+            "job_id": "470432797478994530",
+            "live_segments": [
+              {
+                "id": "470432797478994535",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": false,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563927148,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshInProgress"
+                },
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563927651,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshCompleted"
+                },
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563928154,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshCompleted"
+                }
+              ],
+              "sample_count": 3
+            },
+            "raw_job_state": "RefreshCompleted",
+            "s2_indexes_blocked": true,
+            "segments_applied": true
+          },
+          {
+            "actual_index_tasks": [
+              {
+                "build_id": "470432797479494544",
+                "collection_id": "470432797478494468",
+                "field_id": 104,
+                "field_name": "embedding",
+                "index_id": "470432797478994482",
+                "index_name": "embedding",
+                "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797478494468/470432797478494469/470432797478994535\",\"size\":3873}",
+                "observed_at": 1794563927581,
+                "phase": "wait-disabled",
+                "segment_id": "470432797478994535",
+                "target_snapshot_id": 4,
+                "task_spec_snapshot_id": 4
+              }
+            ],
+            "apply_blocked_before_publication": false,
+            "background_index_completed_without_refresh_retry": false,
+            "duplicate_logical_application": false,
+            "index_stats": {
+              "field_name": "embedding",
+              "index_name": "embedding",
+              "index_type": "IVF_FLAT",
+              "indexed_rows": 4096,
+              "metric_type": "L2",
+              "nlist": "32",
+              "pending_index_rows": 0,
+              "state": "Finished",
+              "total_rows": 4096
+            },
+            "index_wait_started_time": 0,
+            "job_id": "470432797478994530",
+            "live_segments": [
+              {
+                "id": "470432797478994535",
+                "rows": 4096
+              }
+            ],
+            "observed_in_progress_with_index_wait": false,
+            "phase_observations": {
+              "samples": [
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563927148,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshInProgress"
+                },
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563927651,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshCompleted"
+                },
+                {
+                  "collection_id": "470432797478494468",
+                  "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_eb33f894f9",
+                  "index_wait_started_time": 0,
+                  "job_id": "470432797478994530",
+                  "observed_at": 1794563940742,
+                  "segments_applied": true,
+                  "snapshot_id": 4,
+                  "start_time": 1794563926795,
+                  "state": "RefreshCompleted"
+                }
+              ],
+              "sample_count": 28
+            },
+            "raw_job_state": "RefreshCompleted",
+            "s2_indexes_blocked": false,
+            "segments_applied": true
+          }
+        ]
+      }
+    ]
+  },
+  "helper_verification": {
+    "python_helpers_passed": 86,
+    "ci_contract_tests_passed": 10,
+    "ruff_python_files": 12
+  },
+  "fixture_memory_local_measurement_mib": {
+    "before": 791.9,
+    "after": 389.9,
+    "scope": "single FixtureBundle process on macOS; same rows_blob hashes share decoded GT; all snapshot checks preserved"
+  },
+  "post_run_checks": {
+    "l3_runtime_config": {
+      "dataCoord.externalCollection.refreshWaitForIndex": false,
+      "dataCoord.externalCollectionJobTimeout": 600
+    },
+    "l3_active_gates": [],
+    "l3_active_lease": false,
+    "l3_collections": [],
+    "l3_override_entries": {
+      "dataCoord.externalCollection.refreshWaitForIndex": [],
+      "dataCoord.externalCollectionJobTimeout": []
+    },
+    "l3_version": {
+      "version": "test-paimon-external-l3-hooks-20261113-4f95cb6",
+      "build_time": "Fri Nov 13 08:24:26 UTC 2026",
+      "git_commit": "4f95cb6",
+      "go_version": "go version go1.26.10 linux/amd64",
+      "deploy_mode": "STANDALONE"
+    },
+    "ordinary_collections": [],
+    "ordinary_version": {
+      "version": "pr-51897-20261113-4f95cb61d84",
+      "build_time": "Fri Nov 13 06:54:26 UTC 2026",
+      "git_commit": "4f95cb61d84",
+      "go_version": "go version go1.26.10 linux/amd64",
+      "deploy_mode": "STANDALONE"
+    }
+  },
+  "temporary_runner_cleanup": {
+    "pod_deleted": true,
+    "service_account_deleted": true,
+    "role_deleted": true,
+    "role_binding_deleted": true,
+    "milvus_deployments_retained": true
+  }
+}

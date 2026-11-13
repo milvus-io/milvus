@@ -44,6 +44,11 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--paimon-l3-profile",
+        default=os.getenv("PAIMON_L3_PROFILE"),
+        help="Dedicated deployment/phase-hook profile JSON for serial Paimon L3 CI",
+    )
+    parser.addoption(
         "--pyudf-expected-commit",
         default=None,
         help="Optional deployed Git commit prefix for dedicated PyUDF profiles.",
@@ -133,7 +138,7 @@ def pytest_addoption(parser):
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
     parser.addoption("--data_size", type=int, action="store", default=3000, help="data size for deploy test")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
-    # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
+    # Existing in-house TEI endpoint for text embedding; no model is deployed by the test runner.
     parser.addoption(
         "--tei_endpoint",
         action="store",
@@ -488,10 +493,24 @@ def get_invalid_vector_dict(request):
 def pytest_configure(config):
     # register an additional marker
     config.addinivalue_line("markers", "tag(name): mark test to run only matching the tag")
+    if config.getoption("--paimon-l3-profile") and getattr(config.option, "numprocesses", None) not in (None, 0):
+        raise pytest.UsageError("Paimon L3 changes deployment configuration and requires pytest -n 0")
     if config.getoption("--run-spark-backfill"):
         from spark_backfill.config import ensure_serial_execution
 
         ensure_serial_execution(getattr(config.option, "numprocesses", None))
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    # Validate the final selection, after pytest-tagging and -k/-m filtering.
+    yield
+    isolated = [item for item in items if item.get_closest_marker("paimon_refresh_serial")]
+    if isolated:
+        if not config.getoption("--paimon-l3-profile") and not config.option.collectonly:
+            raise pytest.UsageError("Paimon L3 requires --paimon-l3-profile from its dedicated CI job")
+        if config.getoption("--paimon-l3-profile") and len(isolated) != len(items):
+            raise pytest.UsageError("Paimon L3 must run alone in its dedicated CI job; select only its test module")
 
 
 def pytest_runtest_setup(item):
