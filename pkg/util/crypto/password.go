@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -31,7 +30,11 @@ import (
 )
 
 // BcryptMaxPasswordBytes is the maximum plaintext length representable by bcrypt.
+// Every algorithm enforces it, so a password stays valid if the algorithm changes.
 const BcryptMaxPasswordBytes = 72
+
+// errBcryptMismatch is returned by bcryptVerify when the password does not match.
+var errBcryptMismatch = errors.New("bcrypt: password does not match")
 
 // VerifyStoredPassword compares a plaintext password with a stored hash. The
 // algorithm comes from the format of the hash rather than from configuration,
@@ -41,14 +44,26 @@ const BcryptMaxPasswordBytes = 72
 // does not match. A malformed stored hash is instead a credential-store failure
 // and must not be reported as a bad password, or an operator holding the right
 // one goes looking for the wrong problem.
+// IsPBKDF2SHA512Hash reports whether a stored hash is in the PBKDF2-SHA512
+// format. Any other stored hash is bcrypt.
+func IsPBKDF2SHA512Hash(storedHash string) bool {
+	return strings.HasPrefix(storedHash, pbkdf2SHA512Prefix)
+}
+
 func VerifyStoredPassword(ctx context.Context, storedHash, password string) error {
-	if strings.HasPrefix(storedHash, pbkdf2SHA512Prefix) {
+	if IsPBKDF2SHA512Hash(storedHash) {
 		return verifyPBKDF2SHA512(storedHash, password)
+	}
+	if !BcryptAvailable {
+		// Any other hash is bcrypt, which this build cannot verify.
+		mlog.RatedWarn(ctx, rate.Every(time.Minute),
+			"a stored password hash uses bcrypt, which this build leaves out; the user cannot log in until the password is reset")
+		return bcryptVerify(storedHash, password)
 	}
 	if len(password) > BcryptMaxPasswordBytes {
 		return merr.WrapErrPrivilegeNotAuthenticated("invalid password")
 	}
-	err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
+	err := bcryptVerify(storedHash, password)
 	switch {
 	case err == nil:
 		if paramtable.Get().CommonCfg.PasswordHashAlgorithm.GetValue() == PasswordHashPBKDF2SHA512 {
@@ -57,7 +72,7 @@ func VerifyStoredPassword(ctx context.Context, storedHash, password string) erro
 				"verified a bcrypt password hash while pbkdf2-sha512 is configured; update this password to rehash it")
 		}
 		return nil
-	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
+	case errors.Is(err, errBcryptMismatch):
 		return merr.WrapErrPrivilegeNotAuthenticated("invalid password")
 	default:
 		return merr.WrapErrServiceInternalErr(err, "stored credential hash is invalid")
