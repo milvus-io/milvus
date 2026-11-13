@@ -216,6 +216,7 @@ func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.Sea
 }
 
 // SplitSearchResult splits one complete Search result into query-major Chunks.
+// A nonempty result that needs only one Chunk is returned unchanged, not copied.
 func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*internalpb.SearchResults, error) {
 	if result == nil {
 		return nil, errors.New("SplitSearchResult requires a Search result")
@@ -272,6 +273,11 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 			accumulatedBytes = 0
 		}
 		accumulatedBytes += unitBytes
+		if start == 0 && end == len(buffer.units)-1 {
+			// All Units fit one Chunk under the existing sizing rules. Preserve the
+			// original payload (including SlicedBlob) instead of rebuilding every hit.
+			return []*internalpb.SearchResults{result}, nil
+		}
 		if accumulatedBytes < chunkBytes {
 			continue
 		}
