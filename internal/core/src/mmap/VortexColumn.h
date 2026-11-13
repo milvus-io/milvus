@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,7 +29,6 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/bson_view.h"
-#include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/VortexColumnGroup.h"
 #include "milvus-storage/format/vortex/vortex_format_reader.h"
@@ -233,8 +233,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     Take(milvus::OpContext* op_ctx, TakeOptions options) const override;
 
  private:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override;
+    class PlannerState;
+
+    const PlannerState&
+    Planner() const;
 
     // Same contract as ChunkedArrayColumn: the legacy ArrayView of a field
     // with null elements is not served.
@@ -378,6 +380,8 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::shared_ptr<VortexColumnGroup> column_group_;
     size_t data_byte_size_ = 0;
     std::vector<FileState> files_;
+    mutable std::once_flag planner_once_;
+    mutable std::unique_ptr<PlannerState> planner_;
 };
 
 }  // namespace milvus

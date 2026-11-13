@@ -43,7 +43,7 @@
 #include "common/FastMem.h"
 #include "common/OpContext.h"
 #include "common/Span.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ChunkedColumn.h"
 #include "mmap/ColumnOffsetLookup.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
@@ -341,7 +341,7 @@ class ChunkedColumnGroup {
     std::unique_ptr<LazyInitState> lazy_init_;
 };
 
-class ProxyChunkColumn : public ChunkedColumnInterface {
+class ProxyChunkColumn : public RawColumnBase {
  public:
     explicit ProxyChunkColumn(std::shared_ptr<ChunkedColumnGroup> group,
                               FieldId field_id,
@@ -401,13 +401,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ScanResult
     Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override {
         group_->Prepare(op_ctx);
-        return ChunkedColumnInterface::Scan(op_ctx, options);
+        return RawColumnBase::Scan(op_ctx, options);
     }
 
     TakeResultPtr
     Take(milvus::OpContext* op_ctx, TakeOptions options) const override {
         group_->Prepare(op_ctx);
-        return ChunkedColumnInterface::Take(op_ctx, std::move(options));
+        return RawColumnBase::Take(op_ctx, std::move(options));
     }
 
     PinWrapper<const char*>
@@ -945,11 +945,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  protected:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override {
-        return std::make_unique<ColumnPlanner>(
-            GetNumRowsUntilChunk(),
-            OffsetLookupOptions{OffsetLookupStrategy::BatchBinary});
+    detail::OffsetLookupOptions
+    GetOffsetLookupOptions() const override {
+        return {detail::OffsetLookupStrategy::BatchBinary};
     }
 
     void

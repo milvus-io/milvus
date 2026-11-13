@@ -180,6 +180,8 @@ class PhyCompareFilterExpr : public Expr {
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           left_field_(expr->left_field_id_),
           right_field_(expr->right_field_id_),
+          segment_(segment),
+          active_count_(active_count),
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr),
@@ -195,21 +197,14 @@ class PhyCompareFilterExpr : public Expr {
                               active_count) {
         is_left_indexed_ = left_value_lookup_.HasReader();
         is_right_indexed_ = right_value_lookup_.HasReader();
-        if (segment->is_chunked()) {
+        if (segment->type() == SegmentType::Growing && segment->is_chunked()) {
             left_num_chunk_ =
-                segment->type() == SegmentType::Growing
-                    ? upper_div(segment_chunk_reader_.active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment_chunk_reader_.NumChunkData(left_field_);
-            right_num_chunk_ =
-                segment->type() == SegmentType::Growing
-                    ? upper_div(segment_chunk_reader_.active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment_chunk_reader_.NumChunkData(right_field_);
+                upper_div(active_count_, segment_chunk_reader_.SizePerChunk());
+            right_num_chunk_ = left_num_chunk_;
             num_chunk_ = left_num_chunk_;
-        } else {
-            num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
-                                   segment_chunk_reader_.SizePerChunk());
+        } else if (segment->type() == SegmentType::Growing) {
+            num_chunk_ =
+                upper_div(active_count_, segment_chunk_reader_.SizePerChunk());
         }
         AssertInfo(
             batch_size_ > 0,
@@ -222,7 +217,7 @@ class PhyCompareFilterExpr : public Expr {
 
     void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
-        segment_chunk_reader_.SetSnapshot(snapshot);
+        snapshot_ = snapshot;
     }
 
     void
@@ -239,13 +234,14 @@ class PhyCompareFilterExpr : public Expr {
     void
     MoveCursorInternal() {
         if (!has_offset_input_) {
-            if (is_left_indexed_ || is_right_indexed_) {
+            if (segment_->type() == SegmentType::Sealed || is_left_indexed_ ||
+                is_right_indexed_) {
                 // The value-lookup path addresses rows by absolute segment
                 // offset, so current_data_global_pos_ is its only cursor. An
                 // index-only field has no raw chunks to walk here.
                 return;
             }
-            if (segment_chunk_reader_.segment_->is_chunked()) {
+            if (segment_->is_chunked()) {
                 segment_chunk_reader_.MoveCursorForMultipleChunk(
                     left_current_chunk_id_,
                     left_current_chunk_pos_,
@@ -302,13 +298,10 @@ class PhyCompareFilterExpr : public Expr {
     // for growing segments, which have no ChunkedColumn.
     std::shared_ptr<ChunkedColumnInterface>
     CaptureDataColumn(FieldId field_id) const {
-        if (segment_chunk_reader_.snapshot_ != nullptr) {
-            return segment_chunk_reader_.snapshot_
-                ->GetDataScanResources(field_id)
-                .first;
+        if (snapshot_ != nullptr) {
+            return snapshot_->GetDataScanResources(field_id).first;
         }
-        return segment_chunk_reader_.segment_->GetDataScanResources(field_id)
-            .first;
+        return segment_->GetChunkedColumn(field_id);
     }
 
     int64_t
@@ -329,7 +322,7 @@ class PhyCompareFilterExpr : public Expr {
                           TargetBitmapView res,
                           TargetBitmapView valid_res,
                           const ValTypes&... values) {
-        if (segment_chunk_reader_.segment_->is_chunked()) {
+        if (segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
                                                          FUNC,
@@ -437,13 +430,12 @@ class PhyCompareFilterExpr : public Expr {
                                             const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
-        if (segment_chunk_reader_.segment_->is_chunked() ||
-            segment_chunk_reader_.segment_->type() == SegmentType::Growing) {
+        if (segment_->is_chunked() ||
+            segment_->type() == SegmentType::Growing) {
             auto get_chunk_id_and_offset =
                 [&](const FieldId field,
                     int64_t offset) -> std::pair<int64_t, int64_t> {
-                if (segment_chunk_reader_.segment_->type() ==
-                    SegmentType::Growing) {
+                if (segment_->type() == SegmentType::Growing) {
                     auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else {
@@ -514,11 +506,9 @@ class PhyCompareFilterExpr : public Expr {
             }
             return processed_size;
         } else {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                op_ctx_, left_field_, 0);
+            auto pw_left = segment_->chunk_data<T>(op_ctx_, left_field_, 0);
             auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                op_ctx_, right_field_, 0);
+            auto pw_right = segment_->chunk_data<U>(op_ctx_, right_field_, 0);
             auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
@@ -575,12 +565,11 @@ class PhyCompareFilterExpr : public Expr {
                       left_field_.get(),
                       right_field_.get());
         } else {
-            AssertInfo(
-                segment_chunk_reader_.segment_->type() == SegmentType::Growing,
-                "sealed compare Column Take is unavailable for fields "
-                "{} and {}",
-                left_field_.get(),
-                right_field_.get());
+            AssertInfo(segment_->type() == SegmentType::Growing,
+                       "sealed compare Column Take is unavailable for fields "
+                       "{} and {}",
+                       left_field_.get(),
+                       right_field_.get());
             return ProcessBothDataByOffsetsByChunkFallback<T, U>(
                 func, input, res, valid_res, values...);
         }
@@ -594,7 +583,7 @@ class PhyCompareFilterExpr : public Expr {
                                         const ValTypes&... values) {
         int64_t processed_size = 0;
 
-        const auto active_count = segment_chunk_reader_.active_count_;
+        const auto active_count = active_count_;
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
             auto pw_left = segment_chunk_reader_.ChunkData<T>(left_field_, i);
             auto left_chunk = pw_left.get();
@@ -603,8 +592,7 @@ class PhyCompareFilterExpr : public Expr {
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
             auto size =
                 (i == (num_chunk_ - 1))
-                    ? (segment_chunk_reader_.segment_->type() ==
-                               SegmentType::Growing
+                    ? (segment_->type() == SegmentType::Growing
                            ? (active_count % segment_chunk_reader_
                                                  .SizePerChunk() ==
                                       0
@@ -668,15 +656,11 @@ class PhyCompareFilterExpr : public Expr {
             auto right_chunk = pw_right.get();
             int64_t left_chunk_size = 0;
             int64_t right_chunk_size = 0;
-            if (segment_chunk_reader_.segment_->type() ==
-                SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing) {
                 const auto last_chunk_size =
-                    segment_chunk_reader_.active_count_ %
-                                segment_chunk_reader_.SizePerChunk() ==
-                            0
+                    active_count_ % segment_chunk_reader_.SizePerChunk() == 0
                         ? segment_chunk_reader_.SizePerChunk()
-                        : segment_chunk_reader_.active_count_ %
-                              segment_chunk_reader_.SizePerChunk();
+                        : active_count_ % segment_chunk_reader_.SizePerChunk();
                 left_chunk_size = left_current_chunk_id_ == left_num_chunk_ - 1
                                       ? last_chunk_size
                                       : segment_chunk_reader_.SizePerChunk();
@@ -911,7 +895,7 @@ class PhyCompareFilterExpr : public Expr {
     VectorPtr
     ExecCompareExprDispatcher(OpType op, EvalCtx& context);
 
-    template <typename OpType>
+    template <typename T, typename U, typename OpType>
     VectorPtr
     ExecCompareWithValueLookup(OpType op, EvalCtx& context);
 
@@ -950,12 +934,14 @@ class PhyCompareFilterExpr : public Expr {
     int64_t right_current_chunk_pos_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
-    segcore::ColumnScanState left_column_scan_state_;
-    segcore::ColumnScanState right_column_scan_state_;
     // Chunk cursors remain for the legacy fallback. Scan position is always a
     // segment offset so it does not depend on a later published chunk layout.
     int64_t current_data_global_pos_{0};
 
+    const segcore::SegmentInternalInterface* segment_;
+    const int64_t active_count_;
+    const segcore::SegmentReadSnapshot* snapshot_{nullptr};
+    // Growing and remaining legacy operations alone use Chunk compatibility.
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;

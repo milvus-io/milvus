@@ -41,6 +41,7 @@
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "query/Utils.h"
+#include "mmap/ChunkedColumn.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/DataGen.h"
@@ -1182,17 +1183,68 @@ TEST(GroupMembershipTest, RawScansHonorCancellation) {
 
 TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
     // Cancel when the accessor reaches chunk 1, after chunk 0 was consumed.
-    // No timing or thread scheduling dependency: the next periodic check must
-    // throw before chunk 2 is pinned.
+    // No timing or thread scheduling dependency: cancellation must throw
+    // before chunk 2 is pinned.
     class CancellingSegment : public segcore::ChunkedSegmentSealedImpl {
      public:
-        CancellingSegment(SchemaPtr schema, folly::CancellationSource& source)
+        class CancellingColumn : public ChunkedColumn {
+         public:
+            CancellingColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
+                             const FieldMeta& field,
+                             folly::CancellationSource& source,
+                             int& pins)
+                : ChunkedColumn(std::move(slot), field),
+                  source_(source),
+                  pins_(pins) {
+            }
+            PinWrapper<Chunk*>
+            GetChunk(OpContext* ctx, int64_t chunk) const override {
+                ++pins_;
+                if (chunk == 1) {
+                    source_.requestCancellation();
+                }
+                return ChunkedColumn::GetChunk(ctx, chunk);
+            }
+
+         private:
+            folly::CancellationSource& source_;
+            int& pins_;
+        };
+
+        CancellingSegment(SchemaPtr schema,
+                          FieldId field,
+                          folly::CancellationSource& source)
             : ChunkedSegmentSealedImpl(schema,
                                        empty_index_meta,
                                        segcore::SegcoreConfig::default_config(),
                                        991),
-              source_(source),
               values_(2048, 1) {
+            std::vector<std::unique_ptr<Chunk>> chunks;
+            chunks.reserve(4);
+            auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+            for (int i = 0; i < 4; ++i) {
+                chunks.push_back(std::make_unique<FixedWidthChunk>(
+                    2048,
+                    1,
+                    reinterpret_cast<char*>(values_.data()),
+                    values_.size() * sizeof(int64_t),
+                    sizeof(int64_t),
+                    false,
+                    guard));
+            }
+            auto translator = std::make_unique<TestChunkTranslator>(
+                std::vector<int64_t>(4, 2048),
+                "membership_cancellation",
+                std::move(chunks));
+            auto slot =
+                cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+                    std::move(translator), nullptr);
+            column_ = std::make_shared<CancellingColumn>(
+                std::move(slot), (*schema)[field], source, pins);
+        }
+        std::shared_ptr<ChunkedColumnInterface>
+        GetChunkedColumn(FieldId) const override {
+            return column_;
         }
         bool
         HasFieldData(FieldId) const override {
@@ -1218,29 +1270,16 @@ TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
         }
         mutable int pins = 0;
 
-     protected:
-        PinWrapper<SpanBase>
-        chunk_data_impl(milvus::OpContext*,
-                        FieldId,
-                        int64_t chunk) const override {
-            ++pins;
-            if (chunk == 1) {
-                source_.requestCancellation();
-            }
-            return PinWrapper<SpanBase>(
-                SpanBase(values_.data(), 2048, sizeof(int64_t)));
-        }
-
      private:
-        folly::CancellationSource& source_;
         std::vector<int64_t> values_;
+        std::shared_ptr<ChunkedColumnInterface> column_;
     };
     auto schema = std::make_shared<Schema>();
     auto field = schema->AddDebugField("group", DataType::INT64);
     schema->set_primary_field_id(field);
     folly::CancellationSource source;
     milvus::OpContext ctx(source.getToken());
-    CancellingSegment segment(schema, source);
+    CancellingSegment segment(schema, field, source);
     try {
         BuildOffsetsBitmap<int64_t>(
             &ctx, segment, field, 8192, {int64_t(1)}, nullptr);

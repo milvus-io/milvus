@@ -21,8 +21,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 #include <math.h>
 
@@ -43,6 +47,64 @@
 #include "mmap/ColumnOffsetLookup.h"
 
 namespace milvus {
+
+namespace detail {
+
+struct CellLocation {
+    int64_t cell_id = -1;
+    int64_t cell_offset = 0;
+};
+
+enum class OffsetLookupStrategy { PerOffset, BatchBinary, Bucket };
+
+struct OffsetLookupOptions {
+    OffsetLookupStrategy strategy = OffsetLookupStrategy::PerOffset;
+    // Borrow the immutable V1 index rather than rebuilding/copying it per Take.
+    int64_t bucket_order = 0;
+    const std::vector<int64_t>* bucket_cells = nullptr;
+};
+
+// Raw-only geometry. Vortex plans files and compressed Cells independently.
+class RawColumnPlanner final {
+ public:
+    // Production Columns borrow immutable generation metadata; tests may own it.
+    explicit RawColumnPlanner(const std::vector<int64_t>& num_rows_until_cell,
+                              OffsetLookupOptions lookup_options = {});
+    explicit RawColumnPlanner(std::vector<int64_t>&& num_rows_until_cell,
+                              OffsetLookupOptions lookup_options = {});
+
+    CellLocation
+    Locate(int64_t segment_offset) const;
+
+    // Preserve input order and duplicates independently of pin-set deduplication.
+    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+    LocateBatch(OffsetView offsets) const;
+
+    int64_t
+    CellStart(int64_t cell_id) const;
+
+    int64_t
+    CellRows(int64_t cell_id) const;
+
+    int64_t
+    NumCells() const;
+
+    int64_t
+    NumRows() const;
+
+    const std::vector<int64_t>&
+    CellBoundaries() const;
+
+ private:
+    void
+    ValidateBoundaries() const;
+
+    std::shared_ptr<const std::vector<int64_t>> owned_num_rows_until_cell_;
+    const std::vector<int64_t>* num_rows_until_cell_{nullptr};
+    OffsetLookupOptions lookup_options_;
+};
+
+}  // namespace detail
 
 using namespace milvus::cachinglayer;
 
@@ -84,7 +146,43 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
                                           vcid_to_cid_arr);
 }
 
-class ChunkedColumnBase : public ChunkedColumnInterface {
+// Shared Raw read implementation, not part of the backend-neutral Column API.
+class RawColumnBase : public ChunkedColumnInterface {
+ public:
+    ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override;
+
+    TakeResultPtr
+    Take(milvus::OpContext* op_ctx, TakeOptions options) const override;
+
+ protected:
+    using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+    using TakeCellRead = std::function<Chunk*(int64_t)>;
+    using TakeCellAccess = std::variant<TakeCellPin, TakeCellRead>;
+
+    // Access owns the generation; Batch borrows from retained pins, CurrentCell
+    // returns an owning pin on Cell changes. op_ctx outlives borrowed reads.
+    virtual TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const = 0;
+
+    virtual std::optional<DataType>
+    GetDefaultScanDataType() const = 0;
+
+    virtual detail::OffsetLookupOptions
+    GetOffsetLookupOptions() const = 0;
+
+ private:
+    const detail::RawColumnPlanner&
+    Planner() const;
+
+    mutable std::once_flag planner_once_;
+    // Lazy TakeResults share this geometry and retain its generation via access.
+    mutable std::shared_ptr<const detail::RawColumnPlanner> planner_;
+};
+
+class ChunkedColumnBase : public RawColumnBase {
  public:
     explicit ChunkedColumnBase(std::shared_ptr<CacheSlot<Chunk>> slot,
                                const FieldMeta& field_meta)
@@ -393,15 +491,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
  protected:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override {
+    detail::OffsetLookupOptions
+    GetOffsetLookupOptions() const override {
         auto* meta =
             static_cast<segcore::storagev1translator::CTMeta*>(slot_->meta());
-        return std::make_unique<ColumnPlanner>(
-            meta->num_rows_until_chunk_,
-            OffsetLookupOptions{OffsetLookupStrategy::Bucket,
-                                num_chunks_ > 1 ? meta->virt_chunk_order_ : 0,
-                                &meta->vcid_to_cid_arr_});
+        return {detail::OffsetLookupStrategy::Bucket,
+                num_chunks_ > 1 ? meta->virt_chunk_order_ : 0,
+                &meta->vcid_to_cid_arr_};
     }
 
     std::optional<DataType>

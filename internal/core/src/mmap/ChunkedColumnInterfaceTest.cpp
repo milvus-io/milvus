@@ -37,6 +37,10 @@
 namespace milvus {
 namespace {
 
+using detail::OffsetLookupOptions;
+using detail::OffsetLookupStrategy;
+using detail::RawColumnPlanner;
+
 constexpr int32_t kElementSize = 4;
 constexpr int64_t kTestFieldId = 1;
 constexpr int64_t kVectorArrayFieldId = 2;
@@ -2231,7 +2235,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
-    ColumnPlanner planner(std::vector<int64_t>{0, 3, 5});
+    RawColumnPlanner planner(std::vector<int64_t>{0, 3, 5});
     EXPECT_EQ(planner.NumCells(), 2);
     EXPECT_EQ(planner.NumRows(), 5);
     EXPECT_EQ(planner.CellBoundaries(), (std::vector<int64_t>{0, 3, 5}));
@@ -2246,7 +2250,7 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
     EXPECT_EQ(boundary.cell_id, 1);
     EXPECT_EQ(boundary.cell_offset, 0);
 
-    ColumnPlanner single_cell(std::vector<int64_t>{0, 5});
+    RawColumnPlanner single_cell(std::vector<int64_t>{0, 5});
     const auto single_cell_last = single_cell.Locate(4);
     EXPECT_EQ(single_cell_last.cell_id, 0);
     EXPECT_EQ(single_cell_last.cell_offset, 4);
@@ -2254,10 +2258,10 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
 
 TEST(ColumnPlannerTest, BorrowsStableBoundariesAndOwnsTemporaryBoundaries) {
     const std::vector<int64_t> stable_boundaries{0, 3, 5};
-    ColumnPlanner borrowed(stable_boundaries);
+    RawColumnPlanner borrowed(stable_boundaries);
     EXPECT_EQ(borrowed.CellBoundaries().data(), stable_boundaries.data());
 
-    ColumnPlanner owned(std::vector<int64_t>{0, 2, 5});
+    RawColumnPlanner owned(std::vector<int64_t>{0, 2, 5});
     EXPECT_EQ(owned.CellBoundaries(), (std::vector<int64_t>{0, 2, 5}));
     EXPECT_EQ(owned.NumRows(), 5);
 }
@@ -2277,11 +2281,11 @@ TEST(ColumnPlannerTest, BatchStrategiesPreserveOrderForBothOffsetWidths) {
             boundaries.back() - 1, 0, 3, 2, 1, 3, 0};
         const std::vector<int32_t> offsets32(offsets64.begin(),
                                              offsets64.end());
-        const ColumnPlanner reference(boundaries);
+        const RawColumnPlanner reference(boundaries);
         for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                     OffsetLookupStrategy::BatchBinary,
                                     OffsetLookupStrategy::Bucket}) {
-            const ColumnPlanner planner(
+            const RawColumnPlanner planner(
                 boundaries,
                 OffsetLookupOptions{strategy, bucket_order, &buckets});
             for (const auto offsets :
@@ -2309,7 +2313,7 @@ TEST(ColumnPlannerTest, BatchStrategiesValidateOffsetsAndAllowEmptyRequests) {
     for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                 OffsetLookupStrategy::BatchBinary,
                                 OffsetLookupStrategy::Bucket}) {
-        const ColumnPlanner planner(
+        const RawColumnPlanner planner(
             boundaries, OffsetLookupOptions{strategy, bucket_order, &buckets});
         for (const int64_t invalid : {-1, 5}) {
             const int64_t offsets64[]{0, invalid};
@@ -2338,20 +2342,20 @@ TEST(ColumnPlannerTest, BatchStrategiesValidateOffsetsAndAllowEmptyRequests) {
 TEST(ColumnPlannerTest, RejectsInvalidBucketConfiguration) {
     const std::vector<int64_t> boundaries{0, 3, 8};
     const std::vector<int64_t> short_index{0};
+    EXPECT_THROW((RawColumnPlanner(boundaries,
+                                   {OffsetLookupStrategy::Bucket, 0, nullptr})),
+                 std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries, {OffsetLookupStrategy::Bucket, 0, nullptr})),
+        (RawColumnPlanner(boundaries,
+                          {OffsetLookupStrategy::Bucket, 63, &short_index})),
         std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {OffsetLookupStrategy::Bucket, 63, &short_index})),
+        (RawColumnPlanner(boundaries,
+                          {OffsetLookupStrategy::Bucket, 0, &short_index})),
         std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {OffsetLookupStrategy::Bucket, 0, &short_index})),
-        std::exception);
-    EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {static_cast<OffsetLookupStrategy>(99), 0, nullptr})),
+        (RawColumnPlanner(boundaries,
+                          {static_cast<OffsetLookupStrategy>(99), 0, nullptr})),
         std::exception);
 }
 
@@ -2362,7 +2366,7 @@ TEST(ColumnPlannerTest, EmptyColumnsHaveNoLocationsForAnyBatchStrategy) {
         for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                     OffsetLookupStrategy::BatchBinary,
                                     OffsetLookupStrategy::Bucket}) {
-            const ColumnPlanner planner(boundaries, {strategy, 0, &buckets});
+            const RawColumnPlanner planner(boundaries, {strategy, 0, &buckets});
             const auto result = planner.LocateBatch(OffsetView{});
             EXPECT_TRUE(result.first.empty());
             EXPECT_TRUE(result.second.empty());
