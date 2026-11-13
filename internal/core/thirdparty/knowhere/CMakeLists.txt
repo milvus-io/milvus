@@ -59,6 +59,30 @@ FetchContent_GetProperties( knowhere )
 if ( NOT knowhere_POPULATED )
     FetchContent_Populate( knowhere )
 
+    # Carry the AISAQ rerank fix (data_dim != aligned_dim) until the pinned
+    # Knowhere revision contains it: without it a half-precision IP index reads
+    # the neighbour count/ids as coordinates during full-precision rerank.
+    set( KNOWHERE_AISAQ_RERANK_PATCH
+         "${CMAKE_CURRENT_SOURCE_DIR}/patches/aisaq-rerank-copy.patch" )
+    execute_process(
+        COMMAND git apply --check --reverse "${KNOWHERE_AISAQ_RERANK_PATCH}"
+        WORKING_DIRECTORY "${knowhere_SOURCE_DIR}"
+        RESULT_VARIABLE KNOWHERE_AISAQ_PATCH_APPLIED
+        OUTPUT_QUIET ERROR_QUIET )
+    if ( NOT KNOWHERE_AISAQ_PATCH_APPLIED EQUAL 0 )
+        execute_process(
+            COMMAND git apply --whitespace=nowarn "${KNOWHERE_AISAQ_RERANK_PATCH}"
+            WORKING_DIRECTORY "${knowhere_SOURCE_DIR}"
+            RESULT_VARIABLE KNOWHERE_AISAQ_PATCH_RESULT
+            OUTPUT_VARIABLE KNOWHERE_AISAQ_PATCH_OUTPUT
+            ERROR_VARIABLE KNOWHERE_AISAQ_PATCH_OUTPUT )
+        if ( NOT KNOWHERE_AISAQ_PATCH_RESULT EQUAL 0 )
+            message( FATAL_ERROR
+                     "Failed to apply ${KNOWHERE_AISAQ_RERANK_PATCH}: "
+                     "${KNOWHERE_AISAQ_PATCH_OUTPUT}" )
+        endif()
+    endif()
+
     # Adding the following target:
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}
