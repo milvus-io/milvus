@@ -102,6 +102,21 @@ database/index storage. Verification holds one case's expected PK set in memory.
 Sparse update histories and the optional all-data temp index need memory beyond the
 base column size; choose memory limits from measured usage before scaling up.
 
+## Latest postings bitmap admission
+
+ON mode may retain a latest membership bitmap for a non-NULL value touched by
+an update. Admission requires at least `max(4096, ceil(segment_rows / 64))`
+distinct historical posting offsets and has an 8 MiB bitmap budget per field.
+This is a POC heuristic, not a calibrated cost model. Admission is first-come;
+there is no eviction or query-frequency tracking. Sparse values use the SoA
+postings path. NULL uses the existing latest validity bitmap.
+
+Updates maintain admitted bitmaps under the version-store lock. A query copies
+or combines them only when its timestamp is at least their latest membership
+change; older snapshots use versioned postings. Stats expose
+`latest_posting_reads`, `latest_posting_bitmap_count`, and
+`latest_posting_bitmap_bytes`. The byte count measures bitmap payload, not RSS.
+
 ## Artifacts and interpretation
 
 - `fixture/`: `base.jsonl`, logical `updates.jsonl`, `mirror.jsonl`, SQL oracle,

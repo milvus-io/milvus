@@ -74,6 +74,8 @@ Visible(const History& history, uint64_t query_ts) {
 }
 
 constexpr size_t kPostingBlockSize = 256;
+constexpr size_t kMinLatestBitmapPostings = 4096;
+constexpr size_t kLatestBitmapBudgetPerField = 8 * 1024 * 1024;
 
 struct Postings;
 
@@ -103,10 +105,16 @@ struct PostingPosition {
 };
 
 struct Postings {
+    explicit Postings(bool is_null) : is_null(is_null) {
+    }
+
     // Writer lookup only; readers walk dense blocks.
     std::unordered_map<int64_t, PostingPosition> slots;
     std::vector<std::unique_ptr<PostingBlock>> blocks;
     size_t size = 0;
+    const bool is_null;
+    TargetBitmap latest;
+    uint64_t latest_since = 0;
 
     PostingPosition
     AppendSlot(int64_t offset) {
@@ -163,6 +171,7 @@ struct Field {
     // store lock; returned snapshots never alias subsequent writer changes.
     TargetBitmap latest_validity;
     uint64_t latest_validity_since = 0;
+    size_t latest_posting_bytes = 0, latest_posting_count = 0;
 
     void
     Validate(const UpdateValue& value) const {
@@ -180,9 +189,40 @@ struct Field {
     IndexPostings(const UpdateValue& value) {
         auto it = index->find(value);
         if (it == index->end()) {
-            it = index->emplace(value, std::make_unique<Postings>()).first;
+            it = index
+                     ->emplace(
+                         value,
+                         std::make_unique<Postings>(
+                             std::holds_alternative<std::monostate>(value)))
+                     .first;
         }
         return *it->second;
+    }
+
+    void
+    MaybeCacheLatest(Postings& postings, size_t row_count, uint64_t since) {
+        const auto words = (row_count + 63) / 64;
+        const auto bytes = words * sizeof(uint64_t);
+        // POC admission policy: bound dense bitmap memory and avoid paying a
+        // whole-column bitmap for sparse values. NULL already has validity.
+        if (postings.is_null || postings.latest.size() ||
+            postings.size < std::max(kMinLatestBitmapPostings, words) ||
+            bytes > kLatestBitmapBudgetPerField - latest_posting_bytes)
+            return;
+        TargetBitmap bitmap(row_count, false);
+        for (const auto& block : postings.blocks) {
+            for (size_t slot = 0; slot < block->size; ++slot) {
+                if (block->last_begin[slot] != kInfinity &&
+                    block->last_end[slot] == kInfinity)
+                    bitmap.set(block->offsets[slot]);
+            }
+        }
+        // Only published intervals were read; pending reserved slots are empty.
+        // A failed Apply may retain this valid optimization of the old prefix.
+        postings.latest = std::move(bitmap);
+        postings.latest_since = since;
+        latest_posting_bytes += bytes;
+        ++latest_posting_count;
     }
 };
 
@@ -257,6 +297,24 @@ class UpdatesRecord::Impl {
                 "POC row offset is outside the physical segment");
     }
 
+    void
+    CollectPostings(const Postings& postings,
+                    uint64_t query_ts,
+                    TargetBitmap& result) const {
+        if (postings.latest.size() && query_ts >= postings.latest_since) {
+            if (result.size())
+                result |= postings.latest;
+            else
+                result = postings.latest.clone();
+            latest_posting_reads.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            if (!result.size())
+                result = TargetBitmap(row_count, false);
+            index_postings.fetch_add(postings.size, std::memory_order_relaxed);
+            Collect(postings, query_ts, result);
+        }
+    }
+
     const size_t row_count;
     const bool enable_temp_index;
     mutable std::shared_mutex mutex;
@@ -264,7 +322,8 @@ class UpdatesRecord::Impl {
     std::optional<uint64_t> last_mutation_ts;
     std::atomic<uint64_t> index_reads{0}, value_reads{0};
     std::atomic<uint64_t> value_rows{0}, base_rows{0}, correction_rows{0};
-    std::atomic<uint64_t> old_index_reads{0}, index_postings{0};
+    std::atomic<uint64_t> old_index_reads{0};
+    mutable std::atomic<uint64_t> index_postings{0}, latest_posting_reads{0};
     std::atomic<uint64_t> all_valid_reads{0}, latest_validity_reads{0},
         history_validity_reads{0};
 };
@@ -347,7 +406,8 @@ UpdatesRecord::IndexBaseBatch(int64_t field_id,
         field.Validate(values[i]);
         auto& postings = (*field.index)[values[i]];
         if (!postings)
-            postings = std::make_unique<Postings>();
+            postings = std::make_unique<Postings>(
+                std::holds_alternative<std::monostate>(values[i]));
         auto position = postings->AppendSlot(start + i);
         position.block->last_begin[position.slot] = 0;
         position.block->last_end[position.slot] = kInfinity;
@@ -384,12 +444,15 @@ UpdatesRecord::GetStats() const {
         stats.update_versions += field->versions.size();
         stats.base_index_rows += field->base_index_rows;
         stats.latest_validity_bytes += field->latest_validity.size_in_bytes();
+        stats.latest_posting_bitmap_bytes += field->latest_posting_bytes;
+        stats.latest_posting_bitmap_count += field->latest_posting_count;
     }
     stats.value_rows = impl_->value_rows.load();
     stats.base_rows = impl_->base_rows.load();
     stats.correction_rows = impl_->correction_rows.load();
     stats.old_index_reads = impl_->old_index_reads.load();
     stats.index_postings = impl_->index_postings.load();
+    stats.latest_posting_reads = impl_->latest_posting_reads.load();
     stats.all_valid_reads = impl_->all_valid_reads.load();
     stats.latest_validity_reads = impl_->latest_validity_reads.load();
     stats.history_validity_reads = impl_->history_validity_reads.load();
@@ -449,6 +512,7 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
         History* base_history;
         Version* base_interval;
         int64_t offset;
+        Postings* previous_postings;
     };
     std::vector<Pending> pending;
     Require(offsets.empty() ||
@@ -469,8 +533,10 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
                 uint64_t* previous_end = nullptr;
                 History* base_history = nullptr;
                 Version* base_interval = nullptr;
+                Postings* previous_postings = nullptr;
                 if (field.index) {
                     auto previous = field.current_postings[offset];
+                    previous_postings = previous.block->owner;
                     previous_end = &previous.block->last_end[previous.slot];
                     if (history.empty()) {
                         // Register the base slot before finding the destination:
@@ -488,6 +554,11 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
                     index_history->reserve(
                         index_history->size() +
                         (base_history == index_history ? 2 : 1));
+                    const auto since = impl_->last_mutation_ts.value_or(0);
+                    field.MaybeCacheLatest(
+                        *previous_postings, impl_->row_count, since);
+                    field.MaybeCacheLatest(
+                        *block->owner, impl_->row_count, since);
                 }
                 field.versions.push_back({value, mutation_ts, kInfinity});
                 if (base_history) {
@@ -509,7 +580,8 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
                                    previous_end,
                                    base_history,
                                    base_interval,
-                                   offset});
+                                   offset,
+                                   previous_postings});
             }
         }
     } catch (...) {
@@ -540,6 +612,17 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
             item.block->last_begin[item.slot] = mutation_ts;
             item.block->last_end[item.slot] = kInfinity;
             item.field->current_postings[item.offset] = {item.block, item.slot};
+            auto& destination = *item.block->owner;
+            if (item.previous_postings != &destination) {
+                if (item.previous_postings->latest.size()) {
+                    item.previous_postings->latest.set(item.offset, false);
+                    item.previous_postings->latest_since = mutation_ts;
+                }
+                if (destination.latest.size()) {
+                    destination.latest.set(item.offset);
+                    destination.latest_since = mutation_ts;
+                }
+            }
             if (item.field->nullable) {
                 const bool valid = !std::holds_alternative<std::monostate>(
                     *item.version->value);
@@ -620,7 +703,7 @@ UpdatesRecord::InBitmap(int64_t field_id,
                         uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
     const auto& field = impl_->IndexedField(field_id);
-    TargetBitmap result(impl_->row_count, false);
+    TargetBitmap result;
     for (const auto& value : values) {
         // NULL in an IN list never contributes a TRUE result.
         if (std::holds_alternative<std::monostate>(value)) {
@@ -629,11 +712,11 @@ UpdatesRecord::InBitmap(int64_t field_id,
         field.Validate(value);
         auto it = field.index->find(value);
         if (it != field.index->end()) {
-            impl_->index_postings.fetch_add(it->second->size,
-                                            std::memory_order_relaxed);
-            Collect(*it->second, query_ts, result);
+            impl_->CollectPostings(*it->second, query_ts, result);
         }
     }
+    if (!result.size())
+        result = TargetBitmap(impl_->row_count, false);
     return result;
 }
 
@@ -664,12 +747,12 @@ UpdatesRecord::RangeBitmap(int64_t field_id,
     auto end = !upper             ? tree.end()
                : upper->inclusive ? tree.upper_bound(upper->value)
                                   : tree.lower_bound(upper->value);
-    TargetBitmap result(impl_->row_count, false);
+    TargetBitmap result;
     for (auto it = begin; it != end; ++it) {
-        impl_->index_postings.fetch_add(it->second->size,
-                                        std::memory_order_relaxed);
-        Collect(*it->second, query_ts, result);
+        impl_->CollectPostings(*it->second, query_ts, result);
     }
+    if (!result.size())
+        result = TargetBitmap(impl_->row_count, false);
     return result;
 }
 
@@ -681,7 +764,7 @@ UpdatesRecord::PrefixBitmap(int64_t field_id,
     const auto& field = impl_->IndexedField(field_id);
     Require(field.type == UpdateFieldType::VarChar,
             "POC prefix lookup requires a VARCHAR field");
-    TargetBitmap result(impl_->row_count, false);
+    TargetBitmap result;
     const auto& tree = *field.index;
     for (auto it = tree.lower_bound(UpdateValue{prefix}); it != tree.end();
          ++it) {
@@ -689,10 +772,10 @@ UpdatesRecord::PrefixBitmap(int64_t field_id,
         if (value.compare(0, prefix.size(), prefix) != 0) {
             break;
         }
-        impl_->index_postings.fetch_add(it->second->size,
-                                        std::memory_order_relaxed);
-        Collect(*it->second, query_ts, result);
+        impl_->CollectPostings(*it->second, query_ts, result);
     }
+    if (!result.size())
+        result = TargetBitmap(impl_->row_count, false);
     return result;
 }
 

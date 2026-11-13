@@ -148,7 +148,10 @@ GetPOCStats(void* session, CSegmentInterface segment, char** output) {
             {"all_valid_reads", s.all_valid_reads},
             {"latest_validity_reads", s.latest_validity_reads},
             {"history_validity_reads", s.history_validity_reads},
-            {"latest_validity_bytes", s.latest_validity_bytes}};
+            {"latest_validity_bytes", s.latest_validity_bytes},
+            {"latest_posting_reads", s.latest_posting_reads},
+            {"latest_posting_bitmap_bytes", s.latest_posting_bitmap_bytes},
+            {"latest_posting_bitmap_count", s.latest_posting_bitmap_count}};
         *output = strdup(json.dump().c_str());
         AssertInfo(*output, "Failed to allocate POC statistics");
         return SuccessCStatus();

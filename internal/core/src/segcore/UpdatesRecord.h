@@ -93,6 +93,8 @@ class UpdatesRecord {
         uint64_t old_index_reads = 0, index_postings = 0;
         uint64_t all_valid_reads = 0, latest_validity_reads = 0;
         uint64_t history_validity_reads = 0, latest_validity_bytes = 0;
+        uint64_t latest_posting_reads = 0, latest_posting_bitmap_bytes = 0;
+        uint64_t latest_posting_bitmap_count = 0;
     };
     Stats
     GetStats() const;
