@@ -139,9 +139,10 @@ func (s *RestfulAccessInfoSuite) TestErrorMsg() {
 	result := Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
+	// Line breaks are returned as is; Formatter.Format escapes them for the log.
 	s.ctx.Set(ContextReturnMessage, "test error. stack: 1:\n 2:\n 3:\n")
 	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
+	s.Equal("test error. stack: 1:\n 2:\n 3:\n", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestDbName() {

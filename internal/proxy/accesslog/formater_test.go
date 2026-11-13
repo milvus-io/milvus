@@ -18,6 +18,7 @@ package accesslog
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -188,6 +189,22 @@ func (s *LogFormatterSuite) TestFormatMethodResult() {
 		fs = formatter.Format(i)
 		s.False(strings.Contains(fs, info.Unknown))
 	}
+}
+
+func (s *LogFormatterSuite) TestFormatEscapesLineBreaks() {
+	fmt := "$error_msg"
+	formatter := NewFormatter(fmt)
+
+	i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, s.reqs[0])
+	i.SetResult(merr.Status(nil), errors.New("age > 10\nforged record\rtail"))
+	fs := formatter.Format(i)
+
+	// The only real newline is the trailing record separator; the CR and LF
+	// inside the field are escaped so the record stays on one line.
+	s.Equal(1, strings.Count(fs, "\n"))
+	s.True(strings.HasSuffix(fs, "\n"))
+	s.NotContains(fs[:len(fs)-1], "\r")
+	s.Contains(fs, "age > 10\\nforged record\\rtail")
 }
 
 func (s *LogFormatterSuite) TestParseConfigKeyFailed() {
