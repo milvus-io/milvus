@@ -40,17 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// NewMultiSearchTestProxy starts the real batch scheduler for the REST tests in proxy_test.
-func NewMultiSearchTestProxy(t *testing.T, queueCapacity, workers int) *Proxy {
-	t.Helper()
-	s := newMultiSearchScheduler(t.Context(), queueCapacity)
-	s.start(workers)
-	t.Cleanup(s.stop)
-	p := &Proxy{multiSearch: s}
-	p.UpdateStateCode(commonpb.StateCode_Healthy)
-	return p
-}
-
 func multiSearchTestPrepare(collection string) MultiSearchPrepare {
 	return func(context.Context) (*milvuspb.SearchRequest, error) {
 		return &milvuspb.SearchRequest{DbName: "default", CollectionName: collection}, nil

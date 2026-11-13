@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
@@ -68,20 +70,41 @@ func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
 }
 
 func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
-	handle := dqlResponseMiddleware(next, dqlExplicitTransportTimeout)
+	respond := newDQLResponseMiddleware(dqlExplicitTransportTimeout)
 	handleWithMetrics := restfulSizeMiddleware(func(c *gin.Context) {
 		metrics.GetStats(c.Request.Context()).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("MultiSearch")
-		handle(c)
+		timeout, err := multiSearchTransportTimeout(c)
+		handle := next
+		if err != nil {
+			handle = func(c *gin.Context) {
+				HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			}
+		}
+		respond(c, handle, timeout)
 	}, true)
 	return func(c *gin.Context) {
 		if p, ok := h.proxy.(multiSearchProxy); ok {
 			if err := p.CheckMultiSearchAdmission(); err != nil {
-				rejectQueueFullBeforeDecode(c, err)
+				// Admission still takes precedence over an invalid header.
+				timeout, _ := multiSearchTransportTimeout(c)
+				respond(c, func(c *gin.Context) { rejectQueueFullBeforeDecode(c, err) }, timeout)
 				return
 			}
 		}
 		handleWithMetrics(c)
 	}
+}
+
+func multiSearchTransportTimeout(c *gin.Context) (*time.Duration, error) {
+	header := c.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+	if header == "" {
+		return nil, nil
+	}
+	timeout, err := parseRequestTimeout(header)
+	if err != nil {
+		return nil, err
+	}
+	return &timeout, nil
 }
 
 func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (any, error) {
@@ -222,7 +245,7 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 			return nil, err
 		}
 	}
-	if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
+	if err := h.checkMultiSearchQuota(ctx, req); err != nil {
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, searchMethod, hookutil.ActionAuthorize)
 		return nil, err
 	}
@@ -243,4 +266,16 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 		return nil, merr.WrapErrServiceInternalMsg("Search returned an invalid response")
 	}
 	return result, nil
+}
+
+func (h *HandlersV2) checkMultiSearchQuota(ctx context.Context, req *milvuspb.SearchRequest) error {
+	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
+		return nil
+	}
+	dbID, parts, rateType, nq, err := proxy.GetMultiSearchQuotaInfo(ctx, h.metaCache(), req)
+	if err != nil {
+		return err
+	}
+	_, err = checkQuota(ctx, req, h.proxy, dbID, parts, rateType, nq)
+	return err
 }

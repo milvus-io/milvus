@@ -710,14 +710,6 @@ func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
 	return req.GetNq(), nil
 }
 
-func getNq(req *milvuspb.SearchRequest) (int64, error) {
-	if req.GetNq() != 0 {
-		return req.GetNq(), nil
-	}
-	// Keep compatibility with older clients that omit NQ.
-	return getPlaceholderGroupNQ(req.GetPlaceholderGroup())
-}
-
 func getPlaceholderGroupNQ(data []byte) (int64, error) {
 	group := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(data, group); err != nil {
@@ -761,35 +753,6 @@ func NormalizeMultiSearchNQ(request *milvuspb.SearchRequest) error {
 	}
 	request.Nq = nq
 	return nil
-}
-
-// NormalizeSearchNQ fills NQ for requests from older clients and checks that
-// legacy advanced search subrequests use the same NQ.
-func NormalizeSearchNQ(request *milvuspb.SearchRequest) (int64, error) {
-	nq := request.GetNq()
-	if len(request.GetSubReqs()) == 0 {
-		var err error
-		nq, err = getNq(request)
-		if err != nil {
-			return 0, err
-		}
-	}
-	for _, subRequest := range request.GetSubReqs() {
-		subNQ, err := getNqFromSubSearch(subRequest)
-		if err != nil {
-			return 0, err
-		}
-		subRequest.Nq = subNQ
-		if nq == 0 {
-			nq = subNQ
-			continue
-		}
-		if subNQ != nq {
-			return 0, merr.WrapErrParameterInvalid(nq, subNQ, "sub search request nq should be the same")
-		}
-	}
-	request.Nq = nq
-	return nq, nil
 }
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {

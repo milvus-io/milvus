@@ -32,6 +32,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -40,9 +41,12 @@ import (
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -328,17 +332,38 @@ func (w blockedMultiSearchResponseWriter) FlushError() error {
 }
 
 func TestMultiSearchRESTTransportDeadlineInterruptsFlush(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, 1, 1))
-		req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(
-			`{"requests":[{"search":{}}],"timeoutMs":0}`))
-		req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "1")
-		response := blockedMultiSearchResponseWriter{httptest.NewRecorder(), make(chan struct{})}
-		require.PanicsWithValue(t, http.ErrAbortHandler, func() {
-			handler.ServeHTTP(response, req)
+	for _, test := range []struct {
+		name, payload string
+		capacity      int
+		status        int
+		code          int32
+	}{
+		{"valid batch", `{"requests":[{"search":{}}],"timeoutMs":0}`, 1, http.StatusOK, 0},
+		{"decode failure", "{", 1, http.StatusOK, merr.Code(merr.ErrIncorrectParameterFormat)},
+		{"invalid batch", `{"requests":[]}`, 1, http.StatusOK, merr.Code(merr.ErrParameterMissing)},
+		{"admission rejection", "{", 0, http.StatusTooManyRequests, merr.Code(merr.ErrServiceTooManyRequests)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, test.capacity, 1))
+				req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(test.payload))
+				req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "1")
+				response := blockedMultiSearchResponseWriter{httptest.NewRecorder(), make(chan struct{})}
+				require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+					handler.ServeHTTP(response, req)
+				})
+				require.Equal(t, test.status, response.Code)
+				require.Contains(t, response.Header().Get("Content-Type"), "application/json")
+				if test.status == http.StatusTooManyRequests {
+					require.Equal(t, "1", response.Header().Get("Retry-After"))
+					require.Equal(t, "Retry-After", response.Header().Get("Access-Control-Expose-Headers"))
+				}
+				var body multiSearchRESTResponse
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+				require.Equal(t, test.code, body.Code)
+			})
 		})
-		require.Equal(t, http.StatusOK, response.Code)
-	})
+	}
 }
 
 type shortMultiSearchResponseWriter struct{ http.ResponseWriter }
@@ -348,28 +373,50 @@ func (w shortMultiSearchResponseWriter) Write(p []byte) (int, error) {
 }
 
 func TestMultiSearchRESTShortWriteFailsTransport(t *testing.T) {
-	handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, 1, 1))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler.ServeHTTP(shortMultiSearchResponseWriter{w}, r)
-	}))
-	defer server.Close()
-	client := server.Client()
-	client.Timeout = 5 * time.Second
-	response, err := client.Post(server.URL+multiSearchRESTPath, "application/json", strings.NewReader(
-		`{"requests":[{"search":{}}],"timeoutMs":0}`))
-	if err == nil {
-		defer response.Body.Close()
-		_, err = io.ReadAll(response.Body)
+	for _, test := range []struct{ name, payload, requestTimeout string }{
+		{"valid batch", `{"requests":[{"search":{}}],"timeoutMs":0}`, ""},
+		{"invalid batch", `{"requests":[]}`, "1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, 1, 1))
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.ServeHTTP(shortMultiSearchResponseWriter{w}, r)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+multiSearchRESTPath, strings.NewReader(test.payload))
+			require.NoError(t, err)
+			if test.requestTimeout != "" {
+				req.Header.Set(mhttp.HTTPHeaderRequestTimeout, test.requestTimeout)
+			}
+			response, err := server.Client().Do(req)
+			if err == nil {
+				defer response.Body.Close()
+				_, err = io.ReadAll(response.Body)
+			}
+			require.Error(t, err)
+		})
 	}
-	require.Error(t, err)
 }
 
 type multiSearchQuotaProxy struct {
-	*multiSearchHTTPProxy
+	*proxy.Proxy
+	cache   proxy.Cache
+	search  proxy.MultiSearchExecute
 	limiter types.Limiter
 }
 
+func (p *multiSearchQuotaProxy) GetMetaCache() proxy.Cache { return p.cache }
+
 func (p *multiSearchQuotaProxy) GetRateLimiter() (types.Limiter, error) { return p.limiter, nil }
+
+func (p *multiSearchQuotaProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	if p.search != nil {
+		return p.search(ctx, req)
+	}
+	return p.Proxy.Search(ctx, req)
+}
 
 type multiSearchQuotaCache struct{ proxy.Cache }
 
@@ -412,12 +459,13 @@ type multiSearchQuotaCall struct {
 
 type multiSearchQuotaLimiter struct {
 	types.Limiter
-	calls []multiSearchQuotaCall
+	calls     []multiSearchQuotaCall
+	denyFirst bool
 }
 
 func (l *multiSearchQuotaLimiter) Check(dbID int64, parts map[int64][]int64, rateType internalpb.RateType, nq int) error {
 	l.calls = append(l.calls, multiSearchQuotaCall{dbID, parts, rateType, nq})
-	if len(l.calls) == 1 {
+	if l.denyFirst && len(l.calls) == 1 {
 		return merr.WrapErrServiceRateLimit(10)
 	}
 	return nil
@@ -436,8 +484,8 @@ func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 		require.NoError(t, params.Save(regexpKey, "true"))
 		t.Cleanup(func() { require.NoError(t, params.Reset(regexpKey)) })
 		p.cache = multiSearchQuotaCache{p.cache}
-		limiter := &multiSearchQuotaLimiter{}
-		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{multiSearchHTTPProxy: p, limiter: limiter})
+		limiter := &multiSearchQuotaLimiter{denyFirst: true}
+		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{Proxy: p.Proxy, cache: p.cache, search: p.Search, limiter: limiter})
 		payload := `{"maxConcurrency":1,"requests":[
 			{"search":{"dbName":"catalog_a","collectionName":"ready","partitionNames":["e.*"],"data":[[1,0],[0,1]]}},
 			{"search":{"dbName":"catalog_b","collectionName":"ready","partitionNames":["w.*"],"ids":[10,20,30]}}]}`
@@ -452,5 +500,170 @@ func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 		second := multiSearchQuotaCall{20, map[int64][]int64{21: {22}}, internalpb.RateType_DQLSearch, 3}
 		require.Equal(t, []multiSearchQuotaCall{first, first, second}, limiter.calls)
 		require.Equal(t, []string{"catalog_a", "catalog_b"}, searched)
+	})
+}
+
+type multiSearchTestShardPolicy struct {
+	shardclient.LBPolicy
+	node types.QueryNodeClient
+}
+
+func (p multiSearchTestShardPolicy) Execute(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+	return workload.Exec(ctx, 1, p.node, "channel")
+}
+
+func (multiSearchTestShardPolicy) UpdateCostMetrics(int64, *internalpb.CostAggregation) {}
+
+type multiSearchTestQueryNode struct {
+	types.QueryNodeClient
+	searched chan *querypb.SearchRequest
+}
+
+func (p multiSearchTestQueryNode) Search(_ context.Context, req *querypb.SearchRequest, _ ...grpc.CallOption) (*internalpb.SearchResults, error) {
+	p.searched <- req
+	return &internalpb.SearchResults{
+		Status:     merr.Success(),
+		MetricType: "L2",
+		ResultData: &schemapb.SearchResultData{
+			NumQueries: 2, TopK: 1, Topks: []int64{1, 1}, Scores: []float32{-0.5, -0.6},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{17, 18}}}},
+		},
+	}, nil
+}
+
+type pendingMultiSearchTestQuery struct {
+	taskmodel.BaseTask
+	*taskmodel.TaskCondition
+	id int64
+	ts uint64
+}
+
+func (t *pendingMultiSearchTestQuery) TraceCtx() context.Context { return t.Ctx() }
+func (*pendingMultiSearchTestQuery) Name() string                { return taskmodel.QueryTaskName }
+func (*pendingMultiSearchTestQuery) Type() commonpb.MsgType      { return commonpb.MsgType_Retrieve }
+func (t *pendingMultiSearchTestQuery) ID() int64                 { return t.id }
+func (t *pendingMultiSearchTestQuery) SetID(id int64)            { t.id = id }
+func (t *pendingMultiSearchTestQuery) BeginTs() uint64           { return t.ts }
+func (t *pendingMultiSearchTestQuery) EndTs() uint64             { return t.ts }
+func (t *pendingMultiSearchTestQuery) SetTs(ts uint64)           { t.ts = ts }
+func (*pendingMultiSearchTestQuery) OnEnqueue() error            { return nil }
+func (*pendingMultiSearchTestQuery) PreExecute(context.Context) error {
+	return merr.WrapErrServiceInternalMsg("queue filler should have been removed before starting the scheduler")
+}
+func (*pendingMultiSearchTestQuery) Execute(context.Context) error     { return nil }
+func (*pendingMultiSearchTestQuery) PostExecute(context.Context) error { return nil }
+
+func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		params := paramtable.Get()
+		for key, value := range map[string]string{
+			params.QuotaConfig.QuotaAndLimitsEnabled.Key: "true",
+			params.CommonCfg.AuthorizationEnabled.Key:    "false",
+			params.ProxyCfg.EnableAutoLoad.Key:           "false",
+			params.HTTPCfg.DQLAdmissionEnabled.Key:       "true",
+		} {
+			require.NoError(t, params.Save(key, value))
+			t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+		}
+		const db, collection = "catalog", "ready"
+		cache := proxy.InitEmptyMetaCacheForTest()
+		cache.SeedDBInfoForTest(db, &metacache.DatabaseInfo{DBID: 10})
+		info := cache.SeedCollectionForTest(db, collection, 11)
+		info.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+		schema, err := metacache.NewSchemaInfo(&schemapb.CollectionSchema{
+			Name: collection,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			},
+		})
+		require.NoError(t, err)
+		info.Schema = schema
+		cache.SeedPartitionCacheForTest(11, []*metacache.PartitionInfo{{Name: "east", PartitionID: 12}}, false)
+
+		p := proxy.NewMultiSearchTestProxy(t, 1, 1)
+		searched := make(chan *querypb.SearchRequest, 2)
+		sched := proxy.AddMultiSearchDQLSchedulerForTest(t, p, cache, multiSearchTestShardPolicy{node: multiSearchTestQueryNode{searched: searched}})
+		sched.DqQueue.SetMaxTaskNum(1)
+		require.NoError(t, sched.DqQueue.Enqueue(&pendingMultiSearchTestQuery{TaskCondition: taskmodel.NewTaskCondition(t.Context())}))
+		require.True(t, p.IsDQLQueueFull())
+		require.NoError(t, p.CheckMultiSearchAdmission())
+
+		limiter := &multiSearchQuotaLimiter{}
+		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{Proxy: p, cache: cache, limiter: limiter})
+		payload := `{"timeoutMs":1000,"requests":[{"search":{"dbName":"catalog","collectionName":"ready","partitionNames":["east"],"limit":1,"data":[[1,0],[0,1]]}}]}`
+		req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(payload))
+		response := httptest.NewRecorder()
+		done := make(chan struct{})
+		start := time.Now()
+		go func() {
+			defer close(done)
+			handler.ServeHTTP(response, req)
+		}()
+
+		// Before the retry timer can advance, the first attempt has tried to
+		// enqueue in the full queue and reached its backoff.
+		synctest.Wait()
+		charge := multiSearchQuotaCall{10, map[int64][]int64{11: {12}}, internalpb.RateType_DQLSearch, 2}
+		require.Equal(t, []multiSearchQuotaCall{charge}, limiter.calls)
+		require.Empty(t, searched)
+		require.Empty(t, done)
+
+		require.EqualValues(t, 1, sched.ClearDQLQueue("query", "release the DQL queue").QueuedCleared)
+		require.False(t, p.IsDQLQueueFull())
+		require.NoError(t, sched.Start())
+		<-done
+		require.Equal(t, 200*time.Millisecond, time.Since(start))
+		require.Equal(t, []multiSearchQuotaCall{charge, charge}, limiter.calls)
+		require.Len(t, searched, 1)
+		search := (<-searched).GetReq()
+		require.Equal(t, int64(11), search.GetCollectionID())
+		require.Equal(t, []int64{12}, search.GetPartitionIDs())
+		require.Equal(t, int64(2), search.GetNq())
+
+		require.Equal(t, http.StatusOK, response.Code)
+		var body multiSearchRESTResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Zero(t, body.Code)
+		require.Len(t, body.Data, 1)
+		item := body.Data[0].Search
+		require.Zero(t, item.Code, response.Body.String())
+		require.Equal(t, []int64{1, 1}, item.Topks)
+		require.Len(t, item.Data, 2)
+		require.Equal(t, "17", item.Data[0]["id"])
+		require.Equal(t, "18", item.Data[1]["id"])
+	})
+}
+
+func TestRESTSearchKeepsOrdinaryPartitionQuotaLookup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var searched []int64
+		p := newMultiSearchHTTPProxy(t, nil, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			searched = append(searched, req.GetNq())
+			return successfulSearchResult(), nil
+		})
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true"))
+		regexpKey := params.ProxyCfg.PartitionNameRegexp.Key
+		require.NoError(t, params.Save(regexpKey, "true"))
+		t.Cleanup(func() { require.NoError(t, params.Reset(regexpKey)) })
+		p.cache = multiSearchQuotaCache{p.cache}
+		limiter := &multiSearchQuotaLimiter{}
+		handler := newMultiSearchRESTHandler(&multiSearchQuotaProxy{Proxy: p.Proxy, cache: p.cache, search: p.Search, limiter: limiter})
+		search := func(partition string) int32 {
+			payload := `{"dbName":"catalog_a","collectionName":"ready","partitionNames":["` + partition + `"],"data":[[1,0],[0,1]]}`
+			req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", strings.NewReader(payload))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			require.Equal(t, http.StatusOK, response.Code)
+			var body struct{ Code int32 }
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+			return body.Code
+		}
+		require.Equal(t, merr.Code(merr.ErrHTTPRateLimit), search("e.*"))
+		require.Zero(t, search("east"))
+		require.Empty(t, limiter.calls)
+		require.Equal(t, []int64{0}, searched)
 	})
 }

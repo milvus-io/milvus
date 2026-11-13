@@ -21,6 +21,7 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -102,6 +103,7 @@ type multiSearchTestHook struct {
 	username    string
 	authCalls   chan time.Time
 	searchCalls chan string
+	before      func(any)
 }
 
 func (h *multiSearchTestHook) VerifyAPIKey(key string) (string, error) {
@@ -112,8 +114,11 @@ func (h *multiSearchTestHook) VerifyAPIKey(key string) (string, error) {
 	return h.username, nil
 }
 
-func (h *multiSearchTestHook) Before(ctx context.Context, _ any, method string) (context.Context, error) {
+func (h *multiSearchTestHook) Before(ctx context.Context, req any, method string) (context.Context, error) {
 	h.searchCalls <- method
+	if h.before != nil {
+		h.before(req)
+	}
 	return ctx, nil
 }
 
@@ -373,4 +378,142 @@ func TestMultiSearchGRPCUnimplementedOnOldService(t *testing.T) {
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Nil(t, response)
+}
+
+func TestMultiSearchGRPCPreservesSearchHookFields(t *testing.T) {
+	key := proxy.Params.CommonCfg.AuthorizationEnabled.Key
+	require.NoError(t, proxy.Params.Save(key, "false"))
+	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(key)) })
+	type hookFields struct {
+		principal string
+		skip      bool
+	}
+	seen := make(chan hookFields, 2)
+	previousHook := hookutil.GetHook()
+	hookutil.SetTestHook(&multiSearchTestHook{
+		searchCalls: make(chan string, 2),
+		before: func(req any) {
+			if search, ok := req.(*milvuspb.SearchRequest); ok {
+				seen <- hookFields{search.GetRlsPrincipal(), search.GetSkipRls()}
+			}
+		},
+	})
+	t.Cleanup(func() { hookutil.SetTestHook(previousHook) })
+
+	runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+	cache := proxy.InitEmptyMetaCacheForTest()
+	cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
+	cache.SeedCollectionForTest(util.DefaultDBName, "papers", 2)
+	client := startMultiSearchTestProxy(t, &multiSearchTestProxy{
+		cache: cache,
+		limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
+			return nil
+		}},
+		run: runner.RunMultiSearch,
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ids := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
+	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+		MaxConcurrency: 1,
+		Requests: []*milvuspb.MultiSearchSubRequest{
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-reader"}),
+			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-owner", SkipRls: true}),
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(response.GetStatus()))
+	require.Len(t, response.GetResults(), 2)
+	for _, result := range response.GetResults() {
+		require.NoError(t, merr.Error(result.GetSearch().GetStatus()))
+	}
+	require.Len(t, seen, 2)
+	require.Equal(t, hookFields{"paper-reader", false}, <-seen)
+	require.Equal(t, hookFields{"paper-owner", true}, <-seen)
+}
+
+func TestMultiSearchGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		for _, key := range []string{
+			proxy.Params.CommonCfg.AuthorizationEnabled.Key,
+			proxy.Params.QuotaConfig.QuotaAndLimitsEnabled.Key,
+		} {
+			require.NoError(t, proxy.Params.Save(key, "false"))
+			t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(key)) })
+		}
+		runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+		cache := proxy.InitEmptyMetaCacheForTest()
+		cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
+		for i, collection := range []string{"ready", "active", "undispatched"} {
+			cache.SeedCollectionForTest(util.DefaultDBName, collection, int64(i+2))
+		}
+		started := make(chan string, 3)
+		deadlines := make(chan time.Time, 3)
+		canceled := make(chan error, 1)
+		batchDeadlines := make(chan [2]time.Time, 1)
+		client := startMultiSearchTestProxy(t, &multiSearchTestProxy{
+			cache: cache,
+			limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
+				return nil
+			}},
+			run: func(ctx context.Context, options proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+				parentDeadline, _ := ctx.Deadline()
+				batchDeadlines <- [2]time.Time{parentDeadline, options.ExecutionDeadline}
+				return runner.RunMultiSearch(ctx, options, items, execute)
+			},
+			search: func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				started <- req.GetCollectionName()
+				deadline, _ := ctx.Deadline()
+				deadlines <- deadline
+				if req.GetCollectionName() == "active" {
+					<-ctx.Done()
+					canceled <- ctx.Err()
+					return nil, ctx.Err()
+				}
+				return &milvuspb.SearchResults{
+					Status: merr.Success(), CollectionName: req.GetCollectionName(), SessionTs: 42,
+					Results: &schemapb.SearchResultData{NumQueries: 1, Topks: []int64{0}},
+				}, nil
+			},
+		})
+		parent, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		input := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
+		budget := 250 * time.Millisecond
+		response, err := client.MultiSearch(parent, &milvuspb.MultiSearchRequest{
+			MaxConcurrency: 1,
+			TimeoutMs:      proto.Int64(budget.Milliseconds()),
+			Requests: []*milvuspb.MultiSearchSubRequest{
+				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "ready", SearchInput: input}),
+				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "active", SearchInput: input}),
+				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "undispatched", SearchInput: input}),
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, parent.Err())
+		require.NoError(t, merr.Error(response.GetStatus()))
+		require.Len(t, response.GetResults(), 3)
+		ready := response.GetResults()[0].GetSearch()
+		require.NoError(t, merr.Error(ready.GetStatus()))
+		require.Equal(t, "ready", ready.GetCollectionName())
+		require.Equal(t, uint64(42), ready.GetSessionTs())
+		require.Equal(t, []int64{0}, ready.GetResults().GetTopks())
+		for _, item := range response.GetResults()[1:] {
+			require.Equal(t, merr.TimeoutCode, item.GetSearch().GetStatus().GetCode())
+			require.Nil(t, item.GetSearch().GetResults())
+		}
+		synctest.Wait()
+		require.Len(t, started, 2)
+		require.Equal(t, "ready", <-started)
+		require.Equal(t, "active", <-started)
+		require.Len(t, canceled, 1)
+		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
+		require.Len(t, batchDeadlines, 1)
+		pair := <-batchDeadlines
+		require.True(t, pair[0].After(pair[1]))
+		require.Len(t, deadlines, 2)
+		for range 2 {
+			require.Equal(t, pair[1], <-deadlines)
+		}
+	})
 }

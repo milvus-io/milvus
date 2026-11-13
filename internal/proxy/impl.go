@@ -3185,6 +3185,8 @@ func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.Sear
 		Highlighter:           request.GetHighlighter(),
 		SearchAggregation:     request.GetSearchAggregation(),
 		FunctionChains:        request.GetFunctionChains(),
+		RlsPrincipal:          request.GetRlsPrincipal(),
+		SkipRls:               request.GetSkipRls(),
 	}
 	for _, subRequest := range request.GetSubReqs() {
 		if subRequest == nil {

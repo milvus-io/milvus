@@ -45,22 +45,27 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 // request rate limiting. GetMetaCache is resolved per request so the interceptor observes
 // the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
 func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
-	return rateLimitInterceptor(GetMetaCache, limiter, false)
+	return rateLimitInterceptor(GetMetaCache, limiter, false, GetRequestInfo)
 }
 
 // MultiSearchRateLimitInterceptor requires a quota scope for every Search
 // attempt when quota is enabled.
 func MultiSearchRateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
-	return rateLimitInterceptor(getMetaCache, limiter, true)
+	return rateLimitInterceptor(getMetaCache, limiter, true, func(ctx context.Context, cache Cache, request proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+		return GetMultiSearchQuotaInfo(ctx, cache, request.(*milvuspb.SearchRequest))
+	})
 }
 
-func rateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter, requireQuotaScope bool) grpc.UnaryServerInterceptor {
+func rateLimitInterceptor(
+	getMetaCache func() Cache, limiter types.Limiter, requireQuotaScope bool,
+	getQuotaInfo func(context.Context, Cache, proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error),
+) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, getMetaCache(), request)
+		dbID, collectionIDToPartIDs, rt, n, err := getQuotaInfo(ctx, getMetaCache(), request)
 		if err != nil {
 			if requireQuotaScope && paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 				return GetFailedResponse(req, err), nil
@@ -179,6 +184,19 @@ func getCollectionAndPartitionID(ctx context.Context, metaCache Cache, r reqPart
 }
 
 func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPartNames) (int64, map[int64][]int64, error) {
+	return resolveQuotaPartitions(ctx, metaCache, r, false)
+}
+
+// GetMultiSearchQuotaInfo resolves the scope and quota cost of a prepared Search item.
+func GetMultiSearchQuotaInfo(ctx context.Context, metaCache Cache, request *milvuspb.SearchRequest) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+	if metaCache == nil {
+		return GetRequestInfo(ctx, metaCache, request)
+	}
+	dbID, parts, err := resolveQuotaPartitions(ctx, metaCache, request, paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool())
+	return dbID, parts, internalpb.RateType_DQLSearch, int(request.GetNq()), err
+}
+
+func resolveQuotaPartitions(ctx context.Context, metaCache Cache, r reqPartNames, matchPartitionPatterns bool) (int64, map[int64][]int64, error) {
 	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
@@ -199,7 +217,7 @@ func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPar
 		}
 	}
 
-	if _, isSearch := r.(*milvuspb.SearchRequest); isSearch && len(partitionNames) > 0 && paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool() {
+	if matchPartitionPatterns && len(partitionNames) > 0 {
 		parts, err := dql.GetPartitionIDs(ctx, metaCache, r.GetDbName(), r.GetCollectionName(), partitionNames)
 		if err != nil {
 			return 0, nil, err

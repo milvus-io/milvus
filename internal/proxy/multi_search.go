@@ -210,7 +210,6 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		startedAt: startedAt,
 		results:   make([]*milvuspb.SearchResults, len(items)),
 		progress:  make([]multiSearchItemProgress, len(items)),
-		remaining: len(items),
 		done:      make(chan struct{}),
 	}
 	entry, err := s.enqueue(func() {
@@ -238,14 +237,14 @@ type multiSearchBatch struct {
 	nodeID    string
 	startedAt time.Time
 
-	mu        sync.Mutex
-	results   []*milvuspb.SearchResults
-	progress  []multiSearchItemProgress
-	remaining int
-	done      chan struct{}
+	mu       sync.Mutex
+	results  []*milvuspb.SearchResults
+	progress []multiSearchItemProgress
+	done     chan struct{}
 }
 
 func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items []MultiSearchPrepare, execute MultiSearchExecute) {
+	defer close(b.done)
 	concurrency := min(multiSearchConcurrency, len(items))
 	if maxConcurrency != 0 {
 		concurrency = int(min(uint64(maxConcurrency), uint64(len(items))))
@@ -277,10 +276,6 @@ func (b *multiSearchBatch) complete(ctx context.Context, i int, result *milvuspb
 	}
 	b.results[i] = result
 	b.progress[i].completedAt = time.Now()
-	b.remaining--
-	if b.remaining == 0 {
-		close(b.done)
-	}
 }
 
 func (b *multiSearchBatch) finish(ctx context.Context, unfinished error) []*milvuspb.SearchResults {

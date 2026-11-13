@@ -515,10 +515,29 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 }
 
 func (t *SearchTask) checkNq(ctx context.Context) (int64, error) {
-	nq, err := NormalizeSearchNQ(t.request)
-	if err != nil {
-		return 0, err
+	nq := t.request.GetNq()
+	if t.GetIsAdvanced() {
+		for _, req := range t.request.GetSubReqs() {
+			subNq, err := getNqFromSubSearch(req)
+			if err != nil {
+				return 0, err
+			}
+			req.Nq = subNq
+			if nq == 0 {
+				nq = subNq
+			} else if subNq != nq {
+				return 0, merr.WrapErrParameterInvalid(nq, subNq, "sub search request nq should be the same")
+			}
+		}
+	} else if nq == 0 {
+		// Older clients omit NQ.
+		var err error
+		nq, err = getPlaceholderGroupNQ(t.request.GetPlaceholderGroup())
+		if err != nil {
+			return 0, err
+		}
 	}
+	t.request.Nq = nq
 
 	// Check if nq is valid:
 	// https://milvus.io/docs/limitations.md
