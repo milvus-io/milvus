@@ -1252,6 +1252,36 @@ func TestMilvusAggReduceAvgSingleColumn(t *testing.T) {
 	}
 }
 
+// TestMilvusAggReduceVariance merges 2 global var_samp(c2) partials, {1, 3}
+// and {5}, into var_samp {1, 3, 5} = 4.
+func TestMilvusAggReduceVariance(t *testing.T) {
+	long := func(v int64) *schemapb.FieldData {
+		return &schemapb.FieldData{Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{v}}}},
+		}}
+	}
+	double := func(v float64) *schemapb.FieldData {
+		return &schemapb.FieldData{Type: schemapb.DataType_Double, Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{v}}}},
+		}}
+	}
+	results := []*internalpb.RetrieveResults{
+		{FieldsData: []*schemapb.FieldData{long(4), long(2), double(2)}},
+		{FieldsData: []*schemapb.FieldData{long(5), long(1), double(0)}},
+	}
+	aggs, err := agg.NewAggregate("var_samp", 102, "var_samp(c2)", schemapb.DataType_Int64)
+	require.NoError(t, err)
+	aggFieldMap, err := agg.NewAggregationFieldMap([]string{"var_samp(c2)"}, nil, aggs)
+	require.NoError(t, err)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 102, Name: "c2", DataType: schemapb.DataType_Int64}}}
+
+	res, err := NewMilvusAggReducer(nil, agg.AggregatesToPB(aggs), aggFieldMap, -1, schema).Reduce(results)
+	require.NoError(t, err)
+	require.Len(t, res.GetFieldsData(), 1)
+	assert.Equal(t, "var_samp(c2)", res.GetFieldsData()[0].GetFieldName())
+	assert.InDelta(t, 4.0, res.GetFieldsData()[0].GetScalars().GetDoubleData().GetData()[0], 1e-12)
+}
+
 func TestMilvusAggReduce(t *testing.T) {
 	paramtable.Init()
 	suite.Run(t, new(MilvusAggReduceSuite))
