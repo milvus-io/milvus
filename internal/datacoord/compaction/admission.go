@@ -35,8 +35,10 @@ import (
 // accepted tasks enters the queue separately from new work.
 var ErrAdmissionLimited = errors.New("compaction task admission limited")
 
-type Producer = meta.CompactionProducer
-type AdmissionOptions = meta.CompactionAdmissionOptions
+type (
+	Producer         = meta.CompactionProducer
+	AdmissionOptions = meta.CompactionAdmissionOptions
+)
 
 const (
 	ProducerLegacyTrigger  = meta.ProducerLegacyTrigger

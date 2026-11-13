@@ -148,9 +148,11 @@ func (m *CompactionTriggerManager) SubmitTBC(ctx context.Context, plan *datapb.C
 	return m.inspector.EnqueueCompaction(ctx, task, AdmissionOptions{Producer: ProducerTBC})
 }
 
-type planCollection struct{ groups list.List }
-type planGroup struct{ pools list.List }
-type planPool struct{ plans []*datapb.CompactionTask }
+type (
+	planCollection struct{ groups list.List }
+	planGroup      struct{ pools list.List }
+	planPool       struct{ plans []*datapb.CompactionTask }
+)
 
 // Move a collection, group or compatible pool behind its peers while it has
 // work, otherwise retire it for the rest of the round.

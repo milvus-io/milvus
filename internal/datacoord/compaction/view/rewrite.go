@@ -45,8 +45,10 @@ type RewriteInputs struct {
 func (v *RewriteInputs) GetGroupLabel() *CompactionGroupLabel { return v.Group }
 func (v *RewriteInputs) GetSegmentsView() []*SegmentView      { return v.Segments }
 
-type SortView struct{ RewriteInputs }
-type RewriteView struct{ RewriteInputs }
+type (
+	SortView    struct{ RewriteInputs }
+	RewriteView struct{ RewriteInputs }
+)
 
 func (v *SortView) Plan() ([]*datapb.CompactionTask, error) {
 	return v.planSingletons(datapb.CompactionType_SortCompaction)

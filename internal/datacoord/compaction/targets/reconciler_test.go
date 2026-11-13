@@ -676,5 +676,4 @@ func TestCompactionTargetReconcilerStandingSortWithAutoCompactionOff(t *testing.
 	require.ElementsMatch(t, []int64{1, 2}, sorting)
 	require.Equal(t, []int64{3}, rewriting)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
-
 }
