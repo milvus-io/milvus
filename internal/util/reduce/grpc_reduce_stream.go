@@ -18,11 +18,11 @@ package reduce
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -97,10 +97,10 @@ func NewQueryGRPCReduceStream(ctx context.Context, client viewpb.ViewQueryServic
 // NewSearchGRPCReduceStream opens SearchOnViewStream and sends its initial request.
 func NewSearchGRPCReduceStream(ctx context.Context, client viewpb.ViewQueryServiceClient, request *viewpb.SearchOnViewRequest) (ReduceStream[*internalpb.SearchResults], error) {
 	if client == nil {
-		return nil, errors.New("NewGRPCReduceStream requires a gRPC client")
+		return nil, merr.WrapErrServiceInternalMsg("NewGRPCReduceStream requires a gRPC client")
 	}
 	if request == nil {
-		return nil, errors.New("NewGRPCReduceStream requires a SearchOnView request")
+		return nil, merr.WrapErrServiceInternalMsg("NewGRPCReduceStream requires a SearchOnView request")
 	}
 
 	streamContext, cancel := context.WithCancel(ctx)
@@ -125,20 +125,20 @@ func NewSearchGRPCReduceStream(ctx context.Context, client viewpb.ViewQueryServi
 				return nil, err
 			}
 			if response == nil {
-				return nil, errors.New("SearchOnViewStream returned a nil response")
+				return nil, merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil response")
 			}
 			if chunk := response.GetChunk(); chunk != nil {
 				return chunk, nil
 			}
 			if response.GetMetadata() != nil {
-				return nil, errors.New("SearchOnViewStream returned metadata during Recv")
+				return nil, merr.WrapErrServiceInternalMsg("SearchOnViewStream returned metadata during Recv")
 			}
-			return nil, errors.New("SearchOnViewStream returned response without a payload")
+			return nil, merr.WrapErrServiceInternalMsg("SearchOnViewStream returned response without a payload")
 		},
 		closeSend: clientStream.CloseSend,
 		cancel:    cancel,
 		interruptErr: func() error {
-			return errors.New("gRPC ReduceStream Interrupt is not implemented")
+			return merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "gRPC ReduceStream Interrupt is not implemented"))
 		},
 	}, nil
 }

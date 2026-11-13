@@ -18,12 +18,12 @@ package reducestream
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"

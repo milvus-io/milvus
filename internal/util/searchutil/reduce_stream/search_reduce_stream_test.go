@@ -17,13 +17,13 @@
 package reducestream
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -193,22 +193,31 @@ func BenchmarkSearchUnitByteSize(b *testing.B) {
 				data.FieldsData = append(data.FieldsData, field)
 			}
 		case "dense_vector":
-			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_FloatVector, FieldId: 200,
-				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 768,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 768)}}}}})
-		case "sparse_vector":
-			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 200,
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{
+				Type: schemapb.DataType_FloatVector, FieldId: 200,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{make([]byte, 256)}}}}}})
+					Dim:  768,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 768)}},
+				}},
+			})
+		case "sparse_vector":
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{
+				Type: schemapb.DataType_SparseFloatVector, FieldId: 200,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{make([]byte, 256)}}},
+				}},
+			})
 		case "grouped":
 			data.GroupByFieldValues = data.FieldsData
 		case "array":
-			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_Array, FieldId: 200,
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{
+				Type: schemapb.DataType_Array, FieldId: 200,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{
 						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: make([]int64, 256)}}},
 					}},
-				}}}})
+				}}},
+			})
 		}
 		unit := searchReduceUnit{data: data, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(data.FieldsData)}
 		for _, mode := range []string{"direct", "materialized"} {
@@ -754,7 +763,7 @@ func TestSplitSearchResultDoesNotUseBlobLengthForThreshold(t *testing.T) {
 }
 
 func TestSplitSearchResultSingleChunkStillValidates(t *testing.T) {
-	for _, invalid := range []string{"scores", "topks", "elements"} {
+	for _, invalid := range []string{"scores", "topks", "elements", "blob"} {
 		t.Run(invalid, func(t *testing.T) {
 			result := newSearchChunk(1, 2, []testHit{{1, .9}, {2, .8}})
 			switch invalid {
@@ -764,9 +773,11 @@ func TestSplitSearchResultSingleChunkStillValidates(t *testing.T) {
 				result.ResultData.Topks = []int64{-1}
 			case "elements":
 				result.ResultData.ElementIndices = &schemapb.LongArray{Data: []int64{0}}
+			case "blob":
+				result.ResultData, result.SlicedBlob = nil, []byte{0xff}
 			}
 			chunks, err := SplitSearchResult(result, 256*1024)
-			require.Error(t, err)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Nil(t, chunks)
 		})
 	}
@@ -1162,15 +1173,19 @@ func TestNewReduceStreamValidatesPlainANNSearch(t *testing.T) {
 
 	_, err := NewReduceStream(nil, []ReduceStream{child}, 1)
 	require.ErrorContains(t, err, "requires a Search request")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Topk: 1, IsIterator: true}, []ReduceStream{child}, 1)
 	require.ErrorContains(t, err, "positive nq")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, IsIterator: true}, []ReduceStream{child}, 1)
 	require.ErrorContains(t, err, "positive topK")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true, IsAdvanced: true}, []ReduceStream{child}, 1)
 	require.ErrorContains(t, err, "Plain ANN Search and Search Group By only")
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 
 	grouped, err := NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, GroupByFieldIds: []int64{101}}, []ReduceStream{child}, 1)
 	require.NoError(t, err)
@@ -1182,9 +1197,11 @@ func TestNewReduceStreamValidatesPlainANNSearch(t *testing.T) {
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true}, []ReduceStream{child}, 0)
 	require.ErrorContains(t, err, "positive Chunk bytes")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true}, []ReduceStream{nil}, 1)
 	require.ErrorContains(t, err, "child stream 0 is nil")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func TestOrderedReduceStreamInterruptIsUnimplemented(t *testing.T) {
@@ -1194,6 +1211,7 @@ func TestOrderedReduceStreamInterruptIsUnimplemented(t *testing.T) {
 	metadata, err := stream.Interrupt()
 	require.Nil(t, metadata)
 	require.ErrorContains(t, err, "Interrupt is not implemented")
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 }
 
 func recvChunk(t *testing.T, stream ReduceStream) *internalpb.SearchResults {

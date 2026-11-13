@@ -18,13 +18,13 @@ package reduce
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -126,12 +126,7 @@ func TestGRPCReduceStreamProtocol(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, closeStream()) })
 				require.Zero(t, *recvCalls, "opening must not prefetch a Chunk")
 				interruptErr := interrupt()
-				if query {
-					require.ErrorIs(t, interruptErr, merr.ErrServiceUnimplemented)
-				} else {
-					require.EqualError(t, interruptErr, "gRPC ReduceStream Interrupt is not implemented")
-					require.Equal(t, merr.Code(errors.New("untyped")), merr.Code(interruptErr))
-				}
+				require.ErrorIs(t, interruptErr, merr.ErrServiceUnimplemented)
 				chunk, err := recv()
 				switch tc.name {
 				case "chunk":
@@ -147,12 +142,7 @@ func TestGRPCReduceStreamProtocol(t *testing.T) {
 					require.Equal(t, codes.Unavailable, status.Code(err))
 				default:
 					require.Nil(t, chunk)
-					require.Error(t, err)
-					if query {
-						require.ErrorIs(t, err, merr.ErrServiceInternal)
-					} else {
-						require.Equal(t, merr.Code(errors.New("untyped")), merr.Code(err))
-					}
+					require.ErrorIs(t, err, merr.ErrServiceInternal)
 				}
 				require.NoError(t, closeStream())
 				require.ErrorIs(t, ctx.Err(), context.Canceled)

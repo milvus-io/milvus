@@ -3664,7 +3664,7 @@ Disabled if the value is less or equal to 0.`,
 		Key:          "proxy.queryView.enableReduceStream",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "route supported requests through Streaming Reduce",
+		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
 		Export:       true,
 	}
 	p.EnableReduceStream.Init(base.mgr)
@@ -3673,7 +3673,7 @@ Disabled if the value is less or equal to 0.`,
 		Key:          "proxy.queryView.reduceStreamChunkBytes",
 		Version:      "3.0.0",
 		DefaultValue: "262144",
-		Doc:          "reducible-payload byte threshold for each stream Chunk",
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request.",
 		Export:       true,
 	}
 	p.ReduceStreamChunkBytes.Init(base.mgr)

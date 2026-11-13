@@ -116,13 +116,44 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, metric.L2, false)
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, newSearchScoreInfo(metric.L2, false), false)
 		require.NoError(t, err)
 	}
 
 	require.Equal(t, []int64{11, 12, 21, 22}, output.GetIds().GetIntId().GetData())
 	require.Equal(t, []float32{0.2, 0.3, 1.1, 1.2}, output.GetScores())
 	require.Equal(t, []int64{2, 2}, output.GetTopks())
+}
+
+func TestAppendFinalSearchChunkRejectsMalformedShape(t *testing.T) {
+	for _, invalid := range []string{"nq", "counts", "output_counts", "counters", "scores", "elements", "negative_count", "hit_count"} {
+		t.Run(invalid, func(t *testing.T) {
+			chunk := newFinalSearchChunk([]int64{10}, []float32{1}, "v1").ResultData
+			output := &schemapb.SearchResultData{NumQueries: 1, Topks: []int64{0}, Ids: &schemapb.IDs{}}
+			seen := []int64{0}
+			switch invalid {
+			case "nq":
+				chunk.NumQueries = 2
+			case "counts":
+				chunk.Topks = nil
+			case "output_counts":
+				output.Topks = nil
+			case "counters":
+				seen = nil
+			case "scores":
+				chunk.Scores = nil
+			case "elements":
+				chunk.ElementIndices = &schemapb.LongArray{}
+			case "negative_count":
+				chunk.Topks[0] = -1
+			case "hit_count":
+				chunk.Topks[0] = 2
+			}
+			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, newSearchScoreInfo(metric.IP, false), false)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Empty(t, output.GetScores())
+		})
+	}
 }
 
 func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
@@ -133,7 +164,7 @@ func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
 	last.ResultData.NumQueries, last.ResultData.Topks = 2, []int64{0, 2}
 	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first, last, nil}}
 
-	result, _, err := (&SearchTask{}).consumeSearchResultStream(stream, request, metric.IP, func(*internalpb.SearchResults) {})
+	result, _, err := (&SearchTask{}).consumeSearchResultStream(stream, request, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, result.Results.Topks)
 	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
@@ -174,12 +205,33 @@ func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
 		},
 	}}
 
-	result, metricType, err := task.consumeSearchResultStream(stream, task.SearchRequest, metric.L2, func(*internalpb.SearchResults) {})
+	result, scoreInfo, err := task.consumeSearchResultStream(stream, task.SearchRequest, newSearchScoreInfo(metric.L2, false), func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
-	require.Equal(t, metric.L2, metricType)
+	require.Equal(t, newSearchScoreInfo(metric.L2, false), scoreInfo)
 	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())
 	require.Equal(t, []float32{0.1, 0.2, 0.3}, result.GetResults().GetScores())
 	require.Equal(t, []int64{3}, result.GetResults().GetTopks())
+}
+
+func TestConsumeSearchResultStreamScoreInfo(t *testing.T) {
+	for _, rewritten := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rewritten=%t", rewritten), func(t *testing.T) {
+			chunk := newFinalSearchChunk([]int64{10, 11}, []float32{-0.1, -0.2}, "v1")
+			chunk.MetricType = metric.L2
+			stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{chunk}}
+			request := &internalpb.SearchRequest{Nq: 1, Topk: 2}
+			result, info, err := (&SearchTask{}).consumeSearchResultStream(stream, request,
+				newSearchScoreInfo("", rewritten), func(*internalpb.SearchResults) {})
+			require.NoError(t, err)
+			require.Equal(t, searchScoreInfo{MetricType: metric.L2, Rewritten: rewritten, LargerIsBetter: rewritten}, info)
+			expected := []float32{0.1, 0.2}
+			if rewritten {
+				expected = []float32{-0.1, -0.2}
+			}
+			require.Equal(t, expected, result.GetResults().GetScores())
+			require.Equal(t, []int64{10, 11}, result.GetResults().GetIds().GetIntId().GetData())
+		})
+	}
 }
 
 func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testing.T) {

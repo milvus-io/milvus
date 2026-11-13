@@ -59,6 +59,7 @@ func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, nodeID int64,
 		return reduce.NewQueryGRPCReduceStream(ctx, client, req)
 	})
 }
+
 func executeViewQueryRPC[T any](
 	ctx context.Context,
 	qvc *queryViewClient,

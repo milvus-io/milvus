@@ -17,11 +17,10 @@
 package reducestream
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
@@ -147,18 +146,18 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 
 	hitCount := typeutil.GetSizeOfIDs(data.GetIds())
 	if len(data.GetScores()) != hitCount {
-		return nil, fmt.Errorf("Search Chunk score count %d does not match hit count %d", len(data.GetScores()), hitCount)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk score count %d does not match hit count %d", len(data.GetScores()), hitCount)
 	}
 
 	totalTopK := int64(0)
 	for _, count := range data.GetTopks() {
 		if count < 0 {
-			return nil, fmt.Errorf("Search Chunk contains a negative per-query hit count %d", count)
+			return nil, merr.WrapErrServiceInternalMsg("Search Chunk contains a negative per-query hit count %d", count)
 		}
 		totalTopK += count
 	}
 	if totalTopK != int64(hitCount) {
-		return nil, fmt.Errorf("Search Chunk Topks total %d does not match hit count %d", totalTopK, hitCount)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk Topks total %d does not match hit count %d", totalTopK, hitCount)
 	}
 
 	b.units = make([]searchReduceUnit, 0, hitCount)
@@ -182,17 +181,17 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 
 func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.SearchResultData, error) {
 	if chunk.GetNumQueries() != 0 && chunk.GetNumQueries() != nq {
-		return nil, fmt.Errorf("Search Chunk nq %d does not match request nq %d", chunk.GetNumQueries(), nq)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk nq %d does not match request nq %d", chunk.GetNumQueries(), nq)
 	}
 	if chunk.GetTopK() != 0 && chunk.GetTopK() != topK {
-		return nil, fmt.Errorf("Search Chunk topK %d does not match request topK %d", chunk.GetTopK(), topK)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk topK %d does not match request topK %d", chunk.GetTopK(), topK)
 	}
 
 	data := chunk.GetResultData()
 	if data == nil && len(chunk.GetSlicedBlob()) > 0 {
 		data = &schemapb.SearchResultData{}
 		if err := fastpb.UnmarshalSearchResultData(chunk.GetSlicedBlob(), data); err != nil {
-			return nil, fmt.Errorf("decode Search Chunk: %w", err)
+			return nil, merr.WrapErrServiceInternalErr(err, "decode Search Chunk")
 		}
 	}
 	if data == nil {
@@ -204,13 +203,13 @@ func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.Sea
 	}
 
 	if data.GetNumQueries() != nq {
-		return nil, fmt.Errorf("Search Chunk data nq %d does not match request nq %d", data.GetNumQueries(), nq)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk data nq %d does not match request nq %d", data.GetNumQueries(), nq)
 	}
 	if data.GetTopK() != topK {
-		return nil, fmt.Errorf("Search Chunk data topK %d does not match request topK %d", data.GetTopK(), topK)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk data topK %d does not match request topK %d", data.GetTopK(), topK)
 	}
 	if len(data.GetTopks()) != int(nq) {
-		return nil, fmt.Errorf("Search Chunk has %d per-query hit counts, expected %d", len(data.GetTopks()), nq)
+		return nil, merr.WrapErrServiceInternalMsg("Search Chunk has %d per-query hit counts, expected %d", len(data.GetTopks()), nq)
 	}
 	return data, nil
 }
@@ -219,19 +218,19 @@ func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.Sea
 // A nonempty result that needs only one Chunk is returned unchanged, not copied.
 func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*internalpb.SearchResults, error) {
 	if result == nil {
-		return nil, errors.New("SplitSearchResult requires a Search result")
+		return nil, merr.WrapErrServiceInternalMsg("SplitSearchResult requires a Search result")
 	}
 	if !merr.Ok(result.GetStatus()) {
 		return nil, merr.Error(result.GetStatus())
 	}
 	if result.GetNumQueries() <= 0 {
-		return nil, fmt.Errorf("SplitSearchResult requires a positive nq, got %d", result.GetNumQueries())
+		return nil, merr.WrapErrServiceInternalMsg("SplitSearchResult requires a positive nq, got %d", result.GetNumQueries())
 	}
 	if result.GetTopK() <= 0 {
-		return nil, fmt.Errorf("SplitSearchResult requires a positive topK, got %d", result.GetTopK())
+		return nil, merr.WrapErrServiceInternalMsg("SplitSearchResult requires a positive topK, got %d", result.GetTopK())
 	}
 	if chunkBytes <= 0 {
-		return nil, fmt.Errorf("SplitSearchResult requires positive Chunk bytes, got %d", chunkBytes)
+		return nil, merr.WrapErrServiceInternalMsg("SplitSearchResult requires positive Chunk bytes, got %d", chunkBytes)
 	}
 
 	buffer := &orderedChildBuffer{}
@@ -370,23 +369,23 @@ type OrderedReduceStream struct {
 // NewReduceStream creates the ANN Search or Search Group By OrderedReduceStream implementation.
 func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
 	if request == nil {
-		return nil, errors.New("NewReduceStream requires a Search request")
+		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Search request")
 	}
 	if request.GetNq() <= 0 {
-		return nil, fmt.Errorf("NewReduceStream requires a positive nq, got %d", request.GetNq())
+		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a positive nq, got %d", request.GetNq())
 	}
 	if request.GetTopk() <= 0 {
-		return nil, fmt.Errorf("NewReduceStream requires a positive topK, got %d", request.GetTopk())
+		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a positive topK, got %d", request.GetTopk())
 	}
 	if request.GetIsAdvanced() || len(request.GetSubReqs()) > 0 {
-		return nil, errors.New("NewReduceStream supports Plain ANN Search and Search Group By only")
+		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "NewReduceStream supports Plain ANN Search and Search Group By only")
 	}
 	if chunkBytes <= 0 {
-		return nil, fmt.Errorf("NewReduceStream requires positive Chunk bytes, got %d", chunkBytes)
+		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires positive Chunk bytes, got %d", chunkBytes)
 	}
 	for i, childStream := range childStreams {
 		if childStream == nil {
-			return nil, fmt.Errorf("NewReduceStream child stream %d is nil", i)
+			return nil, merr.WrapErrServiceInternalMsg("NewReduceStream child stream %d is nil", i)
 		}
 	}
 
@@ -657,7 +656,7 @@ func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer
 			}
 			candidate := buffer.front()
 			if candidate.queryIndex < s.currentQuery {
-				return nil, false, fmt.Errorf("child buffer returned query %d after query %d started", candidate.queryIndex, s.currentQuery)
+				return nil, false, merr.WrapErrServiceInternalMsg("child buffer returned query %d after query %d started", candidate.queryIndex, s.currentQuery)
 			}
 			if candidate.queryIndex > s.currentQuery {
 				continue
@@ -890,7 +889,7 @@ func buildSearchChunk(
 		}
 		if len(data.FieldsData) > 0 {
 			if len(unit.data.GetFieldsData()) != len(data.FieldsData) {
-				return nil, fmt.Errorf("Search Chunk field count %d does not match output field count %d", len(unit.data.GetFieldsData()), len(data.FieldsData))
+				return nil, merr.WrapErrServiceInternalMsg("Search Chunk field count %d does not match output field count %d", len(unit.data.GetFieldsData()), len(data.FieldsData))
 			}
 			computer := fieldIndexComputers[unit.data]
 			if computer == nil {
@@ -965,5 +964,5 @@ func (s *OrderedReduceStream) closeChildren() error {
 
 // Interrupt is reserved for the bidirectional gRPC integration.
 func (s *OrderedReduceStream) Interrupt() (*internalpb.SearchResults, error) {
-	return nil, errors.New("OrderedReduceStream Interrupt is not implemented")
+	return nil, merr.Wrap(merr.ErrServiceUnimplemented, "OrderedReduceStream Interrupt is not implemented")
 }

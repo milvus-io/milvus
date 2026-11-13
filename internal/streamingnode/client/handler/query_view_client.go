@@ -102,6 +102,7 @@ func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, pchannel type
 	})
 	return result, err
 }
+
 func executeQueryPlanRPC[T any](
 	ctx context.Context,
 	qvc *queryViewClient,

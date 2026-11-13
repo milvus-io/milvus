@@ -3152,16 +3152,16 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 }
 
 // RunFromReduced continues an ordinary or Hybrid Search pipeline after candidate reduction.
-func (p *pipeline) RunFromReduced(ctx context.Context, span trace.Span, reduced []*milvuspb.SearchResults, metricTypes []string, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
+func (p *pipeline) RunFromReduced(ctx context.Context, span trace.Span, reduced []*milvuspb.SearchResults, scoreInfos []searchScoreInfo, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	if len(p.nodes) == 0 || (p.nodes[0].opName != searchReduceOp && p.nodes[0].opName != hybridSearchReduceOp) {
 		return nil, storageCost, merr.WrapErrServiceInternal("SearchPipeline does not start with Search reduction")
 	}
-	if len(reduced) != len(metricTypes) || (p.nodes[0].opName == searchReduceOp && len(reduced) != 1) {
+	if len(reduced) != len(scoreInfos) || (p.nodes[0].opName == searchReduceOp && len(reduced) != 1) {
 		return nil, storageCost, merr.WrapErrServiceInternal("reduced Search results do not match pipeline inputs")
 	}
 	msg := opMsg{}
 	msg[reducedMsgKey] = reduced
-	msg["metrics"] = metricTypes
+	msg["score_infos"] = scoreInfos
 	msg[pipelineStorageCost] = storageCost
 	// ReduceStream already produced the first node's candidate lists.
 	return p.run(ctx, span, msg, 1)

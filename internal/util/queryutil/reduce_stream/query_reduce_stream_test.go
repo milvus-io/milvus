@@ -18,11 +18,11 @@ package reducestream
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -121,16 +121,20 @@ func TestQueryStreamComputedColumnValidation(t *testing.T) {
 func TestQueryStreamPreservesNullableFields(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
 	result.FieldsData = append(result.FieldsData,
-		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldId: 102,
+		&schemapb.FieldData{
+			Type: schemapb.DataType_VarChar, FieldId: 102,
 			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 				ValidData: []bool{true, false, true},
 				Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "", "b"}}},
-			}}},
-		&schemapb.FieldData{Type: schemapb.DataType_FloatVector, FieldId: 103,
+			}},
+		},
+		&schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldId: 103,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
 				Dim: 2, ValidData: []bool{true, false, true},
 				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
-			}}},
+			}},
+		},
 	)
 	chunks, err := SplitRetrieveResult(result, 1)
 	require.NoError(t, err)
@@ -709,9 +713,10 @@ func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
 				if test.average {
 					average, err := agg.ComputeAvgFromSumAndCount(field, chunk.FieldsData[2])
 					require.NoError(t, err)
-					if group == 7 {
+					switch group {
+					case 7:
 						require.Equal(t, []float64{18}, average.GetScalars().GetDoubleData().GetData())
-					} else if group == 9 {
+					case 9:
 						require.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(average))
 					}
 				}

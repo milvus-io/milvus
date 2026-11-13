@@ -267,8 +267,10 @@ func TestLegacyHybridGroupStreamsPreserveVChannelCandidates(t *testing.T) {
 		}
 		chunk := newTestSearchChunk(1, []int64{id}, []float32{.9})
 		chunk.MetricType = req.GetLegacyReq().GetMetricType()
-		chunk.ResultData.GroupByFieldValues = []*schemapb.FieldData{{FieldId: 200, Type: schemapb.DataType_Int64,
-			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{id}}}}}}}
+		chunk.ResultData.GroupByFieldValues = []*schemapb.FieldData{{
+			FieldId: 200, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{id}}}}},
+		}}
 		return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
 	}}
 	client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})

@@ -113,7 +113,7 @@ func runGroupedSearchComparison(t *testing.T, request *internalpb.SearchRequest,
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, stream.Close()) })
 	task := &SearchTask{SearchRequest: request}
-	streamed, _, err := task.consumeSearchResultStream(stream, request, request.GetMetricType(), func(*internalpb.SearchResults) {})
+	streamed, _, err := task.consumeSearchResultStream(stream, request, newSearchScoreInfo(request.GetMetricType(), false), func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.True(t, proto.Equal(batch.GetResults(), streamed.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), streamed.GetResults())
 	return streamed.GetResults()
@@ -138,8 +138,10 @@ func TestSearchGroupByStreamingMatchesBatch(t *testing.T) {
 		for _, metric := range []string{"IP", "L2"} {
 			for _, chunkBytes := range []int{1, 90, 256 * 1024} {
 				t.Run(fmt.Sprintf("%s/%s/bytes_%d", tc.name, metric, chunkBytes), func(t *testing.T) {
-					request := &internalpb.SearchRequest{Nq: 2, Topk: 2 + tc.offset, Offset: tc.offset,
-						MetricType: metric, GroupSize: tc.groupSize, GroupByFieldIds: []int64{101}}
+					request := &internalpb.SearchRequest{
+						Nq: 2, Topk: 2 + tc.offset, Offset: tc.offset,
+						MetricType: metric, GroupSize: tc.groupSize, GroupByFieldIds: []int64{101},
+					}
 					if tc.composite {
 						request.GroupByFieldIds = append(request.GroupByFieldIds, 102)
 					}
@@ -204,8 +206,12 @@ func TestSearchGroupByStreamingOrderByAppliesOffsetAfterSorting(t *testing.T) {
 	task.orderByFields = []OrderByField{{FieldName: "value", OutputFieldName: "value", FieldID: 104, Ascending: true}}
 	request := proto.Clone(task.SearchRequest).(*internalpb.SearchRequest)
 	input := groupStreamResult(t, request, [][]groupStreamHit{{
-		{30, .99, int64(30)}, {10, .98, int64(10)}, {20, .97, int64(20)},
-		{31, .90, int64(30)}, {11, .85, int64(10)}, {21, .80, int64(20)},
+		{30, .99, int64(30)},
+		{10, .98, int64(10)},
+		{20, .97, int64(20)},
+		{31, .90, int64(30)},
+		{11, .85, int64(10)},
+		{21, .80, int64(20)},
 	}}, false)
 	input.ResultData.FieldsData[0].FieldName = "value"
 	patch := mockey.Mock((*fakeLegacyQueryClient).Search).To(func(_ *fakeLegacyQueryClient, _ context.Context, req *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {

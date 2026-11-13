@@ -218,10 +218,10 @@ func (s *SearchPipelineSuite) TestRunFromReducedSkipsReduceNode() {
 			},
 			{
 				name:    "finish",
-				inputs:  []string{reducedMsgKey, "metrics"},
+				inputs:  []string{reducedMsgKey, "score_infos"},
 				outputs: []string{pipelineOutput},
 				op: searchPipelineTestOperator(func(_ context.Context, _ trace.Span, inputs ...any) ([]any, error) {
-					s.Require().Equal([]string{"L2"}, inputs[1].([]string))
+					s.Require().Equal([]searchScoreInfo{newSearchScoreInfo("L2", false)}, inputs[1].([]searchScoreInfo))
 					return []any{inputs[0].([]*milvuspb.SearchResults)[0]}, nil
 				}),
 			},
@@ -229,7 +229,7 @@ func (s *SearchPipelineSuite) TestRunFromReducedSkipsReduceNode() {
 	}
 
 	storageCost := segcore.StorageCost{ScannedRemoteBytes: 10, ScannedTotalBytes: 20}
-	result, actualStorageCost, err := pipeline.RunFromReduced(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []string{"L2"}, storageCost)
+	result, actualStorageCost, err := pipeline.RunFromReduced(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []searchScoreInfo{newSearchScoreInfo("L2", false)}, storageCost)
 	s.Require().NoError(err)
 	s.False(reduceCalled)
 	s.Same(reduced, result)

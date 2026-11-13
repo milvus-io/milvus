@@ -18,10 +18,10 @@ package reducestream
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
