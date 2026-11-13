@@ -298,6 +298,11 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
 
         // Check if current entry is a subdirectory
         if (boost::filesystem::is_directory(status)) {
+            // Filesystem recovery directories are not Milvus data and may be
+            // unreadable by the non-root Milvus user.
+            if (it->path().filename() == "lost+found") {
+                continue;
+            }
             total_file_size += GetSizeOfDir(it->path().string());
         }
     }
