@@ -100,6 +100,8 @@ type Core struct {
 	broker           Broker
 	ddlTsLockManager DdlTsLockManager
 
+	schemaLoadFieldsUpdater schemaLoadFieldsUpdateFunc
+
 	metaKVCreator metaKVCreator
 
 	proxyCreator       proxyutil.ProxyCreator

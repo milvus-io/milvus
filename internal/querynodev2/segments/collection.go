@@ -92,16 +92,8 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
-			// the schema may be changed even the collection is loaded
-			collection.schema.Store(schema)
-			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
-			collection.schemaVersion = loadMeta.GetSchemaVersion()
-			log.Info("update collection schema",
-				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
-				zap.Any("schema", schema),
-			)
+		if err := collection.updateSchema(schema); err != nil {
+			return err
 		}
 		// Always update index meta to ensure newly indexed fields are visible
 		// for search plan creation (CollectionIndexMeta::HasField check).
@@ -127,7 +119,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error {
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, _ uint64) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -136,11 +128,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
-		return err
-	}
-	collection.schema.Store(schema)
-	return nil
+	return collection.updateSchema(schema)
 }
 
 func (m *collectionManager) updateMetric() {
@@ -196,13 +184,32 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType    atomic.String // deprecated
-	schema        atomic.Pointer[schemapb.CollectionSchema]
-	isGpuIndex    bool
-	loadFields    typeutil.Set[int64]
-	schemaVersion uint64
+	metricType atomic.String // deprecated
+	schema     atomic.Pointer[schemapb.CollectionSchema]
+	isGpuIndex bool
+	loadFields typeutil.Set[int64]
+	refCount   *atomic.Uint32
+}
 
-	refCount *atomic.Uint32
+// updateSchema is serialized by collectionManager.mut. Publish the Go schema
+// only after the native schema and load hints have been published together.
+func (c *Collection) updateSchema(schema *schemapb.CollectionSchema) error {
+	if schema == nil {
+		return merr.WrapErrServiceInternal("update collection schema with nil")
+	}
+	// RPCs carry a per-vchannel timetick, while loads carry the maximum across
+	// vchannels. Only the RootCoord schema version orders both sources.
+	if schema.GetVersion() <= c.Schema().GetVersion() {
+		return nil
+	}
+	loadFields := typeutil.NewSet(c.loadFields.Collect()...)
+	loadFields.Insert(common.GetAddedLoadFieldIDs(c.Schema(), schema)...)
+	if err := c.ccollection.UpdateSchema(schema, loadFields.Collect()); err != nil {
+		return err
+	}
+	c.loadFields = loadFields
+	c.schema.Store(schema)
+	return nil
 }
 
 // GetDBName returns the database name of collection.
@@ -343,7 +350,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		dbName:        loadMetaInfo.GetDbName(),
 		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		schemaVersion: loadMetaInfo.GetSchemaVersion(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
