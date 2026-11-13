@@ -43,12 +43,9 @@ const (
 //     filter, cpu only ranks;
 //   - workers that do not are placed by the pre-existing slot max-heap.
 //
-// A worker that reports cpu/memory is still gated by its scalar slots, with
-// the heap's own rule (slotAdmits). The worker enforces its slot budget
-// itself -- its index scheduler rejects an enqueue beyond totalSlots once its
-// queue is non-empty, and runs builds only within acquireSlots -- so a task
-// placed past a worker's slots would only bounce back into retry and backoff.
-// Memory then decides among the workers whose slots admit the task.
+// Resource-reporting workers admit index work by memory too. Their scalar
+// slots remain useful to old coordinators and for diagnostics, but must not
+// prevent this coordinator placing memory-priced work on them.
 //
 // Nothing gets worse for a task: one that finds no home in the first tier
 // falls through to the tier that existed before.
@@ -164,43 +161,19 @@ func (p *nodePicker) pick(d demand) int64 {
 	return p.pickOversized(d)
 }
 
-// slotAdmits is the slot heap's rule applied to one dimensioned worker: a
-// task that asks for no slot always fits; otherwise the worker must have a
-// slot left. A task asking for more slots than any dimensioned worker has
-// left is still admitted by the worker with the most (see pickByResource), as
-// the heap admits it best-effort on its most-available node.
-func (n *resourceNode) slotAdmits(taskSlot int64) bool {
-	return taskSlot <= 0 || n.availableSlots > 0
-}
-
 // pickByResource returns ok=false when no resource-reporting worker can hold
 // the task now, so the caller falls through to the scalar tier.
 //
-// Memory and slots are the hard filters; cpu only ranks. Among the workers
-// whose slots and memory both admit the task, those with taskSlot slots left
-// are preferred; only when none has them does the task go best-effort to the
-// fitting worker with the most slots left, which mirrors the heap.
+// Memory is the hard filter; CPU only ranks. Scalar slots do not gate or
+// reorder the memory tier. Old workers still use the unchanged slot heap.
 func (p *nodePicker) pickByResource(d demand) (int64, bool) {
 	var (
 		best      *resourceNode
 		bestScore = math.Inf(-1)
-		// bestEffort is the fitting worker with the most slots left, used only
-		// when no fitting worker has taskSlot slots.
-		bestEffort *resourceNode
 	)
-	taskSlot := d.slot
 	for _, n := range p.nodes {
 		req := d.on(n)
-		if n.availableMemory < req.Memory || !n.slotAdmits(taskSlot) {
-			// Memory gates because exceeding it kills the process rather than
-			// slowing it down; slots gate because the worker rejects work
-			// beyond them.
-			continue
-		}
-		if taskSlot > 0 && n.availableSlots < taskSlot {
-			if bestEffort == nil || n.availableSlots > bestEffort.availableSlots {
-				bestEffort = n
-			}
+		if n.availableMemory < req.Memory {
 			continue
 		}
 		if s := n.score(req); s > bestScore {
@@ -208,20 +181,16 @@ func (p *nodePicker) pickByResource(d demand) (int64, bool) {
 		}
 	}
 	if best == nil {
-		best = bestEffort
-	}
-	if best == nil {
 		return NullNodeID, false
 	}
-	best.charge(taskSlot, d.on(best))
+	best.charge(d.slot, d.on(best))
 	return best.nodeID, true
 }
 
 // pickOversized dispatches a task whose memory exceeds every
 // resource-reporting worker's total, so no amount of waiting can make it fit.
-// It goes to the worker with the most free memory among those whose slots
-// admit it; it is never sent to a worker that has no free memory at all, or no
-// slot left. A task that would fit some worker's total memory but not its
+// It goes to the worker with the most free memory and is never sent to a
+// worker with no free memory. A task that fits some worker's total but not its
 // current free memory waits instead.
 func (p *nodePicker) pickOversized(d demand) int64 {
 	for _, n := range p.nodes {
@@ -231,7 +200,7 @@ func (p *nodePicker) pickOversized(d demand) int64 {
 	}
 	var emptiest *resourceNode
 	for _, n := range p.nodes {
-		if n.availableMemory <= 0 || !n.slotAdmits(d.slot) {
+		if n.availableMemory <= 0 {
 			continue
 		}
 		if emptiest == nil || n.availableMemory > emptiest.availableMemory {

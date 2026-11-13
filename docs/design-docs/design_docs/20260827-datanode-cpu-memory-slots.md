@@ -7,18 +7,17 @@ This replaces the DataNode-side admission design #52561 started from.
 ## Goal
 
 Extend the single scalar "slot" DataCoord uses to place tasks on DataNodes into
-two dimensions, CPU and memory, so a memory-heavy task is never placed on a
-worker that cannot hold it and compute-heavy tasks are spread instead of packed.
+two dimensions, CPU and memory, so estimated memory constrains placement and
+local index execution, and CPU demand spreads compute-heavy tasks.
 
-Non-goals:
+Scope:
 
-- DataNode does not estimate anything and gains no admission gate. Its
-  execution limits (compaction pool, `buildParallel`, import pool) are
-  unchanged, and the index scheduler's own slot admission
-  (`TaskScheduler.acquireSlots`, #54296) keeps bounding how many index, stats
-  and analyze builds run at once. DataCoord's picker still honours a
-  worker's `available_slots` on the two-dimensional tier, so it does not send
-  work the worker would reject.
+- DataNode does not estimate task sizes. Its index scheduler replaces scalar
+  slot admission with memory reservations when node memory capacity is known;
+  missing legacy estimates are converted from their slot share. The vector
+  task cap (`dataNode.index.maxVecIndexBuildConcurrency`, default 4), backend
+  build reservations, compaction pool and import pools remain. There is no
+  new CPU admission limit and no scalar-index task-count limit.
 - The existing scalar slot path is not removed. It stays as the compatibility
   tier for workers or coordinators that predate this change.
 - No rollback switch: the two-dimensional path only engages when both sides
@@ -36,15 +35,15 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 
 - Estimation lives only in DataCoord: every task family implements
   `GetTaskResource() taskcommon.Resource` next to the existing `GetTaskSlot()`.
-- DataNode only does bookkeeping: whatever cpu/memory the CreateTask properties
-  carry is added on accept and subtracted on completion, at exactly the points
-  where the scalar `usingSlots` is added and subtracted today. The worker never
+- DataNode books whatever cpu/memory the CreateTask properties carry on accept
+  and releases it after execution cleanup. Local index admission reserves the
+  same accepted memory separately before starting work. The worker never
   recomputes an estimate, and never reads one off the request payload — the
   handler resolves it once and passes it down as a parameter. A request without
   the properties (old coordinator) books the share of the node its scalar
   `task_slot` stands for; see Compatibility.
 - The old scalar chain (`GetTaskSlot`, `slot_usage`/`task_slot`,
-  `available_slots`, the max-heap `pickNode`) is untouched.
+  `available_slots`, the max-heap `pickNode`) stays as the compatibility path.
 
 ## Wire changes (fixed fields, appended at the end of each message)
 
@@ -104,7 +103,7 @@ is placed meanwhile.
 | scalar index | 1 | fieldSize x 2 | same |
 | stats (TextIndex / BM25 / JsonKeyIndex) | 1 | sum(size of the fields the sub job indexes) x 2; whole segment when the schema is not cached | `index/task_stats.go` loops over the `enable_match` fields / the JSON fields / the BM25 output fields only |
 | sort compaction | 1 | segmentSize x 2 | `storage.Sort` retains every input record |
-| mix compaction / bump schema version | 1 | min(sum(input segments), `dataCoord.segment.maxSize`) + delete maps | `MultiSegmentWriter` streams: never more than the input, never more than one output segment. The pk -> ts delete maps are not streamed: delete rows x 64 bytes per segment, plus the deltalog bytes for a VarChar key; summed over the inputs on the merge-sort path, which keeps every map until the merge ends, and the largest one on mergeSplit, which holds one at a time |
+| mix compaction / bump schema version | 1 | min(sum(inputs), `dataCoord.segment.maxSize`) + merge-sort reader windows + delete maps | The writer streams, but `storage.MergeSort` opens every input reader before output. For V1, sum each field's largest encoded + decoded binlog chunk, then sum across inputs. Missing chunk sizes, packed storage and manifests conservatively use twice the whole input per reader. mergeSplit keeps its existing streaming budget. Delete maps sum on merge-sort; only the largest is held on mergeSplit. |
 | L0 compaction | 1 | sum(deltalog) x 2 + sum(target statslog) | `l0_compactor.go` loads every delta log, then loads the target L1/L2 bloom filters in batches through `loadBF`; summing all targets' stats logs is conservative across batches |
 | clustering compaction | 8 | sum(input segments) | buckets are flushed at `memoryBufferRatio` of the machine; that cap is not applied, so a large input is over-priced |
 | analyze | 8 | Σ clustering-key field size (the field-size rule below) x 2 | the train set is down-sampled to `maxTrainSizeRatio` of the machine; that cap is not applied. Going through the field-size rule gives sparse and array-of-vector keys an answer, where rows x dim had none |
@@ -311,19 +310,25 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   scheduler (summed over queued + running runs, the same scope its
   `Slots()+QueuedSlots()` covers). One shared ledger keyed by task ID would
   have duplicated four lifecycles that already exist.
-- The index task queue books a task's cpu/memory when it is enqueued and
-  releases it once per execution in `finishTask`, which every popped task
-  reaches -- the same span the queue's slot accounting covers. It is released
-  per execution, not per task name through `activeTasks`: a dropped build
-  whose native call ignores cancellation keeps running while DataCoord
-  dispatches the same `clusterID/taskID` again, `AddActiveTask` keeps only the
-  newer one under the name, and a release by name would return one booking
-  and leak the other until restart. A task
-  waiting for the scheduler's slot admission (`acquireSlots`) therefore stays
-  booked, so DataCoord keeps seeing its cpu/memory and stops placing once the
-  worker's memory is spoken for. How many builds run at once is left to that
-  admission and, for vector builds, to `MaxVecIndexBuildConcurrency`; this
-  change adds no gate of its own.
+- The index queue books each task's CPU/memory on acceptance and releases it
+  after execution cleanup. This report includes waiting tasks, so DataCoord
+  stops placing when accepted work has spoken for the node. Bookings are
+  captured before cleanup can reset task fields. Active tasks, reservations
+  and releases use execution identity: a canceled native build that keeps
+  running can overlap a retry with the same name without releasing its budget.
+- Local index admission has a separate execution ledger. Before preparation
+  and download it atomically reserves accepted memory against node capacity
+  minus index execution reservations and the other executors' accepted memory.
+  Its own waiting tasks are excluded from this test, so queued bookings cannot
+  prevent their own execution. The waiting queue is separately bounded to one
+  node's memory and 1024 tasks. An empty queue accepts one oversized estimate;
+  an otherwise idle node executes such an estimate alone so it can progress.
+  This does not claim that an oversized estimate fits physical memory.
+  Reservations remain held through backend admission waits, upload and input
+  cleanup, including canceled native calls until they actually return. Vector
+  tasks retain FIFO build admission and their full-lifecycle concurrency cap.
+  A blocked vector can be bypassed by a non-vector task that fits. If memory
+  capacity cannot be read, queue and execution admission use legacy slots.
 - The external-collection refresh task runs through its own manager rather
   than one of the four executors. The manager books the estimate when it
   accepts the task (queued in its pool included, a duplicate dispatch books
@@ -343,8 +348,7 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   A failed limit reading leaves the ledger's figure alone rather than reporting
   nothing free. The system term applies only while the ledger has something
   booked: a node with nothing booked reports `available_memory = total_memory`,
-  the memory counterpart of the index scheduler admitting any task on a node
-  with no slot in use. DataCoord ends a round at a task that does not fit, so
+  the same progress rule as local index admission on an otherwise idle node. DataCoord ends a round at a task that does not fit, so
   without this a task that fits `total_memory` but never the system free
   memory (resident memory held by the other roles or an allocator) would stop
   every task behind it for good. An idle node therefore accepts work up to its
@@ -357,8 +361,8 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   offered. It never widens the report beyond the ledger.
 - The memory total is the full cgroup limit (standalone: ×
   `standaloneSlotFactor`). No headroom ratio is reserved; the system term above
-  is what keeps the report honest. A dimensioned worker is admitted on both
-  its memory and its scalar slots (see the picker).
+  is what keeps the report honest. Dimensioned workers are admitted on
+  memory; scalar slots remain a compatibility report (see the picker).
 - New gauge `milvus_datanode_task_resource{node_id, type=cpu|memory, state=total|available}`
   (`metrics.DataNodeTaskResource`).
 
@@ -369,15 +373,10 @@ Same rules as PR #52561, implemented thinner:
 - A worker that reports `total_memory > 0` is placed on the two dimensions;
   any other worker is placed by the existing max-heap, which is unchanged.
 - Two-dimensional placement: skip a worker whose
-  `available_memory < req.Memory`, and a worker whose slots do not admit the
-  task by the heap's own rule (a task asking for slots needs the worker to have
-  at least one left). Slots gate because the worker enforces them itself: since
-  #54296 its index scheduler rejects an enqueue beyond `totalSlots` once its
-  queue is non-empty and runs builds only within `acquireSlots`, so a task
-  placed past a worker's slots would bounce back into retry and backoff. CPU
-  never refuses. Among the admitted workers, those with `taskSlot` slots left
-  are preferred; when none has them the task goes, best-effort like the heap,
-  to the admitted worker with the most slots left.
+  `available_memory < req.Memory`. CPU never refuses. Scalar slots do not gate
+  or reorder this tier: the worker's index queue and execution admission use
+  memory too. A slot gate here would still strand small scalar builds behind
+  slot-heavy vector tasks.
   Rank the rest by `0.6 x memFrac + 0.25 x cpuFrac + 0.15 x (1 - |memFrac - cpuFrac|)`
   where each fraction is what remains after the task, as a fraction of the
   worker's total. Take the highest; charge cpu, memory and slots on the picked
@@ -391,7 +390,7 @@ Same rules as PR #52561, implemented thinner:
   or at most `standaloneSlotFactor` in standalone; the default is 10% x 2,
   under the default 0.25) exceeds the `total_memory` of every worker, dispatch to the dimensioned worker with the most
   `available_memory` (waiting never helps such a task); otherwise return
-  `NullNodeID`. The slot rule applies here too. Only a worker that
+  `NullNodeID`. Only a worker that
   still has free memory takes an oversized task: otherwise a round of them piles
   onto whichever worker is least loaded, each charging memory that worker does
   not have, and every other family then sees a cluster with nothing free.
@@ -431,26 +430,27 @@ Same rules as PR #52561, implemented thinner:
   protocol violation, so it must not be reported as one — unlike `task_slot`,
   a missing `task_cpu` never fails the task. A key that is present but
   unparsable is a real error and does fail the `CreateTask` call.
-- The pre-`CreateTask` RPCs (`PreImport`, `ImportV2`, `CompactionV2`,
-  `PreImportV3`, `CreateJob`, `CreateJobV2`) carry no properties at all and
-  currently book zero CPU/memory. They do not reach `CreateTask`'s slot-share
-  fallback. Current DataCoord dispatch uses `CreateTask`; accounting for direct
-  legacy-RPC callers is outside this change. A pool serving such callers
-  alongside resource-priced tasks does not account for the legacy tasks in its
-  CPU/memory ledger. The compatibility guarantee above covers keyless
-  `CreateTask` requests, not every historical RPC.
+- Direct index RPCs (`CreateJob`, `CreateJobV2`) carry no resource properties.
+  The index queue converts missing memory from the task's scalar slot, or uses
+  the memory floor if that slot is absent too. Other direct pre-`CreateTask`
+  RPCs (`PreImport`, `ImportV2`, `CompactionV2`, `PreImportV3`) still book zero
+  CPU/memory and do not reach `CreateTask`'s slot-share fallback. Accounting for
+  those historical callers remains outside this change: a shared pool does
+  not include those direct tasks in its CPU/memory ledger. The compatibility
+  guarantee does not cover every historical RPC.
 - Scheduling semantics are those of the slot heap: a task that does not fit
   ends the round (see the `NullNodeID` rule above). What changes is when a
-  task fits: on a dimensioned worker that is memory, not only slots.
+  task fits: on a dimensioned worker that is memory; old workers keep slots.
 - A worker pool that implements `QuerySlot` itself (a managed or proxied
   DataNode pool, for instance) and fills only `available_slots` reports no
   `total_memory`. DataCoord then places the whole pool on the scalar heap, as
   it does an old DataNode, so this change has no effect there until that
-  implementation reports the new fields. Roll the pool side out first, then the
-  coordinator: a coordinator ahead of the pool only keeps the slot behavior.
+  implementation reports the new fields and admits index work by memory.
+  Roll the pool side out first, then the coordinator: a coordinator ahead of
+  the pool only keeps the slot behavior.
 - During a rolling upgrade, dimensioned workers are preferred until their memory
-  is full, then the scalar heap serves the rest; aggregate throughput is
-  preserved, fill order changes.
+  is full, then the scalar heap serves the rest. Throughput changes require
+  measurement; the tiers preserve compatibility, not a performance guarantee.
 
 ## Code layout
 
@@ -473,7 +473,11 @@ Same rules as PR #52561, implemented thinner:
   (mockey on `hardware.GetCPUNum` / `hardware.GetMemoryCount`).
 - Picker: memory filter, score ordering, in-round charging, oversized to the
   emptiest worker, all-old-workers fall back to the heap, mixed cluster.
-- Executors: ledger and `usingSlots` move together on enqueue and completion.
+- Executors: separate acceptance and execution ledgers; exhausted old slots
+  with spare memory, external executor usage, oversized tasks, cancellation
+  through cleanup, same-name retries, and the retained vector concurrency cap.
+- Merge-sort compaction: a V1 fan-in whose resident reader windows exceed one
+  output segment, chunk-size fallbacks, and namespace sort-path selection.
 - Coverage target >= 90% on touched code; run with
   `-tags dynamic,test -gcflags="all=-N -l"`.
 
@@ -482,5 +486,6 @@ Same rules as PR #52561, implemented thinner:
 One commit: `enhance: place DataNode tasks on cpu and memory instead of a scalar
 slot` -- the wire fields, the pricing, the ledgers, the picker and the import
 v3 booking. An earlier revision also bounded scalar index/stats/analyze builds
-with a worker-side semaphore; that was dropped once #54296 put slot admission
-in the index scheduler itself.
+with a worker-side semaphore. The final index execution admission uses memory
+instead of the scalar budget while retaining the vector-task concurrency cap
+and backend build reservations.

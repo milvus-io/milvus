@@ -346,11 +346,11 @@ func TestIndexTaskQueueBudget(t *testing.T) {
 		used, queued = sched.TaskQueue.GetSlotUsage()
 		require.EqualValues(t, 96, used)
 		require.EqualValues(t, 32, queued)
-		sched.finishAdmission(first.Name())
-		sched.releaseSlots(first.Name())
+		sched.finishAdmission(first)
+		sched.releaseResources(first)
 		require.Same(t, second, sched.TaskQueue.PopUnissuedTask(true))
-		sched.finishAdmission(second.Name())
-		sched.releaseSlots(second.Name())
+		sched.finishAdmission(second)
+		sched.releaseResources(second)
 		used, queued = sched.TaskQueue.GetSlotUsage()
 		require.Zero(t, used)
 		require.Zero(t, queued)
@@ -407,13 +407,13 @@ func TestIndexTaskQueueReleasesSlotsAfterTaskReset(t *testing.T) {
 	t.Cleanup(scheduler.Close)
 	scheduler.totalSlots = func() int64 { return 1 }
 	task := &fakeTask{id: 1, ctx: context.Background()}
-	assert.True(t, scheduler.acquireSlots(task))
+	assert.True(t, scheduler.acquireResources(task, scheduler.taskResource(task).Memory))
 	scheduler.TaskQueue.AddActiveTask(task)
-	name := task.Name()
-	// Slot ownership belongs to the queue key, even after task cleanup changes
-	// the fields used to compute its name.
+	// Ownership belongs to the execution even after cleanup changes its name.
 	task.id = 0
-	assert.Same(t, task, scheduler.TaskQueue.PopActiveTask(name))
+	assert.Same(t, task, scheduler.TaskQueue.PopActiveTask(task))
+	scheduler.finishAdmission(task)
+	scheduler.releaseResources(task)
 	assert.Zero(t, scheduler.TaskQueue.GetUsingSlot())
 	assert.Empty(t, scheduler.pendingTasks)
 }
@@ -443,9 +443,9 @@ func TestIndexTaskQueue_Resource(t *testing.T) {
 	queue.AddActiveTask(task)
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 
-	// Leaving the active list returns the slots but not the cpu/memory: that
-	// booking belongs to the execution and is returned by ReleaseResource.
-	queue.PopActiveTask(task.Name())
+	// Removing the registry entry does not return accepted CPU/memory: that
+	// booking belongs to the execution and is returned after cleanup.
+	queue.PopActiveTask(task)
 	assert.Equal(t, int64(0), queue.GetUsingSlot())
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 	queue.ReleaseResource(task)
@@ -468,7 +468,7 @@ func TestIndexTaskQueue_Resource(t *testing.T) {
 
 // A dropped task whose native build ignores cancellation keeps running while
 // DataCoord dispatches the same clusterID/taskID again. Both executions are
-// booked; the newer one replaces the older under the name in activeTasks.
+// booked and tracked independently, even though their names match.
 // Each must return its own booking when it finishes, whichever order they
 // finish in, or the node reports less free memory than it has until restart.
 func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {

@@ -48,9 +48,8 @@ type Task interface {
 	Reset()
 	GetSlot() int64
 	// GetResource is the cpu/memory DataCoord estimated for this task. The
-	// worker never computes it; it books it on enqueue and releases it when
-	// the task leaves the active set. Zero when the coordinator predates the
-	// field.
+	// worker books it on enqueue and releases it after execution cleanup. The
+	// queue converts a missing legacy estimate from the task's scalar slot.
 	GetResource() taskcommon.Resource
 	IsVectorIndex() bool
 }

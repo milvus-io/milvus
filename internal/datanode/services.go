@@ -914,8 +914,8 @@ func nodeTaskCapacity() taskcommon.Resource {
 //
 // The machine bound applies only while something is booked. A node with
 // nothing booked reports its whole capacity, so DataCoord can always place the
-// oldest waiting task on it, the same rule the index scheduler applies to slots
-// (slotsAvailable admits any task on a node with nothing in use). DataCoord
+// oldest waiting task on it, the same progress rule as local index memory
+// admission on an otherwise idle node. DataCoord
 // ends a scheduling round at a task that does not fit, so without this a task
 // that fits the capacity but never what the machine reports free -- resident
 // memory that other roles or an allocator keep -- would stop every task behind

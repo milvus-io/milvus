@@ -234,6 +234,12 @@ func (node *DataNode) Init() error {
 			return node.compactionExecutor.Slots() + node.importScheduler.Slots() +
 				node.importV3Scheduler.Slots() + node.importV3Scheduler.QueuedSlots()
 		})
+		node.taskScheduler.SetMemoryAdmission(func() int64 {
+			return nodeTaskCapacity().Memory
+		}, func() int64 {
+			return node.compactionExecutor.Resource().Memory + node.importScheduler.Resource().Memory +
+				node.importV3Scheduler.Resource().Memory + node.externalCollectionManager.Resource().Memory
+		})
 
 		err := index.InitSegcore(serverID)
 		if err != nil {

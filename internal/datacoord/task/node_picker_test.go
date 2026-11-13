@@ -69,44 +69,42 @@ func TestNodePicker_CPUOnlyRanks(t *testing.T) {
 	assert.Equal(t, int64(1), p.Pick(1, taskcommon.Resource{CPU: 8, Memory: pickGiB}))
 }
 
-func TestNodePicker_SlotsGateDimensionedWorkers(t *testing.T) {
+func TestNodePicker_MemoryTierIgnoresExhaustedScalarSlots(t *testing.T) {
 	p := newNodePicker(map[int64]*session.WorkerSlots{
 		1: resourceWorker(1, 0, 8, 64*pickGiB),
 		2: resourceWorker(2, 10, 8, 8*pickGiB),
 	})
 	req := taskcommon.Resource{CPU: 1, Memory: pickGiB}
-	// Node 1 has by far the most free memory and would score highest, but its
-	// slot budget is spent: the worker would reject the task, so node 2 takes it.
+	// The memory-rich worker can still execute this task despite having no
+	// scalar slots. New workers admit index tasks by memory too.
 	byID := make(map[int64]*resourceNode, len(p.nodes))
 	for _, n := range p.nodes {
 		byID[n.nodeID] = n
 	}
 	assert.Greater(t, byID[1].score(req), byID[2].score(req))
-	assert.Equal(t, int64(2), p.Pick(1, req))
-	assert.Equal(t, int64(9), byID[2].availableSlots)
+	assert.Equal(t, int64(1), p.Pick(1, req))
+	assert.Equal(t, int64(0), byID[1].availableSlots)
+	assert.Equal(t, 63*pickGiB, byID[1].availableMemory)
 
-	// A task that asks for no slot is placed on memory alone.
-	assert.Equal(t, int64(1), p.Pick(0, req))
+	// A zero-slot task also follows resource scores; the previous charge now
+	// makes node 2 preferable on CPU/balance.
+	assert.Equal(t, int64(2), p.Pick(0, req))
 }
 
-// TestNodePicker_SlotsChargedWithinRound: a worker's slots run out within the
-// round just like its memory does.
-func TestNodePicker_SlotsChargedWithinRound(t *testing.T) {
+func TestNodePicker_MemoryBoundsTheRoundAfterSlotsRunOut(t *testing.T) {
 	p := newNodePicker(map[int64]*session.WorkerSlots{
-		1: resourceWorker(1, 2, 8, 64*pickGiB),
+		1: resourceWorker(1, 2, 8, 4*pickGiB),
 	})
 	req := taskcommon.Resource{CPU: 1, Memory: pickGiB}
 	assert.Equal(t, int64(1), p.Pick(1, req))
 	assert.Equal(t, int64(1), p.Pick(1, req))
-	// Memory is plentiful, but both slots are spent.
+	// Slots are spent; the remaining memory still admits two tasks.
+	assert.Equal(t, int64(1), p.Pick(1, req))
+	assert.Equal(t, int64(1), p.Pick(1, req))
 	assert.Equal(t, int64(NullNodeID), p.Pick(1, req))
 }
 
-// TestNodePicker_SlotsBestEffort mirrors the heap: a worker with enough slots
-// left is preferred over a higher-scoring one without, and a task asking for
-// more slots than any worker has left goes to the fitting worker with the most
-// slots left, draining them.
-func TestNodePicker_SlotsBestEffort(t *testing.T) {
+func TestNodePicker_ScalarSlotsDoNotOverrideResourceScore(t *testing.T) {
 	p := newNodePicker(map[int64]*session.WorkerSlots{
 		1: resourceWorker(1, 2, 8, 64*pickGiB),
 		2: resourceWorker(2, 8, 8, 8*pickGiB),
@@ -116,18 +114,13 @@ func TestNodePicker_SlotsBestEffort(t *testing.T) {
 		byID[n.nodeID] = n
 	}
 	req := taskcommon.Resource{CPU: 1, Memory: pickGiB}
-	// Needs 4 slots: only node 2 has them, although node 1 scores higher.
-	assert.Equal(t, int64(2), p.Pick(4, req))
-	assert.Equal(t, int64(4), byID[2].availableSlots)
-
-	// Needs 16 slots: nobody has them; node 2 has the most left and takes it.
+	// A higher resource score wins even without enough scalar slots.
+	assert.Equal(t, int64(1), p.Pick(4, req))
+	// The next charge spreads CPU onto node 2, regardless of slot demand.
 	assert.Equal(t, int64(2), p.Pick(16, req))
-	assert.Equal(t, int64(0), byID[2].availableSlots)
-
-	// Again 16: node 1 is the only one with a slot left.
-	assert.Equal(t, int64(1), p.Pick(16, req))
 	assert.Equal(t, int64(0), byID[1].availableSlots)
-	assert.Equal(t, int64(NullNodeID), p.Pick(1, req))
+	assert.Equal(t, int64(0), byID[2].availableSlots)
+	assert.Equal(t, int64(1), p.Pick(16, req))
 }
 
 func TestNodePicker_OversizedGoesToEmptiest(t *testing.T) {
@@ -192,17 +185,16 @@ func TestNodePicker_Score(t *testing.T) {
 	assert.InDelta(t, 0.6*1.0+0.25*0+0.15*0, n.score(taskcommon.Resource{CPU: 100}), 1e-9)
 }
 
-func TestNodePicker_OversizedRespectsSlots(t *testing.T) {
+func TestNodePicker_OversizedUsesMemoryDespiteExhaustedSlots(t *testing.T) {
 	p := newNodePicker(map[int64]*session.WorkerSlots{
 		1: resourceWorker(1, 0, 8, 8*pickGiB),
 		2: resourceWorker(2, 10, 8, 4*pickGiB),
 	})
-	// 32GiB fits nowhere even empty. Node 1 has the most free memory but no slot
-	// left, so the worker would reject it: node 2 takes it.
-	assert.Equal(t, int64(2), p.Pick(1, taskcommon.Resource{CPU: 1, Memory: 32 * pickGiB}))
+	// 32GiB fits nowhere even empty. The most available memory wins.
+	assert.Equal(t, int64(1), p.Pick(1, taskcommon.Resource{CPU: 1, Memory: 32 * pickGiB}))
 
 	noSlots := newNodePicker(map[int64]*session.WorkerSlots{1: resourceWorker(1, 0, 8, 8*pickGiB)})
-	assert.Equal(t, int64(NullNodeID), noSlots.Pick(1, taskcommon.Resource{CPU: 1, Memory: 32 * pickGiB}))
+	assert.Equal(t, int64(1), noSlots.Pick(1, taskcommon.Resource{CPU: 1, Memory: 32 * pickGiB}))
 }
 
 func TestNodePicker_ScoreWithoutCPUReport(t *testing.T) {
