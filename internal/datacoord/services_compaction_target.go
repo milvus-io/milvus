@@ -308,6 +308,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingSort(record) && record.GetEnabled():
 		observation, err := targets.ObserveSort(ctx, s.meta)
 		rows, observed, observationErr = observation.Rows, true, err
+	case record.GetIntent() == datapb.TargetIntent_INTENT_INDEX_VERSION && targets.HasStandingCondition(record) && record.GetEnabled():
+		rows, observationErr = targets.ObserveIndexVersion(ctx, s.meta, s.indexMeta, record)
+		observed = true
 	}
 	if observed && observationErr == nil {
 		target.RemainingRows = proto.Int64(rows)
