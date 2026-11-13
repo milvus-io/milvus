@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -112,9 +111,9 @@ func hashed(t *testing.T, password string) string {
 	// slow bcrypt is. DefaultCost put well over a second into every comparison,
 	// which both dominated the suite and turned the Eventually budgets below
 	// into a race against CI machine speed.
-	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	h, err := testPasswordHash(password)
 	assert.NoError(t, err)
-	return string(h)
+	return h
 }
 
 // clientReturning answers every GetCredential with the given bcrypt hash.
