@@ -108,6 +108,24 @@ func TestGetCompactableSegmentGroupByCollection(t *testing.T) {
 	assert.False(t, m.Segments.GetSegment(groups[100][0].GetID()).IsCompacting)
 }
 
+// minAllocsPerRun returns the fewest average allocations per call of f across
+// several sampling attempts. testing.AllocsPerRun measures process-global heap
+// allocations, so a burst of allocations from another goroutine inflates any
+// attempt it lands in. The config refresher started by paramtable.Init in
+// TestMain re-reads and parses milvus.yaml on every tick; its bursts only add
+// allocations and never remove them, so the minimum across attempts isolates
+// f's own allocation count.
+func minAllocsPerRun(f func()) float64 {
+	const attempts = 20
+	minAllocs := testing.AllocsPerRun(20, f)
+	for i := 1; i < attempts; i++ {
+		if allocs := testing.AllocsPerRun(20, f); allocs < minAllocs {
+			minAllocs = allocs
+		}
+	}
+	return minAllocs
+}
+
 func TestGetCompactableSegmentGroupByCollectionNonL0Allocations(t *testing.T) {
 	allocations := func(nonL0Count int) float64 {
 		store := metacache.NewMetaStore(nil)
@@ -122,7 +140,7 @@ func TestGetCompactableSegmentGroupByCollectionNonL0Allocations(t *testing.T) {
 			}})
 		}
 		var groups map[int64][]*meta.SegmentInfo
-		count := testing.AllocsPerRun(20, func() {
+		count := minAllocsPerRun(func() {
 			groups = m.GetCompactableSegmentGroupByCollection()
 		})
 		require.NotEmpty(t, groups[100])
