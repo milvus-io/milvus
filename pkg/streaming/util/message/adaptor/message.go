@@ -27,6 +27,9 @@ func NewMsgPackFromMessage(msgs ...message.ImmutableMessage) (*msgstream.MsgPack
 		if msg.MessageType() == message.MessageTypeTxn {
 			tsMsgs, err := parseTxnMsg(msg)
 			if err != nil {
+				if containsRowWrite(msg) {
+					return nil, err
+				}
 				finalErr = errors.CombineErrors(finalErr, errors.Wrapf(err, "Failed to convert txn message to msgpack, %v", msg.MessageID()))
 				continue
 			}
@@ -34,6 +37,14 @@ func NewMsgPackFromMessage(msgs ...message.ImmutableMessage) (*msgstream.MsgPack
 			continue
 		}
 
+		if isRowWrite(msg) {
+			expanded, err := readRowWrite(msg)
+			if err != nil {
+				return nil, err
+			}
+			allTsMsgs = append(allTsMsgs, expanded...)
+			continue
+		}
 		tsMsg, err := parseSingleMsg(msg)
 		if err != nil {
 			finalErr = errors.CombineErrors(finalErr, errors.Wrapf(err, "Failed to convert message to msgpack, %v", msg.MessageID()))
@@ -80,6 +91,14 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 
 	tsMsgs := make([]msgstream.TsMsg, 0, txnMsg.Size())
 	err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
+		if isRowWrite(im) {
+			expanded, err := readRowWrite(im)
+			if err != nil {
+				return err
+			}
+			tsMsgs = append(tsMsgs, expanded...)
+			return nil
+		}
 		var tsMsg msgstream.TsMsg
 		tsMsg, err := parseSingleMsg(im)
 		if err != nil {
@@ -134,6 +153,10 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 	var tsMsg msgstream.TsMsg
 	var err error
 	switch msg.MessageType() {
+	case message.MessageTypeMVCCBarrier, message.MessageTypeRecoveryBarrier:
+		// These persisted 3.1 confirmation records advance the existing 3.0
+		// consumer TimeTick. Native query-view payloads have no 3.0 effects.
+		tsMsg = &msgstream.TimeTickMsg{TimeTickMsg: &msgpb.TimeTickMsg{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_TimeTick, Timestamp: msg.TimeTick()}}}
 	case message.MessageTypeFlush:
 		tsMsg, err = NewFlushMessageBody(msg)
 	case message.MessageTypeManualFlush:
@@ -250,4 +273,20 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, msg message.Immu
 func recoverImportMsgFromHeader(importMsg *msgstream.ImportMsg, _ *message.ImportMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
 	importMsg.Base.Timestamp = timetick
 	return importMsg, nil
+}
+
+func isRowWrite(msg message.ImmutableMessage) bool {
+	return msg.Version() == message.VersionV2 && (msg.MessageType() == message.MessageTypeInsert || msg.MessageType() == message.MessageTypeUpsert)
+}
+
+func containsRowWrite(msg message.ImmutableMessage) bool {
+	if isRowWrite(msg) {
+		return true
+	}
+	if msg.MessageType() != message.MessageTypeTxn {
+		return false
+	}
+	found := false
+	_ = message.AsImmutableTxnMessage(msg).RangeOver(func(body message.ImmutableMessage) error { found = found || isRowWrite(body); return nil })
+	return found
 }

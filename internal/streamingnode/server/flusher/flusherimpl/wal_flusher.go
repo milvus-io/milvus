@@ -122,8 +122,8 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 			return nil
 		case msg, ok := <-scanner.Chan():
 			if !ok {
-				impl.logger.Warn(context.TODO(), "wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
-				return nil
+				impl.logger.Warn(impl.notifier.Context(), "wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
+				return scanner.Error()
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
@@ -247,7 +247,9 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	}
 	timetick := msg.TimeTick()
 	defer func() {
-		impl.lastDispatchTimeTick = timetick
+		if err == nil {
+			impl.lastDispatchTimeTick = timetick
+		}
 	}()
 
 	if msg.MessageType() == message.MessageTypeCommitImport {
@@ -269,6 +271,9 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// TODO: We will merge the flusher into recovery storage in future.
 		// Currently, flusher works as a separate component.
 		defer func() {
+			if err != nil {
+				return
+			}
 			if err = impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 				impl.logger.Warn(context.TODO(), "failed to observe message", mlog.Err(err))
 			}

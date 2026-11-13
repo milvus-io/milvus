@@ -21,12 +21,18 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -198,4 +204,32 @@ func (suite *FilterNodeSuite) buildMsgPack() *msgstream.MsgPack {
 
 func TestFilterNode(t *testing.T) {
 	suite.Run(t, new(FilterNodeSuite))
+}
+
+func TestFilterNodeBindsNewWALPrimaryKey(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	collection := segments.NewTestCollection(1, querypb.LoadType_LoadCollection, schema)
+	delegated := delegator.NewMockShardDelegator(t)
+	delegated.EXPECT().VerifyExcludedSegments(int64(100), uint64(20)).Return(true).Once()
+	node := newFilterNode(1, "p_1v0", nil, delegated, 8)
+	mutable := message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&messagespb.InsertMessageHeaderV2{CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}).WithBody(&messagespb.InsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{101, 102}}}}, RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1001, 1002}}}}}).MustBuildMutable()
+	pack, err := adaptor.NewMsgPackFromMessage(mutable.WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(1)).IntoImmutableMessage(rmq.NewRmqID(2)))
+	require.NoError(t, err)
+	require.Len(t, pack.Msgs, 1)
+	insert := pack.Msgs[0].(*msgstream.InsertMsg)
+	require.NotNil(t, insert.StandalonePrimaryKeys)
+	require.Empty(t, insert.FieldsData)
+	// Exercise the production filter entry, which must bind keys before policies
+	// and before insertNode later extracts them from the column representation.
+	require.NoError(t, node.filtrate(collection, insert))
+	require.Nil(t, insert.StandalonePrimaryKeys)
+	require.Len(t, insert.FieldsData, 1)
+	require.Equal(t, int64(100), insert.FieldsData[0].GetFieldId())
+	require.Equal(t, []int64{101, 102}, insert.FieldsData[0].GetScalars().GetLongData().Data)
+	keys, err := segments.GetPrimaryKeys(insert, schema)
+	require.NoError(t, err)
+	require.Len(t, keys, 2)
+	require.Equal(t, int64(101), keys[0].GetValue())
+	require.Equal(t, int64(102), keys[1].GetValue())
 }

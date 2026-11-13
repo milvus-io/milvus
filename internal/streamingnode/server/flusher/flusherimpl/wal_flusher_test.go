@@ -153,7 +153,7 @@ func TestWALFlusher_DispatchStopsCreateCollectionOnObserveError(t *testing.T) {
 
 	msg := message.CreateTestCreateCollectionMessage(t, 2, 100, rmq.NewRmqID(100)).
 		IntoImmutableMessage(rmq.NewRmqID(101))
-	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(context.Canceled).Twice()
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(context.Canceled).Once()
 
 	err := flusher.dispatch(msg)
 	require.ErrorIs(t, err, context.Canceled)
@@ -654,4 +654,19 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 		read.Maybe()
 	}
 	return w
+}
+
+func TestWALFlusherRowWriteDecodeFailureDoesNotObserve(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	flusher := newTestWALFlusher(rs)
+	flusher.lastDispatchTimeTick = 10
+	input := make(chan *msgstream.MsgPack, 1)
+	flusher.flusherComponents.dataServices["vchannel-1"] = newDataSyncServiceWrapper("vchannel-1", input, &pipeline.DataSyncService{}, 0)
+	mutable := message.NewUpsertMessageBuilderV2().WithVChannel("vchannel-1").WithHeader(&message.UpsertMessageHeader{CollectionId: 1}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(1))
+	wire := mutable.IntoMessageProto()
+	broken := message.NewImmutableMesasge(rmq.NewRmqID(2), []byte{0xff}, wire.Properties)
+	require.Error(t, flusher.dispatch(broken))
+	require.Equal(t, uint64(10), flusher.lastDispatchTimeTick)
+	require.Empty(t, input)
+	rs.AssertNotCalled(t, "ObserveMessage", mock.Anything, mock.Anything)
 }

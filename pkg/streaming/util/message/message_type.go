@@ -30,6 +30,21 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		IsSystem:       true,
 		SelfControlled: true,
 	},
+	MessageTypeRecoveryBarrier: {
+		LogLevel:       mlog.DebugLevel,
+		IsSystem:       true,
+		SelfControlled: true,
+	},
+	MessageTypeMVCCBarrier: {
+		LogLevel:       mlog.DebugLevel,
+		IsSystem:       true,
+		SelfControlled: true,
+	},
+	MessageTypeUpsert: {
+		LogLevel:       mlog.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
+	},
 	MessageTypeInsert: {
 		LogLevel:       mlog.DebugLevel,
 		CipherEnabled:  true,
