@@ -29,6 +29,21 @@ class IndexCreatorBase {
     virtual void
     Build() = 0;
 
+    virtual void
+    LoadData() {
+        input_prepared_ = true;
+    }
+
+    virtual bool
+    TryReserveBuild() {
+        return true;
+    }
+
+    bool
+    InputPrepared() const {
+        return input_prepared_;
+    }
+
     virtual milvus::BinarySet
     Serialize() = 0;
 
@@ -38,6 +53,9 @@ class IndexCreatorBase {
 
     virtual index::IndexStatsPtr
     Upload() = 0;
+
+ protected:
+    bool input_prepared_ = false;
 };
 
 using IndexCreatorBasePtr = std::unique_ptr<IndexCreatorBase>;

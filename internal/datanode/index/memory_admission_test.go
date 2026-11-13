@@ -13,67 +13,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const admissionGiB = int64(1) << 30
 
-type memoryAdmissionTask struct {
-	ctx      context.Context
-	name     string
-	slot     int64
-	resource taskcommon.Resource
-	vector   bool
-	state    atomic.Int32
-	reset    atomic.Bool
-	started  chan struct{}
-	execute  func(context.Context) error
-	cleanup  func()
+// Expose only Task, as stats/analyze do, rather than PreparedTask's pipeline.
+type nonPreparedMemoryTask struct {
+	Task
+	reset atomic.Bool
 }
 
-func (t *memoryAdmissionTask) Ctx() context.Context                      { return t.ctx }
-func (t *memoryAdmissionTask) Name() string                              { return t.name }
-func (t *memoryAdmissionTask) GetSlot() int64                            { return t.slot }
-func (t *memoryAdmissionTask) GetResource() taskcommon.Resource          { return t.resource }
-func (t *memoryAdmissionTask) IsVectorIndex() bool                       { return t.vector }
-func (t *memoryAdmissionTask) OnEnqueue(context.Context) error           { return nil }
-func (t *memoryAdmissionTask) SetState(state indexpb.JobState, _ string) { t.state.Store(int32(state)) }
-func (t *memoryAdmissionTask) GetState() indexpb.JobState {
-	if t.reset.Load() {
-		panic("registry read state after cleanup")
-	}
-	return indexpb.JobState(t.state.Load())
-}
-func (t *memoryAdmissionTask) PreExecute(context.Context) error { close(t.started); return nil }
-func (t *memoryAdmissionTask) Execute(ctx context.Context) error {
-	if t.execute != nil {
-		return t.execute(ctx)
-	}
-	return nil
-}
-func (t *memoryAdmissionTask) PostExecute(context.Context) error { return nil }
-func (t *memoryAdmissionTask) Reset() {
-	if t.cleanup != nil {
-		t.cleanup()
-	}
-	// Real tasks invalidate fields during cleanup; bookkeeping must use the
-	// accepted immutable booking, not a value read from the reset task.
-	t.resource = taskcommon.Resource{}
-	t.slot = 0
+func (t *nonPreparedMemoryTask) Reset() {
 	t.reset.Store(true)
+	t.Task.Reset()
 }
 
-func memoryTask(id string, memory int64) *memoryAdmissionTask {
-	return &memoryAdmissionTask{
-		ctx: context.Background(), name: id, slot: 128,
-		resource: taskcommon.Resource{CPU: 8, Memory: memory}, started: make(chan struct{}),
+func (t *nonPreparedMemoryTask) GetState() indexpb.JobState {
+	if t.reset.Load() {
+		panic("registry read task state after Reset")
 	}
+	return t.Task.GetState()
 }
 
 func memoryScheduler(t *testing.T, capacity int64) *TaskScheduler {
@@ -82,178 +47,247 @@ func memoryScheduler(t *testing.T, capacity int64) *TaskScheduler {
 	s := newTestTaskScheduler(context.Background())
 	s.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: capacity} }
 	require.NoError(t, s.Start())
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(); s.Wait() })
 	return s
 }
 
-func memoryGate(t *testing.T) (<-chan struct{}, func()) {
-	t.Helper()
-	ch := make(chan struct{})
-	var once sync.Once
-	release := func() { once.Do(func() { close(ch) }) }
-	t.Cleanup(release)
-	return ch, release
+func memoryTask(id string, memory int64) *pipelineTestTask {
+	return &pipelineTestTask{id: id, slots: 128, ctx: context.Background(), resource: taskcommon.Resource{CPU: 8, Memory: memory}}
 }
 
-func awaitMemoryTask(t *testing.T, ch <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(5 * time.Second):
-		t.Fatal("memory admission did not make progress")
-	}
-}
-
-func assertMemoryTaskWaiting(t *testing.T, ch <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-		t.Fatal("task ran without execution memory or a vector permit")
-	case <-time.After(150 * time.Millisecond):
-	}
-}
-
-func TestMemoryAdmissionScalarRunsBesideSlotOversizedVector(t *testing.T) {
+// A vector waiting for its backend has a large scalar-slot demand. A scalar
+// build can still use the remaining memory without a vector build reservation.
+func TestMemoryAdmissionScalarRunsBesideHighSlotVector(t *testing.T) {
 	s := memoryScheduler(t, 8*admissionGiB)
-	gate, release := memoryGate(t)
+	var attempts atomic.Int32
 	vector := memoryTask("vector", 6*admissionGiB)
-	vector.vector = true
-	vector.execute = func(context.Context) error { <-gate; return nil }
+	vector.reserve = func() (bool, error) { attempts.Add(1); return false, nil }
 	require.NoError(t, s.TaskQueue.Enqueue(vector))
-	awaitMemoryTask(t, vector.started)
-	scalar := memoryTask("scalar", admissionGiB)
+	require.Eventually(t, func() bool { return attempts.Load() > 0 }, 5*time.Second, time.Millisecond)
+
+	built := make(chan struct{})
+	scalar := &scalarPipelineTestTask{memoryTask("scalar", admissionGiB)}
+	scalar.build = func() { close(built) }
 	require.NoError(t, s.TaskQueue.Enqueue(scalar))
-	awaitMemoryTask(t, scalar.started)
+	awaitPipeline(t, built)
 	require.Eventually(t, func() bool { return s.executionMemory() == 6*admissionGiB }, 5*time.Second, time.Millisecond)
-	require.EqualValues(t, 128, s.TaskQueue.GetUsingSlot(), "scalar demand is reported independently of memory admission")
-	release()
 }
 
-func TestMemoryAdmissionWaitsThroughCancellationAndNativeCleanup(t *testing.T) {
+func TestMemoryAdmissionQueuedBookingsDoNotBlockTheirOwnExecution(t *testing.T) {
 	s := memoryScheduler(t, 8*admissionGiB)
-	native, releaseNative := memoryGate(t)
-	cleanup, releaseCleanup := memoryGate(t)
+	gate, release := pipelineGate(t)
+	started := make(chan struct{})
 	first := memoryTask("first", 6*admissionGiB)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	first.ctx = ctx
-	first.execute = func(context.Context) error { <-native; return nil } // ignores cancellation
-	cleaning := make(chan struct{})
-	first.cleanup = func() { close(cleaning); <-cleanup }
+	first.build = func() { close(started); <-gate }
 	require.NoError(t, s.TaskQueue.Enqueue(first))
-	awaitMemoryTask(t, first.started)
-	second := memoryTask("second", 4*admissionGiB)
+	awaitPipeline(t, started)
+	secondStarted := make(chan struct{})
+	second := memoryTask("second", 6*admissionGiB)
+	second.build = func() { close(secondStarted) }
 	require.NoError(t, s.TaskQueue.Enqueue(second))
-	require.EqualValues(t, 10*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
-	cancel()
-	assertMemoryTaskWaiting(t, second.started)
-	releaseNative()
-	awaitMemoryTask(t, cleaning)
-	assertMemoryTaskWaiting(t, second.started)
+	require.EqualValues(t, 12*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
 	require.EqualValues(t, 6*admissionGiB, s.executionMemory())
-	releaseCleanup()
-	awaitMemoryTask(t, second.started)
+	release()
+	awaitPipeline(t, secondStarted)
 	require.Eventually(t, func() bool {
 		return s.executionMemory() == 0 && s.TaskQueue.GetUsingResource().Memory == 0
 	}, 5*time.Second, time.Millisecond)
 }
 
-func TestMemoryAdmissionVectorPermitAllowsScalarBypass(t *testing.T) {
-	paramtable.Init()
-	pool := conc.NewPool[any](1)
-	defer pool.Release()
-	patch := mockey.Mock(GetVecIndexBuildPool).Return(pool).Build()
-	defer patch.UnPatch()
-	s := memoryScheduler(t, 16*admissionGiB)
-	// Cleanup hooks execute in reverse: release the blocking task before Close.
-	gate, release := memoryGate(t)
-	first := memoryTask("first-vector", 2*admissionGiB)
-	first.vector = true
-	first.execute = func(context.Context) error { <-gate; return nil }
-	require.NoError(t, s.TaskQueue.Enqueue(first))
-	awaitMemoryTask(t, first.started)
-	next := memoryTask("next-vector", 2*admissionGiB)
-	next.vector = true
-	require.NoError(t, s.TaskQueue.Enqueue(next))
-	scalar := memoryTask("scalar", admissionGiB)
+func TestMemoryAdmissionOversizedRunsAlone(t *testing.T) {
+	s := memoryScheduler(t, 8*admissionGiB)
+	gate, release := pipelineGate(t)
+	started := make(chan struct{})
+	large := memoryTask("oversized", 16*admissionGiB)
+	large.build = func() { close(started); <-gate }
+	require.NoError(t, s.TaskQueue.Enqueue(large))
+	awaitPipeline(t, started)
+	scalarStarted := make(chan struct{})
+	scalar := &scalarPipelineTestTask{memoryTask("small", admissionGiB)}
+	scalar.build = func() { close(scalarStarted) }
 	require.NoError(t, s.TaskQueue.Enqueue(scalar))
-	awaitMemoryTask(t, scalar.started)
-	assertMemoryTaskWaiting(t, next.started)
+	// Inspect an admission attempt directly; no sleep is needed to prove it
+	// cannot start while the oversized execution owns the node.
+	require.Nil(t, s.TaskQueue.PopUnissuedTask(true))
+	require.EqualValues(t, 16*admissionGiB, s.executionMemory())
 	release()
-	awaitMemoryTask(t, next.started)
-	s.Close()
+	awaitPipeline(t, scalarStarted)
 }
 
-func TestMemoryAdmissionSameNameExecutionsKeepIndependentBookings(t *testing.T) {
-	s := memoryScheduler(t, 16*admissionGiB)
-	gate1, release1 := memoryGate(t)
-	gate2, release2 := memoryGate(t)
-	first := memoryTask("same", 6*admissionGiB)
-	second := memoryTask("same", 6*admissionGiB)
-	first.execute = func(context.Context) error { <-gate1; return nil }
-	second.execute = func(context.Context) error { <-gate2; return nil }
-	require.NoError(t, s.TaskQueue.Enqueue(first))
-	awaitMemoryTask(t, first.started)
-	require.NoError(t, s.TaskQueue.Enqueue(second))
-	awaitMemoryTask(t, second.started)
-	require.EqualValues(t, 12*admissionGiB, s.executionMemory())
-	release1()
-	require.Eventually(t, func() bool { return s.TaskQueue.GetUsingResource().Memory == 6*admissionGiB }, 5*time.Second, time.Millisecond)
-	_, active := s.TaskQueue.GetTaskNum()
-	require.Equal(t, 1, active)
-	release2()
-	require.Eventually(t, func() bool { return s.executionMemory() == 0 && s.TaskQueue.GetUsingResource().Memory == 0 }, 5*time.Second, time.Millisecond)
-	require.Zero(t, s.TaskQueue.GetUsingResource().Memory)
+func TestMemoryAdmissionCanceledNativeCallKeepsItsReservation(t *testing.T) {
+	s := memoryScheduler(t, 8*admissionGiB)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	gate, release := pipelineGate(t)
+	started := make(chan struct{})
+	task := memoryTask("ignores-cancellation", 6*admissionGiB)
+	task.ctx = ctx
+	task.build = func() { close(started); <-gate }
+	require.NoError(t, s.TaskQueue.Enqueue(task))
+	awaitPipeline(t, started)
+	cancel()
+	nextStarted := make(chan struct{})
+	next := &scalarPipelineTestTask{memoryTask("next", 4*admissionGiB)}
+	next.build = func() { close(nextStarted) }
+	require.NoError(t, s.TaskQueue.Enqueue(next))
+	require.Nil(t, s.TaskQueue.PopUnissuedTask(true))
+	require.EqualValues(t, 6*admissionGiB, s.executionMemory())
+	require.EqualValues(t, 10*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
+	release()
+	awaitPipeline(t, nextStarted)
 }
 
-func TestMemoryAdmissionWaitingQueue(t *testing.T) {
+func TestMemoryAdmissionPreservesVectorConcurrencyLimit(t *testing.T) {
 	paramtable.Init()
-	s := newTestTaskScheduler(context.Background())
-	defer s.Close()
-	s.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 8 * admissionGiB} }
-	accepted := 0
-	for i := 0; i < 16; i++ {
-		if err := s.TaskQueue.Enqueue(memoryTask(fmt.Sprint(i), 2*admissionGiB)); err == nil {
-			accepted++
+	key := paramtable.Get().DataNodeCfg.MaxVecIndexBuildConcurrency.Key
+	require.NoError(t, paramtable.Get().Save(key, "2"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	s := memoryScheduler(t, 16*admissionGiB)
+	gate, release := pipelineGate(t)
+	started := make(chan string, 3)
+	for i := range 3 {
+		task := memoryTask(fmt.Sprint(i), admissionGiB)
+		task.build = func() { started <- task.id; <-gate }
+		require.NoError(t, s.TaskQueue.Enqueue(task))
+	}
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("vector task did not start")
 		}
 	}
-	require.Equal(t, 4, accepted)
-	require.EqualValues(t, 8*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
-	for task := s.TaskQueue.PopUnissuedTask(true); task != nil; task = s.TaskQueue.PopUnissuedTask(true) {
-		s.processTask(task)
+	scalarDone := make(chan struct{})
+	scalar := &scalarPipelineTestTask{memoryTask("scalar", admissionGiB)}
+	scalar.build = func() { close(scalarDone) }
+	require.NoError(t, s.TaskQueue.Enqueue(scalar))
+	awaitPipeline(t, scalarDone)
+	select {
+	case <-started:
+		t.Fatal("third vector exceeded the retained concurrency limit")
+	default:
+	}
+	release()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("vector permit was not returned")
 	}
 }
 
-func TestMemoryAdmissionCanceledQueuedVectorDoesNotWaitForPool(t *testing.T) {
-	paramtable.Init()
-	pool := conc.NewPool[any](1)
-	defer pool.Release()
-	patch := mockey.Mock(GetVecIndexBuildPool).Return(pool).Build()
-	defer patch.UnPatch()
-	s := memoryScheduler(t, 8*admissionGiB)
-	gate, release := memoryGate(t)
-	first := memoryTask("running", 2*admissionGiB)
-	first.vector = true
-	first.execute = func(context.Context) error { <-gate; return nil }
-	require.NoError(t, s.TaskQueue.Enqueue(first))
-	awaitMemoryTask(t, first.started)
-	canceled := memoryTask("canceled-before-start", 2*admissionGiB)
-	canceled.vector = true
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	canceled.ctx = ctx
-	require.NoError(t, s.TaskQueue.Enqueue(canceled))
-	require.Eventually(t, func() bool {
-		return canceled.reset.Load() && s.TaskQueue.GetUsingResource().Memory == 2*admissionGiB
-	}, 5*time.Second, time.Millisecond)
-	select {
-	case <-canceled.started:
-		t.Fatal("canceled task prepared native work")
-	default:
+func TestMemoryAdmissionRetainsBudgetThroughCleanup(t *testing.T) {
+	for _, outcome := range []string{"success", "stats-analyze", "load-error", "build-error", "cancel", "close"} {
+		t.Run(outcome, func(t *testing.T) {
+			s := memoryScheduler(t, 8*admissionGiB)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			gate, release := pipelineGate(t)
+			cleaning := make(chan struct{})
+			task := memoryTask(outcome, 6*admissionGiB)
+			task.ctx = ctx
+			task.cleanup = func() {
+				// Releasing after Reset must use the accepted snapshot.
+				task.resource = taskcommon.Resource{}
+				close(cleaning)
+				<-gate
+			}
+			if outcome == "load-error" {
+				task.prepareErr = merr.WrapErrServiceUnavailableMsg("injected download failure")
+			}
+			if outcome == "build-error" {
+				task.buildErr = merr.WrapErrServiceUnavailableMsg("injected build failure")
+			}
+			if outcome == "cancel" || outcome == "close" {
+				attempted := make(chan struct{})
+				var once sync.Once
+				task.reserve = func() (bool, error) { once.Do(func() { close(attempted) }); return false, nil }
+				require.NoError(t, s.TaskQueue.Enqueue(task))
+				awaitPipeline(t, attempted)
+				if outcome == "cancel" {
+					cancel()
+				} else {
+					s.Close()
+				}
+			} else {
+				var submitted Task = task
+				if outcome == "stats-analyze" {
+					submitted = &nonPreparedMemoryTask{Task: &scalarPipelineTestTask{task}}
+				}
+				require.NoError(t, s.TaskQueue.Enqueue(submitted))
+			}
+			awaitPipeline(t, cleaning)
+			if outcome == "stats-analyze" {
+				_, active := s.TaskQueue.GetTaskNum()
+				require.Zero(t, active)
+			}
+			require.EqualValues(t, 6*admissionGiB, s.executionMemory())
+			require.EqualValues(t, 6*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
+			blocked := memoryTask("cannot-start", 4*admissionGiB)
+			require.False(t, s.acquireTestResources(blocked))
+			s.releaseResources(blocked)
+			release()
+			require.Eventually(t, func() bool {
+				return s.executionMemory() == 0 && s.TaskQueue.GetUsingResource().Memory == 0
+			}, 5*time.Second, time.Millisecond)
+		})
 	}
-	require.Equal(t, indexpb.JobState_JobStateRetry, indexpb.JobState(canceled.state.Load()))
-	release()
-	s.Close()
+}
+
+func TestMemoryQueueConcurrentAdmission(t *testing.T) {
+	paramtable.Init()
+	s := newTestTaskScheduler(context.Background())
+	s.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 8 * admissionGiB} }
+	t.Cleanup(s.Close)
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.TaskQueue.Enqueue(memoryTask(fmt.Sprint(i), 2*admissionGiB)); err == nil {
+				accepted.Add(1)
+			} else {
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			}
+		}()
+	}
+	wg.Wait()
+	require.EqualValues(t, 4, accepted.Load())
+	require.EqualValues(t, 8*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
+	for task := s.TaskQueue.PopUnissuedTask(true); task != nil; task = s.TaskQueue.PopUnissuedTask(true) {
+		s.finishTask(s.beginTask(task), nil)
+	}
+	require.Zero(t, s.executionMemory())
+}
+
+func TestMemoryAdmissionSameNameExecutionsOwnSeparateReservations(t *testing.T) {
+	for _, newerFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(newerFirst), func(t *testing.T) {
+			paramtable.Init()
+			s := newTestTaskScheduler(context.Background())
+			s.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 8 * admissionGiB} }
+			t.Cleanup(s.Close)
+			older := memoryTask("same-name", 3*admissionGiB)
+			newer := memoryTask("same-name", 3*admissionGiB)
+			start := func(task Task) *taskExecution {
+				require.NoError(t, s.TaskQueue.Enqueue(task))
+				require.Same(t, task, s.TaskQueue.PopUnissuedTask(true))
+				return s.beginTask(task)
+			}
+			first, second := start(older), start(newer)
+			if newerFirst {
+				first, second = second, first
+			}
+			require.EqualValues(t, 6*admissionGiB, s.executionMemory())
+			s.finishTask(first, nil)
+			require.EqualValues(t, 3*admissionGiB, s.executionMemory())
+			require.EqualValues(t, 3*admissionGiB, s.TaskQueue.GetUsingResource().Memory)
+			s.finishTask(second, nil)
+			require.Zero(t, s.executionMemory())
+			require.Zero(t, s.TaskQueue.GetUsingResource().Memory)
+			require.Empty(t, s.pendingTasks)
+		})
+	}
 }
 
 func TestMemoryAdmissionReadsCapacityOncePerScan(t *testing.T) {
@@ -265,7 +299,7 @@ func TestMemoryAdmissionReadsCapacityOncePerScan(t *testing.T) {
 		reads++
 		return taskcommon.Resource{Memory: 8 * admissionGiB}
 	}
-	newScalar := func(id string, size int64) Task { return memoryTask(id, size) }
+	newScalar := func(id string, size int64) Task { return &scalarPipelineTestTask{memoryTask(id, size)} }
 	running := newScalar("running", 7*admissionGiB)
 	require.NoError(t, s.TaskQueue.Enqueue(running))
 	require.Same(t, running, s.TaskQueue.PopUnissuedTask(true))
@@ -286,7 +320,7 @@ func (s *TaskScheduler) acquireTestResources(task Task) bool {
 	s.resourceMu.Lock()
 	if _, ok := s.executions[task]; !ok {
 		resource := task.GetResource()
-		s.executions[task] = &taskExecution{resource: resource, slots: max(task.GetSlot(), 0)}
+		s.executions[task] = &taskExecution{task: task, resource: resource, slots: max(task.GetSlot(), 0)}
 	}
 	defer s.resourceMu.Unlock()
 	return s.acquireResourcesLocked(task, s.availableExecutionMemoryLocked())

@@ -59,9 +59,14 @@ class LoonFFIPropertiesSingleton {
         std::unique_lock lck(mutex_);
 
         if (properties_ == nullptr) {
-            properties_ =
+            if (c_storage_config.crt_queue_sizes > 0) {
+                std::unique_lock cfg_lck(config_mutex_);
+                s3_crt_queue_sizes_ = c_storage_config.crt_queue_sizes;
+            }
+            auto properties =
                 MakeInternalPropertiesFromStorageConfig(c_storage_config);
-            ApplyArrowReaderConfig(*properties_);
+            ApplyArrowReaderConfig(*properties);
+            properties_ = std::move(properties);
         }
     }
 
@@ -92,6 +97,19 @@ class LoonFFIPropertiesSingleton {
     GetProperties() const {
         std::shared_lock lck(mutex_);
         return properties_;
+    }
+
+    void
+    SetS3CrtQueueSizes(uint32_t crt_queue_sizes) {
+        std::unique_lock cfg_lck(config_mutex_);
+        s3_crt_queue_sizes_ = crt_queue_sizes;
+    }
+
+    // Job messages do not carry node-local CRT resource tuning.
+    uint32_t
+    GetS3CrtQueueSizes() const {
+        std::shared_lock cfg_lck(config_mutex_);
+        return s3_crt_queue_sizes_;
     }
 
     void
@@ -174,6 +192,7 @@ class LoonFFIPropertiesSingleton {
     // while mutex_ is held; see ApplyArrowReaderConfig.
     mutable std::shared_mutex config_mutex_;
     ArrowReaderLimits arrow_reader_limits_{};
+    uint32_t s3_crt_queue_sizes_ = 125;
     ExternalIopsConfig external_iops_config_{};
     std::atomic<int64_t> index_build_read_window_bytes_{0};
 };

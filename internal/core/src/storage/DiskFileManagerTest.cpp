@@ -1697,21 +1697,21 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
                 std::string local_data_path;
                 if (vec_type.data_type == DataType::VECTOR_FLOAT) {
                     local_data_path =
-                        file_manager->CacheRawDataToDisk<float>(config);
+                        file_manager->CacheRawDataToDisk<float>(config).path;
                 } else if (vec_type.data_type == DataType::VECTOR_INT8) {
                     local_data_path =
-                        file_manager->CacheRawDataToDisk<int8_t>(config);
+                        file_manager->CacheRawDataToDisk<int8_t>(config).path;
                 } else if (vec_type.data_type == DataType::VECTOR_FLOAT16) {
                     local_data_path =
-                        file_manager->CacheRawDataToDisk<knowhere::fp16>(
-                            config);
+                        file_manager->CacheRawDataToDisk<knowhere::fp16>(config)
+                            .path;
                 } else if (vec_type.data_type == DataType::VECTOR_BFLOAT16) {
                     local_data_path =
-                        file_manager->CacheRawDataToDisk<knowhere::bf16>(
-                            config);
+                        file_manager->CacheRawDataToDisk<knowhere::bf16>(config)
+                            .path;
                 } else if (vec_type.data_type == DataType::VECTOR_BINARY) {
                     local_data_path =
-                        file_manager->CacheRawDataToDisk<uint8_t>(config);
+                        file_manager->CacheRawDataToDisk<uint8_t>(config).path;
                 }
 
                 ASSERT_FALSE(local_data_path.empty())
@@ -2108,7 +2108,8 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[index::VALID_DATA_PATH_KEY] = valid_data_path;
 
-    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    auto cached_data = file_manager->CacheRawDataToDisk<float>(config);
+    const auto& local_data_path = cached_data.path;
     ASSERT_FALSE(local_data_path.empty());
 
     auto local_chunk_manager =
@@ -2127,6 +2128,11 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     std::vector<uint8_t> read_bitmap(bitmap_size);
     local_chunk_manager->Read(
         valid_data_path, sizeof(uint64_t), read_bitmap.data(), bitmap_size);
+
+    EXPECT_EQ(cached_data.rows, valid_count);
+    EXPECT_EQ(cached_data.dim, dim);
+    EXPECT_EQ(cached_data.valid_data_count, read_total_num_rows);
+    EXPECT_EQ(cached_data.validity, read_bitmap);
 
     // Verify bitmap content
     for (int64_t i = 0; i < num_rows; ++i) {
@@ -2768,8 +2774,11 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[index::VALID_DATA_PATH_KEY] = valid_data_path;
 
-    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    auto cached_data = file_manager->CacheRawDataToDisk<float>(config);
+    const auto& local_data_path = cached_data.path;
     ASSERT_FALSE(local_data_path.empty());
+    EXPECT_EQ(cached_data.valid_data_count, 0);
+    EXPECT_TRUE(cached_data.validity.empty());
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();

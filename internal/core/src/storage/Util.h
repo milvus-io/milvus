@@ -371,6 +371,12 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
 
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
+
 void
 IterateFieldDataFromManifest(
     const std::string& manifest_path,

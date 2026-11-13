@@ -285,9 +285,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
 }
 
 CStatus
-CreateIndex(CIndex* res_index,
-            const uint8_t* serialized_build_index_info,
-            const uint64_t len) {
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -375,8 +375,6 @@ CreateIndex(CIndex* res_index,
                 field_type, config, fileManagerContext);
         LOG_INFO("create index instance success, build_id: {}",
                  build_index_info->buildid());
-        index->Build();
-        LOG_INFO("build index done, build_id: {}", build_index_info->buildid());
         *res_index = index.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -397,6 +395,64 @@ CreateIndex(CIndex* res_index,
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    }
+}
+
+CStatus
+CreateIndex(CIndex* res_index, const uint8_t* data, const uint64_t len) {
+    auto status = CreateIndexBuilder(res_index, data, len);
+    if (status.error_code != Success) {
+        return status;
+    }
+    status = LoadIndexData(*res_index);
+    if (status.error_code == Success) {
+        status = BuildIndex(*res_index);
+    }
+    if (status.error_code != Success) {
+        delete static_cast<milvus::indexbuilder::IndexCreatorBase*>(*res_index);
+        *res_index = nullptr;
+    }
+    return status;
+}
+
+CStatus
+LoadIndexData(CIndex index) {
+    try {
+        static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)->LoadData();
+        return CStatus{Success, ""};
+    } catch (const SegcoreError& e) {
+        return CStatus{e.get_error_code(), strdup(e.what())};
+    } catch (const std::exception& e) {
+        return CStatus{UnexpectedError, strdup(e.what())};
+    }
+}
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted) {
+    try {
+        *admitted = static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)
+                        ->TryReserveBuild();
+        return CStatus{Success, ""};
+    } catch (const SegcoreError& e) {
+        return CStatus{e.get_error_code(), strdup(e.what())};
+    } catch (const std::exception& e) {
+        return CStatus{UnexpectedError, strdup(e.what())};
+    }
+}
+
+CStatus
+BuildIndex(CIndex index) {
+    try {
+        auto* builder =
+            static_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        AssertInfo(builder != nullptr && builder->InputPrepared(),
+                   "index build requires prepared input");
+        builder->Build();
+        return CStatus{Success, ""};
+    } catch (const SegcoreError& e) {
+        return CStatus{e.get_error_code(), strdup(e.what())};
+    } catch (const std::exception& e) {
+        return CStatus{UnexpectedError, strdup(e.what())};
     }
 }
 

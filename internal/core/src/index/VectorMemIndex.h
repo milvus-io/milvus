@@ -80,6 +80,12 @@ class VectorMemIndex : public VectorIndex {
     Build(const Config& config = {}) override;
 
     void
+    Prepare(const Config& config) override;
+
+    bool
+    TryReserveBuild(const Config& config) override;
+
+    void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) override;
 
     int64_t
@@ -158,6 +164,8 @@ class VectorMemIndex : public VectorIndex {
 
  protected:
     Config config_;
+    storage::FileManagerContext build_context_;
+    std::unique_ptr<PreparedVectorInput> build_input_;
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     // used for embedding list only

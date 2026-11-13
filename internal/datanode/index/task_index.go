@@ -53,12 +53,13 @@ type indexBuildTask struct {
 	ctx    context.Context
 
 	cm             storage.ChunkManager
-	index          indexcgowrapper.CodecIndex
+	index          indexcgowrapper.PreparedIndex
 	req            *workerpb.CreateJobRequest
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
+	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
 	resource       taskcommon.Resource
 
@@ -101,26 +102,14 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
-	// Reset runs from processTask's deferred cleanup on every exit path, including
-	// the canceled one where PostExecute -- the only other place that releases the
-	// index -- is skipped. Without this the native index built by Execute is never
-	// freed. Delete is idempotent, so releasing here after a normal PostExecute is
-	// a no-op.
+	// Keep task identity and result bookkeeping alive until the scheduler has
+	// published the final state and returned its slot reservation.
 	if it.index != nil {
 		if err := it.index.Delete(); err != nil {
 			mlog.Warn(it.ctx, "failed to release index object on task reset", mlog.Err(err))
 		}
 	}
-	it.ident = ""
-	it.cancel = nil
-	it.ctx = nil
-	it.cm = nil
 	it.index = nil
-	it.req = nil
-	it.newTypeParams = nil
-	it.newIndexParams = nil
-	it.tr = nil
-	it.manager = nil
 }
 
 // Ctx is the context of index tasks.
@@ -161,6 +150,7 @@ func (it *indexBuildTask) GetState() indexpb.JobState {
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.queueDur = 0
+	it.prepareDur = 0
 	it.tr.RecordSpan()
 	mlog.Info(ctx, "IndexBuilderTask Enqueue", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.FieldSegmentID(it.req.GetSegmentID()))
@@ -181,6 +171,7 @@ func (it *indexBuildTask) IsVectorIndex() bool {
 }
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
+	started := time.Now()
 	it.queueDur = it.tr.RecordSpan()
 	mlog.Info(ctx, "Begin to prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.Int64("Collection", it.req.GetCollectionID()), mlog.Int64("SegmentID", it.req.GetSegmentID()))
@@ -254,6 +245,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		mlog.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		mlog.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
 	)
+	it.prepareDur = time.Since(started)
 	return nil
 }
 
@@ -276,7 +268,24 @@ func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb
 	return redacted
 }
 
-func (it *indexBuildTask) Execute(ctx context.Context) error {
+func (it *indexBuildTask) LoadData(ctx context.Context) error {
+	started := time.Now()
+	if it.index == nil {
+		if err := it.createBuilder(ctx); err != nil {
+			return err
+		}
+	}
+	if err := it.index.LoadData(); err != nil {
+		return err
+	}
+	loadDuration := time.Since(started)
+	it.prepareDur += loadDuration
+	mlog.Info(ctx, "Successfully load index data", mlog.FieldBuildID(it.req.GetBuildID()), mlog.Duration("duration", loadDuration))
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
 		mlog.FieldBuildID(it.req.GetBuildID()),
@@ -388,20 +397,31 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	var err error
-	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
+	it.index, err = indexcgowrapper.CreateIndexBuilder(ctx, buildIndexParams)
 	if err != nil {
-		if it.index != nil && it.index.CleanLocalData() != nil {
-			log.Warn(ctx, "failed to clean cached data on disk after build index failed")
-		}
-		log.Warn(ctx, "failed to build index", mlog.Err(err))
 		return err
 	}
-
-	buildIndexLatency := it.tr.RecordSpan()
-	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
-
-	log.Info(ctx, "Successfully build index")
 	return nil
+}
+
+func (it *indexBuildTask) Execute(ctx context.Context) error {
+	if it.index == nil {
+		return merr.WrapErrServiceInternalMsg("index input has not been prepared")
+	}
+	started := time.Now()
+	if err := it.index.BuildPrepared(); err != nil {
+		return err
+	}
+	buildDuration := time.Since(started)
+	buildIndexLatency := it.prepareDur + buildDuration
+	mlog.Info(ctx, "Successfully build index", mlog.FieldBuildID(it.req.GetBuildID()), mlog.Duration("duration", buildDuration))
+	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) TryReserveBuild() (bool, error) {
+	return it.index.TryReserveBuild()
 }
 
 func (it *indexBuildTask) PostExecute(ctx context.Context) error {

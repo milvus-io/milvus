@@ -33,6 +33,9 @@ class RemoteOutputStream : public milvus::OutputStream {
     Write(const void* data, size_t size) override;
 
     size_t
+    Write(const std::shared_ptr<arrow::Buffer>& buffer);
+
+    size_t
     Write(int fd, size_t size) override;
 
     void
