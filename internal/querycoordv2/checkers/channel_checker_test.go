@@ -454,3 +454,14 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannelsSpreadAcrossSQNodes() {
 		suite.Equal(channelNum/len(sqNodes), cnt, "node %d got %d channels, distribution %v", node, cnt, perNode)
 	}
 }
+
+// An unsubscribe is planned against the delegator the distribution reported, so
+// QueryNode can keep one watched afterwards.
+func (suite *ChannelCheckerTestSuite) TestReduceTasksCarryCopyVersion() {
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	channel := utils.CreateTestChannel(1, 1, 9, "test-insert-channel")
+	tasks := suite.checker.createChannelReduceTasks(context.Background(), []*meta.DmChannel{channel}, replica)
+	suite.Require().Len(tasks, 1)
+	defer tasks[0].Cancel(nil)
+	suite.Equal(int64(9), tasks[0].Actions()[0].(*task.ChannelAction).CopyVersion())
+}

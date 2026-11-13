@@ -218,9 +218,19 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 
 	existing, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
-		// Replica reassignment does not require rebuilding a channel subscription.
-		// Only advance its generation and preserve live data and the query view;
-		// QueryCoord reconciles worker routes and target partitions separately.
+		// A delegator routes to the workers of the replica it was created for,
+		// so it must not serve another one. QueryCoord removes such a leftover
+		// before the node's replica watches the channel again.
+		if existing.ReplicaID() != req.GetReplicaID() {
+			err := merr.WrapErrChannelReduplicate(channel.GetChannelName(),
+				fmt.Sprintf("subscribed by replica %d", existing.ReplicaID()))
+			log.Warn(ctx, "reject watch from another replica",
+				mlog.Int64("existingReplicaID", existing.ReplicaID()), mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		// Within the replica, only advance the generation and preserve live data
+		// and the query view; QueryCoord reconciles worker routes and target
+		// partitions separately.
 		if existing.UpdateVersion(req.GetVersion()) {
 			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
 		}
@@ -397,6 +407,14 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		return merr.Status(err), nil
 	}
 
+	// Every delegator creation and version change runs under this channel gate,
+	// so the version read here cannot change before the delegator is removed.
+	if existing, ok := node.delegators.Get(req.GetChannelName()); ok && req.GetVersion() > 0 && existing.Version() > req.GetVersion() {
+		err := merr.WrapErrChannelReduplicate(req.GetChannelName(), "a newer delegator was watched after this unsubscribe was planned")
+		log.Warn(ctx, "keep newer delegator", mlog.Int64("version", req.GetVersion()),
+			mlog.Int64("delegatorVersion", existing.Version()), mlog.Err(err))
+		return merr.Status(err), nil
+	}
 	if err := node.unsubscribeChannelLocked(ctx, req.GetCollectionID(), req.GetChannelName()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -1471,6 +1489,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			Channel:    key,
 			Collection: shardDelegator.Collection(),
 			Version:    shardDelegator.Version(),
+			ReplicaID:  shardDelegator.ReplicaID(),
 		})
 
 		sealed, growing := shardDelegator.GetSegmentInfo(false)
