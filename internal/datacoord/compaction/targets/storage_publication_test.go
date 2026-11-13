@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -98,6 +99,8 @@ func TestStorageStandingReconcilesRealMixOutput(t *testing.T) {
 			manager := NewLoadedCompactionTargetMeta(t, ctx)
 			alloc := meta.NewMockAllocator(t)
 			versionManager := index.NewMockVersionManager(t)
+			absent := index.IndexVersionCondition{Mode: index.IndexVersionAbsent}
+			versionManager.EXPECT().ResolveIndexVersionConditions(mock.Anything).Return(absent, absent).Maybe()
 			versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0")).Maybe()
 			versionManager.EXPECT().ResolveScalarIndexVersion().Return(0).Once()
 			handler := meta.NewMockHandlerWithMeta(mt)

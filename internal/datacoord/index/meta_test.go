@@ -1491,6 +1491,33 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 }
 
+func TestMatchMaterializedIndexVersionsAfterPublication(t *testing.T) {
+	m := updateSegmentIndexMeta(t)
+	vector := IndexVersionCondition{Mode: IndexVersionAbsent}
+	scalar := IndexVersionCondition{Mode: IndexVersionAtLeast, Version: 2}
+	candidates := []int64{meta.SegID}
+	matching, err := m.MatchMaterializedIndexVersions(t.Context(), meta.CollID, candidates, vector, scalar)
+	require.NoError(t, err)
+	require.Empty(t, matching)
+
+	publish := func(version int32) {
+		t.Helper()
+		require.NoError(t, m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: meta.BuildID, State: commonpb.IndexState_Finished,
+			IndexFileKeys: []string{"index"}, CurrentScalarIndexVersion: version,
+		}))
+	}
+	publish(1)
+	matching, err = m.MatchMaterializedIndexVersions(t.Context(), meta.CollID, candidates, vector, scalar)
+	require.NoError(t, err)
+	require.Equal(t, candidates, matching)
+
+	publish(2)
+	matching, err = m.MatchMaterializedIndexVersions(t.Context(), meta.CollID, candidates, vector, scalar)
+	require.NoError(t, err)
+	require.Empty(t, matching)
+}
+
 func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 	setup := func(t *testing.T, requested indexpb.IndexStorePathVersion, indexFileKeys []string) *IndexMeta {
 		t.Helper()

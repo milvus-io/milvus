@@ -3764,3 +3764,62 @@ func TestHasTooManyDeletions(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyCompactionTriggerHandsOffAutomaticMix(t *testing.T) {
+	paramtable.Init()
+	cfg := &Params.DataCoordCfg
+	for key, value := range map[string]string{
+		cfg.EnableAutoCompaction.Key:           "true",
+		cfg.IndexBasedCompaction.Key:           "false",
+		cfg.TwoTierCompaction.Key:              "true",
+		cfg.AutoUpgradeSegmentIndex.Key:        "false",
+		cfg.ForceRebuildSegmentIndex.Key:       "true",
+		cfg.ForceRebuildScalarSegmentIndex.Key: "false",
+		cfg.TargetVecIndexVersion.Key:          "2",
+		cfg.SingleCompactionRatioThreshold.Key: "0.2",
+	} {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+	const collectionID, staleID, deletedID, indexID int64 = 1, 10, 20, 30
+	mt := meta.NewTestMetaForCompactionTargets()
+	mt.AddCollection(&meta.CollectionInfo{ID: collectionID, Schema: meta.NewTestSchema()})
+	stale := &datapb.SegmentInfo{
+		ID: staleID, CollectionID: collectionID, PartitionID: 1, InsertChannel: "ch", NumOfRows: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsSorted: true,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 10}}}},
+	}
+	deletes := &datapb.SegmentInfo{
+		ID: deletedID, CollectionID: collectionID, PartitionID: 1, InsertChannel: "ch", NumOfRows: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsSorted: true,
+		Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 10}}}},
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 5, MemorySize: 5}}}},
+	}
+	mt.Segments.SetSegment(staleID, meta.NewSegmentInfo(stale))
+	mt.Segments.SetSegment(deletedID, meta.NewSegmentInfo(deletes))
+	indexes := index.NewTestIndexMeta(collectionID, staleID, indexID, "HNSW", &model.SegmentIndex{
+		CollectionID: collectionID, SegmentID: staleID, IndexID: indexID,
+		CurrentIndexVersion: 1, IndexFileKeys: []string{"stale"},
+	})
+	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 2), meta: mt}
+	trigger := NewCompactionTrigger(mt, indexes, inspector, newMock0Allocator(t), meta.NewMockHandlerWithMeta(mt), index.NewIndexEngineVersionManager())
+	trigger.Start()
+	t.Cleanup(trigger.Stop)
+	runSignal := func(force bool) []int64 {
+		t.Helper()
+		_, err := trigger.TriggerCompaction(t.Context(), NewCompactionSignal().WithCollectionID(collectionID).WithIsForce(force))
+		require.NoError(t, err)
+		var inputs []int64
+		for len(inspector.spyChan) > 0 {
+			plan := <-inspector.spyChan
+			for _, segment := range plan.GetSegmentBinlogs() {
+				inputs = append(inputs, segment.GetSegmentID())
+			}
+		}
+		return inputs
+	}
+	require.ElementsMatch(t, []int64{staleID, deletedID}, runSignal(false))
+	trigger.SetStandingMix(true)
+	require.Empty(t, runSignal(false))
+	require.ElementsMatch(t, []int64{staleID, deletedID}, runSignal(true))
+}

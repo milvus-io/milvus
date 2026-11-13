@@ -76,6 +76,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	schemaUpdates := reconciler.selectableSchemaUpdates(ctx, auto, segments)
 	eligible := make(map[int64]collectionPlanningFacts)
 	standingRewrites := reconciler.selectableStorageRewrites(ctx, auto, segments)
+	standingRewrites = append(standingRewrites, reconciler.selectableIndexRewrites(ctx, auto, segments)...)
 	standingRewrites = append(standingRewrites, reconciler.selectableCleanupRewrites(ctx, auto, segments, eligible)...)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)

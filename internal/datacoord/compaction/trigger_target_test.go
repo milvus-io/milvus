@@ -119,6 +119,8 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(115), nil).Once()
 	alloc.EXPECT().AllocID(mock.Anything).Return(206, nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(116), nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(207, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(117), nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(120), nil).Once()
 	alloc.EXPECT().AllocN(int64(3)).Return(10_000, 10_003, nil).Once()
 

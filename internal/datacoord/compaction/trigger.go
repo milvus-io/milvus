@@ -331,6 +331,9 @@ func (t *compactionTrigger) allocSignalID(ctx context.Context) (UniqueID, error)
 
 // handleSignal is the internal logic to convert compactionSignal into compaction tasks.
 func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
+	if t.standingMix && !signal.isForce {
+		return nil
+	}
 	ctx := signal.ctx
 	if ctx == nil {
 		ctx = context.TODO()

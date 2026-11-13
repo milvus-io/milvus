@@ -309,6 +309,10 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingSort(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
 		observation, err := targets.ObserveSort(ctx, s.meta, s.handler)
 		rows, observed, observationErr = observation.Rows, true, err
+	case record.GetIntent() == datapb.TargetIntent_INTENT_INDEX_VERSION && targets.HasStandingCondition(record) &&
+		record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		rows, observationErr = targets.ObserveIndexVersion(ctx, s.meta, s.indexMeta, s.handler, record)
+		observed = true
 	case targets.IsStandingStorage(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
 		rows, observationErr = targets.ObserveStorage(ctx, s.meta, s.handler, record)
 		observed = true
