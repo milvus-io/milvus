@@ -567,6 +567,10 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 			mlog.String("channel", channel),
 			mlog.FieldNodeID(nodeID))
 
+		// Let the delegator select a snapshot after satisfying the consistency
+		// guarantee, as for ordinary queries. Pinning dr.ts also bypasses the
+		// local WAL optimization for Strong reads. The subsequent deletes
+		// receive their own WAL timestamps, not this query timestamp.
 		queryReq := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
 				Base: commonpbutil.NewMsgBase(
@@ -575,7 +579,6 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					commonpbutil.WithTargetID(nodeID),
 				),
-				MvccTimestamp:      dr.ts,
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
@@ -584,6 +587,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				ConsistencyLevel:   dr.req.GetConsistencyLevel(),
 				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
