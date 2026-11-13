@@ -299,7 +299,7 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 		}
 
 		for _, segment := range group.Segments {
-			if HasTooManyDeletions(segment) {
+			if HasTooManyDeletions(ctx, segment) {
 				segmentViews := view.GetViewsByInfo(segment)
 				cv := &MixSegmentView{
 					Label:         segmentViews[0].Label,

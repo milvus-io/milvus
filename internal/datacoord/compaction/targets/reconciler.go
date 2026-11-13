@@ -68,8 +68,10 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	auto := paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool()
 	segments := standingSegments(ctx, reconciler.meta)
 	schemaUpdates := reconciler.selectableSchemaUpdates(ctx, auto, segments)
+	eligible := make(map[int64]collectionPlanningFacts)
 	standingRewrites := reconciler.selectableStorageRewrites(ctx, auto, segments)
 	standingRewrites = append(standingRewrites, reconciler.selectableIndexRewrites(ctx, auto, segments)...)
+	standingRewrites = append(standingRewrites, reconciler.selectableCleanupRewrites(ctx, auto, segments, eligible)...)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
@@ -103,7 +105,6 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 
 	// Pick the physical path for each segment before constructing any View.
 	// An independently selectable SORT takes precedence over a matching REWRITE.
-	eligible := make(map[int64]collectionPlanningFacts)
 	sortSelectable := make([]*meta.SegmentInfo, 0, len(sortMatches))
 	allocated := make(map[int64]struct{}, len(sortMatches))
 	for _, segment := range sortMatches {

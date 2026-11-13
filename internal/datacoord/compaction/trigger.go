@@ -788,7 +788,7 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *view
 		expireTime, _ := tsoutil.ParseTS(compactTime.ExpireTime)
 		earliestTolerance := expireTime.Add(-tolerantDuration)
 		earliestFromTime, _ := tsoutil.ParseTS(fromTs)
-		if earliestFromTime.Before(earliestTolerance) {
+		if policy.IsStrictlyExpired(fromTs, earliestTolerance) {
 			mlog.Info(context.TODO(), "Trigger strict expiry compaction for segment",
 				mlog.FieldSegmentID(segment.GetID()),
 				mlog.FieldCollectionID(segment.GetCollectionID()),
@@ -804,37 +804,9 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *view
 	return false
 }
 
-func getExpirQuantilesIndexByRatio(ratio float64, percentilesLen int) int {
-	// expirQuantiles is [20%, 40%, 60%, 80%, 100%] (len = 5).
-	// We map ratio to the nearest lower 20% bucket:
-	// 0~0.39 -> 20%, 0.4~0.59 -> 40%, 0.6~0.79 -> 60%, 0.8~0.99 -> 80%, >=1.0 -> 100%
-	if percentilesLen <= 0 {
-		return 0
-	}
-	step := 0.2
-	idx := int((ratio+0.01)/step) - 1 // add 0.01 to avoid rounding error
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= percentilesLen {
-		idx = percentilesLen - 1
-	}
-	return idx
-}
-
 func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *view.CompactTime, segment *meta.SegmentInfo) bool {
-	percentiles := segment.GetExpirQuantiles()
-	if len(percentiles) == 0 {
-		return false
-	}
-
-	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
-
-	idx := getExpirQuantilesIndexByRatio(ratio, len(percentiles))
-	expirationTime := percentiles[idx]
-	// If current time (startTime) is greater than the expiration time at this percentile, trigger compaction
-	startTs := tsoutil.PhysicalTime(compactTime.StartTime)
-	return startTs.UnixMicro() >= expirationTime && expirationTime > 0
+	return policy.IsTTLFieldExpired(segment.GetExpirQuantiles(), tsoutil.PhysicalTime(compactTime.StartTime),
+		Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat())
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, compactTime *view.CompactTime) bool {
@@ -850,42 +822,9 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 		return true
 	}
 
-	// Ratio + size path: derive an expired-row fraction from the quantile
-	// distribution (20%-bucket granularity). Approximate; the strict-
-	// tolerance check above covers the precise edges.
-	//
-	// We deliberately UNDER-estimate. Q[i] < expireTime guarantees
-	// percentiles[i] of rows are expired; that fraction times
-	// InsertBinlogSize is the byte estimate under a uniform-per-row-size
-	// assumption that does NOT hold when expired binlogs are smaller than
-	// the segment-wide average. To prevent over-triggering on segments
-	// whose precise expired-byte sum sits exactly at threshold, we shift
-	// the fraction down one 20% bucket.
-	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
-	expiredFraction := 0.0
-	if commitTs > 0 {
-		if commitTs < compactTime.ExpireTime {
-			expiredFraction = 1.0
-		}
-	} else {
-		// Quantile i covers fraction (i+1)/len(quantiles) of rows. Count the
-		// prefix of quantiles older than the expiration horizon, then shift
-		// down one bucket (the deliberate under-estimate described above).
-		quantiles := stats.GetTimestampQuantiles()
-		qualifying := 0
-		for _, q := range quantiles {
-			if q <= 0 || uint64(q) >= compactTime.ExpireTime {
-				break
-			}
-			qualifying++
-		}
-		if qualifying >= 2 {
-			expiredFraction = float64(qualifying-1) / float64(len(quantiles))
-		}
-	}
-	expiredApproxSize := int64(expiredFraction * float64(stats.GetInsertBinlogSize()))
-	if expiredFraction >= ratio ||
-		expiredApproxSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
+	exceedsThreshold, expiredFraction, expiredApproxSize := policy.ExpiredRowsExceedThreshold(stats, commitTs, compactTime.ExpireTime,
+		Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat(), Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64())
+	if exceedsThreshold {
 		mlog.Info(context.TODO(), "expired entities exceed ratio/size threshold, trigger compaction",
 			mlog.Int64("segmentID", segment.ID),
 			mlog.Float64("expiredFraction", expiredFraction),
@@ -896,7 +835,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 	}
 
 	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
-	if policy.HasTooManyDeletions(segment) {
+	if policy.HasTooManyDeletions(t.meta.Ctx, segment) {
 		return true
 	}
 
