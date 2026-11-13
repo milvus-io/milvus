@@ -14575,7 +14575,7 @@
           "datasource": {
             "uid": "${datasource}"
           },
-          "description": "Process OS thread count and approximate active named C++ thread groups.",
+          "description": "OS thread count and approximate active threads by pool: CPU advanced since the prior sample, or state R/D at sampling. D includes uninterruptible I/O waits; this is not CPU cores.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -15608,6 +15608,187 @@
             },
             {
               "$$hashKey": "object:421",
+              "format": "short",
+              "logBase": 1,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": {
+            "uid": "${datasource}"
+          },
+          "description": "Sampled CPU by pool and mode (user/system), every 5 seconds. User includes niced threads. 1 means one CPU core on average. Initial historic CPU is excluded; short-lived threads and exit tails may be missed.",
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 75
+          },
+          "hiddenSeries": false,
+          "id": 123550,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "10.2.0",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "exemplar": true,
+              "expr": "sum by (pod, thread_pool, cpu_mode) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{pod}} {{thread_pool}} {{cpu_mode}}",
+              "queryType": "randomWalk",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeRegions": [],
+          "title": "Thread Pool CPU Cores",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "mode": "time",
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "logBase": 1,
+              "min": 0,
+              "show": true,
+              "label": "CPU cores"
+            },
+            {
+              "format": "short",
+              "logBase": 1,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": {
+            "uid": "${datasource}"
+          },
+          "description": "Compare sampled CPU (including unclassified) with process CPU over the same Grafana rate interval. These are not synchronized snapshots; failures can cause catch-up spikes. A gap is not assigned to a guessed pool. Configure the Prometheus data source scrape interval to match actual scraping.",
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 75
+          },
+          "hiddenSeries": false,
+          "id": 123551,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "10.2.0",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "exemplar": true,
+              "expr": "sum by (pod) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "sampled {{pod}}",
+              "queryType": "randomWalk",
+              "refId": "A"
+            },
+            {
+              "exemplar": true,
+              "expr": "sum by (pod) (rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "process {{pod}}",
+              "queryType": "randomWalk",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeRegions": [],
+          "title": "Thread CPU Coverage",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "mode": "time",
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "logBase": 1,
+              "min": 0,
+              "show": true,
+              "label": "CPU cores"
+            },
+            {
               "format": "short",
               "logBase": 1,
               "show": true

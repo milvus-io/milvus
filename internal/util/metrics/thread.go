@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,32 +28,44 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
+	"github.com/tklauser/go-sysconf"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // theadWatcher is the utility to update milvus process thread number metrics.
 // the os thread number metrics is not accurate since it only returns thread number used by golang "normal" runtime
 // and the crucial threads number in cpp side is not included.
 type threadWatcher struct {
-	startOnce sync.Once
-	stopOnce  sync.Once
-	wg        sync.WaitGroup
-	ch        chan struct{}
-	samples   map[int32]threadSample
+	startOnce  sync.Once
+	stopOnce   sync.Once
+	wg         sync.WaitGroup
+	ch         chan struct{}
+	samples    map[int32]threadSample
+	clockTicks float64
+	scanStart  uint64
+}
+
+type threadCPU struct {
+	user   uint64
+	system uint64
 }
 
 type threadSample struct {
-	group string
-	cpu   uint64
+	group     string
+	cpu       threadCPU
+	startTime uint64
 }
 
 type threadStat struct {
-	tid   int32
-	name  string
-	state byte
-	cpu   uint64
+	tid        int32
+	name       string
+	state      byte
+	cpu        threadCPU
+	startTime  uint64
+	unreadable bool
 }
 
 var threadNameGroupRules = []struct {
@@ -65,7 +78,13 @@ var threadNameGroupRules = []struct {
 	{prefix: "rocksdb:high", group: "rocksdb_high"},
 	{prefix: "rocksdb:low", group: "rocksdb_low"},
 	{prefix: "rocksdb:bottom", group: "rocksdb_bottom"},
+	{prefix: "AwsEventLoop", group: "aws_crt_event_loop"},
+	{prefix: "AwsHostResolver", group: "aws_crt_resolver"},
+	{prefix: "EvntLoopCleanup", group: "aws_crt_cleanup"},
 	{prefix: "MILVUS_FL_WR", group: "file_write"},
+	{prefix: "MILVUS_LF_IO", group: "local_file_io"},
+	{prefix: "MILVUS_ASYNC_LO", group: "async_load"},
+	{prefix: "MILVUS_PREFETCH", group: "prefetch"},
 	{prefix: "MILVUS_SEARCH", group: "milvus_search"},
 	{prefix: "MILVUS_LOAD", group: "milvus_load"},
 	{prefix: "HIGH_SEGC_POOL", group: "segcore_high"},
@@ -83,9 +102,19 @@ const (
 )
 
 func NewThreadWatcher() *threadWatcher {
+	var clockTicks int64
+	if runtime.GOOS == "linux" {
+		var err error
+		clockTicks, err = sysconf.Sysconf(sysconf.SC_CLK_TCK)
+		if err != nil || clockTicks <= 0 {
+			mlog.Warn(context.TODO(), "thread watcher cannot obtain clock frequency; CPU counters disabled", mlog.Err(err))
+			clockTicks = 0
+		}
+	}
 	return &threadWatcher{
-		ch:      make(chan struct{}),
-		samples: make(map[int32]threadSample),
+		clockTicks: float64(clockTicks),
+		ch:         make(chan struct{}),
+		samples:    make(map[int32]threadSample),
 	}
 }
 
@@ -118,7 +147,7 @@ func (thw *threadWatcher) watchThreadNum() {
 			}
 			mlog.Debug(context.TODO(), "thread watcher observe thread num", mlog.Int32("threadNum", threadNum))
 			metrics.ThreadNum.Set(float64(threadNum))
-			thw.updateNamedThreadCPUActiveNum()
+			thw.updateNamedThreadMetrics()
 		case <-thw.ch:
 			mlog.Info(context.TODO(), "thread watcher exit")
 			return
@@ -126,57 +155,102 @@ func (thw *threadWatcher) watchThreadNum() {
 	}
 }
 
-func (thw *threadWatcher) updateNamedThreadCPUActiveNum() {
+func (thw *threadWatcher) updateNamedThreadMetrics() {
 	if runtime.GOOS != "linux" {
 		return
 	}
 
-	current, err := collectNamedThreadStats()
+	current, scanStart, err := collectNamedThreadStats("/proc", thw.clockTicks)
 	if err != nil {
 		mlog.Warn(context.TODO(), "thread watcher failed to collect named thread stats", mlog.Err(err))
 		return
 	}
 
-	activeByGroup, nextSamples := collectActiveThreadGroups(current, thw.samples)
+	activeByGroup, cpuByGroup, nextSamples := collectThreadGroups(current, thw.samples, thw.scanStart)
 
-	for _, rule := range threadNameGroupRules {
-		metrics.ThreadCPUActiveNumByPool.WithLabelValues(rule.group).Set(float64(activeByGroup[rule.group]))
+	publish := func(group string) {
+		metrics.ThreadCPUActiveNumByPool.WithLabelValues(group).Set(float64(activeByGroup[group]))
+		if thw.clockTicks > 0 {
+			cpu := cpuByGroup[group]
+			metrics.ThreadPoolCPUSeconds.WithLabelValues(group, "user").Add(float64(cpu.user) / thw.clockTicks)
+			metrics.ThreadPoolCPUSeconds.WithLabelValues(group, "system").Add(float64(cpu.system) / thw.clockTicks)
+		}
 	}
-	metrics.ThreadCPUActiveNumByPool.WithLabelValues(unclassifiedThreadPool).Set(float64(activeByGroup[unclassifiedThreadPool]))
+	for _, rule := range threadNameGroupRules {
+		publish(rule.group)
+	}
+	publish(unclassifiedThreadPool)
 	thw.samples = nextSamples
+	thw.scanStart = scanStart
 }
 
-func collectActiveThreadGroups(current []threadStat, previous map[int32]threadSample) (map[string]int, map[int32]threadSample) {
+func collectThreadGroups(current []threadStat, previous map[int32]threadSample, since uint64) (map[string]int, map[string]threadCPU, map[int32]threadSample) {
+	cpuByGroup := make(map[string]threadCPU)
 	activeByGroup := make(map[string]int)
 	nextSamples := make(map[int32]threadSample, len(current))
 	for _, stat := range current {
+		if stat.unreadable {
+			if sample, ok := previous[stat.tid]; ok {
+				nextSamples[stat.tid] = sample
+			}
+			continue
+		}
 		group, classified := classifyThreadName(stat.name)
 		if !classified {
 			group = unclassifiedThreadPool
 		}
 		nextSamples[stat.tid] = threadSample{
-			group: group,
-			cpu:   stat.cpu,
+			group:     group,
+			cpu:       stat.cpu,
+			startTime: stat.startTime,
 		}
 
 		previousSample, existed := previous[stat.tid]
-		if !existed {
+		if !existed || previousSample.startTime != stat.startTime {
+			// A birth on the boundary tick is ambiguous; do not import old CPU.
+			if since > 0 && stat.startTime > since {
+				cpu := cpuByGroup[group]
+				cpu.user += stat.cpu.user
+				cpu.system += stat.cpu.system
+				cpuByGroup[group] = cpu
+			}
 			continue
 		}
-		if previousSample.group == group && (stat.cpu > previousSample.cpu || stat.state == 'R' || stat.state == 'D') {
+		// Attribute the interval to its original pool; never move historic CPU.
+		cpu := cpuByGroup[previousSample.group]
+		if stat.cpu.user >= previousSample.cpu.user {
+			cpu.user += stat.cpu.user - previousSample.cpu.user
+		}
+		if stat.cpu.system >= previousSample.cpu.system {
+			cpu.system += stat.cpu.system - previousSample.cpu.system
+		}
+		cpuByGroup[previousSample.group] = cpu
+		if previousSample.group == group && (stat.cpu.user > previousSample.cpu.user || stat.cpu.system > previousSample.cpu.system || stat.state == 'R' || stat.state == 'D') {
 			activeByGroup[group]++
 		}
 	}
-	return activeByGroup, nextSamples
+	return activeByGroup, cpuByGroup, nextSamples
 }
 
-func collectNamedThreadStats() ([]threadStat, error) {
-	taskDir := "/proc/self/task"
+func collectNamedThreadStats(procRoot string, clockTicks float64) ([]threadStat, uint64, error) {
+	var scanStart uint64
+	if clockTicks > 0 {
+		// Uptime may be hidden by subset=pid; only new-thread lifetime CPU needs it.
+		if uptime, err := os.ReadFile(filepath.Join(procRoot, "uptime")); err == nil {
+			if fields := strings.Fields(string(uptime)); len(fields) > 0 {
+				seconds, err := strconv.ParseFloat(fields[0], 64)
+				if err == nil && seconds >= 0 && !math.IsNaN(seconds) && !math.IsInf(seconds, 0) && seconds*clockTicks < math.Exp2(64) {
+					// Proc uptime is rounded to centiseconds. Exclude the boundary tick.
+					scanStart = uint64(math.Ceil(seconds * clockTicks))
+				}
+			}
+		}
+	}
+	taskDir := filepath.Join(procRoot, "self", "task")
 	entries, err := os.ReadDir(taskDir)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-
 	stats := make([]threadStat, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -186,48 +260,47 @@ func collectNamedThreadStats() ([]threadStat, error) {
 		if err != nil {
 			continue
 		}
-		tid := int32(tid64)
-		nameBytes, err := os.ReadFile(filepath.Join(taskDir, entry.Name(), "comm"))
-		if err != nil {
-			continue
-		}
+		stat := threadStat{tid: int32(tid64), unreadable: true}
 		statBytes, err := os.ReadFile(filepath.Join(taskDir, entry.Name(), "stat"))
-		if err != nil {
-			continue
+		if err == nil {
+			parsed, err := parseThreadStat(string(statBytes))
+			if err == nil && parsed.tid == stat.tid {
+				stat = parsed
+			}
 		}
-		state, cpu, err := parseThreadStat(string(statBytes))
-		if err != nil {
-			continue
-		}
-		stats = append(stats, threadStat{
-			tid:   tid,
-			name:  strings.TrimSpace(string(nameBytes)),
-			state: state,
-			cpu:   cpu,
-		})
+		// Keep failed reads in the snapshot so an existing baseline survives.
+		stats = append(stats, stat)
 	}
-	return stats, nil
+	return stats, scanStart, nil
 }
 
-func parseThreadStat(stat string) (byte, uint64, error) {
-	endComm := strings.LastIndexByte(stat, ')')
-	if endComm < 0 || endComm+2 >= len(stat) {
-		return 0, 0, strconv.ErrSyntax
+func parseThreadStat(raw string) (threadStat, error) {
+	startComm := strings.IndexByte(raw, '(')
+	endComm := strings.LastIndexByte(raw, ')')
+	if startComm < 1 || endComm <= startComm || endComm+2 >= len(raw) {
+		return threadStat{}, merr.WrapErrServiceInternalMsg("invalid proc thread stat")
 	}
-
-	fields := strings.Fields(stat[endComm+2:])
-	if len(fields) <= 12 || len(fields[0]) == 0 {
-		return 0, 0, strconv.ErrSyntax
+	tid, err := strconv.ParseInt(strings.TrimSpace(raw[:startComm]), 10, 32)
+	if err != nil {
+		return threadStat{}, err
+	}
+	fields := strings.Fields(raw[endComm+2:])
+	if len(fields) <= 19 || len(fields[0]) != 1 {
+		return threadStat{}, merr.WrapErrServiceInternalMsg("incomplete proc thread stat")
 	}
 	utime, err := strconv.ParseUint(fields[11], 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return threadStat{}, err
 	}
 	stime, err := strconv.ParseUint(fields[12], 10, 64)
 	if err != nil {
-		return 0, 0, err
+		return threadStat{}, err
 	}
-	return fields[0][0], utime + stime, nil
+	startTime, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return threadStat{}, err
+	}
+	return threadStat{tid: int32(tid), name: raw[startComm+1 : endComm], state: fields[0][0], cpu: threadCPU{user: utime, system: stime}, startTime: startTime}, nil
 }
 
 func classifyThreadName(name string) (string, bool) {
