@@ -2,7 +2,6 @@ import time
 
 import pytest
 import requests
-
 from base.testbase import TestBase
 from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
@@ -43,12 +42,24 @@ class TestCompactionTargets(TestBase):
         result = self.collection_client.flush(name)
         assert result["code"] == 0, result
 
-        created = self.target_request("create", {"collectionName": name, "rewrite": {}})
-        assert created["code"] == 0, created
-        target_id = created["data"]["targetId"]
-        assert isinstance(target_id, str) and int(target_id) > 0
-        assert created["data"]["totalRows"] == "1024"
-        assert "optimize" not in created["data"]
+        snapshot = {"collectionName": name, "snapshotName": "protect_rewrite_input"}
+        protected = self.snapshot_client.snapshot_create({**snapshot, "compactionProtectionSeconds": 60})
+        assert protected["code"] == 0, protected
+        try:
+            created = self.target_request("create", {"collectionName": name, "rewrite": {}})
+            assert created["code"] == 0, created
+            target_id = created["data"]["targetId"]
+            assert isinstance(target_id, str) and int(target_id) > 0
+            assert created["data"]["totalRows"] == "1024"
+            assert "optimize" not in created["data"]
+
+            while_protected = self.target_request("describe", {"targetId": target_id})
+            assert while_protected["code"] == 0, while_protected
+            assert while_protected["data"]["state"] == "COMPACTION_TARGET_STATE_ACTIVE"
+            assert while_protected["data"]["remainingRows"] == "1024"
+        finally:
+            dropped_snapshot = self.snapshot_client.snapshot_drop(snapshot)
+            assert dropped_snapshot["code"] == 0, dropped_snapshot
 
         deadline = time.monotonic() + 180
         while True:
