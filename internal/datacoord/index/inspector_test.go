@@ -171,12 +171,13 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	mt.Segments.SetSegment(seg1.ID, seg1)
 
 	segIndex1 := &model.SegmentIndex{
-		SegmentID:  seg1.ID,
-		IndexID:    3,
-		BuildID:    4,
-		IndexState: commonpb.IndexState_Unissued,
+		CollectionID: seg1.CollectionID,
+		SegmentID:    seg1.ID,
+		IndexID:      3,
+		BuildID:      4,
+		IndexState:   commonpb.IndexState_Unissued,
 	}
-	im.AddSegmentIndex(ctx, segIndex1)
+	assert.NoError(t, im.AddSegmentIndex(ctx, segIndex1))
 
 	im.Indexes[2] = map[UniqueID]*model.Index{
 		3: {

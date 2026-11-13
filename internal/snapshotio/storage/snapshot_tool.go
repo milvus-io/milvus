@@ -30,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const ExportedSnapshotFilesPath = "files"
@@ -75,6 +77,7 @@ func ListSnapshotDataFiles(
 	if storageConfig == nil {
 		storageConfig = compaction.CreateStorageConfig()
 	}
+	snapshot = WithoutJSONFlatIndexFiles(snapshot)
 	collector := &snapshotFileRefCollector{
 		cm:            cm,
 		storageConfig: storageConfig,
@@ -317,6 +320,7 @@ func RewriteSnapshotWithMapping(
 	if metadataURI == "" {
 		return nil, merr.WrapErrServiceInternalMsg("metadata URI cannot be empty")
 	}
+	snapshot = WithoutJSONFlatIndexFiles(snapshot)
 	rewriter := snapshotPathRewriter{mappings: mappings}
 	// Export writes a self-contained snapshot. Clone the source metadata before
 	// rewriting paths so the in-memory referenced snapshot remains unchanged.
@@ -582,4 +586,47 @@ func ExportedSnapshotPath(cm milvusstorage.ChunkManager, src string, targetRoot 
 	// targetRoot/snapshots/..., giving restore a stable bundle anchor plus a
 	// relocatable data subtree.
 	return path.Join(targetRoot, ExportedSnapshotFilesPath, relative)
+}
+
+// WithoutJSONFlatIndexFiles projects old snapshots into physical copy/export
+// inputs. Definitions remain available to RestoreIndexes; the source is immutable.
+func WithoutJSONFlatIndexFiles(snapshot *SnapshotData) *SnapshotData {
+	retired := make(map[int64]struct{})
+	for _, index := range snapshot.Indexes {
+		if indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(snapshot.Collection.GetSchema(), index.GetFieldID()).GetDataType(), index.GetIndexParams()) {
+			retired[index.GetIndexID()] = struct{}{}
+		}
+	}
+	result := *snapshot
+	result.Segments = make([]*datapb.SegmentDescription, 0, len(snapshot.Segments))
+	removedBuilds := make(map[int64]struct{})
+	for _, segment := range snapshot.Segments {
+		if segment == nil {
+			result.Segments = append(result.Segments, nil)
+			continue
+		}
+		physical := make([]*indexpb.IndexFilePathInfo, 0, len(segment.GetIndexFiles()))
+		for _, info := range segment.GetIndexFiles() {
+			_, logical := retired[info.GetIndexID()]
+			if logical || indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(snapshot.Collection.GetSchema(), info.GetFieldID()).GetDataType(), info.GetIndexParams()) {
+				removedBuilds[info.GetBuildID()] = struct{}{}
+				continue
+			}
+			physical = append(physical, info)
+		}
+		if len(physical) == len(segment.GetIndexFiles()) {
+			result.Segments = append(result.Segments, segment)
+		} else {
+			cloned := proto.Clone(segment).(*datapb.SegmentDescription)
+			cloned.IndexFiles = physical
+			result.Segments = append(result.Segments, cloned)
+		}
+	}
+	result.BuildIDs = make([]int64, 0, len(snapshot.BuildIDs))
+	for _, buildID := range snapshot.BuildIDs {
+		if _, retired := removedBuilds[buildID]; !retired {
+			result.BuildIDs = append(result.BuildIDs, buildID)
+		}
+	}
+	return &result
 }

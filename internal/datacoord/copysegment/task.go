@@ -480,6 +480,24 @@ func (t *Task) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	// Startup's asynchronous schema reload can exhaust its retries. Resolve a
+	// cold candidate's collection here; a failed lookup leaves the completed
+	// worker result and task state intact so the next poll can retry it.
+	if t.Meta != nil && t.IndexMeta != nil && !t.IndexMeta.JSONFlatSchemaReady(t.GetCollectionId()) {
+		ctx := t.Ctx
+		if ctx == nil {
+			ctx = context.TODO()
+		}
+		if err := t.Meta.ReloadCollectionFromRootcoord(ctx, t.Meta.Broker, t.GetCollectionId()); err != nil {
+			mlog.Warn(ctx, "failed to resolve collection schema before syncing copied indexes, will retry", WrapCopySegmentTaskLog(t, mlog.Err(err))...)
+			return
+		}
+		if !t.IndexMeta.JSONFlatSchemaReady(t.GetCollectionId()) {
+			mlog.Info(ctx, "collection schema is not ready for copied indexes, will retry", WrapCopySegmentTaskLog(t)...)
+			return
+		}
+	}
+
 	// Sync task state and binlog info
 	err = SyncCopySegmentTask(t, resp, t.CopyMeta, t.Meta, t.IndexMeta)
 	if err != nil {
@@ -640,6 +658,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			return nil, err
 		}
 	}
+
+	snapshotData = snapshotstorage.WithoutJSONFlatIndexFiles(snapshotData)
 
 	// Build source segment map for quick lookup
 	sourceSegmentMap := make(map[int64]*datapb.SegmentDescription)
@@ -953,7 +973,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	// so that segmentIndexes entries match the index definitions in indexes map.
 	// Using indexName (instead of fieldID) as key because a single JSON field can have
 	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
-	targetIndexes := indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
+	targetIndexes := indexMeta.GetPhysicalIndexesForCollection(task.GetCollectionId())
 	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
 	for _, idx := range targetIndexes {
 		indexNameToTargetID[idx.IndexName] = idx.IndexID

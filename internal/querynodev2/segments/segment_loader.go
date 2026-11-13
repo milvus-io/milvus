@@ -41,6 +41,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -234,8 +235,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	schema := collection.Schema()
 	hasVirtualPK := typeutil.IsExternalCollection(schema) &&
 		(!typeutil.NewStorageColumnResolver(schema).IsMilvusTable() || !HasExternalPrimaryKey(schema))
-	for _, segment := range segments {
-		configureUseTakeForOutput(segment, collection.Schema())
+	for i, segment := range segments {
+		segments[i] = withoutJSONFlatIndexes(segment, schema)
+		configureUseTakeForOutput(segments[i], schema)
 	}
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
@@ -404,6 +406,22 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	return infos
 }
 
+// withoutJSONFlatIndexes gives physical consumers a private schema-qualified
+// view while leaving the coordinator's shared metadata intact.
+func withoutJSONFlatIndexes(info *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) *querypb.SegmentLoadInfo {
+	for _, index := range info.GetIndexInfos() {
+		if !indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, index.GetFieldID()).GetDataType(), index.GetIndexParams()) {
+			continue
+		}
+		filtered := proto.Clone(info).(*querypb.SegmentLoadInfo)
+		filtered.IndexInfos = lo.Filter(filtered.IndexInfos, func(index *querypb.FieldIndexInfo, _ int) bool {
+			return !indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, index.GetFieldID()).GetDataType(), index.GetIndexParams())
+		})
+		return filtered
+	}
+	return info
+}
+
 func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {
 	if loadInfo == nil {
 		return
@@ -436,6 +454,20 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+	schemas := make(map[int64]*schemapb.CollectionSchema)
+	infos = lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		schema, ok := schemas[info.GetCollectionID()]
+		if !ok {
+			if loader.manager != nil && loader.manager.Collection != nil {
+				if collection := loader.manager.Collection.Get(info.GetCollectionID()); collection != nil {
+					schema = collection.Schema()
+				}
+			}
+			schemas[info.GetCollectionID()] = schema
+		}
+		return withoutJSONFlatIndexes(info, schema)
+	})
+
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -1902,6 +1934,20 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	schemas := make(map[int64]*schemapb.CollectionSchema)
+	loadInfos = lo.Map(loadInfos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		schema, ok := schemas[info.GetCollectionID()]
+		if !ok {
+			if loader.manager != nil && loader.manager.Collection != nil {
+				if collection := loader.manager.Collection.Get(info.GetCollectionID()); collection != nil {
+					schema = collection.Schema()
+				}
+			}
+			schemas[info.GetCollectionID()] = schema
+		}
+		return withoutJSONFlatIndexes(info, schema)
+	})
+
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)

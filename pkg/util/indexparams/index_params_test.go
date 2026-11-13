@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -619,4 +620,22 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["build_algo"], "NN_DESCENT")
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
+}
+
+func TestIsJSONFlatIndex(t *testing.T) {
+	for _, cast := range []string{"JSON", "json", "23"} {
+		assert.True(t, IsJSONFlatIndex(schemapb.DataType_JSON, []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: cast}}))
+	}
+	for _, cast := range []string{"", "VARCHAR", "DOUBLE", "ARRAY_JSON"} {
+		assert.False(t, IsJSONFlatIndex(schemapb.DataType_JSON, []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: cast}}))
+	}
+	assert.False(t, IsJSONFlatIndex(schemapb.DataType_JSON, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}))
+}
+
+func TestIsJSONFlatIndexIgnoresScalarJSONExtras(t *testing.T) {
+	params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}, {Key: common.JSONCastTypeKey, Value: "JSON"}, {Key: common.JSONPathKey, Value: ""}}
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar, schemapb.DataType_FloatVector, schemapb.DataType_None} {
+		assert.False(t, IsJSONFlatIndex(dataType, params))
+	}
+	assert.True(t, IsJSONFlatIndex(schemapb.DataType_JSON, params))
 }

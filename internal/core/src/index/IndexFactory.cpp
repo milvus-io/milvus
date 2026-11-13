@@ -40,7 +40,6 @@
 #include "index/IndexInfo.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/TextMatchIndex.h"
-#include "index/JsonFlatIndex.h"
 #include "index/JsonHybridScalarIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
@@ -70,6 +69,16 @@
 namespace milvus::index {
 
 namespace {
+
+void
+RejectJsonDocumentIndex(DataType field_type,
+                        const std::map<std::string, std::string>& params) {
+    const auto cast = params.find(JSON_CAST_TYPE);
+    if (field_type == DataType::JSON && cast != params.end() &&
+        cast->second == "JSON") {
+        ThrowInfo(Unsupported, "JSON cast JSON has no physical index");
+    }
+}
 
 uint64_t
 ScalarIndexStreamMemoryOverhead(
@@ -714,6 +723,7 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     bool mmap_enable,
     int64_t num_rows,
     const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
+    RejectJsonDocumentIndex(field_type, index_params);
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -870,6 +880,7 @@ IndexFactory::ScalarIndexLoadResource(
     const storage::FileManagerContext& file_manager_context,
     std::optional<storage::EntryStreamLoadInfo>* stream_load_info,
     bool* use_shared_memory_overhead_group) {
+    RejectJsonDocumentIndex(field_type, index_params);
     auto index_type_it = index_params.find("index_type");
     AssertInfo(index_type_it != index_params.end(), "index type is empty");
     std::optional<storage::EntryStreamLoadInfo> inspected_stream_load_info;
@@ -1078,6 +1089,10 @@ IndexFactory::CreateJsonIndex(
     const auto& nested_path = create_index_info.json_path;
     const auto& json_cast_function = create_index_info.json_cast_function;
 
+    if (cast_dtype.data_type() == JsonCastType::DataType::JSON) {
+        ThrowInfo(Unsupported, "JSON cast JSON has no physical index");
+    }
+
     // Sort index
     if (index_type == ASCENDING_SORT) {
         switch (cast_dtype.element_type()) {
@@ -1155,11 +1170,6 @@ IndexFactory::CreateJsonIndex(
                                    InvertedIndexTantivy<std::string>>(
                 create_index_info, file_manager_context, tantivy_ver);
         }
-        case JsonCastType::DataType::JSON:
-            return std::make_unique<JsonFlatIndex>(
-                file_manager_context,
-                nested_path,
-                create_index_info.tantivy_index_version);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
