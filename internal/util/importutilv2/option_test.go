@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -47,18 +48,18 @@ func TestSnapshotPartitionMappingOptions(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, map[string]string{"A": "X", "B": "Y", "C": "Y"}, mapping)
 	assert.Equal(t, []string{"X", "Y"}, PartitionMappingTargets(mapping))
-	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, option)))
-	assert.Error(t, ValidateSnapshotSourceRequest(append(base, option, option)))
-	assert.Error(t, ValidateSnapshotSourceRequest(Options{option}))
+	assert.NoError(t, ValidateImportSourceRequest(append(base, option)))
+	assert.Error(t, ValidateImportSourceRequest(append(base, option, option)))
+	assert.Error(t, ValidateImportSourceRequest(Options{option}))
 }
 
 func TestSnapshotExternalSourceOptions(t *testing.T) {
 	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
 	spec := &commonpb.KeyValuePair{Key: ExternalSpec, Value: `{"extfs":{"access_key_id":"reader","access_key_value":"secret"}}`}
-	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, spec)))
-	assert.ErrorIs(t, ValidateSnapshotSourceOptions(append(base, nil)), merr.ErrImportFailed)
-	assert.ErrorIs(t, ValidateSnapshotSourceRequest(append(base, nil)), merr.ErrImportFailed)
-	assert.Error(t, ValidateSnapshotSourceOptions(Options{{Key: SnapshotSourceURI, Value: "s3://source/key"}}))
+	assert.NoError(t, ValidateImportSourceRequest(append(base, spec)))
+	assert.ErrorIs(t, ValidateImportSourceOptions(append(base, nil)), merr.ErrImportFailed)
+	assert.ErrorIs(t, ValidateImportSourceRequest(append(base, nil)), merr.ErrImportFailed)
+	assert.Error(t, ValidateImportSourceOptions(Options{{Key: SnapshotSourceURI, Value: "s3://source/key"}}))
 	for _, options := range []Options{
 		{spec},
 		{{Key: BackupFlag, Value: "true"}, spec},
@@ -68,16 +69,45 @@ func TestSnapshotExternalSourceOptions(t *testing.T) {
 		append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"}),
 		append(base, &commonpb.KeyValuePair{Key: SnapshotLayout, Value: "referenced"}),
 	} {
-		assert.Error(t, ValidateSnapshotSourceRequest(options))
+		assert.Error(t, ValidateImportSourceRequest(options))
 	}
 	internal := append(base, spec, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"})
-	assert.NoError(t, ValidateSnapshotSourceOptions(internal))
-	assert.NoError(t, ValidateSnapshotSourceOptions(append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"})))
-	assert.Error(t, ValidateSnapshotSourceOptions(Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "invalid"}}))
-	assert.Error(t, ValidateSnapshotSourceRequest(internal))
+	assert.NoError(t, ValidateImportSourceOptions(internal))
+	assert.NoError(t, ValidateImportSourceOptions(append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"})))
+	assert.Error(t, ValidateImportSourceOptions(Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "invalid"}}))
+	assert.Error(t, ValidateImportSourceRequest(internal))
 	redacted := RedactOptions(append(internal, nil, &commonpb.KeyValuePair{Key: EZK, Value: "key-secret"}))
 	assert.NotContains(t, fmt.Sprint(redacted), "secret")
 	assert.Contains(t, spec.Value, "secret", "redaction must not change live options")
+}
+
+func TestOrdinarySourceStorageOptions(t *testing.T) {
+	options := externalStorageOptions()
+	assert.NoError(t, ValidateImportSourceRequest(options))
+	assert.NoError(t, ValidateImportSourceOptions(options))
+	// The ACK validates the durable contract before creating a runnable job.
+	assert.NoError(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"folder/data.json"}}}, options, nil))
+	assert.ErrorIs(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"s3://bucket/data.json"}}}, options, nil), merr.ErrParameterInvalid)
+	assert.ErrorIs(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"data.json"}}}, options[:3], nil), merr.ErrParameterInvalid)
+	for _, incompatible := range (Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: L0Import, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: ExternalSpec, Value: `{}`},
+	}) {
+		assert.ErrorContains(t, ValidateImportSourceOptions(append(externalStorageOptions(), incompatible)), "ordinary file imports")
+	}
+	assert.Error(t, ValidateImportSourceRequest(append(options, options[0])))
+	assert.Error(t, ValidateImportSourceOptions(append(options, nil)))
+	redacted := RedactOptions(append(options, &commonpb.KeyValuePair{Key: "timeout", Value: "1h"}))
+	for _, option := range redacted {
+		if option.Key == "timeout" {
+			assert.Equal(t, "1h", option.Value)
+		} else {
+			assert.Equal(t, "<redacted>", option.Value)
+		}
+	}
+	assert.Equal(t, "external-secret-key", options[4].Value)
 }
 
 func TestOption_GetTimeout(t *testing.T) {
@@ -259,24 +289,24 @@ func TestOption_GetStorageVersion(t *testing.T) {
 	assert.Equal(t, int64(2), version) // StorageV2 = 2
 }
 
-func TestOption_ValidateSnapshotSourceOptions(t *testing.T) {
+func TestOption_ValidateImportSourceOptions(t *testing.T) {
 	valid := Options{
 		{Key: BackupFlag, Value: "true"},
 		{Key: SourceType, Value: SourceTypeSnapshot},
 	}
-	assert.NoError(t, ValidateSnapshotSourceOptions(valid))
+	assert.NoError(t, ValidateImportSourceOptions(valid))
 	assert.True(t, IsSnapshotSource(valid))
 	// Public requests cannot silently turn a former partition selection into
 	// a whole-snapshot import. Persisted tasks already have their file scope.
 	oldOptions := append(append(Options(nil), valid...), &commonpb.KeyValuePair{Key: "source_partition_name", Value: "p1"})
-	assert.ErrorIs(t, ValidateSnapshotSourceRequest(oldOptions), merr.ErrImportFailed)
-	assert.NoError(t, ValidateSnapshotSourceOptions(oldOptions))
-	assert.NoError(t, ValidateSnapshotSourceOptions(Options{
+	assert.ErrorIs(t, ValidateImportSourceRequest(oldOptions), merr.ErrImportFailed)
+	assert.NoError(t, ValidateImportSourceOptions(oldOptions))
+	assert.NoError(t, ValidateImportSourceOptions(Options{
 		{Key: BackupFlag, Value: "true"},
 		{Key: SourceType, Value: SourceTypeSnapshot},
 		{Key: EZK, Value: "encoded-key"},
 	}))
-	assert.NoError(t, ValidateSnapshotSourceOptions(Options{
+	assert.NoError(t, ValidateImportSourceOptions(Options{
 		{Key: BackupFlag, Value: "true"},
 		{Key: StorageVersion, Value: "2"},
 	}))
@@ -339,7 +369,7 @@ func TestOption_ValidateSnapshotSourceOptions(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := ValidateSnapshotSourceOptions(test.options)
+			err := ValidateImportSourceOptions(test.options)
 			assert.ErrorIs(t, err, test.err)
 		})
 	}

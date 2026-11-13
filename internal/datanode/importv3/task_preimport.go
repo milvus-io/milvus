@@ -64,6 +64,9 @@ func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Tas
 func (t *preImportTask) Kind() string { return "preimport" }
 
 func (t *preImportTask) Execute(ctx context.Context) (any, error) {
+	if err := importutilv2.ValidateImportSourceOptions(t.req.GetOptions()); err != nil {
+		return nil, err
+	}
 	// A single file failure short-circuits AwaitAll; cancel the shared ctx so
 	// the remaining per-file count tasks stop instead of scanning on after this
 	// task has reported failure and freed its slot.
@@ -232,12 +235,26 @@ func (t *preImportTask) simpleRowCount(ctx context.Context, file *internalpb.Imp
 	if err != nil {
 		return 0, 0, 0, false, err
 	}
+	if fileType != importutilv2.FileTypeParquet && fileType != importutilv2.FileTypeNumpy {
+		return 0, 0, 0, false, nil
+	}
+	if importutilv2.HasSourceStorageOptions(t.req.GetOptions()) {
+		if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
+			return 0, 0, 0, false, err
+		}
+	}
+	// Metadata-only counting bypasses NewReader, so resolve the same external
+	// source here too. Never replace the task's destination chunk manager.
+	cm, _, err := importutilv2.ResolveSourceStorage(ctx, t.req.GetOptions(), t.cm, t.req.GetStorageConfig())
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
 	switch fileType {
 	case importutilv2.FileTypeParquet:
-		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, t.cm, t.req.GetSchema(), file.GetPaths()[0])
+		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, cm, t.req.GetSchema(), file.GetPaths()[0])
 		return rows, bytes, size, true, err
 	case importutilv2.FileTypeNumpy:
-		rows, bytes, size, err := numpy.NumRowsAndBytes(ctx, t.cm, t.req.GetSchema(), file.GetPaths())
+		rows, bytes, size, err := numpy.NumRowsAndBytes(ctx, cm, t.req.GetSchema(), file.GetPaths())
 		return rows, bytes, size, true, err
 	default:
 		return 0, 0, 0, false, nil

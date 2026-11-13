@@ -77,6 +77,10 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err := ctx.Err(); err != nil {
 				return readerStorage{}, err
 			}
+			if HasSourceStorageOptions(options) {
+				sourceCM, sourceCfg, err := ResolveSourceStorage(ctx, options, cm, cfg)
+				return readerStorage{cm: sourceCM, cfg: sourceCfg}, err
+			}
 			uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 			sourceCM, sourceCfg, err := ResolveSnapshotImportStorage(ctx, cm, cfg, uri, options)
 			if err != nil {
@@ -108,19 +112,19 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if shared != nil && !SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
 		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a task-shared snapshot descriptor and prepared bitmaps")
 	}
-	if err := ValidateSnapshotSourceOptions(f.options); err != nil {
+	if err := ValidateImportSourceOptions(f.options); err != nil {
 		return nil, err
 	}
-	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
-		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
+	if HasSourceStorageOptions(f.options) || file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
+		if err := ValidateImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
 			return nil, err
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if IsSnapshotSource(f.options) {
+	if IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
-		// Same-bucket and no-L0 snapshots use this path too. Ordinary import
-		// retains its existing storage and encryption initialization.
+		// Source storage is resolved once for this task attempt. Each reader
+		// still owns its stream; writes retain the task's target storage.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -237,7 +241,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.
 			// Do not consult storage_version: snapshot metadata is the source of
-			// truth and ValidateSnapshotSourceOptions rejects that ambiguity.
+			// truth and ValidateImportSourceOptions rejects that ambiguity.
 			if len(paths) != 1 {
 				return nil, merr.WrapErrImportFailedMsg(
 					"snapshot-source import file requires exactly one manifest path",

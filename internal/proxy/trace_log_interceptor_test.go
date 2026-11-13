@@ -241,6 +241,10 @@ func TestGetRequestFieldRedactsImportCredentials(t *testing.T) {
 			{Key: "external_spec", Value: spec},
 			{Key: "EXTERNAL_SPEC", Value: spec},
 			{Key: "ezk", Value: "IMPORT_EZK_SENTINEL"},
+			{Key: "storage.endpoint", Value: "ENDPOINT_SENTINEL"},
+			{Key: "storage.accessKeyID", Value: "ACCESS_SENTINEL"},
+			{Key: "storage.secretAccessKey", Value: "SECRET_SENTINEL"},
+			{Key: "STORAGE.secretAccessKey", Value: "MIXED_SECRET_SENTINEL"},
 			{Key: "EzK", Value: "IMPORT_MIXED_EZK_SENTINEL"},
 		}
 		for _, request := range []proto.Message{
@@ -265,6 +269,10 @@ func TestGetRequestFieldRedactsImportCredentials(t *testing.T) {
 					{Key: "external_spec", Value: "<redacted>"},
 					{Key: "EXTERNAL_SPEC", Value: "<redacted>"},
 					{Key: "ezk", Value: "<redacted>"},
+					{Key: "storage.endpoint", Value: "<redacted>"},
+					{Key: "storage.accessKeyID", Value: "<redacted>"},
+					{Key: "storage.secretAccessKey", Value: "<redacted>"},
+					{Key: "STORAGE.secretAccessKey", Value: "<redacted>"},
 					{Key: "EzK", Value: "<redacted>"},
 				}, redacted.GetOptions())
 				output := fmt.Sprint(field.Interface)
@@ -296,6 +304,10 @@ func TestTraceLogInterceptorRedactsImportCredentials(t *testing.T) {
 					{Key: "source_type", Value: "snapshot"},
 					{Key: "external_spec", Value: `{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"}}`},
 					{Key: "ezk", Value: "IMPORT_EZK_SENTINEL"},
+					{Key: "storage.endpoint", Value: "ENDPOINT_SENTINEL"},
+					{Key: "storage.accessKeyID", Value: "ACCESS_SENTINEL"},
+					{Key: "storage.secretAccessKey", Value: "SECRET_SENTINEL"},
+					{Key: "STORAGE.secretAccessKey", Value: "MIXED_SECRET_SENTINEL"},
 				},
 			}
 			before := proto.Clone(request)

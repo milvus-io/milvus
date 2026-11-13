@@ -215,13 +215,9 @@ func IsSnapshotSource(options Options) bool {
 	return err == nil && strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot)
 }
 
-// ValidateSnapshotSourceOptions rejects combinations that would make the
-// source contract ambiguous. Snapshot metadata is the sole authority for the
-// source storage version. L0 import remains a separate contract; CMEK content
-// is validated later against the source schema and supplied EZK.
-func ValidateSnapshotSourceOptions(options Options) error {
-	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
-	counts := make(map[string]int, len(contractKeys))
+// ValidateImportSourceOptions checks source options for ordinary, backup and
+// snapshot imports. Persisted tasks may include coordinator-owned options.
+func ValidateImportSourceOptions(options Options) error {
 	hasSnapshotContractOption := false
 	for _, option := range options {
 		if option == nil {
@@ -232,11 +228,26 @@ func ValidateSnapshotSourceOptions(options Options) error {
 		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping {
 			hasSnapshotContractOption = true
 		}
-		if lo.Contains(contractKeys, option.GetKey()) {
-			counts[option.GetKey()]++
-		}
 	}
+	if source, err := GetSourceStorageConfig(options); err != nil {
+		return err
+	} else if source != nil && (IsBackup(options) || IsL0Import(options) || hasSnapshotContractOption) {
+		return merr.WrapErrParameterInvalidMsg("storage.* options are only supported for ordinary file imports")
+	}
+	return validateSnapshotSourceOptions(options, hasSnapshotContractOption)
+}
+
+// validateSnapshotSourceOptions runs after common source validation. Snapshot
+// metadata owns the storage version; L0 import retains its separate contract.
+func validateSnapshotSourceOptions(options Options, hasSnapshotContractOption bool) error {
 	if hasSnapshotContractOption {
+		contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
+		counts := make(map[string]int, len(contractKeys))
+		for _, option := range options {
+			if lo.Contains(contractKeys, option.GetKey()) {
+				counts[option.GetKey()]++
+			}
+		}
 		for _, key := range contractKeys {
 			if counts[key] > 1 {
 				return merr.WrapErrImportFailedMsg("duplicate snapshot-source option: %s", key)
@@ -361,11 +372,11 @@ func HasExternalSource(options Options) bool {
 	return err == nil
 }
 
-// ValidateSnapshotSourceRequest additionally rejects internal routing options
-// supplied by a public caller. Persisted tasks use ValidateSnapshotSourceOptions.
-func ValidateSnapshotSourceRequest(options Options) error {
+// ValidateImportSourceRequest additionally rejects internal routing options
+// supplied by a public caller. Persisted tasks use ValidateImportSourceOptions.
+func ValidateImportSourceRequest(options Options) error {
 	// Do not silently broaden a request written for the earlier partition
-	// selector. Already-expanded tasks still use ValidateSnapshotSourceOptions
+	// selector. Already-expanded tasks still use ValidateImportSourceOptions
 	// and keep their immutable file inventory rather than re-expanding it.
 	for _, option := range options {
 		// GetKey tolerates nil entries; the common validator rejects them below.
@@ -376,7 +387,7 @@ func ValidateSnapshotSourceRequest(options Options) error {
 			return merr.WrapErrImportFailedMsg("%s is reserved for internal use", option.GetKey())
 		}
 	}
-	return ValidateSnapshotSourceOptions(options)
+	return ValidateImportSourceOptions(options)
 }
 
 // RedactOptions returns a logging-only copy; never mutate credentials in live
@@ -388,7 +399,8 @@ func RedactOptions(options Options) Options {
 			continue
 		}
 		value := option.GetValue()
-		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) {
+		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) ||
+			IsSourceStorageOption(option.GetKey()) {
 			value = "<redacted>"
 		}
 		result = append(result, &commonpb.KeyValuePair{Key: option.GetKey(), Value: value})

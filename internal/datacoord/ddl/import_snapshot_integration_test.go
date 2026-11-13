@@ -85,7 +85,7 @@ func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 				require.Zero(t, physical.Times())
 				require.Zero(t, validation.Times())
 				require.True(t, importutilv2.IsSnapshotPreparation(files))
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+				require.NoError(t, importutilv2.ValidateImportPlan(files, options, nil))
 				require.ErrorIs(t, importutilv2.ValidateSnapshotImportTask(files, options, nil), merr.ErrServiceUnimplemented)
 				// Only the reference survives WAL encoding and CDC rewriting.
 				wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
@@ -116,14 +116,14 @@ func TestSnapshotImportWALReference(t *testing.T) {
 	decoded, err := message.AsBroadcastImportMessageV1(message.NewBroadcastMutableMessageBeforeAppend(wal.Payload(), wal.Properties().ToRawMap()))
 	require.NoError(t, err)
 	files := ImportFilesFromMessage(decoded.MustBody().GetFiles(), funcutil.Map2KeyValuePair(decoded.MustBody().Options))
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, options, nil))
 	require.True(t, proto.Equal(header, decoded.Header()), "the header must carry only the coordinator commit flag")
 	encoded, err := proto.Marshal(&datapb.ImportJob{Files: files, Options: options, PartitionIDs: decoded.MustBody().GetPartitionIDs()})
 	require.NoError(t, err)
 	job := &datapb.ImportJob{}
 	require.NoError(t, proto.Unmarshal(encoded, job))
 	require.Equal(t, []int64{20, 10}, job.PartitionIDs)
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(job.Files, job.Options, nil))
+	require.NoError(t, importutilv2.ValidateImportPlan(job.Files, job.Options, nil))
 	require.True(t, importutilv2.IsSnapshotPreparation(job.Files))
 
 	// CDC rewrites the transport channel, but preserves the URI and

@@ -755,6 +755,9 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"native_list_array", nil},
 		{"native_list_array_backup", nil},
 		{"native_list_array_snapshot", nil},
+		{"external_valid", nil},
+		{"external_missing_secret", nil},
+		{"external_invalid_path", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -768,6 +771,18 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			coll := &meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}}
 			var allocErr, collectionErr, saveErr error
 			switch tc.name {
+			case "external_valid", "external_missing_secret", "external_invalid_path":
+				body.Options[importutilv2.StorageEndpoint] = "source.example.com"
+				body.Options[importutilv2.StorageBucket] = "source-bucket"
+				body.Options[importutilv2.StorageAccessKeyID] = "source-access-key"
+				body.Options[importutilv2.StorageSecretAccessKey] = "source-secret-key"
+				body.Files[0].Paths = []string{"data.json"}
+				if tc.name == "external_missing_secret" {
+					delete(body.Options, importutilv2.StorageSecretAccessKey)
+				}
+				if tc.name == "external_invalid_path" {
+					body.Files[0].Paths = []string{"s3://source-bucket/data.json"}
+				}
 			case "invalid_timeout":
 				body.Options["timeout"] = "invalid_format"
 			case "allocator_failure":
@@ -877,6 +892,19 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			}
 			s.Equal(fmt.Sprint(wantID), resp.JobID)
 			s.Equal(wantID, saved.JobID)
+			if tc.name == "external_missing_secret" || tc.name == "external_invalid_path" {
+				// Durable invalid input becomes a terminal job, so ACK can finish.
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				if tc.name == "external_missing_secret" {
+					s.Contains(saved.Reason, "storage.secretAccessKey is required")
+				} else {
+					s.Contains(saved.Reason, "relative object keys")
+				}
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+				s.False(importutilv2.HasSourceStorageOptions(saved.Options))
+				s.NotContains(saved.Reason, "source-secret-key")
+				return
+			}
 			if tc.name == "unsupported_version" {
 				// The minimal terminal envelope keeps only what querying, GC and a
 				// CDC rollback need: no files, no options, no data timestamp. It is
