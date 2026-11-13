@@ -208,7 +208,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().FenceCompactionTargetCreates(mock.Anything).Return(uint64(1), nil).Once()
+		suite.catalog.EXPECT().FenceCompactionTargetWrites(mock.Anything).Return(uint64(1), nil).Once()
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{
 			{
 				TargetID: 10,

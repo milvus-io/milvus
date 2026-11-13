@@ -83,15 +83,15 @@ func TestStorageStandingConditionsSurviveFailuresAndRestart(t *testing.T) {
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, id int64) (*datapb.CompactionTarget, error) {
 		return proto.CloneOf(persisted[id]), nil
 	}).Maybe()
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
 			require.Nil(t, persisted[record.GetTargetID()])
 			persisted[record.GetTargetID()] = proto.CloneOf(record)
 			return false, nil
 		}).Maybe()
 	formatSaveFails := true
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, previous, next *datapb.CompactionTarget) error {
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, previous, next *datapb.CompactionTarget, _ uint64) error {
 			require.True(t, proto.Equal(previous, persisted[previous.GetTargetID()]))
 			if formatSaveFails && next.GetTargetID() == formatID {
 				return merr.ErrIoFailed

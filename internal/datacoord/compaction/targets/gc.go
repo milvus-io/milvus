@@ -75,7 +75,7 @@ func (m *CompactionTargetMeta) collectExpiredTarget(ctx context.Context, id int6
 	if now.Sub(stoppedAt) <= Params.DataCoordCfg.CompactionTargetRetentionSeconds.GetAsDuration(time.Second) {
 		return nil
 	}
-	if err := m.catalog.DropCompactionTarget(ctx, record); err != nil {
+	if err := m.catalog.DropCompactionTarget(ctx, record, m.writeEpoch); err != nil {
 		m.mu.Lock()
 		m.unconfirmedDeletes[id] = struct{}{}
 		m.mu.Unlock()

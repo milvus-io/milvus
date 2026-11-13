@@ -309,14 +309,14 @@ func TestStandingCleanupKeepsConfirmedConditionOnSaveFailure(t *testing.T) {
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, id int64) (*datapb.CompactionTarget, error) {
 		return proto.CloneOf(persisted[id]), nil
 	})
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
 			persisted[record.GetTargetID()] = proto.CloneOf(record)
 			return false, nil
 		}).Maybe()
 	reject := true
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, _, next *datapb.CompactionTarget) error {
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, _, next *datapb.CompactionTarget, _ uint64) error {
 			if reject && next.GetIntent() == ttlFamily {
 				return merr.ErrIoFailed
 			}

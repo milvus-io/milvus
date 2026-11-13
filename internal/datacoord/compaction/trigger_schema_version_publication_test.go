@@ -83,7 +83,7 @@ func TestStandingSchemaVersionPublishesRealV3Results(t *testing.T) {
 	mt, err := meta.NewMeta(ctx, catalog, chunks, meta.NewMetaStoreWithCollections(catalog), broker.NewMockBroker(t), meta.NoDomainMetas)
 	require.NoError(t, err)
 	t.Cleanup(mt.CloseManifestExecutors)
-	manager, err := targets.NewCompactionTargetMetaForTest(ctx, mt.Catalog)
+	manager, err := targets.RecoverCompactionTargetMeta(ctx, mt.Catalog)
 	require.NoError(t, err)
 	tasks, err := ctask.NewCompactionTaskMeta(ctx, mt.Catalog)
 	require.NoError(t, err)

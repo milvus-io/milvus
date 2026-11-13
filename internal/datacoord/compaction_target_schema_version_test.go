@@ -262,9 +262,9 @@ func TestStandingSchemaVersionWaitsForConfirmedCondition(t *testing.T) {
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, targetID).RunAndReturn(func(context.Context, int64) (*datapb.CompactionTarget, error) {
 		return proto.CloneOf(persisted), nil
 	})
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrServiceUnavailable).Once()
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, _, next *datapb.CompactionTarget) error {
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrServiceUnavailable).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, _, next *datapb.CompactionTarget, _ uint64) error {
 			persisted = proto.CloneOf(next)
 			return nil
 		}).Once()

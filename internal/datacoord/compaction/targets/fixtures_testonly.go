@@ -34,7 +34,7 @@ import (
 )
 
 func NewCompactionTargetMetaForTest(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
-	return loadCompactionTargetMeta(ctx, catalog, 0)
+	return loadCompactionTargetMeta(ctx, catalog, 1)
 }
 
 func NewCompactionTargetTestCatalog(
@@ -42,7 +42,7 @@ func NewCompactionTargetTestCatalog(
 	records ...*datapb.CompactionTarget,
 ) (*metastoremocks.DataCoordCatalog, map[int64]*datapb.CompactionTarget) {
 	catalog := metastoremocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	stored := make(map[int64]*datapb.CompactionTarget)
 	for _, record := range records {
 		stored[record.GetTargetID()] = proto.CloneOf(record)
@@ -58,8 +58,8 @@ func NewCompactionTargetTestCatalog(
 			}
 			return result, nil
 		}).Maybe()
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if stored[record.GetTargetID()] != nil {
@@ -74,8 +74,8 @@ func NewCompactionTargetTestCatalog(
 			defer mu.Unlock()
 			return proto.CloneOf(stored[id]), nil
 		}).Maybe()
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, previous, next *datapb.CompactionTarget) error {
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, previous, next *datapb.CompactionTarget, _ uint64) error {
 			mu.Lock()
 			defer mu.Unlock()
 			if !proto.Equal(previous, stored[previous.GetTargetID()]) {
@@ -84,8 +84,8 @@ func NewCompactionTargetTestCatalog(
 			stored[next.GetTargetID()] = proto.CloneOf(next)
 			return nil
 		}).Maybe()
-	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ uint64) (*datapb.CompactionTarget, bool, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			current := stored[record.GetTargetID()]

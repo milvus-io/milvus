@@ -1203,25 +1203,25 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
-func (kc *Catalog) FenceCompactionTargetCreates(ctx context.Context) (uint64, error) {
-	epoch, guard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
+func (kc *Catalog) FenceCompactionTargetWrites(ctx context.Context) (uint64, error) {
+	epoch, guard, err := kc.loadTargetGeneration(ctx, compactionTargetWriteEpoch)
 	if err != nil {
 		return 0, err
 	}
 	if epoch == math.MaxUint64 {
-		return 0, merr.WrapErrDataIntegrityMsg("compaction target Create epoch exhausted")
+		return 0, merr.WrapErrDataIntegrityMsg("compaction target write epoch exhausted")
 	}
 	epoch++
 	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{
-		compactionTargetCreateEpoch: strconv.FormatUint(epoch, 10),
+		compactionTargetWriteEpoch: strconv.FormatUint(epoch, 10),
 	}, nil, guard)
 	if err != nil {
-		return 0, merr.Wrap(err, "advance compaction target Create epoch")
+		return 0, merr.Wrap(err, "advance compaction target write epoch")
 	}
 	return epoch, nil
 }
 
-func (kc *Catalog) loadTargetCreateGeneration(ctx context.Context, key string) (uint64, predicates.Predicate, error) {
+func (kc *Catalog) loadTargetGeneration(ctx context.Context, key string) (uint64, predicates.Predicate, error) {
 	raw, err := kc.MetaKv.Load(ctx, key)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return 0, predicates.KeyNotExist(key), nil
@@ -1231,9 +1231,20 @@ func (kc *Catalog) loadTargetCreateGeneration(ctx context.Context, key string) (
 	}
 	generation, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil || generation == 0 {
-		return 0, nil, merr.WrapErrDataIntegrityMsg("invalid compaction target Create generation at %s", key)
+		return 0, nil, merr.WrapErrDataIntegrityMsg("invalid compaction target generation at %s", key)
 	}
 	return generation, predicates.ValueEqual(key, raw), nil
+}
+
+func (kc *Catalog) targetWriteEpochGuard(ctx context.Context, expectedEpoch uint64) (predicates.Predicate, error) {
+	epoch, guard, err := kc.loadTargetGeneration(ctx, compactionTargetWriteEpoch)
+	if err != nil {
+		return nil, merr.Wrap(err, "load compaction target write epoch")
+	}
+	if epoch == 0 || epoch != expectedEpoch {
+		return nil, merr.WrapErrServiceUnavailableMsg("compaction target write epoch changed")
+	}
+	return guard, nil
 }
 
 func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
@@ -1283,7 +1294,7 @@ func (kc *Catalog) loadCompactionTarget(ctx context.Context, targetID int64) (*d
 	return record, value, nil
 }
 
-func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion) (bool, error) {
+func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion, epoch uint64) (bool, error) {
 	key, value, err := buildCompactionTargetKV(record)
 	if err != nil {
 		return false, err
@@ -1291,7 +1302,11 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	guards := []predicates.Predicate{predicates.KeyNotExist(key)}
+	epochGuard, err := kc.targetWriteEpochGuard(ctx, epoch)
+	if err != nil {
+		return false, err
+	}
+	guards := []predicates.Predicate{epochGuard, predicates.KeyNotExist(key)}
 	saves := map[string]string{key: value}
 	if collectionID := record.GetCollectionID(); collectionID != 0 {
 		if collection == nil {
@@ -1301,19 +1316,12 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 		if err != nil {
 			return false, err
 		}
-		epoch, epochGuard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
-		if err != nil {
-			return false, merr.Wrap(err, "load compaction target Create epoch")
-		}
-		if epoch != collection.Epoch {
-			return false, merr.WrapErrServiceUnavailableMsg("compaction target Create epoch changed")
-		}
 		replicationGuard, err := kc.targetCreateReplicationGuard(ctx)
 		if err != nil {
 			return false, err
 		}
 		fence := targetCreateFenceKey(collectionID)
-		generation, fenceGuard, err := kc.loadTargetCreateGeneration(ctx, fence)
+		generation, fenceGuard, err := kc.loadTargetGeneration(ctx, fence)
 		if err != nil {
 			return false, merr.Wrap(err, "load compaction target Create fence")
 		}
@@ -1325,7 +1333,7 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 			// winning OPTIMIZE so an older Create cannot use that empty slot.
 			saves[fence] = strconv.FormatUint(generation+1, 10)
 		}
-		guards = append(guards, scopeGuard, epochGuard, replicationGuard, fenceGuard)
+		guards = append(guards, scopeGuard, replicationGuard, fenceGuard)
 	}
 	if record.GetIntent() != datapb.TargetIntent_INTENT_OPTIMIZE {
 		err = kc.MetaKv.MultiSaveAndRemove(ctx, saves, nil, guards...)
@@ -1358,17 +1366,17 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 // ResolveCompactionTargetCreate races an unacknowledged Create against a
 // fence for the collection. The fence can win only while the candidate is
 // absent. CollectionWrites serializes these resolutions with new Creates.
-func (kc *Catalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error) {
+func (kc *Catalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion, expectedEpoch uint64) (*datapb.CompactionTarget, error) {
 	id := candidate.GetTargetID()
 	stored, err := kc.LoadCompactionTarget(ctx, id)
 	if err != nil || stored != nil {
 		return stored, err
 	}
-	epoch, epochGuard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
+	epoch, epochGuard, err := kc.loadTargetGeneration(ctx, compactionTargetWriteEpoch)
 	if err != nil {
-		return nil, merr.Wrap(err, "load compaction target Create epoch")
+		return nil, merr.Wrap(err, "load compaction target write epoch")
 	}
-	if epoch != collection.Epoch {
+	if epoch == 0 || epoch != expectedEpoch {
 		// Any old Create that committed did so before this epoch was read.
 		return kc.LoadCompactionTarget(ctx, id)
 	}
@@ -1391,7 +1399,7 @@ func (kc *Catalog) ResolveCompactionTargetCreate(ctx context.Context, candidate 
 	}
 	scopeGuard := predicates.ValueEqual(collectionKey, raw)
 	fence := targetCreateFenceKey(candidate.GetCollectionID())
-	generation, fenceGuard, err := kc.loadTargetCreateGeneration(ctx, fence)
+	generation, fenceGuard, err := kc.loadTargetGeneration(ctx, fence)
 	if err != nil {
 		return nil, merr.Wrap(err, "load compaction target Create fence")
 	}
@@ -1496,7 +1504,11 @@ func ambiguousTxnCode(code codes.Code) bool {
 	}
 }
 
-func (kc *Catalog) UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget) error {
+func (kc *Catalog) UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget, epoch uint64) error {
+	epochGuard, err := kc.targetWriteEpochGuard(ctx, epoch)
+	if err != nil {
+		return err
+	}
 	id := previous.GetTargetID()
 	current, raw, err := kc.loadCompactionTarget(ctx, id)
 	if err != nil {
@@ -1510,10 +1522,14 @@ func (kc *Catalog) UpdateStandingCompactionTarget(ctx context.Context, previous,
 	if err != nil {
 		return err
 	}
-	return kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.ValueEqual(key, raw))
+	return kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, epochGuard, predicates.ValueEqual(key, raw))
 }
 
-func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget, epoch uint64) (*datapb.CompactionTarget, bool, error) {
+	epochGuard, err := kc.targetWriteEpochGuard(ctx, epoch)
+	if err != nil {
+		return nil, false, err
+	}
 	id := stopped.GetTargetID()
 	current, raw, err := kc.loadCompactionTarget(ctx, id)
 	if err != nil || current == nil || current.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE {
@@ -1529,7 +1545,7 @@ func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.Com
 	if err != nil {
 		return nil, false, err
 	}
-	guards := []predicates.Predicate{predicates.ValueEqual(key, raw)}
+	guards := []predicates.Predicate{epochGuard, predicates.ValueEqual(key, raw)}
 	var removes []string
 	if current.GetIntent() == datapb.TargetIntent_INTENT_OPTIMIZE {
 		slot := activeOptimizeTargetKey(current.GetCollectionID())
@@ -1554,16 +1570,32 @@ func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.Com
 	return current, true, nil
 }
 
-func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error {
+func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, epoch uint64) error {
 	if record == nil {
 		return nil
 	}
-	key := buildCompactionTargetPath(record.GetTargetID())
-	return kc.MetaKv.Remove(ctx, key)
+	epochGuard, err := kc.targetWriteEpochGuard(ctx, epoch)
+	if err != nil {
+		return err
+	}
+	id := record.GetTargetID()
+	current, raw, err := kc.loadCompactionTarget(ctx, id)
+	if err != nil || current == nil {
+		return err
+	}
+	if current.GetState() != datapb.TargetState_TARGET_STATE_INACTIVE || !proto.Equal(current, record) {
+		return merr.WrapErrCompactionPlanConflict("compaction target changed during GC")
+	}
+	key := buildCompactionTargetPath(id)
+	return kc.MetaKv.MultiSaveAndRemove(ctx, nil, []string{key}, epochGuard, predicates.ValueEqual(key, raw))
 }
 
-func (kc *Catalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64) error {
-	return kc.MetaKv.Remove(ctx, targetCreateFenceKey(collectionID))
+func (kc *Catalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64, epoch uint64) error {
+	epochGuard, err := kc.targetWriteEpochGuard(ctx, epoch)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.MultiSaveAndRemove(ctx, nil, []string{targetCreateFenceKey(collectionID)}, epochGuard)
 }
 
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
