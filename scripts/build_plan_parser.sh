@@ -48,7 +48,9 @@ go env -w CGO_ENABLED="1"
 
 # Build Go c-shared library using package path (not file path) and keep the
 # local Milvus module at (devel) instead of stamping a misleading pseudo-version.
-GO111MODULE=on go build -buildvcs=false -buildmode=c-shared \
+# PLAN_PARSER_GO_TAGS carries the strict build tag, so this second Go binary
+# is built like bin/milvus.
+GO111MODULE=on go build -buildvcs=false -buildmode=c-shared -tags "${PLAN_PARSER_GO_TAGS:-}" \
     -o "${OUTPUT_LIB}/libmilvus-planparser.${EXT}" \
     ./internal/parser/planparserv2/cwrapper
 

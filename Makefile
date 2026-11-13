@@ -120,6 +120,22 @@ GOEXPERIMENT_FLAG :=
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
 	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
 endif
+
+# FIPS strict: default OFF. Set MILVUS_FIPS_STRICT=ON (with MILVUS_FIPS_ENABLED=ON)
+# to also restrict Go TLS to FIPS settings, use the CMVP-validated OpenSSL FIPS
+# provider, not load OpenSSL's default provider, refuse to start without FIPS, and
+# compile rustls/ring out of tantivy-binding.
+ifeq ($(MILVUS_FIPS_STRICT),ON)
+ifneq ($(MILVUS_FIPS_ENABLED),ON)
+$(error MILVUS_FIPS_STRICT=ON requires MILVUS_FIPS_ENABLED=ON)
+endif
+ifeq ($(TANTIVY_ANALYZER_REMOTE_TLS),ON)
+$(error MILVUS_FIPS_STRICT=ON requires TANTIVY_ANALYZER_REMOTE_TLS=OFF)
+endif
+	tantivy_analyzer_remote_tls = OFF
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),fipsstrict
+	PLAN_PARSER_GO_TAGS := fipsstrict
+endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -573,8 +589,10 @@ run-test-cpp:
 	@echo $(PWD)/scripts/run_cpp_unittest.sh arg=${filter}
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh arg=${filter})
 
+# The plan parser is a second Go binary (c-shared), so it needs the same
+# GOEXPERIMENT as bin/milvus: BoringCrypto when MILVUS_FIPS_ENABLED=ON.
 plan-parser-lib:
-	@(env bash $(PWD)/scripts/build_plan_parser.sh)
+	@(env $(GOEXPERIMENT_FLAG) PLAN_PARSER_GO_TAGS="$(PLAN_PARSER_GO_TAGS)" bash $(PWD)/scripts/build_plan_parser.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp
@@ -600,6 +618,7 @@ codecov-cpp: build-cpp-with-coverage
 install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
 
 install: milvus build-pyudf-runtime-wheel
+	@if [ "$(MILVUS_FIPS_STRICT)" = "ON" ]; then bash $(PWD)/scripts/build_fips_provider.sh $(PWD); fi
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."

@@ -19,16 +19,26 @@
 package fips
 
 /*
-#cgo LDFLAGS: -lcrypto
+#cgo LDFLAGS: -lssl -lcrypto
 #include <openssl/conf.h>
 #include <openssl/evp.h>
 #include <openssl/provider.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
+#include <stdlib.h>
 
-static int enableOpenSSLFIPS() {
+static int enableOpenSSLFIPS(const char *config, int skip_system_config) {
 	unsigned char buf[1];
 
-	if (!OSSL_LIB_CTX_load_config(NULL, "/milvus/configs/ssl/openssl-fips.cnf")) {
+	// libssl loads the system openssl.cnf the first time it initialises, and that
+	// file's [ssl_conf] replaces the one in config. Initialising libssl here
+	// without loading any config first makes config the only source of TLS
+	// defaults. If libssl was already initialised, this call does nothing, and
+	// loading config below still applies its [ssl_conf].
+	if (skip_system_config && !OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL)) {
+		return -1;
+	}
+	if (!OSSL_LIB_CTX_load_config(NULL, config)) {
 		return -1;  // config load failed
 	}
 	if (!EVP_default_properties_is_fips_enabled(NULL)) {
@@ -46,8 +56,10 @@ static int enableOpenSSLFIPS() {
 import "C"
 
 import (
+	"fmt"
 	"log"
 	"sync"
+	"unsafe"
 )
 
 var (
@@ -57,18 +69,42 @@ var (
 
 func MaybeEnableOpenSSLFIPS() bool {
 	fipsOnce.Do(func() {
-		rc := C.enableOpenSSLFIPS()
-		switch rc {
-		case 1:
-			log.Println("OpenSSL FIPS mode enabled")
-			opensslFIPSEnabled = true
-		case 0:
-			log.Println("WARNING: OpenSSL FIPS config loaded but fips=yes not set in default properties")
-		case -2:
-			log.Println("FATAL: OpenSSL FIPS property set but FIPS provider not functional (check OPENSSL_MODULES env var and .include path in openssl-fips.cnf)")
-		default:
-			log.Println("Failed to load OpenSSL FIPS config")
+		var err error
+		opensslFIPSEnabled, err = enableOpenSSLFIPSFromConfig(opensslFIPSConfigPath)
+		if err != nil {
+			log.Fatal(err)
 		}
 	})
 	return opensslFIPSEnabled
+}
+
+// enableOpenSSLFIPSFromConfig reports whether OpenSSL FIPS mode is enabled. A
+// strict build promises FIPS-only crypto, so it returns an error instead of
+// falling back to running without it the way a MILVUS_FIPS_ENABLED=ON build does.
+func enableOpenSSLFIPSFromConfig(path string) (bool, error) {
+	config := C.CString(path)
+	defer C.free(unsafe.Pointer(config))
+	enabled := false
+	// Only a strict build skips the system openssl.cnf; its own config carries
+	// the TLS defaults instead (key-exchange groups, minimum version).
+	skipSystemConfig := C.int(0)
+	if StrictMode() {
+		skipSystemConfig = 1
+	}
+	switch C.enableOpenSSLFIPS(config, skipSystemConfig) {
+	case 1:
+		log.Println("OpenSSL FIPS mode enabled")
+		enabled = true
+	case 0:
+		log.Println("WARNING: OpenSSL FIPS config loaded but fips=yes not set in default properties")
+	case -2:
+		log.Println("FATAL: OpenSSL FIPS property set but FIPS provider not functional (check OPENSSL_MODULES env var and .include path in openssl-fips.cnf)")
+	default:
+		log.Println("Failed to load OpenSSL FIPS config")
+	}
+	if !enabled && StrictMode() {
+		//nolint:gocritic // paramtable imports this package, so it stays free of Milvus dependencies
+		return false, fmt.Errorf("MILVUS_FIPS_STRICT build could not enable OpenSSL FIPS mode using %s", path)
+	}
+	return enabled, nil
 }
