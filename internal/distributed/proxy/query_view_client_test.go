@@ -20,13 +20,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
+	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type fakeViewQueryClient struct {
@@ -88,4 +94,44 @@ func TestInitViewQueryClientFailsWithoutProvider(t *testing.T) {
 	proxy := &fakeViewQueryClientSetter{}
 	server := &Server{}
 	require.Error(t, server.initViewQueryClient(proxy))
+}
+
+type startupWAL struct{ streaming.WALAccesser }
+
+func (*startupWAL) QueryViewClient() streaming.QueryViewClient { return nil }
+
+type startupQueryNodeClient struct{}
+
+func (*startupQueryNodeClient) QueryViewClient() querynodehandler.QueryViewClient { return nil }
+func (*startupQueryNodeClient) Close()                                            {}
+
+func TestDefaultProxyViewQueryClientHookInitFailure(t *testing.T) {
+	params := paramtable.Get()
+	oldEnable := params.AutoIndexConfig.Enable.GetValue()
+	t.Cleanup(func() {
+		params.Save(params.AutoIndexConfig.Enable.Key, oldEnable)
+	})
+	mockey.PatchConvey("hook init failure is fatal only when AutoIndex is enabled", t, func() {
+		hook := mock_optimizers.NewMockQueryHook(t)
+		hook.EXPECT().Init(params.AutoIndexConfig.AutoIndexSearchConfig.GetValue()).Return(merr.ErrServiceInternal).Twice()
+		mockey.Mock(optimizers.LoadQueryHook).Return(hook, nil).Build()
+		watch := mockey.Mock(optimizers.WatchQueryHook).Return(func() {}).Build()
+		mockey.Mock(streaming.WAL).Return(&startupWAL{}).Build()
+		mockey.Mock(querynodehandler.NewClient).Return(&startupQueryNodeClient{}).Build()
+		mockey.Mock(queryclient.NewLegacyViewQueryClient).To(func(cfg queryclient.ViewQueryClientConfig, _ queryclient.QueryPlanClient, _ queryclient.ViewQueryServiceClient, _ resolver.ShardResolver) queryclient.Client {
+			require.Nil(t, cfg.QueryHook)
+			return &fakeViewQueryClient{}
+		}).Build()
+
+		require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, "false"))
+		client, closeClient, err := newDefaultProxyViewQueryClient(nil, fakeViewQueryClientProxy{}, nil)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		closeClient()
+
+		require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, "true"))
+		_, _, err = newDefaultProxyViewQueryClient(nil, fakeViewQueryClientProxy{}, nil)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.Zero(t, watch.Times())
+	})
 }
