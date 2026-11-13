@@ -241,7 +241,7 @@ func TestCompactionTargetWithEmptyMatchWaitsForCollectionDropAck(t *testing.T) {
 	t.Cleanup(broadcast.ResetBroadcaster)
 	broadcast.Register(b)
 
-	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, nil)
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, nil, meta.NewMockAllocator(t))
 	_, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
 	req := &datapb.DescribeCompactionTargetRequest{TargetId: record.GetTargetID(), Collection: resource}
