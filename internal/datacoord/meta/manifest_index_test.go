@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -57,6 +58,18 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	pathless := good
 	pathless.Path = ""
 	require.Error(t, ValidateManifestIndexPublishable(5001, pathless))
+}
+
+func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
+	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+		IndexName: "index", IndexType: "FLAT",
+		Path:                  "files/insert_log/1/2/3/_index/102/4",
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexFileKeys:         []string{"index.bin"},
+		Properties:            map[string]string{common.IndexTypeKey: "HNSW", "M": "16", common.DimKey: "8"},
+	})
+	require.True(t, ok)
+	require.Equal(t, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}, info.IndexParams)
 }
 
 func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {

@@ -26,24 +26,42 @@ import (
 )
 
 type snapshotRootRebaser struct {
-	oldRoot string
-	newRoot string
+	oldRoot          string
+	newRoot          string
+	originalIdentity *snapshotURIIdentity
 }
 
-func newSnapshotRootRebaser(oldRoot string, newRoot string) snapshotRootRebaser {
-	return snapshotRootRebaser{
+func newSnapshotRootRebaser(oldRoot string, newRoot string, originalLocation string) snapshotRootRebaser {
+	rebaser := snapshotRootRebaser{
 		oldRoot: strings.TrimRight(NormalizeSnapshotObjectPath(oldRoot), "/"),
 		newRoot: strings.TrimRight(NormalizeSnapshotObjectPath(newRoot), "/"),
 	}
+	if identity, completeURI, err := parseSnapshotURIIdentity(originalLocation); err == nil && completeURI {
+		rebaser.originalIdentity = &identity
+	}
+	return rebaser
 }
 
 func (r snapshotRootRebaser) rebasePath(src string) string {
-	if src == "" || r.oldRoot == r.newRoot {
+	if src == "" {
 		return src
 	}
 	// Root relocation is prefix-only: it supports moving the whole exported
 	// bundle while preserving its internal layout, not arbitrary path rewrites.
 	normalized := NormalizeSnapshotObjectPath(src)
+	if r.oldRoot == r.newRoot {
+		if r.originalIdentity != nil {
+			// Same-prefix moves previously preserved URI spelling in restore
+			// fingerprints. Keep non-origin references unchanged for those jobs.
+			identity, completeURI, err := parseSnapshotURIIdentity(src)
+			if err != nil || !completeURI || identity != *r.originalIdentity {
+				return src
+			}
+		}
+		// A bucket-only move still needs to discard the original URI identity.
+		return normalized
+	}
+	// Prefix relocation retains its existing object-key rewrite semantics.
 	if r.oldRoot == "" {
 		if normalized == "" {
 			return r.newRoot
@@ -92,7 +110,7 @@ func RebaseSelfContainedSnapshotMetadata(
 		return merr.WrapErrDataIntegrityMsg("snapshot metadata cannot be nil")
 	}
 
-	rebaser := newSnapshotRootRebaser(oldRoot, newRoot)
+	rebaser := newSnapshotRootRebaser(oldRoot, newRoot, metadata.GetSnapshotInfo().GetS3Location())
 	for i, manifestPath := range metadata.GetManifestList() {
 		metadata.ManifestList[i] = rebaser.rebasePath(manifestPath)
 	}
@@ -118,7 +136,7 @@ func RebaseSelfContainedSnapshotData(
 		return merr.WrapErrDataIntegrityMsg("snapshot cannot be nil")
 	}
 
-	rebaser := newSnapshotRootRebaser(oldRoot, newRoot)
+	rebaser := newSnapshotRootRebaser(oldRoot, newRoot, snapshot.SnapshotInfo.GetS3Location())
 	for i, segment := range snapshot.Segments {
 		if segment == nil {
 			return merr.WrapErrDataIntegrityMsg("snapshot segment at index %d cannot be nil", i)

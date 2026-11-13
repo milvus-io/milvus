@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,9 +30,69 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func TestSearchFanoutPoolSizeRatio(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	cfg := &params.CommonCfg
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, "queryNode.segcore.searchFanoutPoolSizeRatio", fanout.Key)
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(cfg.MiddlePriorityThreadCoreCoefficient.Key, "8"))
+	require.NoError(t, params.Save(cfg.ThreadPoolMaxThreadsSize.Key, "1"))
+	require.NoError(t, params.Save(params.QueryNodeCfg.CGOPoolSizeRatio.Key, "3"))
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(fanout.Key, "3.5"))
+	assert.Equal(t, 3.5, fanout.GetAsFloat())
+	assert.Equal(t, "8", cfg.MiddlePriorityThreadCoreCoefficient.GetValue())
+	assert.Equal(t, "1", cfg.ThreadPoolMaxThreadsSize.GetValue())
+	assert.Equal(t, "3", params.QueryNodeCfg.CGOPoolSizeRatio.GetValue())
+}
+
+func TestSearchFanoutPoolSizeRatioValidation(t *testing.T) {
+	patch := mockey.Mock(hardware.GetCPUNum).Return(2).Build()
+	defer patch.UnPatch()
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	key := "queryNode.segcore.searchFanoutPoolSizeRatio"
+	require.NoError(t, base.Save(key, "NaN"))
+	params.Init(base)
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, float64(DefaultSearchFanoutPoolSizeRatio), fanout.GetAsFloat())
+
+	for _, tc := range []struct {
+		value string
+		want  float64
+	}{
+		{"0.1", 0.1},
+		{"3.5", 3.5},
+		{"1e-20", 1e-20},
+		{"1073741760", 1073741760}, // Largest safe float32 ratio with two cores.
+		{"1073741823.5", 2},        // Rounds up to an overflowing float32 worker count.
+		{"2147483647", 2},
+		{"1e100", 2},
+		{"NaN", 2},
+		{"+Inf", 2},
+		{"-Inf", 2},
+		{"0", 2},
+		{"-1", 2},
+		{"1e-50", 2}, // Underflows to zero at the C.float boundary.
+		{"invalid", 2},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			require.NoError(t, params.Save(key, tc.value))
+			assert.Equal(t, tc.want, fanout.GetAsFloat())
+		})
+	}
+}
 
 func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
 	params := &ComponentParam{}
@@ -134,6 +195,21 @@ func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()
 	t.Errorf("%s should have panicked", name)
+}
+
+func TestCommonConfigCollectionLevelMetricsMode(t *testing.T) {
+	const key = "common.metrics.collectionLevelMode"
+
+	defaultBase := NewBaseTable(SkipRemote(true))
+	var defaultConfig commonConfig
+	defaultConfig.init(defaultBase)
+	assert.Equal(t, metrics.CollectionLevelMetricsModeFull, defaultConfig.CollectionLevelMetricsMode.GetValue())
+
+	aggregateBase := NewBaseTable(SkipRemote(true))
+	assert.NoError(t, aggregateBase.Save(key, metrics.CollectionLevelMetricsModeAggregate))
+	var aggregateConfig commonConfig
+	aggregateConfig.init(aggregateBase)
+	assert.Equal(t, metrics.CollectionLevelMetricsModeAggregate, aggregateConfig.CollectionLevelMetricsMode.GetValue())
 }
 
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
@@ -741,8 +817,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
-		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
-		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())
+		assert.Equal(t, int32(-1), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(-1), Params.IndexBuildReadWindowBytes.GetAsInt64())
 		params.Save(Params.StorageReaderThreadPoolSize.Key, "16")
 		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
@@ -1428,7 +1504,6 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
-		assert.Equal(t, int64(4096), Params.GrowingSegmentsMemSizeInMB.GetAsInt64())
 		assert.Equal(t, 0, Params.CompactionMaxTaskNum.GetAsInt())
 
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
@@ -1678,7 +1753,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
-		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
 		assert.Equal(t, int64(4*1024*1024*1024), params.StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize())
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())
 		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
@@ -1771,7 +1845,6 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "4s")
 		params.Save(params.StreamingCfg.WALRecoveryMaxDirtyMessage.Key, "200")
 		params.Save(params.StreamingCfg.WALRecoveryPersistInterval.Key, "20s")
-		params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "33554432")
 		params.Save(params.StreamingCfg.SummaryMaxBytesPerPChannel.Key, "1GB")
 		params.Save(params.StreamingCfg.IdempotencyMaxKeyLength.Key, "2048")
 		params.Save(params.StreamingCfg.WALRecoveryTailLowWatermark.Key, "1g")
@@ -1804,7 +1877,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 200, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 20*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
-		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
 		assert.Equal(t, int64(1024*1024*1024), params.StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize())
 		assert.Equal(t, 2048, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, int64(1*1024*1024*1024), params.StreamingCfg.WALRecoveryTailLowWatermark.GetAsSize())
@@ -1945,6 +2017,7 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	assert.Equal(t, int64(1000000), params.DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64())
+	assert.Equal(t, int64(64), params.DataNodeCfg.ExternalCollectionPaimonMaxDataSplitsPerSegment.GetAsInt64())
 
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
@@ -2025,6 +2098,34 @@ func TestWriteSegmentIndexToManifest(t *testing.T) {
 	// Explicit invalid boolean values retain the parameter parser's behavior.
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+}
+
+func TestManifestIndexBackfillParams(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.False(t, params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool())
+	assert.Equal(t, 60*time.Second, params.DataCoordCfg.ManifestIndexBackfillInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 1000, params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt())
+	assert.Equal(t, 16, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillBatchSize.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt())
+
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key, "2147483648")
+	assert.Equal(t, math.MaxInt32, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+	assert.False(t, params.DataCoordCfg.ManifestIndexRollbackEnabled.GetAsBool())
+	assert.Equal(t, 60, params.DataCoordCfg.ManifestIndexRollbackInterval.GetAsInt())
+	assert.Equal(t, 1000, params.DataCoordCfg.ManifestIndexRollbackBatchSize.GetAsInt())
+	assert.Equal(t, 8, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackBatchSize.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexRollbackBatchSize.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackConcurrency.Key, "2147483648")
+	assert.Equal(t, 256, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
 }
 
 func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
@@ -2124,4 +2225,78 @@ func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
 	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.Export)
 	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
 	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+}
+
+func TestCredentialBrokerStartupPolicy(t *testing.T) {
+	const key = "common.security.credentialBrokerAllowedEndpoints"
+	const endpoint = "https://broker.example.com/v1/credentials/assume-role"
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	defer bt.mgr.Close()
+	require.NoError(t, bt.Save(key, `["`+endpoint+`"]`))
+	var params ComponentParam
+	params.Init(bt)
+	require.Equal(t, []string{endpoint}, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	// Runtime updates cannot expand a startup security policy.
+	require.NoError(t, bt.Save(key, `["https://other"]`))
+	require.Equal(t, []string{endpoint}, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	bad := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	defer bad.mgr.Close()
+	require.NoError(t, bad.Save(key, `["file:///tmp/broker"]`))
+	require.Panics(t, func() { var invalid ComponentParam; invalid.Init(bad) })
+}
+
+func TestCredentialBrokerStartupPolicyJSON(t *testing.T) {
+	const key = "common.security.credentialBrokerAllowedEndpoints"
+	for _, raw := range []string{"", "  ", "[]"} {
+		t.Run("empty_"+raw, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			defer bt.mgr.Close()
+			require.NoError(t, bt.Save(key, raw))
+			var params ComponentParam
+			params.Init(bt)
+			require.Empty(t, params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+			require.Error(t, params.CommonCfg.CredentialBrokerPolicy().Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: "https://broker/token"}))
+		})
+	}
+	for _, raw := range []string{"null", "{}", "true", `"https://broker/token"`, "https://broker/token,https://other/token", `["https://broker/token",]`, `[42]`, `[null]`, `[""]`} {
+		t.Run("invalid_"+raw, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			defer bt.mgr.Close()
+			require.NoError(t, bt.Save(key, raw))
+			require.Panics(t, func() { var params ComponentParam; params.Init(bt) })
+		})
+	}
+}
+
+func TestCredentialBrokerStartupPolicyYAMLQuery(t *testing.T) {
+	const endpoint = "https://broker.example/token?scope=a,b&audience=a,https://nested.example/token"
+	const other = "https://other.example/token"
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	yaml := `common:
+  security:
+    credentialBrokerAllowedEndpoints: '["` + endpoint + `","` + other + `"]'
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(yaml), 0o600))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(0))
+	defer bt.mgr.Close()
+	var params ComponentParam
+	params.Init(bt)
+	policy := params.CommonCfg.CredentialBrokerPolicy()
+	require.Equal(t, []string{endpoint, other}, policy.Endpoints())
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: endpoint}))
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCloudProvider: "azure", specutil.ExtfsKeyAzureCredentialEndpoint: endpoint}))
+	require.NoError(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: other}))
+	for _, denied := range []string{"https://nested.example/token", "https://broker.example/token?scope=a", "https://broker.example/token?scope=a,b&audience=a", endpoint + "&extra=1"} {
+		require.Error(t, policy.Validate(map[string]string{specutil.ExtfsKeyCredentialEndpoint: denied}), denied)
+	}
+}
+
+func TestCredentialBrokerRejectsInvalidStartupQuery(t *testing.T) {
+	for _, endpoint := range []string{"https://broker/token?x=%zz", "https://broker/token?q=[1]"} {
+		bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+		require.NoError(t, bt.Save("common.security.credentialBrokerAllowedEndpoints", `["`+endpoint+`"]`))
+		require.Panics(t, func() { var params ComponentParam; params.Init(bt) })
+		bt.mgr.Close()
+	}
 }

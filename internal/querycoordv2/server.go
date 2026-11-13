@@ -23,14 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/singleflight"
-	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -45,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -107,7 +104,6 @@ type Server struct {
 	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
-	jobScheduler  *job.Scheduler
 	taskScheduler task.Scheduler
 
 	// HeartBeat
@@ -337,7 +333,6 @@ func (s *Server) initQueryCoord() error {
 
 	// Init schedulers
 	mlog.Info(s.ctx, "init schedulers")
-	s.jobScheduler = job.NewScheduler()
 	s.taskScheduler = task.NewScheduler(
 		s.ctx,
 		s.meta,
@@ -554,7 +549,7 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) Stop() error {
 	// FOLLOW the dependence graph:
-	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
+	// checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
 	if s.collectionUsage != nil {
@@ -570,11 +565,6 @@ func (s *Server) Stop() error {
 	if s.qviewsRuntime != nil {
 		mlog.Info(s.ctx, "stop query view runtime...")
 		s.qviewsRuntime.stop()
-	}
-
-	if s.jobScheduler != nil {
-		mlog.Info(s.ctx, "stop job scheduler...")
-		s.jobScheduler.Stop()
 	}
 
 	if s.checkerController != nil {
@@ -873,64 +863,6 @@ func (s *Server) handleNodeStopping(node int64) {
 
 	// trigger checker to check stopping node
 	s.checkerController.Check()
-}
-
-func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
-	success := s.updateBalanceConfig()
-	if success {
-		return
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		interval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				mlog.Info(ctx, "update balance config loop exit!")
-				return
-
-			case <-ticker.C:
-				success := s.updateBalanceConfig()
-				if success {
-					return
-				}
-				// apply dynamic update only when changed
-				newInterval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
-				if newInterval != interval {
-					interval = newInterval
-					select {
-					case <-ticker.C:
-					default:
-					}
-					ticker.Reset(interval)
-				}
-			}
-		}
-	}()
-}
-
-func (s *Server) updateBalanceConfig() bool {
-	r := semver.MustParseRange("<2.3.0")
-	sessions, _, err := s.session.GetSessionsWithVersionRange(typeutil.QueryNodeRole, r)
-	if err != nil {
-		mlog.Warn(s.ctx, "check query node version occur error on etcd", mlog.Err(err))
-		return false
-	}
-
-	if len(sessions) == 0 {
-		// only balance channel when all query node's version >= 2.3.0
-		Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
-		mlog.Info(s.ctx, "all old query node down, enable auto balance!")
-		return true
-	}
-
-	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-	mlog.RatedDebug(s.ctx, rate.Limit(10), "old query node exist", mlog.Strings("sessions", lo.Keys(sessions)))
-	return false
 }
 
 func (s *Server) watchLoadConfigChanges() {

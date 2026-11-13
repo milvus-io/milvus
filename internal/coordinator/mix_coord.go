@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -377,8 +378,8 @@ func (s *mixCoordImpl) CreateCollectionDataView(ctx context.Context, collectionI
 	return err
 }
 
-func (s *mixCoordImpl) CreateCollectionDataViewWithTransformStarts(ctx context.Context, collectionID int64, vchannels []string, starts map[string]uint64) error {
-	_, err := s.datacoordServer.CreateCollectionDataViewWithTransformStarts(ctx, collectionID, vchannels, starts)
+func (s *mixCoordImpl) CreateCollectionDataViewWithTransformStarts(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error {
+	_, err := s.datacoordServer.CreateCollectionDataViewWithTransformStarts(ctx, result)
 	return err
 }
 
@@ -1462,6 +1463,14 @@ func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 
 func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.rootcoordServer.ListRunningRequests(ctx, req)
+}
+
+func (s *mixCoordImpl) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.rootcoordServer.CancelRequests(ctx, req)
 }
 
 // Deprecated: QueryView does not use the legacy cluster read-task queues.

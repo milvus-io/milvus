@@ -1347,3 +1347,15 @@ transaction. Completion state is in-memory and lives only with the operation/vie
 `LoadBalance` and `TransferSegment` share this synchronous contract. Copy mode is
 not supported by this single-placement operation. Successful placement is not a
 permanent pin and does not assert that retained old-view resources are gone.
+
+## Explicit collection teardown control
+
+A release plan carries optional QueryViewControl per shard, selected from the
+same planning snapshot as the release action. An absent collection LoadConfig
+after source readiness marks all residual shards for preempt_serving_lease,
+including already-Down Views. A missing replica inside a still-loaded collection
+or a suspended replica retains ordinary serving-lease protection. ConfigForShard
+alone cannot distinguish these reasons: policy inspects the collection-level
+LoadConfig. Balancer applies this control through RequestReleaseWithControl.
+DropLoadConfig only withdraws load intent and triggers reconciliation; its ACK
+callback retains the existing synchronous cleanup wait and final config removal.

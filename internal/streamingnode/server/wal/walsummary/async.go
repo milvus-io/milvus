@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -42,11 +43,12 @@ func (m *Manager) flushBacklog(underPressure bool) {
 		return
 	}
 	m.mu.Lock()
-	if len(m.pending) == 0 || m.terminalErr != nil {
+	if m.terminalErr != nil {
 		m.mu.Unlock()
 		return
 	}
 	target := m.lastObserved
+	m.pressureThrough = max(m.pressureThrough, target)
 	m.mu.Unlock()
 	m.RequestFlushThrough(target)
 }
@@ -120,24 +122,34 @@ func (m *Manager) scheduleWrite() {
 			sc.task = &chunkWriteTask{manager: m, chunk: sc}
 			tasks = append(tasks, sc.task)
 		}
+		if sc.Coverage.Start <= m.pressureThrough {
+			sc.task.priority.Promote()
+		}
 	}
 	m.mu.Unlock()
 	for _, task := range tasks {
-		m.cfg.Runtime.Scheduler.Submit(task)
+		task.priority.Submit(m.cfg.Runtime.Scheduler, task)
 	}
 }
 
 func (m *Manager) scheduleManifest() {
 	m.mu.Lock()
-	if m.terminalErr != nil || m.cfg.Runtime.Scheduler == nil || m.manifestVersion == m.publishedVersion ||
-		(m.manifestTask != nil && !m.manifestTask.Done()) {
+	if m.terminalErr != nil || m.cfg.Runtime.Scheduler == nil || m.manifestVersion == m.publishedVersion {
 		m.mu.Unlock()
 		return
 	}
-	task := &manifestWriteTask{manager: m}
-	m.manifestTask = task
+	active := m.manifestTask != nil && !m.manifestTask.Done()
+	if !active {
+		m.manifestTask = &manifestWriteTask{manager: m}
+	}
+	task := m.manifestTask
+	if m.lastAcked < m.pressureThrough {
+		task.priority.Promote()
+	}
 	m.mu.Unlock()
-	m.cfg.Runtime.Scheduler.Submit(task)
+	if !active {
+		task.priority.Submit(m.cfg.Runtime.Scheduler, task)
+	}
 }
 
 // HasPendingWork includes publication-only work, even without another chunk.
@@ -189,9 +201,10 @@ func (m *Manager) reportTerminalError(ctx context.Context, err error) {
 }
 
 type chunkWriteTask struct {
-	manager *Manager
-	chunk   *SealedChunk
-	done    atomic.Bool
+	priority moduleapi.DataTaskPriority
+	manager  *Manager
+	chunk    *SealedChunk
+	done     atomic.Bool
 }
 
 func (t *chunkWriteTask) Done() bool { return t.done.Load() }
@@ -210,8 +223,9 @@ func (t *chunkWriteTask) Execute(ctx context.Context) error {
 }
 
 type manifestWriteTask struct {
-	manager *Manager
-	done    atomic.Bool
+	priority moduleapi.DataTaskPriority
+	manager  *Manager
+	done     atomic.Bool
 }
 
 func (t *manifestWriteTask) Done() bool { return t.done.Load() }

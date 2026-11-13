@@ -2,13 +2,17 @@ package qnview
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -258,7 +262,7 @@ func TestSegmentResourceQueryWaitCancellationReleasesPins(t *testing.T) {
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		entered := make(chan struct{})
-		mockey.Mock((instantTransformRegistration).WaitTransformVisible).To(func(_ instantTransformRegistration, ctx context.Context, _ uint64) error {
+		mockey.Mock(instantTransformRegistration.WaitTransformVisible).To(func(_ instantTransformRegistration, ctx context.Context, _ uint64) error {
 			close(entered)
 			<-ctx.Done()
 			return ctx.Err()
@@ -394,18 +398,137 @@ func TestSegmentResourceUsesViewIndexSelection(t *testing.T) {
 		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, c CollectionRuntime) (ResourceReservation, error) {
 			require.Len(t, info.IndexInfos, 1)
 			require.Equal(t, c.IndexInfos()[0].IndexID, info.IndexInfos[0].IndexID)
+			info.EstimatedBytesPerRow = 123
 			observed <- info.IndexInfos[0].IndexID
 			return nil, nil
+		}).Build()
+		f.prepareMock.UnPatch()
+		mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+			require.Len(t, snapshot.LoadInfo.IndexInfos, 1)
+			require.Equal(t, c.IndexInfos()[0].IndexID, snapshot.LoadInfo.IndexInfos[0].IndexID)
+			require.EqualValues(t, 123, snapshot.LoadInfo.EstimatedBytesPerRow)
+			return &resourceTestRead{}, nil
 		}).Build()
 		a := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		require.EqualValues(t, 300, <-observed)
+		f.manager.mu.Lock()
+		resource := f.manager.resources[1000]
+		cachedInfo := resource.snapshot.LoadInfo
+		baseInfo := resource.bases[0].snapshot.LoadInfo
+		f.manager.mu.Unlock()
+		require.Same(t, cachedInfo, baseInfo, "the base must retain the source snapshot, not the operation's filtered copy")
+		require.Len(t, baseInfo.IndexInfos, 2)
+		require.Zero(t, baseInfo.EstimatedBytesPerRow, "node-local preparation must not modify the retained snapshot")
 		b := f.acquire(2, 1, 2)
 		f.await(t, 1)
 		require.EqualValues(t, 301, <-observed)
 		require.Len(t, source.LoadInfo.IndexInfos, 2)
+		require.Zero(t, source.LoadInfo.EstimatedBytesPerRow)
 		require.EqualValues(t, 1, f.loads.Load(), "read bindings share compatible physical rows")
 		f.drop(t, a)
 		f.drop(t, b)
+	})
+}
+
+func TestSegmentResourceConcurrentViewPreparationPreservesSharedMetadata(t *testing.T) {
+	mockey.PatchConvey("preparing another View cannot mutate metadata held by an active query", t, func() {
+		f := setupResourceTest(t, nil)
+		source := resourceSnapshot(100, 1000, 1)
+		for _, id := range []int64{300, 301} {
+			source.LoadInfo.IndexInfos = append(source.LoadInfo.IndexInfos, &querypb.FieldIndexInfo{
+				FieldID: 100, IndexID: id, IndexFilePaths: []string{fmt.Sprintf("index/%d", id)},
+				IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "INVERTED"}},
+			})
+		}
+		expected := proto.Clone(source.LoadInfo).(*querypb.SegmentLoadInfo)
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).Return(source, nil).Build()
+		f.dependencyMock.UnPatch()
+		mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			id := int64(299 + view.IntoProto().GetMeta().GetLoadInfoVersion())
+			return &fakeCollectionRuntimeGuard{schemaVersion: 1, schema: &schemapb.CollectionSchema{Version: 1}, updatedIndexes: []*indexpb.IndexInfo{{FieldID: 100, IndexID: id}}}, false, nil
+		}).Build()
+		f.manager.estimator = &resourceTestEstimator{}
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error) {
+			info.EstimatedBytesPerRow = collection.IndexInfos()[0].IndexID
+			return nil, nil
+		}).Build()
+		prepared := make(chan *querypb.SegmentLoadInfo, 2)
+		start := make(chan struct{})
+		release := sync.OnceFunc(func() { close(start) })
+		defer release()
+		f.prepareMock.UnPatch()
+		mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, ctx context.Context, _ TransformSegment, _ segments.ReadState, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+			info := snapshot.LoadInfo
+			id := collection.IndexInfos()[0].IndexID
+			prepared <- info
+			if id == 301 {
+				select {
+				case <-start:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			for iteration := 0; iteration < 256; iteration++ {
+				info.IndexInfos[0].IndexParams[0].Value = fmt.Sprintf("view-%d-%d", id, iteration)
+				info.IndexInfos[0].IndexFilePaths[0] = fmt.Sprintf("prepared/%d/%d", id, iteration)
+			}
+			return &resourceTestRead{}, nil
+		}).Build()
+
+		first := f.acquire(1, 1, 1)
+		f.await(t, 1)
+		firstInfo := <-prepared
+		require.Len(t, firstInfo.IndexInfos, 1)
+		require.EqualValues(t, 300, firstInfo.IndexInfos[0].IndexID)
+		firstExpected := proto.Clone(firstInfo).(*querypb.SegmentLoadInfo)
+		held, err := f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, 0)
+		require.NoError(t, err)
+		defer held[0].Release()
+		f.manager.mu.Lock()
+		resource := f.manager.resources[1000]
+		cachedInfo, baseInfo := resource.snapshot.LoadInfo, resource.bases[0].snapshot.LoadInfo
+		f.manager.mu.Unlock()
+		require.Same(t, cachedInfo, baseInfo)
+
+		second := f.acquire(2, 1, 2)
+		var secondInfo *querypb.SegmentLoadInfo
+		select {
+		case secondInfo = <-prepared:
+		case <-time.After(5 * time.Second):
+			t.Fatal("second View did not start read preparation")
+		}
+		var changed atomic.Bool
+		var readers sync.WaitGroup
+		for range 4 {
+			readers.Go(func() {
+				<-start
+				for range 256 {
+					if !proto.Equal(cachedInfo, expected) || !proto.Equal(baseInfo, expected) || !proto.Equal(firstInfo, firstExpected) {
+						changed.Store(true)
+					}
+				}
+			})
+		}
+		release()
+		f.await(t, 1)
+		readers.Wait()
+		require.False(t, changed.Load(), "private preparation writes escaped into shared metadata")
+		require.True(t, proto.Equal(source.LoadInfo, expected))
+		require.True(t, proto.Equal(baseInfo, expected))
+		require.NotSame(t, firstInfo, secondInfo)
+		require.Len(t, secondInfo.IndexInfos, 1)
+		require.EqualValues(t, 301, secondInfo.IndexInfos[0].IndexID)
+		require.EqualValues(t, 300, firstInfo.EstimatedBytesPerRow)
+		require.EqualValues(t, 301, secondInfo.EstimatedBytesPerRow)
+		require.Equal(t, "view-300-255", firstInfo.IndexInfos[0].IndexParams[0].Value)
+		require.Equal(t, "view-301-255", secondInfo.IndexInfos[0].IndexParams[0].Value)
+		require.EqualValues(t, 1, f.loads.Load())
+		dropped := f.beginDrop(first)
+		requireDropPending(t, dropped)
+		held[0].Release()
+		awaitShutdown(t, dropped)
+		f.drop(t, second)
 	})
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -34,10 +33,12 @@ type SearchAggregationComputer struct {
 // NewSearchAggregationComputer wraps an already-reduced SearchResultData.
 // Upstream searchReduceOperator owns cross-shard merge + group-size /
 // topK enforcement; this computer only does per-NQ hierarchical aggregation.
+// largerIsBetter describes the reduced scores, which may have been rewritten
+// by a FunctionChain and no longer follow the original metric direction.
 func NewSearchAggregationComputer(
 	data *schemapb.SearchResultData,
 	ctx *SearchAggregationContext,
-	metricType string,
+	largerIsBetter bool,
 ) *SearchAggregationComputer {
 	m := make(map[int64]*schemapb.FieldData, len(data.GetFieldsData())+len(data.GetGroupByFieldValues()))
 	for _, fd := range data.GetFieldsData() {
@@ -51,7 +52,7 @@ func NewSearchAggregationComputer(
 		}
 	}
 	direction := "asc"
-	if metric.PositivelyRelated(metricType) {
+	if largerIsBetter {
 		direction = "desc"
 	}
 	return &SearchAggregationComputer{

@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -4669,28 +4668,6 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		// FieldID should be 0 (assigned by RootCoord later)
 		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
 	})
-}
-
-func TestFailMetricLabel(t *testing.T) {
-	assertLabels := func(wantCause string, err error) {
-		t.Helper()
-		status, cause := failMetricLabel(err)
-		// Every failure keeps the coarse status a pre-2.6.19 dashboard queries;
-		// only the cause tells the parties apart.
-		assert.Equal(t, metrics.FailLabel, status)
-		assert.Equal(t, wantCause, cause)
-	}
-
-	// untyped / nil errors must take the conservative system bucket
-	assertLabels(metrics.CauseSystem, nil)
-	assertLabels(metrics.CauseSystem, errors.New("plain error"))
-	assertLabels(metrics.CauseSystem, merr.WrapErrServiceInternalMsg("internal failure"))
-	// input-classified merr errors go to the user bucket, also through wrapping
-	assertLabels(metrics.CauseUser, merr.WrapErrParameterInvalidMsg("bad parameter"))
-	assertLabels(metrics.CauseUser, merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context"))
-	// client cancellation is neither party's failure
-	assertLabels(metrics.CauseCancel, context.Canceled)
-	assertLabels(metrics.CauseCancel, errors.Wrap(context.Canceled, "rpc aborted"))
 }
 
 // newTestSchema builds a schema exercising every supported data type. It used

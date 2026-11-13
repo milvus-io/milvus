@@ -20,7 +20,33 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCollectionFlushRateDefaultAndOverrides(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	t.Cleanup(base.mgr.Close)
+	qc := quotaConfig{}
+	qc.init(base)
+
+	// With no YAML, environment, or remote source, this exercises the code default.
+	require.True(t, qc.FlushLimitEnabled.GetAsBool())
+	require.Equal(t, float64(1), qc.MaxFlushRatePerCollection.GetAsFloat())
+	require.Equal(t, defaultMax, qc.MaxFlushRate.GetAsFloat())
+	require.Equal(t, defaultMax, qc.MaxFlushRatePerDB.GetAsFloat())
+
+	require.NoError(t, base.Save(qc.MaxFlushRatePerCollection.Key, "0.25"))
+	require.Equal(t, 0.25, qc.MaxFlushRatePerCollection.GetAsFloat())
+	require.NoError(t, base.Save(qc.FlushLimitEnabled.Key, "false"))
+	require.Equal(t, defaultMax, qc.MaxFlushRatePerCollection.GetAsFloat())
+	require.NoError(t, base.Save(qc.FlushLimitEnabled.Key, "true"))
+	require.Equal(t, 0.25, qc.MaxFlushRatePerCollection.GetAsFloat())
+
+	require.NoError(t, base.Reset(qc.MaxFlushRatePerCollection.Key))
+	require.Equal(t, float64(1), qc.MaxFlushRatePerCollection.GetAsFloat())
+	require.NoError(t, base.Save(qc.MaxFlushRatePerCollection.Key, "-1"))
+	require.Equal(t, defaultMax, qc.MaxFlushRatePerCollection.GetAsFloat())
+}
 
 func TestQuotaParam(t *testing.T) {
 	qc := quotaConfig{}
@@ -59,7 +85,7 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, false, qc.IndexLimitEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxIndexRate.GetAsFloat())
 		assert.True(t, qc.FlushLimitEnabled.GetAsBool())
-		assert.Equal(t, 0.1, qc.MaxFlushRatePerCollection.GetAsFloat())
+		assert.Equal(t, float64(1), qc.MaxFlushRatePerCollection.GetAsFloat())
 		assert.Equal(t, defaultMax, qc.MaxFlushRate.GetAsFloat())
 		assert.Equal(t, false, qc.CompactionLimitEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxCompactionRate.GetAsFloat())

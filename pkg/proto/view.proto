@@ -135,6 +135,7 @@ message QueryViewMeta {
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
+    QueryViewControl control = 9;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -196,6 +197,7 @@ message SyncResponse {
     oneof response {
         SyncQueryViewsResponse views = 1;
         SyncCloseResponse close = 2;
+        ViewFeedbackReport view_feedback = 3;
     }
 }
 
@@ -205,6 +207,19 @@ message SyncQueryViewsResponse {
 }
 
 message SyncCloseResponse {
+}
+
+// Shard planning access within a best-effort reporting window, independent of View versions.
+message ViewFeedback {
+    ShardID shard_id = 1;
+    uint64 request_count = 2;
+    int64 last_access_unix_nanos = 3;
+}
+
+message ViewFeedbackReport {
+    repeated ViewFeedback shards = 1;
+    int64 window_start_unix_nanos = 2;
+    int64 window_end_unix_nanos = 3;
 }
 
 // ShardID identifies one shard within a replica.
@@ -514,4 +529,10 @@ message QueryNodeRequestContext {
 message StreamingNodeRequestContext {
     // Node selected for this attempt; does not imply the server received it.
     int64 node_id = 1;
+}
+
+// Monotonic lifecycle controls for one QueryView identity.
+message QueryViewControl {
+    // Explicit collection teardown skips timed retention, never operation references.
+    bool preempt_serving_lease = 1;
 }

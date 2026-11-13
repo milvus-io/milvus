@@ -534,9 +534,8 @@ enum class ScanReadMode {
     ValidityOnly,
 };
 
-// TODO(local-format): Phase 2 will guarantee borrowed views only until the next
-// Next()/Seek() or cursor destruction, regardless of backend/pin policy. Longer
-// use requires owned data, not reliance on incidental pin retention.
+// Borrowed views must be consumed before the next Next()/Seek() or cursor
+// destruction. Pin retention does not extend this common data lifetime.
 class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
@@ -555,9 +554,8 @@ class ScanCursor {
     // Data scans return at most one dense batch beginning exactly at
     // Position(). The returned size may be smaller than length at a Cell,
     // file, reader, or ownership boundary, but must never exceed length.
-    // Under CursorOwned, consume the borrowed data batch before the next
-    // Next()/Seek(); under ResultOwned, its views remain valid while the
-    // returned batch owner remains alive.
+    // Consume each borrowed batch before the next Next()/Seek() or cursor
+    // destruction, regardless of pin policy.
     //
     // Row-id scans consume the complete requested source range in one call and
     // return one sparse payload. They return true even when no row matches;
@@ -575,6 +573,9 @@ enum class ScanPinPolicy {
     // The cursor owns the physical Cell pin. A returned batch is borrowed and
     // must be consumed before the next Next()/Seek() call.
     CursorOwned,
+    // The cursor pins every source Cell up front until destruction. This
+    // changes source residency, not the borrowed batch lifetime.
+    AllCells,
 };
 
 enum class ScanOutput {

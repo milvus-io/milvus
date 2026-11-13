@@ -174,6 +174,14 @@ class NgramIndexReader final : public IIndexReaderBase,
 
     // ---- INgramReader --------------------------------------------
 
+    bool
+    CanHandleConditionTree(
+        const RegexLiteralCondition& condition) const override;
+
+    void
+    ConditionTreeCandidates(const RegexLiteralCondition& condition,
+                            TargetBitmap& candidates) const override;
+
     // Per-literal eligibility, including min_gram and extractable regex fragments.
     // Ask after pinning; a load-time capability bit cannot encode this answer.
     bool

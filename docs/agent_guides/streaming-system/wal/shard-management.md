@@ -14,10 +14,11 @@ mask semantics. `collection.on.truncating` remains coordinator/DataCoord state.
 
 Growing segments are sealed when any registered policy triggers. See `internal/streamingnode/server/wal/interceptors/shard/policy/seal_policy.go` for the full list of policies.
 
-StreamingNode no longer seals by binlog file count or consumes
-`dataCoord.segment.maxBinlogFileNumber`. Segment capacity, lifetime, idle time,
-memory pressure, blocking L0 and explicit WAL operations still trigger sealing.
-The DataCoord configuration remains in use by the legacy DataCoord path.
+StreamingNode does not seal by binlog file count. Segment capacity, lifetime,
+idle time, memory pressure, blocking L0 and explicit WAL operations trigger
+sealing. DataCoord does not seal growing segments: it only registers the
+segments that StreamingNode allocates (`AllocSegment`) and records their flush
+(`SaveBinlogPaths`).
 
 Recovery restores only NORMAL partitions as writable. Dropped/tombstoned
 partitions remain in recovery metadata until Summary retirement, without

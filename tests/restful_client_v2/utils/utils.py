@@ -147,7 +147,16 @@ def wait_cluster_be_ready(cluster_id, client, timeout=120):
 
 
 def gen_data_by_type(field):
-    data_type = field["type"]
+    data_type = field.get("type")
+    if data_type is None:
+        data_type = field["dataType"].lower()
+        params = field.get("elementTypeParams", {})
+        if data_type == "floatvector":
+            data_type = f"floatVector({params['dim']})"
+        elif data_type == "varchar":
+            data_type = f"varchar({params['max_length']})"
+        else:
+            data_type = {"float": "float32", "double": "float64"}.get(data_type, data_type)
     if data_type == "bool":
         return random.choice([True, False])
     if data_type == "int8":
@@ -182,7 +191,7 @@ def get_data_by_fields(fields, nb):
     for i in range(nb):
         tmp = {}
         for field in fields_not_auto_id:
-            tmp[field["name"]] = gen_data_by_type(field)
+            tmp[field.get("name", field.get("fieldName"))] = gen_data_by_type(field)
         data.append(tmp)
     return data
 

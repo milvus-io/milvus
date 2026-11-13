@@ -113,3 +113,35 @@ SearchOnView/QueryOnView while Down is pending, then stop renewal and observe
 Down followed by rejection. Production QueryCoord scheduling and Proxy
 QueryViewClient routing use this protocol. Component tests exercise explicit
 ViewSync; claims about automatic handoff additionally require cluster evidence.
+
+## Explicit collection teardown control
+
+Balancer attaches `QueryViewMeta.control.preempt_serving_lease` to Down when
+collection load intent has been withdrawn. Replica removal or suspension with
+collection intent still present uses ordinary Down. DDL callbacks only withdraw
+intent and wait for cleanup; they do not change Views directly.
+
+Coordinator's `EnterDownWithControl` handles both Up -> Down and an already
+published Down. Strengthening control persists and resends Down even without a
+state change. Repeating the same control or an ordinary Down is a no-op.
+
+On receiving controlled Down, SN closes that View's serving lease: disable
+future grants/renewal, clear the deadline, and stop its timer. The existing
+pending-Down check then waits only for call references to reach zero. The closed
+lease cannot reopen on a delayed ordinary push. Existing leases can release
+normally, but cannot renew; new acquisition is rejected and the View is removed
+from replica discovery while its existing calls drain.
+
+This control introduces no per-call cancellation context or separate recovery
+protocol. Active calls retain their original caller context and reference
+lifetime. SN's deadline and closed-lease bit are local; after restart Coordinator
+re-delivers its persisted Down/control through the existing sync protocol.
+Once Down completes, the existing Dropping/resource cleanup protocol runs.
+Execution handles retain their resources through actual native completion and
+conversion; an operation guard delays View resource cleanup until those handles
+are returned. The control never clears operation references.
+
+Empty control preserves normal handoff. Older workers ignoring the optional
+control keep their existing lease delay. Verify freshly renewed long leases,
+pending-Down upgrades and duplicate pushes, final-reference release, no renewal
+or reacquisition after closure, normal handoff, and synchronous resource drain.

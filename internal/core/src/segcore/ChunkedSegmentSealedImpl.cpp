@@ -137,6 +137,7 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
+#include "segcore/OutputFields.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/TimestampIndex.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -728,6 +729,9 @@ make_persisted_index_entry(LoadIndexInfo& info) {
 // this translator cannot recreate the generation.
 class CompletedTextStorageTranslator final
     : public cachinglayer::Translator<index::TextIndexStorage> {
+    using CellResults = std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<value_type>>>;
+
  public:
     CompletedTextStorageTranslator(
         std::unique_ptr<index::TextIndexStorage> storage,
@@ -782,10 +786,15 @@ class CompletedTextStorageTranslator final
         return key_;
     }
 
-    std::vector<std::pair<cachinglayer::cid_t,
-                          std::unique_ptr<index::TextIndexStorage>>>
+    CellResults
     get_cells(milvus::OpContext* ctx,
-              const std::vector<cachinglayer::cid_t>&) override {
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        return folly::coro::blockingWait(get_cells_async(ctx, cids));
+    }
+
+    folly::coro::Task<CellResults>
+    get_cells_async(milvus::OpContext* ctx,
+                    const std::vector<cachinglayer::cid_t>&) override {
         CheckCancellation(ctx, segment_id_, "CompletedTextStorageTranslator");
         AssertInfo(storage_ != nullptr,
                    "completed text storage was already transferred");
@@ -793,7 +802,7 @@ class CompletedTextStorageTranslator final
                               std::unique_ptr<index::TextIndexStorage>>>
             result;
         result.emplace_back(0, std::move(storage_));
-        return result;
+        co_return result;
     }
 
     cachinglayer::Meta*
@@ -2659,16 +2668,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     const auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
     const auto column_groups = segment_load_info.GetColumnGroups();
 
     if (schema_snapshot->is_external_collection()) {
-        InjectExternalSpecProperties(*properties,
+        auto external_properties =
+            std::make_shared<milvus_storage::api::Properties>(*properties);
+        InjectExternalSpecProperties(*external_properties,
                                      segment_load_info.GetCollectionID(),
                                      schema_snapshot->get_external_source(),
                                      schema_snapshot->get_external_spec());
+        properties = std::move(external_properties);
     }
 
     const auto needed_columns = schema_snapshot->GetExternalColumnNames();
@@ -2676,7 +2687,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
-                                            *properties));
+                                            properties));
     // QueryNode registers the collection's cipher context before loading.
     // Resolve encrypted Parquet keys through that context when opening files.
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
@@ -5728,7 +5739,7 @@ ReadTextLobBatch(
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto& cache = GetGlobalTextColumnCache();
-    return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
+    return cache.ReadBatch(lob_base_path, fs, properties, encoded_refs);
 }
 
 void
@@ -5883,12 +5894,30 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                "text index field {} has negative row count",
                field_id.get());
     const auto declared_row_count = static_cast<size_t>(row_count);
-    auto produce_text_batches = [&](const index::TextIndexBuildSource::
-                                        ConsumeBatch& consume) {
+    index::TextIndexBuildParams params{
+        .field_name = unique_id,
+        .value_type = field_meta.get_data_type(),
+        .analyzer_name = "milvus_tokenizer",
+        .analyzer_params = field_meta.get_analyzer_params(),
+        .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
+        .unique_id = unique_id,
+        .local_dir =
+            cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
+    index::TextIndexBuilder builder(std::move(params));
+    // Release source cursors and pins before finalizing the index.
+    {
         auto it = target_runtime->fields.find(field_id);
         std::shared_ptr<ChunkedColumnInterface> column =
             it != target_runtime->fields.end() ? it->second : nullptr;
         if (column) {
+            // Preserve V1's former bulk pin set; grouped Raw and Vortex keep
+            // their current-source pins. Neither policy retains old batches.
+            const auto scan_options = ScanOptions::ForData(
+                0,
+                TargetType::StringView,
+                dynamic_cast<const ChunkedColumnBase*>(column.get()) != nullptr
+                    ? ScanPinPolicy::AllCells
+                    : ScanPinPolicy::CursorOwned);
             // Check for cancellation before bulk operation
             CheckCancellation(op_ctx,
                               id_,
@@ -5951,7 +5980,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         views[i] = texts[entry.text_index];
                         validity[i] = true;
                     }
-                    consume(index::ScalarBuildBatch<std::string_view>{
+                    builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
                         views,
                         field_meta.is_nullable()
                             ? ValidityView::FromExpanded(validity.data())
@@ -5965,26 +5994,35 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         field_id.get(),
                         "ChunkedSegmentSealedImpl::CreateTextIndex()");
                 };
-                column->BulkRawStringAt(
-                    op_ctx,
-                    [&](std::string_view value, size_t offset, bool is_valid) {
-                        AssertInfo(offset == expected_offset &&
-                                       offset < declared_row_count,
-                                   "text column for field {} produced row {} "
-                                   "while row {} was expected",
-                                   field_id.get(),
-                                   offset,
-                                   expected_offset);
-                        ++expected_offset;
+                auto cursor = column->Scan(op_ctx, scan_options);
+                AssertInfo(cursor != nullptr,
+                           "text column scan is unsupported");
+                ScanBatch batch;
+                while (cursor->Next(kTextLobIndexBuildBatchSize,
+                                    ScanReadMode::DataAndValidity,
+                                    &batch)) {
+                    AssertInfo(
+                        batch.row_id_start == expected_offset &&
+                            batch.size > 0 &&
+                            batch.size <= declared_row_count - expected_offset,
+                        "invalid text scan batch at row {} for field {}",
+                        expected_offset,
+                        field_id.get());
+                    const auto* values =
+                        batch.values.data_as<std::string_view>();
+                    for (int64_t i = 0; i < batch.size; ++i) {
+                        const auto offset = expected_offset++;
+                        const auto is_valid =
+                            !batch.validity || batch.validity[i];
                         if (!is_valid) {
                             entries.push_back({offset, false, 0});
                             if (entries.size() >= kTextLobIndexBuildBatchSize) {
                                 flush_text_entries();
                             }
-                            return;
+                            continue;
                         }
                         entries.push_back({offset, true, encoded_refs.size()});
-                        encoded_ref_storage.emplace_back(value);
+                        encoded_ref_storage.emplace_back(values[i]);
                         encoded_refs.push_back(MakeTextLobEncodedRef(
                             encoded_ref_storage.back().data(),
                             encoded_ref_storage.back().size()));
@@ -5993,7 +6031,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                             entries.size() >= kTextLobIndexBuildBatchSize) {
                             flush_text_entries();
                         }
-                    });
+                    }
+                }
                 flush_text_entries();
                 AssertInfo(expected_offset == declared_row_count,
                            "text column for field {} declared {} rows but "
@@ -6003,30 +6042,36 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                            expected_offset);
             } else {
                 size_t expected_offset = 0;
-                column->BulkRawStringAt(
-                    op_ctx,
-                    [&](std::string_view value, size_t offset, bool is_valid) {
-                        AssertInfo(offset == expected_offset &&
-                                       offset < declared_row_count,
-                                   "text column for field {} produced row {} "
-                                   "while row {} was expected",
-                                   field_id.get(),
-                                   offset,
-                                   expected_offset);
-                        ++expected_offset;
-                        AssertInfo(is_valid || field_meta.is_nullable(),
-                                   "non-nullable text field {} produced a "
-                                   "null row at offset {}",
-                                   field_id.get(),
-                                   offset);
-                        const std::array<std::string_view, 1> values{value};
-                        const std::array<bool, 1> validity{is_valid};
-                        consume(index::ScalarBuildBatch<std::string_view>{
-                            values,
-                            field_meta.is_nullable()
-                                ? ValidityView::FromExpanded(validity.data())
-                                : ValidityView{}});
-                    });
+                auto cursor = column->Scan(op_ctx, scan_options);
+                AssertInfo(cursor != nullptr,
+                           "text column scan is unsupported");
+                ScanBatch batch;
+                while (cursor->Next(kTextLobIndexBuildBatchSize,
+                                    ScanReadMode::DataAndValidity,
+                                    &batch)) {
+                    AssertInfo(
+                        batch.row_id_start == expected_offset &&
+                            batch.size > 0 &&
+                            batch.size <= declared_row_count - expected_offset,
+                        "invalid text scan batch at row {} for field {}",
+                        expected_offset,
+                        field_id.get());
+                    if (!field_meta.is_nullable() && batch.validity) {
+                        for (int64_t i = 0; i < batch.size; ++i) {
+                            AssertInfo(batch.validity[i],
+                                       "non-nullable text field {} produced a "
+                                       "null row at offset {}",
+                                       field_id.get(),
+                                       expected_offset + i);
+                        }
+                    }
+                    builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
+                        {batch.values.data_as<std::string_view>(),
+                         static_cast<size_t>(batch.size)},
+                        field_meta.is_nullable() ? batch.validity
+                                                 : ValidityView{}});
+                    expected_offset += batch.size;
+                }
                 AssertInfo(expected_offset == declared_row_count,
                            "text column for field {} declared {} rows but "
                            "produced {}",
@@ -6119,7 +6164,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         views[i] = values[i];
                     }
                 }
-                consume(index::ScalarBuildBatch<std::string_view>{
+                builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
                     std::span<const std::string_view>(views.data(), batch_size),
                     field_meta.is_nullable()
                         ? ValidityView::FromExpanded(validity.data())
@@ -6131,10 +6176,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     "ChunkedSegmentSealedImpl::CreateTextIndex()");
             }
         }
-    };
-    index::TextIndexBuildSource source{
-        .row_count = declared_row_count,
-        .produce = std::move(produce_text_batches)};
+    }
 
     // Check for cancellation before finalizing
     CheckCancellation(op_ctx,
@@ -6142,17 +6184,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    index::TextIndexBuildParams params{
-        .field_name = unique_id,
-        .value_type = field_meta.get_data_type(),
-        .analyzer_name = "milvus_tokenizer",
-        .analyzer_params = field_meta.get_analyzer_params(),
-        .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
-        .unique_id = unique_id,
-        .local_dir =
-            cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
-    auto artifact =
-        std::move(index::TextIndexBuilder(std::move(params))).Build(source);
+    auto artifact = std::move(builder).Finish(declared_row_count);
     auto storage = std::move(*artifact).IntoStorage();
     const index::IndexMetadata metadata{index::ReaderCaps{.text_match = true},
                                         index::Domain::Row,
@@ -8226,7 +8258,7 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
             }
             auto reader = std::shared_ptr<milvus_storage::api::Reader>(
                 milvus_storage::api::Reader::create(
-                    column_groups, arrow_schema, needed_columns, *properties)
+                    column_groups, arrow_schema, needed_columns, properties)
                     .release());
             if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
                 reader->set_keyretriever([](const std::string& key_metadata) {
@@ -9174,17 +9206,26 @@ ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
 
         // Rows are written at their absolute segment offsets (see
         // SimpleGeometryCache::AppendDataAt).
-        auto num_chunks = column->num_chunks();
+        auto cursor = column->Scan(
+            op_ctx,
+            ScanOptions::ForData(
+                0, TargetType::StringView, ScanPinPolicy::CursorOwned));
+        AssertInfo(cursor != nullptr, "geometry column scan is unsupported");
+        const auto num_rows = column->NumRows();
         size_t absolute_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-            // Get all string views from this chunk
-            auto pw = column->StringViews(op_ctx, chunk_id);
-            auto [string_views, valid_data] = pw.get();
-
-            // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size();
-                 ++i, ++absolute_offset) {
-                if (!valid_data || valid_data[i]) {
+        ScanBatch batch;
+        while (cursor->Next(num_rows - absolute_offset,
+                            ScanReadMode::DataAndValidity,
+                            &batch)) {
+            AssertInfo(batch.row_id_start == absolute_offset &&
+                           batch.size > 0 &&
+                           batch.size <= num_rows - absolute_offset,
+                       "invalid geometry scan batch at row {} for field {}",
+                       absolute_offset,
+                       field_id.get());
+            const auto* string_views = batch.values.data_as<std::string_view>();
+            for (int64_t i = 0; i < batch.size; ++i, ++absolute_offset) {
+                if (!batch.validity || batch.validity[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
                     geometry_cache->AppendDataAt(
@@ -9195,6 +9236,10 @@ ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
                 }
             }
         }
+        AssertInfo(absolute_offset == num_rows,
+                   "geometry scan returned {} rows, expected {}",
+                   absolute_offset,
+                   num_rows);
 
         LOG_INFO(
             "Successfully built geometry cache for segment {} field {} "
@@ -9377,7 +9422,7 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     const std::vector<std::pair<int, std::vector<FieldId>>>& eager_cg_field_ids,
     const std::vector<std::pair<int, std::vector<FieldId>>>& lazy_cg_field_ids,
     const std::vector<VortexColumnGroupLocalFormat>& local_formats,
@@ -9511,7 +9556,7 @@ ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormats(
 void
 ChunkedSegmentSealedImpl::LoadVortexColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
@@ -9633,7 +9678,7 @@ ChunkedSegmentSealedImpl::LoadVortexColumnGroup(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const SegmentLoadInfo& segment_load_info,
@@ -10208,52 +10253,46 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     bool used_take = TryTakeForSearch(
         plan, results.seg_offsets_.data(), size, results, snapshot, op_ctx);
 
-    std::unique_ptr<DataArray> field_data;
-    // Per-call OpContext keeps storage_usage scoped to this segment;
-    // sharing op_ctx across segments would double-count bytes. See
-    // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
-    milvus::OpContext local_ctx;
-    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
-    if (op_ctx != nullptr) {
-        local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority =
-            op_ctx->runtime_load_priority.value_or(
-                milvus::proto::common::LoadPriority::HIGH);
-    }
+    std::vector<FieldId> fields_to_fetch;
+    fields_to_fetch.reserve(plan->target_entries_.size());
     for (auto field_id : plan->target_entries_) {
-        // Skip fields already filled by take
         if (used_take && results.output_fields_data_.count(field_id) > 0) {
             continue;
         }
-        segcore::CheckCancellation(
-            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
+        fields_to_fetch.push_back(field_id);
+    }
+
+    auto fetch_one = [this, plan, snapshot, &results, size](
+                         FieldId field_id, milvus::OpContext* field_ctx) {
         auto& field_meta = plan->schema_->operator[](field_id);
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript_from_state(snapshot,
-                                                   &local_ctx,
-                                                   field_id,
-                                                   results.seg_offsets_.data(),
-                                                   size,
-                                                   target_dynamic_fields);
-        } else if (!snapshot->fields->has_field(field_id)) {
-            field_data = bulk_subscript_not_exist_field(
-                field_meta, results.seg_offsets_.data(), size);
-        } else {
-            field_data = bulk_subscript_from_state(snapshot,
-                                                   &local_ctx,
-                                                   field_id,
-                                                   results.seg_offsets_.data(),
-                                                   size);
+            return bulk_subscript_from_state(snapshot,
+                                             field_ctx,
+                                             field_id,
+                                             results.seg_offsets_.data(),
+                                             size,
+                                             target_dynamic_fields);
         }
-        results.output_fields_data_[field_id] = std::move(field_data);
+        if (!snapshot->fields->has_field(field_id)) {
+            return bulk_subscript_not_exist_field(
+                field_meta, results.seg_offsets_.data(), size);
+        }
+        return bulk_subscript_from_state(
+            snapshot, field_ctx, field_id, results.seg_offsets_.data(), size);
+    };
+    auto fetched_fields =
+        FetchOutputFields(fields_to_fetch, get_segment_id(), op_ctx, fetch_one);
+    for (auto& fetched : fetched_fields) {
+        results.output_fields_data_[fetched.field_id] =
+            std::move(fetched.field_data);
+        results.search_storage_cost_.scanned_remote_bytes +=
+            fetched.scanned_remote_bytes;
+        results.search_storage_cost_.scanned_total_bytes +=
+            fetched.scanned_total_bytes;
     }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
-    results.search_storage_cost_.scanned_total_bytes +=
-        local_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----

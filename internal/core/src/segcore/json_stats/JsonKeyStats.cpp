@@ -298,14 +298,13 @@ BuildJsonStatsColumnFieldIds(const std::vector<std::string>& column_names,
     return result;
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 GetJsonStatsReadProperties() {
     auto properties =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
-    if (properties == nullptr) {
-        return {};
-    }
-    return *properties;
+    return properties
+               ? properties
+               : std::make_shared<const milvus_storage::api::Properties>();
 }
 
 // Opens one JSON-stats projection synchronously and preserves its storage
@@ -339,13 +338,14 @@ NoopParquetKeyRetriever(const std::string&) {
 }
 
 folly::coro::Task<JsonStatsParquetMetadata>
-ReadJsonStatsParquetMetadata(const std::string& file,
-                             const milvus_storage::ArrowFileSystemPtr& fs,
-                             const milvus_storage::api::Properties& properties,
-                             bool use_async,
-                             bool retain_schema,
-                             folly::CancellationToken token,
-                             proto::common::LoadPriority priority) {
+ReadJsonStatsParquetMetadata(
+    const std::string& file,
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
+    bool use_async,
+    bool retain_schema,
+    folly::CancellationToken token,
+    proto::common::LoadPriority priority) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
     storage::ThrowIfCancelled(token, "prepare JSON stats footer");
@@ -2526,12 +2526,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    if (!(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path))) {
-        ThrowInfo(ErrorCode::FileWriteFailed,
-                  "failed to upload meta file: {} for segment {}",
-                  meta_file_path,
-                  segment_id_);
-    }
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

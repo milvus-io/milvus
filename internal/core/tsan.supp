@@ -1,3 +1,8 @@
 # Licensed under the Apache License, Version 2.0.
-# Ignore reports originating inside the uninstrumented LLVM OpenMP runtime.
+# Ignore interceptor calls inside the uninstrumented LLVM OpenMP runtime and
+# its Archer callbacks. Archer's unlock can tail-call pthread_mutex_unlock,
+# making its caller appear to be libomp while the matching lock is in libarcher.
+# Keep both libraries together so TSan does not observe only half of a lock pair.
+# Archer's explicit happens-before annotations remain active.
 called_from_lib:libomp.so
+called_from_lib:libarcher.so

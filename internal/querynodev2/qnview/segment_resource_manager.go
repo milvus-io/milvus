@@ -525,8 +525,6 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		_, ok := selected[index.GetIndexID()]
 		return !ok
 	})
-	snapshot.LoadInfo = info
-	snapshot.IndexInfos = collection.IndexInfos()
 	if m.estimator != nil {
 		reservation, err := m.estimator.Reserve(ctx, info, collection)
 		if err != nil {
@@ -539,10 +537,10 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	var base *segmentBase
 	var reuse segments.ReadState
 	// Normal sealed same-ID additive manifests preserve the row domain. External
-	// snapshots may replace it, so they require an identical manifest to share.
+	// snapshots may replace it, so they require the same manifest revision to share.
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		sameManifest := info.GetManifestPath() != "" && candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
+		sameManifest := info.GetManifestPath() != "" && packed.SameManifestPath(candidate.snapshot.LoadInfo.GetManifestPath(), info.GetManifestPath())
 		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
 			break
@@ -571,6 +569,8 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		m.mu.Unlock()
 		go r.catchup(base)
 	}
+	// Only this operation uses the filtered copy; the base retains the immutable source snapshot.
+	snapshot.LoadInfo = info
 	read, err := m.loader.PrepareReadState(ctx, base.segment, reuse, collection, snapshot)
 	if err != nil {
 		return nil, err

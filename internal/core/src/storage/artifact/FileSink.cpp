@@ -278,11 +278,13 @@ class V1DiskSink::Impl {
                    : disk_manager->GetLocalIndexObjectPrefix();
     }
 
-    bool
+    void
     AddDiskFile(const std::string& path) {
-        return storage_namespace == ArtifactStorageNamespace::TextLog
-                   ? disk_manager->AddTextLog(path)
-                   : disk_manager->AddFile(path);
+        if (storage_namespace == ArtifactStorageNamespace::TextLog) {
+            disk_manager->AddTextLog(path);
+        } else {
+            disk_manager->AddFileOrThrow(path);
+        }
     }
 
     std::string
@@ -496,11 +498,7 @@ V1DiskSink::WriteEntryFromLocalFile(std::string_view name,
                       error.message());
         }
         impl_->AssertSlicedPathsAvailable(entry_name, staged_size);
-        if (!impl_->AddDiskFile(upload_path)) {
-            ThrowInfo(FileWriteFailed,
-                      "failed to upload local artifact entry {}",
-                      name);
-        }
+        impl_->AddDiskFile(upload_path);
     } catch (...) {
         impl_->state = SinkState::Failed;
         throw;

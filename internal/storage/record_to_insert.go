@@ -38,7 +38,7 @@ func RecordToInsertData(
 	schema *schemapb.CollectionSchema,
 	requiredFields typeutil.Set[int64],
 ) (*InsertData, error) {
-	insertData, err := NewInsertDataWithFunctionOutputField(schema)
+	insertData, err := NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -96,6 +97,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 					FieldID:      fieldID,
 					IndexID:      indexID,
 					IndexName:    "vector_hnsw",
+					IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "metric_type", Value: "L2"}},
+					TypeParams:   []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
 				},
 				indexID2: {
 					CollectionID: collectionID,
@@ -205,6 +208,7 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 			if info.GetBuildID() == buildID {
 				require.Equal(t, []string{"segments/1/2/3/_index/102/4/index.bin"}, info.GetIndexFilePaths())
 				require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, info.GetIndexStorePathVersion())
+				require.Equal(t, map[string]string{common.IndexTypeKey: "HNSW", "metric_type": "L2", common.DimKey: "8"}, common.KeyValuePairs(info.GetIndexParams()).ToMap())
 			}
 		}
 	})

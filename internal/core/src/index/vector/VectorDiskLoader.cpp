@@ -290,15 +290,14 @@ PrepareCommonLoadConfig(Config& config,
     config[DISK_ANN_THREADS_NUM] = *open_options.load_threads;
 }
 
-// Create the backend mmap prefix, reporting filesystem failures before
-// deserialization.
+// Stream backends may create local disk files even when mmap is disabled.
 void
-EnsureMmapDirectory(const std::string& path) {
+EnsureLocalIndexDirectory(const std::string& path) {
     std::error_code error;
     std::filesystem::create_directories(path, error);
     if (error) {
         ThrowInfo(FileCreateFailed,
-                  "failed to create disk vector mmap directory {}: {}",
+                  "failed to create disk vector index directory {}: {}",
                   path,
                   error.message());
     }
@@ -380,8 +379,11 @@ OpenEngine(bool use_async,
     const auto prefix = selected_handle->LocalPrefix();
     // Keep the decoded payload alive until Knowhere consumes the load input.
     std::vector<uint8_t> validity_bytes;
-    const auto input = co_await ReadValidity(
-        use_async, source, plan, params, prefix, validity_bytes);
+    knowhere::LoadOptions input;
+    if (plan.state != ArtifactState::Normal) {
+        input = co_await ReadValidity(
+            use_async, source, plan, params, prefix, validity_bytes);
+    }
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = co_await DecodeEmptyEmbeddingList(use_async, source);
@@ -459,9 +461,9 @@ OpenEngine(bool use_async,
                               paths[i]);
                 }
             }
-        } else if (enable_mmap) {
+        } else {
             {
-                auto local_io = [&] { EnsureMmapDirectory(prefix); };
+                auto local_io = [&] { EnsureLocalIndexDirectory(prefix); };
                 if (use_async) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
                 } else {
@@ -473,6 +475,29 @@ OpenEngine(bool use_async,
         auto config = params.knowhere_config;
         PrepareCommonLoadConfig(
             config, params, open_options, prefix, stream_backend, enable_mmap);
+        if (plan.has_validity) {
+            bool needs_external_validity = true;
+            auto inspect = [&] {
+                const auto requirements =
+                    engine.native_index.InspectLoadRequirements(
+                        knowhere::BinarySet{}, config);
+                selected_handle->RethrowFirstFailure();
+                if (!requirements.has_value()) {
+                    ThrowDeserializeError(requirements.error());
+                }
+                needs_external_validity =
+                    requirements.value().needs_external_validity;
+            };
+            if (use_async) {
+                co_await storage::RunLocalFileIOAsync(inspect, priority);
+            } else {
+                inspect();
+            }
+            if (needs_external_validity) {
+                input = co_await ReadValidity(
+                    use_async, source, plan, params, prefix, validity_bytes);
+            }
+        }
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
@@ -593,7 +618,11 @@ VectorDiskLoader::AsyncEntryNames(storage::FileSource& source,
         }
     }
     std::vector<std::string> names;
-    if (plan.has_validity) {
+    // Ordinary-vector validity can be estimated from the row count without
+    // opening either the sidecar or the native index. Array validity may use
+    // the element domain, so retain its file inspection.
+    if (plan.has_validity &&
+        (params.elem_type != DataType::NONE || !params.num_rows.has_value())) {
         names.emplace_back(VALID_DATA_KEY);
     }
     if (plan.has_empty_offsets) {

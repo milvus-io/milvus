@@ -507,3 +507,112 @@ fn original_line_coordinates_for_empty_lines_and_terminal_lf() {
     assert_eq!(coordinates, [(1, 0, ""), (2, 1, "中\r"), (3, 6, "")]);
     assert!(r.texts[1].lines.is_empty());
 }
+
+#[test]
+fn max_count_caps_matching_lines_per_input_and_resets_between_batches() {
+    let plan = plan(
+        &["error", "timeout"],
+        MatchOptions {
+            max_count: Some(1),
+            ..Default::default()
+        },
+    );
+    let mut session = Session::new(&plan);
+    for _ in 0..2 {
+        let result = session
+            .execute_accounted(
+                &[
+                    "skip\n错误 error error\nerror".as_bytes(),
+                    b"none",
+                    b"timeout\r\nerror",
+                    b"",
+                ],
+                execution_limits(),
+                ResultOverhead::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            rows(&result.texts[0]),
+            [("错误 error error", vec![(7, 12), (13, 18)])]
+        );
+        assert_eq!(result.texts[0].lines[0].line_number, 2);
+        assert_eq!(result.texts[0].lines[0].line_start_offset, 5);
+        assert!(result.texts[1].lines.is_empty());
+        assert_eq!(rows(&result.texts[2]), [("timeout\r", vec![(0, 7)])]);
+        assert!(result.texts[3].lines.is_empty());
+    }
+}
+
+#[test]
+fn max_count_zero_unlimited_and_empty_pattern() {
+    for (max_count, expected) in [
+        (None, 3),
+        (Some(0), 0),
+        (Some(1), 1),
+        (Some(2), 2),
+        (Some(u64::MAX), 3),
+    ] {
+        let result = search(
+            &[""],
+            MatchOptions {
+                max_count,
+                ..Default::default()
+            },
+            &["\n中\nlast\n", ""],
+        );
+        assert_eq!(result.texts[0].lines.len(), expected);
+        assert!(result.texts[1].lines.is_empty());
+        if expected > 1 {
+            assert_eq!(rows(&result.texts[0])[1], ("中", vec![(0, 0), (3, 3)]));
+        }
+    }
+}
+
+#[test]
+fn max_count_stops_before_later_matching_lines_consume_result_budget() {
+    let input = format!("error\nerror{}", "x".repeat(16 * 1024));
+    for (max_count, limited) in [(Some(1), true), (None, false)] {
+        let mut session = Session::new(&plan(
+            &["error"],
+            MatchOptions {
+                max_count,
+                ..Default::default()
+            },
+        ));
+        let result =
+            session.execute_accounted(&[input.as_bytes()], 1024, ResultOverhead::default());
+        if limited {
+            assert_eq!(rows(&result.unwrap().texts[0]), [("error", vec![(0, 5)])]);
+        } else {
+            assert!(matches!(
+                result,
+                Err(Error::ResourceLimit(LimitKind::ResultBytes))
+            ));
+        }
+    }
+}
+
+#[test]
+fn max_count_does_not_bypass_validation_or_cancellation() {
+    for max_count in [Some(0), Some(1)] {
+        let options = MatchOptions {
+            max_count,
+            ..Default::default()
+        };
+        assert!(Plan::compile(&[b"["], options, compile_limits()).is_err());
+        let mut session = Session::new(&plan(&["error"], options));
+        assert!(matches!(
+            session.execute_accounted(
+                &[b"error\n\xff"],
+                execution_limits(),
+                ResultOverhead::default()
+            ),
+            Err(Error::InvalidUtf8 { .. })
+        ));
+        session.cancellation_token().cancel();
+        assert!(matches!(
+            session.execute_accounted(&[b"error"], execution_limits(), ResultOverhead::default()),
+            Err(Error::Cancelled)
+        ));
+    }
+}

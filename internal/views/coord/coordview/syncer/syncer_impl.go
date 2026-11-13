@@ -18,7 +18,8 @@ var (
 )
 
 type reliableSyncer struct {
-	client ViewSyncClient
+	client          ViewSyncClient
+	feedbackHandler ViewFeedbackHandler
 
 	mu               sync.Mutex
 	resumableSyncers map[qviews.WorkNodeKey]*resumableSyncer
@@ -32,14 +33,23 @@ type reliableSyncer struct {
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
-func NewReliableSyncer(client ViewSyncClient) ReliableSyncer {
+func NewReliableSyncer(client ViewSyncClient, feedbackHandler ViewFeedbackHandler, pchannels []string) ReliableSyncer {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &reliableSyncer{
 		client:           client,
+		feedbackHandler:  feedbackHandler,
 		resumableSyncers: make(map[qviews.WorkNodeKey]*resumableSyncer),
 		ctx:              ctx,
 		cancel:           cancel,
 		nodeChanged:      make(chan struct{}, 1),
+	}
+	// Seed all known PChannels, including those temporarily without an owner.
+	// SyncViews adds targets introduced after this snapshot.
+	for _, pchannel := range pchannels {
+		node := qviews.StreamingNode{PChannel: pchannel}
+		if s.resumableSyncers[node.Key()] == nil {
+			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
+		}
 	}
 	s.drainWG.Add(1)
 	go s.watchNodeChanged()
@@ -132,7 +142,7 @@ func (s *reliableSyncer) syncViewsToNode(ctx context.Context, nodeKey qviews.Wor
 
 	mlog.Info(ctx, "ReliableSyncer: node discovered on demand, creating ResumableSyncer",
 		mlog.String("node", nodeKey))
-	rs := newResumableSyncer(s.ctx, node, s.client)
+	rs := newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
 	s.resumableSyncers[nodeKey] = rs
 	rs.Sync(views)
 	return false, nil
@@ -163,7 +173,7 @@ func (s *reliableSyncer) Close() error {
 }
 
 // drainRemovedNodes drains ResumableSyncers whose target nodes are no longer alive.
-// It does NOT create ResumableSyncers for new nodes — that is done lazily by tryCreateSyncer.
+// SN targets remain alive across assignment gaps; only lost QNs are drained.
 func (s *reliableSyncer) drainRemovedNodes() {
 	s.mu.Lock()
 	if s.closed {

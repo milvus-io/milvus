@@ -181,9 +181,11 @@ On recovery, rebuild all persisted View references before enabling GC. Merely
 loading current configuration is insufficient to decide which historical
 versions are unreferenced.
 
-Release stops new View planning for the collection, drains reconciliation that
-captured the old intent, and waits for all QueryViews to complete node cleanup
-and durable removal. It then deletes **all** CollectionLoadConfig versions and
+Release stops new View planning for the collection and joins the next pending
+background reconciliation batch. Concurrent releases share that batch's
+completion, which drains any planning that captured the old intent. Each release
+then waits for its own QueryViews to complete node cleanup and durable removal.
+It deletes **all** CollectionLoadConfig versions and
 completes the Release workflow. There is no retained maximum, inactive version
 or LoadInfo tombstone after Release. DropCollection likewise does not retain a
 load version after its cleanup finishes.
@@ -225,3 +227,14 @@ Key source packages: `internal/views/coord/loadmgr/`,
 `internal/views/coord/coordview/`, `internal/metastore/kv/queryview/`, `internal/querycoordv2/ddl_callbacks_drop_load_info.go`,
 `internal/datacoord/ddl/{create_index,alter_index,drop_index}.go`,
 `internal/querynodev2/qvresource/`, and the parent SN resource runtime.
+
+### Serving-lease preemption on explicit release
+
+StopPlanning publishes the absence of collection load intent and triggers the
+Balancer. Its release plan carries QueryViewControl.preempt_serving_lease for
+all residual shards of unloaded collections. This includes
+old Views already waiting in Down. The ordinary balancer RequestRelease entry
+retains its lease semantics for replica retirement. Balancer applies the controlled release through the shard manager, including
+already-Down Views. DDL callbacks only withdraw intent and wait; they never
+modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
+the release completion fence.

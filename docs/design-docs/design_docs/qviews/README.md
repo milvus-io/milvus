@@ -551,6 +551,19 @@ for its serving views. Full mixed-version upgrade validation is a separate check
 [DDL visibility](ddl_visibility.md) specifies the DataVersion and configuration
 fences and the operations still deferred.
 
+## ViewFeedback
+
+[ViewFeedback](view_feedback.md) collects best-effort access
+windows by ShardID in a dedicated top-level SN handler child structure. Windows
+are taken every five seconds or at 1024 distinct Shards and sent through persistent
+Syncer streams. Coord owns feedback by Replica load-config lifetime and expires
+received windows after two minutes, independently of reports and reads.
+It publishes copy-on-write Replica snapshots containing LastAccess and
+RequestRates averaged over all collection shards, including silent shards.
+Global rates sum the normalized Replica rates and update on contribution changes.
+Readers receive immutable snapshot pointers without copying.
+Feedback does not drive QueryView state machines or preparation priority.
+
 ## Partition statistics and pruning
 
 [Global segment pruning](query/segment_pruning.md) defines immutable DataView

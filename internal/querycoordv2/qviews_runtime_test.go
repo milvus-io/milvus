@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
@@ -107,9 +108,19 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	require.NoError(t, runtime.balanceCache.WaitForReady(ctx))
 	require.Same(t, data, runtime.balanceCache.GetCollection(100).DataView())
 	require.Equal(t, "rg1", runtime.balanceCache.GetNode(10).Info().ResourceGroup)
+	feedbackID := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
+	require.Same(t, runtime.viewFeedback, runtime.resources.ViewFeedback)
+	runtime.viewFeedback.OnViewFeedback(runtimeTestFeedbackWindow(feedbackID, 5))
+	got, found := runtime.viewFeedback.GetViewFeedback(feedbackID.ReplicaID)
+	require.True(t, found)
+	require.EqualValues(t, 5, got.RequestRates.Last2Windows)
+	runtime.loadConfigStore.StopPlanning(100)
+	runtime.viewFeedback.OnViewFeedback(runtimeTestFeedbackWindow(feedbackID, 6))
+	_, found = runtime.viewFeedback.GetViewFeedback(feedbackID.ReplicaID)
+	require.False(t, found)
 	runtime.stop()
 	runtime.stop()
-	require.Equal(t, 3, detached)
+	require.Equal(t, 4, detached)
 }
 
 func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
@@ -250,12 +261,20 @@ func newRuntimeDataViewProvider(t *testing.T) *fakeRuntimeDataViewProvider {
 }
 
 type fakeRuntimeBalancer struct {
-	started  bool
-	stopped  bool
-	triggers []balancer.TriggerScope
+	started    bool
+	stopped    bool
+	triggers   []balancer.TriggerScope
+	completion *syncutil.Future[error]
 }
 
-func (b *fakeRuntimeBalancer) Reconcile(context.Context) error { return nil }
+func (b *fakeRuntimeBalancer) TriggerWithCompletion(...balancer.TriggerScope) *syncutil.Future[error] {
+	if b.completion != nil {
+		return b.completion
+	}
+	completion := syncutil.NewFuture[error]()
+	completion.Set(nil)
+	return completion
+}
 
 func (b *fakeRuntimeBalancer) Start(context.Context) {
 	b.started = true
@@ -390,7 +409,7 @@ func TestPrefetchedQueryViewsRecoverSameRegistry(t *testing.T) {
 		if prefetch {
 			catalog = newPrefetchedQueryViewCatalog(ctx, catalog)
 		}
-		reliableSyncer := syncer.NewReliableSyncer(&fakeRuntimeViewSyncClient{})
+		reliableSyncer := syncer.NewReliableSyncer(&fakeRuntimeViewSyncClient{}, nil, nil)
 		registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, reliableSyncer, provider)
 		require.NoError(t, err)
 		t.Cleanup(func() {

@@ -73,6 +73,12 @@ func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 	}
 }
 
+func (h *QNQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return qviews.ViewFeedbackWindow{}
+}
+
+func (h *QNQueryViewHandler) ViewFeedbackReady() <-chan struct{} { return nil }
+
 // ApplyViews applies a batch of coord-pushed views.
 // Views are grouped by ShardID and applied atomically per shard.
 // All state reports are delivered through the OnReport callback.

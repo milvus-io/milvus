@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -45,13 +47,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type qviewsBalancer interface {
 	Start(ctx context.Context)
 	Stop()
 	Trigger(scopes ...balancer.TriggerScope)
-	Reconcile(ctx context.Context) error
+	TriggerWithCompletion(scopes ...balancer.TriggerScope) *syncutil.Future[error]
 }
 
 type qviewsRuntime struct {
@@ -65,6 +68,7 @@ type qviewsRuntime struct {
 	readyChanges      *readiness.Notifications
 	refreshVersions   sync.Map // collection ID -> qviews.DataVersion, max requested refresh fence
 	syncer            syncer.ReliableSyncer
+	viewFeedback      *viewfeedback.ReplicaFeedbackStore
 	balancer          qviewsBalancer
 	balanceCache      *cache.Cache
 	nodePublisher     *nodeview.QueryNodePublisher
@@ -81,6 +85,7 @@ type qviewsRuntimeDependencies struct {
 	vchannels              func(context.Context, int64) ([]string, error)
 	queryViewCatalog       queryview.QueryViewCatalog
 
+	pchannels            []string
 	viewSyncClient       syncer.ViewSyncClient
 	queryNodeClient      nodeview.QueryNodeStatePublisher
 	resourceGroupManager nodeview.ResourceGroupStatePublisher
@@ -138,11 +143,13 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	if err != nil {
 		return nil, err
 	}
-	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
+	feedback := viewfeedback.New(loadConfigStore, deps.dataViewProvider)
+	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, feedback, deps.pchannels)
 	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {
 		nodePublisher.Close()
 		_ = reliableSyncer.Close()
+		feedback.Close()
 		return nil, err
 	}
 
@@ -179,6 +186,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		shardViewRegistry:    shardViewRegistry,
 		readyChanges:         newCollectionReadiness(loadConfigStore, shardViewRegistry),
 		syncer:               reliableSyncer,
+		viewFeedback:         feedback,
 		balancer:             balancerController,
 		balanceCache:         balanceCache,
 		nodePublisher:        nodePublisher,
@@ -186,7 +194,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		streamingCoordClient: deps.streamingCoordClient,
 		streamingNodeHandler: deps.streamingNodeHandler,
 	}
-	runtime.resources = &qvresource.Resources{DataViews: deps.dataViewProvider, Balancer: balancerController, BalanceCache: balanceCache, LoadConfigs: loadConfigStore, LoadManager: loadManager, ShardViews: shardViewRegistry, Readiness: runtime.readyChanges, Reconciler: deps.dataViewReconciler, VChannels: deps.vchannels, RefreshVersions: &runtime.refreshVersions}
+	runtime.resources = &qvresource.Resources{ViewFeedback: feedback, DataViews: deps.dataViewProvider, Balancer: balancerController, BalanceCache: balanceCache, LoadConfigs: loadConfigStore, LoadManager: loadManager, ShardViews: shardViewRegistry, Readiness: runtime.readyChanges, Reconciler: deps.dataViewReconciler, VChannels: deps.vchannels, RefreshVersions: &runtime.refreshVersions}
 	loadConfigStore.RegisterObserver(func(collectionID int64, released bool) {
 		if released {
 			runtime.refreshVersions.Delete(collectionID)
@@ -237,6 +245,7 @@ func (r *qviewsRuntime) stop() {
 			r.shardViewRegistry.Close()
 		}
 		_ = r.syncer.Close()
+		r.viewFeedback.Close()
 		if r.queryNodeManager != nil {
 			r.queryNodeManager.Close()
 		}
@@ -319,6 +328,7 @@ func newDefaultQViewsRuntimeDependencies(
 		reconciler = source.QueryViewDataReconciler()
 	}
 	deps := qviewsRuntimeDependencies{
+		pchannels: channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels,
 		loadConfigDependencies: loadmgr.LoadConfigStoreDependencies{
 			Catalog: queryview.NewCollectionLoadInfoCatalog(metaKV),
 			AllocateVersion: func(ctx context.Context) (uint64, error) {

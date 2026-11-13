@@ -373,8 +373,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	alreadyAppliedSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *meta.UpdateSegmentPack) bool {
+		// The operators run again when a run could not take a segment lock;
+		// the marks of a discarded run must not carry over.
+		clear(alreadyAppliedSegments)
 		for segmentID := range baselineSegmentMap {
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			incoming := upsertSegmentMap[segmentID]
 			kept := keptSegmentMap[segmentID]
 
@@ -404,11 +407,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 				continue
 			}
 			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
+				// Replaying a patch is NOT harmless: replacing placeholders
+				// from the same incoming result could discard text or JSON stats
+				// built since the first apply, orphaning their files. A genuine
+				// patch always installs a strictly newer manifest, so it still
+				// applies.
 				alreadyAppliedSegments[segmentID] = struct{}{}
 				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
@@ -426,7 +429,7 @@ func applyExternalCollectionSegmentUpdateAtFence(
 			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
 				continue
 			}
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			if existing == nil {
 				continue
 			}
@@ -449,7 +452,7 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *meta.UpdateSegmentPack) bool {
 		for _, segmentID := range segmentsToDrop {
-			current := modPack.Meta.Segments.GetSegment(segmentID)
+			current := modPack.Peek(segmentID)
 			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
@@ -681,8 +684,11 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
-	cloned.TextStatsLogs = nil
-	cloned.JsonKeyStats = nil
+	// The incoming placeholders describe the stats carried by the incoming
+	// manifest. Apply both atomically so deltalog-only refreshes do not trigger
+	// redundant text or JSON stats rebuilds.
+	cloned.TextStatsLogs = incoming.GetTextStatsLogs()
+	cloned.JsonKeyStats = incoming.GetJsonKeyStats()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -690,15 +696,13 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 }
 
 // getExternalRefreshSegmentSnapshots returns clones in the same order as
-// segmentIDs while holding segMu across the full read, preventing one worker
-// request from observing segment metadata from different update generations.
+// segmentIDs, read at one point in time, preventing one worker request from
+// observing segment metadata from different update generations.
 func getExternalRefreshSegmentSnapshots(mt *meta.Meta, segmentIDs []int64) []*meta.SegmentInfo {
-	mt.SegMu.RLock()
-	defer mt.SegMu.RUnlock()
-
+	segments := mt.Segments.GetSegmentsByIDs(segmentIDs)
 	result := make([]*meta.SegmentInfo, len(segmentIDs))
 	for i, segmentID := range segmentIDs {
-		if segment := mt.Segments.GetSegment(segmentID); segment != nil {
+		if segment := segments[segmentID]; segment != nil {
 			result[i] = segment.Clone()
 		}
 	}

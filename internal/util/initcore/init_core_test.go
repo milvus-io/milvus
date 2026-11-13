@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -236,6 +237,15 @@ func TestOtlpHang(t *testing.T) {
 func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
+	previousFanout := pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, pt.Save(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key, previousFanout))
+	})
+	var fanoutCoefficient float64
+	patch := mockey.Mock(UpdateSearchFanoutThreadCoreCoefficient).To(func(value float64) {
+		fanoutCoefficient = value
+	}).Build()
+	defer patch.UnPatch()
 
 	assert.NotPanics(t, func() { SetupCoreConfigChangelCallback() })
 
@@ -249,8 +259,52 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "2"))
 	assert.Equal(t, "2", pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetValue())
 
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key, "3.5"))
+	assert.Equal(t, 3.5, fanoutCoefficient)
+
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+	assert.Equal(t, 3.5, fanoutCoefficient)
+
+	// Management updates publish the value before sending a separator-free key.
+	manager := paramtable.GetBaseTable().Manager()
+	fanoutKey := config.FormatKey(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key)
+	for _, change := range []struct {
+		eventType, value string
+		want             float64
+	}{
+		{config.CreateType, "4.5", 4.5},
+		{config.UpdateType, "NaN", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "+Inf", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "1e100", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "2147483647", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "0.1", 0.1},
+	} {
+		manager.SetConfig(fanoutKey, change.value)
+		manager.EvictCachedValue(fanoutKey)
+		manager.OnEvent(&config.Event{
+			EventSource: "EtcdSource",
+			EventType:   change.eventType,
+			Key:         fanoutKey,
+			Value:       change.value,
+			HasUpdated:  true,
+		})
+		assert.Equal(t, change.want, pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat())
+		assert.Equal(t, change.want, fanoutCoefficient)
+	}
+	manager.ResetConfig(fanoutKey)
+	manager.EvictCachedValue(fanoutKey)
+	fallbackRatio := pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat()
+	require.NotEqual(t, 0.1, fallbackRatio)
+	// A delete event carries the removed value, not the current fallback.
+	manager.OnEvent(&config.Event{
+		EventSource: "EtcdSource",
+		EventType:   config.DeleteType,
+		Key:         fanoutKey,
+		Value:       "0.1",
+		HasUpdated:  true,
+	})
+	assert.Equal(t, fallbackRatio, fanoutCoefficient)
 
 	previousReadWindow := getStorageV2AsyncLoadReadWindowSizeBytes()
 	t.Cleanup(func() {
@@ -506,8 +560,9 @@ func TestInitLoonReaderConfig(t *testing.T) {
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 
-	// Defaults (0/0) keep the pre-existing sequential behavior and must not
-	// create the pool: GetParallelism() reports 1 when no pool exists.
+	// Defaults (both auto) keep the pre-existing sequential behavior
+	// outside a DataNode and must not create the pool: GetParallelism()
+	// reports 1 when no pool exists.
 	assert.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
 
@@ -516,7 +571,7 @@ func TestInitLoonReaderConfig(t *testing.T) {
 
 	// Out-of-range pool sizes are rejected instead of being narrowed to
 	// int32: 4294967296 would wrap to 0 and silently disable the pool.
-	for _, invalid := range []string{"-1", "4294967296", "1025"} {
+	for _, invalid := range []string{"-2", "4294967296", "1025"} {
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, invalid))
 		err := InitLoonReaderConfig(pt)
 		assert.Error(t, err, "pool size %s must be rejected", invalid)
@@ -606,7 +661,9 @@ func TestInitLoonReaderConfigConcurrent(t *testing.T) {
 // under both loon reader keys and that the handler survives a rejected update.
 func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	paramtable.Init()
-	pt := paramtable.Get()
+	// The registered watchers outlive the test; on the global table a later
+	// test's pool write would fire them and create the non-destroyable pool.
+	pt := newIsolatedParams()
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 

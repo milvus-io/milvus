@@ -48,6 +48,14 @@ type pchannelScopedQueryViewHandler struct {
 	handler  handler.QueryViewHandler
 }
 
+func (h *pchannelScopedQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return h.handler.TakeViewFeedback()
+}
+
+func (h *pchannelScopedQueryViewHandler) ViewFeedbackReady() <-chan struct{} {
+	return h.handler.ViewFeedbackReady()
+}
+
 func (h *pchannelScopedQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 	var matched []handler.ApplyView
 	for _, view := range views {

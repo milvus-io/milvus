@@ -289,6 +289,14 @@ class ScanCountingChunkedColumn : public ChunkedColumn {
         return ChunkedColumn::GetChunk(op_ctx, chunk_id);
     }
 
+    std::vector<PinWrapper<Chunk*>>
+    GetAllChunks(milvus::OpContext* op_ctx) const override {
+        std::vector<int64_t> cell_ids(num_chunks());
+        std::iota(cell_ids.begin(), cell_ids.end(), 0);
+        pin_requests_->push_back(std::move(cell_ids));
+        return ChunkedColumn::GetAllChunks(op_ctx);
+    }
+
     TakeCellAccess
     MakeTakeCellAccess(
         milvus::OpContext* op_ctx,
@@ -336,6 +344,14 @@ class ScanCountingProxyChunkColumn : public ProxyChunkColumn {
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         pin_requests_->emplace_back(std::vector<int64_t>{chunk_id});
         return ProxyChunkColumn::GetChunk(op_ctx, chunk_id);
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    GetAllChunks(milvus::OpContext* op_ctx) const override {
+        std::vector<int64_t> cell_ids(num_chunks());
+        std::iota(cell_ids.begin(), cell_ids.end(), 0);
+        pin_requests_->push_back(std::move(cell_ids));
+        return ProxyChunkColumn::GetAllChunks(op_ctx);
     }
 
     TakeCellAccess
@@ -1267,6 +1283,111 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(
         1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
     EXPECT_EQ(fx.pin_requests->size(), 1u);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           DataScanPreservesLegacyReaderPinGranularity) {
+    ColumnSpec spec{{2, 0, 3}, {{true, false}, {}, {true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+    constexpr bool all_cells = std::is_same_v<TypeParam, ChunkedColumnFactory>;
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ScanOptions::ForData(
+            0,
+            TargetType::Int32,
+            all_cells ? ScanPinPolicy::AllCells : ScanPinPolicy::CursorOwned));
+    ASSERT_NE(cursor, nullptr);
+    if constexpr (all_cells) {
+        EXPECT_EQ(*fx.pin_requests,
+                  (std::vector<std::vector<int64_t>>{{0, 1, 2}}));
+        EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1, 2}));
+    } else {
+        EXPECT_TRUE(fx.pin_requests->empty());
+        EXPECT_TRUE(fx.fetched->empty());
+    }
+
+    ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_EQ(batch.values.template data_as<int32_t>()[0], 0);
+    ASSERT_TRUE(cursor->Next(4, ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    ASSERT_TRUE(cursor->Next(4, ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_EQ(batch.values.template data_as<int32_t>()[0], 2);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 2));
+    const auto evict = [&] {
+        if (fx.group) {
+            fx.group->ManualEvictCache();
+        } else {
+            fx.column->ManualEvictCache();
+        }
+    };
+    const int64_t first[]{0};
+    const int64_t last[]{2};
+    evict();
+    EXPECT_EQ(fx.column->CellsLoaded(first, 1), all_cells);
+    EXPECT_TRUE(fx.column->CellsLoaded(last, 1));
+    if constexpr (all_cells) {
+        EXPECT_EQ(fx.pin_requests->size(), 1);
+    } else {
+        EXPECT_EQ(*fx.pin_requests,
+                  (std::vector<std::vector<int64_t>>{{0}, {2}}));
+    }
+    EXPECT_FALSE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+    cursor.reset();
+    evict();
+    EXPECT_FALSE(fx.column->CellsLoaded(first, 1));
+    EXPECT_FALSE(fx.column->CellsLoaded(last, 1));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           AllCellsScanSupportsStartSeekAndFilterWithoutRepinning) {
+    ColumnSpec spec{{2, 2}, {{true, false}, {false, true}}, true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+    auto options =
+        ScanOptions::ForData(1, TargetType::Int32, ScanPinPolicy::AllCells);
+    options.filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t cell_id) { return cell_id == 1; });
+    auto cursor = fx.column->Scan(nullptr, options);
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_EQ(*fx.pin_requests, (std::vector<std::vector<int64_t>>{{0, 1}}));
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+    ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    cursor->Seek(3);
+    ASSERT_TRUE(cursor->Next(2, ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_TRUE(batch.data_skipped);
+    EXPECT_TRUE(batch.values.empty());
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+    const auto evict = [&] {
+        if (fx.group) {
+            fx.group->ManualEvictCache();
+        } else {
+            fx.column->ManualEvictCache();
+        }
+    };
+    const int64_t offsets[]{0, 2};
+    evict();
+    EXPECT_TRUE(fx.column->CellsLoaded(offsets, 2));
+    EXPECT_EQ(fx.pin_requests->size(), 1);
+    cursor.reset();
+    evict();
+    EXPECT_FALSE(fx.column->CellsLoaded(offsets, 2));
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,

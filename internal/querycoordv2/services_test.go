@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -64,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
@@ -113,7 +113,6 @@ type ServiceSuite struct {
 	collectionObserver *observers.CollectionObserver
 	cluster            *session.MockCluster
 	nodeMgr            *session.NodeManager
-	jobScheduler       *job.Scheduler
 	taskScheduler      *task.MockScheduler
 	balancer           balance.Balance
 
@@ -268,11 +267,9 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.HandleNodeUp(context.TODO(), node)
 	}
-	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.jobScheduler.Start()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	suite.balancer = balance.NewRowCountBasedBalancer(
@@ -310,7 +307,6 @@ func (suite *ServiceSuite) SetupTest() {
 		collectionObserver:  suite.collectionObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
-		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
 		distController:      suite.distController,
 		ctx:                 context.Background(),
@@ -337,6 +333,10 @@ func (suite *ServiceSuite) SetupTest() {
 		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager:   suite.meta,
 		dataViewProvider:       newRuntimeDataViewProvider(suite.T()),
+		// Service tests assert metadata updates without running reconciliation.
+		balancerFactory: func(*cache.Cache) qviewsBalancer {
+			return &fakeRuntimeBalancer{}
+		},
 	})
 	suite.Require().NoError(err)
 	suite.server.qviewsRuntime = runtime
@@ -2062,7 +2062,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.server.qviewsRuntime.stop()
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
-	suite.jobScheduler.Stop()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 

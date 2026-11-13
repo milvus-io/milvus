@@ -1344,11 +1344,11 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type,index_kwargs", TEXT_USER_DEFINED_INDEX_CASES)
-    def test_text_lob_rejects_user_defined_varchar_scalar_index_types(self, index_type, index_kwargs):
+    def test_text_lob_user_defined_scalar_index_admission(self, index_type, index_kwargs):
         """
-        target: verify TEXT rejects user-created scalar indexes, including index types supported by VARCHAR
+        target: verify TEXT accepts explicit NGRAM and rejects other user-created scalar index types
         method: build a minimal TEXT collection and attempt to create each VARCHAR scalar index type on the TEXT field
-        expected: index creation fails with the TEXT user-created scalar index validation error
+        expected: NGRAM parameters are preserved; other index types fail TEXT admission
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1367,6 +1367,13 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name=CONTENT_FIELD, index_type=index_type, **index_kwargs)
+        if index_type == "NGRAM":
+            self.create_index(client, collection_name, index_params=index_params)
+            info, _ = self.describe_index(client, collection_name, index_name=CONTENT_FIELD)
+            assert info["index_type"] == "NGRAM"
+            assert str(info["min_gram"]) == "2"
+            assert str(info["max_gram"]) == "4"
+            return
         self.create_index(
             client,
             collection_name,
@@ -1374,7 +1381,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "TEXT field does not support user-created scalar index",
+                ct.err_msg: "TEXT fields require an explicit NGRAM index",
             },
         )
 

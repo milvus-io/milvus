@@ -66,6 +66,9 @@ TEST(Grep, GenericCgoBoundaryPreservesErrorCodes) {
         {Status::AllocationError, Operation::CreateSession, MemAllocateFailed},
         {Status::InvalidArgument, Operation::Compile, UnexpectedError},
         {Status::InvalidArgument, Operation::ReadResult, UnexpectedError},
+        {Status::InvalidArgument, Operation::ReadCondition, UnexpectedError},
+        {Status::AllocationError, Operation::ReadCondition, MemAllocateFailed},
+        {Status::InternalError, Operation::ReadCondition, UnexpectedError},
         {Status::InternalError, Operation::Execute, UnexpectedError},
         {Status::EngineBuildError, Operation::Compile, InvalidParameter},
         {static_cast<Status>(4242), Operation::Execute, UnexpectedError},
@@ -101,6 +104,37 @@ TEST(Grep, BatchResultsAndByteSpans) {
     ExpectError([&] { result.Selected(4); },
                 Status::InvalidArgument,
                 Operation::ReadResult);
+}
+
+TEST(Grep, ConditionPayloadOwnsBinaryBytesAcrossPlanMovesAndDestruction) {
+    const std::string binary("a\0b", 3);
+    auto payload = [&] {
+        auto plan = Compile(R"(a\x00b)");
+        auto copy = plan.ConditionPayload();
+        EXPECT_NE(copy.find(binary), std::string::npos);
+        auto moved = std::move(plan);
+        EXPECT_EQ(moved.ConditionPayload(), copy);
+        ExpectError([&] { plan.ConditionPayload(); },
+                    Status::InvalidArgument,
+                    Operation::ReadCondition);
+        moved = Compile("another");
+        EXPECT_NE(moved.ConditionPayload(), copy);
+        return copy;
+    }();
+    EXPECT_NE(payload.find(binary), std::string::npos);
+}
+
+TEST(Grep, ConditionPayloadCanBeCopiedConcurrently) {
+    auto plan = Compile("(error|warn).*timeout");
+    const auto expected = plan.ConditionPayload();
+    std::vector<std::future<std::string>> readers;
+    for (int i = 0; i < 8; ++i) {
+        readers.push_back(std::async(std::launch::async,
+                                     [&] { return plan.ConditionPayload(); }));
+    }
+    for (auto& reader : readers) {
+        EXPECT_EQ(reader.get(), expected);
+    }
 }
 
 TEST(Grep, ResultAndViewsOutliveInputSessionAndPlan) {

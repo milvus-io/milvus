@@ -152,7 +152,7 @@ func TestSearchTaskCarriesNoScopeWithTheDefaultHook(t *testing.T) {
 	assert.Equal(t, "", scope, "a stock binary must route across every replica of the collection")
 }
 
-func counterValue(t *testing.T, c *prometheus.CounterVec, labels ...string) float64 {
+func counterValue(t *testing.T, c *metrics.CardinalityCounterVec, labels ...string) float64 {
 	t.Helper()
 	m, err := c.GetMetricWithLabelValues(labels...)
 	require.NoError(t, err)

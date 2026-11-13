@@ -632,7 +632,15 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 				}
 				if err := c.Meta.UpdateSegmentsInfo(c.Ctx, meta.UpdateIsImporting(segID, false)); err != nil {
 					flushFailures++
+					continue
 				}
+				if c.Meta.IndexCatalog != nil {
+					for _, record := range c.Meta.IndexCatalog.GetAllSegmentIndexes(segID) {
+						c.Meta.IndexCatalog.NotifyManifestIndexMigration(record)
+					}
+				}
+				meta.NotifySegmentIndexBuild(segID)
+				meta.NotifySegmentStatsBuild(segID)
 				continue
 			}
 			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {

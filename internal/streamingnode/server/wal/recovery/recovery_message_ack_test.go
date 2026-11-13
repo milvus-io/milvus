@@ -110,7 +110,6 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	installRetainingManager(t, storage, module)
 	scheduler := &recordingAckTaskScheduler{}
 	storage.broadcastAck = newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
-	storage.broadcastAck.retryDelay = time.Millisecond
 	attempts := 0
 	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error {
 		attempts++
@@ -134,12 +133,12 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	module.handle.Release()
 	assert.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
 	first := scheduler.waitTask(t)
-	require.NoError(t, first.Execute(context.Background()))
+	require.ErrorIs(t, first.Execute(context.Background()), nodescheduler.ErrDelay)
 	assert.Equal(t, 1, attempts)
 	assert.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
 
-	retry := scheduler.waitTaskAfter(t, 1)
-	require.NoError(t, retry.Execute(context.Background()))
+	require.Len(t, scheduler.snapshot(), 1)
+	require.NoError(t, first.Execute(context.Background()))
 	assert.Equal(t, 2, attempts)
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, msg.LastConfirmedMessageID().EQ(completed.MessageID))
@@ -199,6 +198,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(20), storage.pendingPersistSnapshot.Checkpoint.TimeTick)
 	firstEndOffset := uint64(first.EstimateSize())
 	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
+	assert.Equal(t, uint64(1), storage.pendingPersistSnapshot.LogicalEndMessageCount)
 
 	second := newAckTestRecoveryBarrier(t, 30, 3)
 	storage.observeMessage(context.Background(), second)
@@ -213,12 +213,15 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.RecoveryTailBytes)
 	assert.Zero(t, metrics.BlockingBytes)
 	assert.Equal(t, uint64(second.EstimateSize()), metrics.PublishLagBytes)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().PublishedMessages)
+	assert.Equal(t, uint64(1), storage.tailController.Snapshot().RecoveryTailMessages)
 
 	followUp := storage.consumeDirtySnapshot()
 	require.NotNil(t, followUp)
 	assert.Equal(t, uint64(30), followUp.Checkpoint.TimeTick)
 	assert.True(t, second.LastConfirmedMessageID().EQ(followUp.Checkpoint.MessageID))
 	assert.Equal(t, firstEndOffset+uint64(second.EstimateSize()), followUp.LogicalEndOffset)
+	assert.Equal(t, uint64(2), followUp.LogicalEndMessageCount)
 }
 
 func TestPersistBatchMarksModuleSnapshotsAfterCompoundCommit(t *testing.T) {
