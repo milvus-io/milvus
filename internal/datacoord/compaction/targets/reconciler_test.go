@@ -5,14 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -684,6 +687,65 @@ func TestCompactionTargetReconcilerObservesFlushBeforeSatisfaction(t *testing.T)
 	stored := targetMeta.GetCompactionTarget(100)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, stored.GetState())
 	require.Zero(t, stored.GetTotalRows())
+}
+
+func TestOptimizeWaitsForConcurrentL0Publication(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := t.Context()
+	const expectedSize = 1 << 20
+	target := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 200, ActivatedAtTS: 200, TailLimit: 1,
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: expectedSize, ActualTargetSizeBytes: expectedSize},
+	}
+	targetMeta := NewLoadedCompactionTargetMeta(t, ctx, target)
+	first := sortedTargetSegment(1, 1, 10, "ch", 0, 100, false)
+	first.Stats = &datapb.Statistics{InsertBinlogSize: expectedSize, TimestampFrom: 100}
+	second := sortedTargetSegment(2, 1, 10, "ch", 0, 100, false)
+	second.Stats = &datapb.Statistics{InsertBinlogSize: 400_000, TimestampFrom: 100}
+	fixture := newCompactionTargetReconcilerTestMeta(targetMeta, first, second)
+	tasks := task.NewTestCompactionTaskMeta(t)
+	l0 := &datapb.CompactionTask{
+		PlanID: 300, TriggerID: 301, CollectionID: 1, PartitionID: 10, Channel: "ch",
+		Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_executing,
+		Pos: &msgpb.MsgPosition{Timestamp: 150},
+	}
+	require.NoError(t, tasks.SaveCompactionTask(ctx, l0))
+	reconciler := newCompactionTargetReconcilerForTest(t, fixture)
+	reconciler.SetTaskMeta(tasks)
+
+	// Publish between the final scope snapshot and its use. The L0 task
+	// transitions only after its updated delta statistics become visible.
+	var selectSegments func(*meta.Meta, context.Context, ...meta.SegmentFilter) []*meta.SegmentInfo
+	observations := 0
+	patch := mockey.Mock((*meta.Meta).SelectSegments).Origin(&selectSegments).To(
+		func(mt *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+			segments := selectSegments(mt, ctx, filters...)
+			if len(filters) == 2 {
+				observations++
+				if observations == 2 {
+					updated := first.Clone()
+					updated.Stats = proto.CloneOf(first.Stats)
+					updated.Stats.DeleteNumRows = first.GetNumOfRows() / 2
+					mt.Segments.SetSegment(first.GetID(), updated)
+					published := proto.CloneOf(l0)
+					published.State = datapb.CompactionTaskState_meta_saved
+					require.NoError(t, tasks.SaveCompactionTask(ctx, published))
+				}
+			}
+			return segments
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	_, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, observations)
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(target.GetTargetID()).GetState())
+	patch.UnPatch()
+	views, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	plans := plannedTaskDescriptors(t, views[policy.TriggerTypeSingle])
+	require.Len(t, plans, 1)
+	require.ElementsMatch(t, []int64{1, 2}, plans[0].GetInputSegments())
 }
 
 func newStandingSortAllocator(t *testing.T) allocator.Allocator {

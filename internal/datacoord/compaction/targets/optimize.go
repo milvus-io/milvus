@@ -242,26 +242,24 @@ func CheckClusteringConflict(ctx context.Context, mt *meta.Meta, tasks *task.Com
 	return ctx.Err()
 }
 
-// OptimizeHasInFlightWork checks current input ownership and L0's dynamic
+// optimizeHasInFlightWork checks input ownership and L0's dynamic
 // base selection. Ordinary L0 tasks do not lock their destination bases.
-func OptimizeHasInFlightWork(mt *meta.Meta, tasks *task.CompactionTaskMeta, collectionID int64, scope []*meta.SegmentInfo) bool {
+func optimizeHasInFlightWork(tasks map[int64][]*datapb.CompactionTask, scope []*meta.SegmentInfo) bool {
 	for _, segment := range scope {
-		if segment.IsCompacting || mt.IsSegmentCompacting(segment.GetID()) {
+		if segment.IsCompacting {
 			return true
 		}
 	}
-	if tasks == nil || len(scope) == 0 {
+	if len(scope) == 0 {
 		return false
 	}
-	for _, plans := range tasks.GetCompactionTasksByCollection(collectionID) {
+	for _, plans := range tasks {
 		for _, plan := range plans {
-			switch plan.GetState() {
-			case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
-			default:
+			if plan.GetType() != datapb.CompactionType_Level0DeleteCompaction {
 				continue
 			}
-			switch plan.GetType() {
-			case datapb.CompactionType_Level0DeleteCompaction:
+			switch plan.GetState() {
+			case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 			default:
 				continue
 			}

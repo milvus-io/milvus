@@ -50,12 +50,19 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 			if err != nil || !available {
 				return false, err
 			}
+			// A completed L0 task can have published delta statistics after
+			// a segment snapshot. Take the task snapshot first, while new
+			// admissions are excluded, to see either the task or its result.
+			var tasks map[int64][]*datapb.CompactionTask
+			if r.taskMeta != nil {
+				tasks = r.taskMeta.GetCompactionTasksByCollection(current.GetCollectionID())
+			}
 			currentObservation, err := ObserveOptimize(ctx, r.meta, current)
 			if err != nil {
 				return false, err
 			}
 			observation = currentObservation
-			finished = observation.Satisfied && !OptimizeHasInFlightWork(r.meta, r.taskMeta, current.GetCollectionID(), observation.Scope)
+			finished = observation.Satisfied && !optimizeHasInFlightWork(tasks, observation.Scope)
 			return finished, nil
 		})
 	}
