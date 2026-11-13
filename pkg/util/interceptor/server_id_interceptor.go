@@ -82,8 +82,13 @@ func ServerIDValidationStreamServerInterceptor(fn GetServerIDFunc) grpc.StreamSe
 // ServerIDInjectionUnaryClientInterceptor returns a new unary client interceptor that
 // injects target server ID into the request.
 func ServerIDInjectionUnaryClientInterceptor(targetServerID int64) grpc.UnaryClientInterceptor {
+	return ServerIDInjectionUnaryClientInterceptorWithGetter(func() int64 { return targetServerID })
+}
+
+// ServerIDInjectionUnaryClientInterceptorWithGetter resolves the target server ID for each request.
+func ServerIDInjectionUnaryClientInterceptorWithGetter(fn GetServerIDFunc) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = metadata.AppendToOutgoingContext(ctx, ServerIDKey, fmt.Sprint(targetServerID))
+		ctx = metadata.AppendToOutgoingContext(ctx, ServerIDKey, fmt.Sprint(fn()))
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
@@ -91,8 +96,13 @@ func ServerIDInjectionUnaryClientInterceptor(targetServerID int64) grpc.UnaryCli
 // ServerIDInjectionStreamClientInterceptor returns a new streaming client interceptor that
 // injects target server ID into the request.
 func ServerIDInjectionStreamClientInterceptor(targetServerID int64) grpc.StreamClientInterceptor {
+	return ServerIDInjectionStreamClientInterceptorWithGetter(func() int64 { return targetServerID })
+}
+
+// ServerIDInjectionStreamClientInterceptorWithGetter resolves the target server ID for each stream.
+func ServerIDInjectionStreamClientInterceptorWithGetter(fn GetServerIDFunc) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		ctx = metadata.AppendToOutgoingContext(ctx, ServerIDKey, fmt.Sprint(targetServerID))
+		ctx = metadata.AppendToOutgoingContext(ctx, ServerIDKey, fmt.Sprint(fn()))
 		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
