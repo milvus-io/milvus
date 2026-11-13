@@ -580,6 +580,11 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
     int64_t physical = build_threshold_;
     int64_t drained = 0;
     double elapsed = 0;
+    const auto fits_budget = [&](int64_t gap) {
+        return gap == 0 ||
+               (gap <= slice && drained > 0 &&
+                gap * elapsed / drained <= async_build_.finalize_budget_ms);
+    };
     const auto drain = [&](int64_t end) {
         const auto begin = Clock::now();
         const auto next = validity_.ValidCountBelow(end);
@@ -597,7 +602,8 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
             target = accepted_row_end_;
         }
         if (logical < target) {
-            if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms) {
+            if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms &&
+                !fits_budget(target - logical)) {
                 std::lock_guard lock(writer_mutex_);
                 DisableAsyncBuild("catch-up deadline exceeded", true);
                 return;
@@ -615,9 +621,7 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         // nullable IdMap still materializes and consumes a logical bitmap.
         // Drain a null-only tail in the next unlocked slice.
         if (gap != 0 &&
-            (accepted_physical_count_ == physical || gap > slice ||
-             drained == 0 ||
-             gap * elapsed / drained > async_build_.finalize_budget_ms)) {
+            (accepted_physical_count_ == physical || !fits_budget(gap))) {
             continue;
         }
         if (gap != 0) {

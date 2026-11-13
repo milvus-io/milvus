@@ -31,31 +31,11 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/growing/GrowingVectorSource.h"
+#include "index/growing/GrowingBuildOptions.h"
 #include "index/vector/KnowhereEngine.h"
 #include "knowhere/config.h"
 
 namespace milvus::index {
-
-struct GrowingBuildOptions {
-    bool enabled{false};
-    int64_t finalize_budget_ms{20};
-    int64_t catchup_deadline_ms{30000};
-    float pool_ratio{0.5f};
-};
-
-enum class GrowingBuildPhase {
-    kBeforeBuild,
-    kAfterBuild,
-    kAfterCatchupRound,
-    kBeforeFinalize
-};
-// Install before constructing test segments and clear only after their workers join.
-extern std::function<void(GrowingBuildPhase)> growing_build_test_hook;
-
-struct GrowingBuildTask {
-    std::mutex lifetime;
-    std::atomic<bool> cancelled{false};
-};
 
 // One writer owns one live concurrent Knowhere node. Published readers share
 // that node, but bind a fixed physical count and a frozen nullable mapping;
@@ -173,6 +153,10 @@ class KnowhereGrowingVectorIndex final
     // Queued tasks own only the control block until admitted under lifetime.
     // A running worker exclusively owns the unpublished engine. Appenders
     // advance the accepted prefix under writer_mutex_ without touching it.
+    struct GrowingBuildTask {
+        std::mutex lifetime;
+        std::atomic<bool> cancelled{false};
+    };
     std::shared_ptr<GrowingBuildTask> task_;
     std::shared_future<void> completion_;
     bool async_disabled_{false};

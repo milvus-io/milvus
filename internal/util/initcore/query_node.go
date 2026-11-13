@@ -298,9 +298,8 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 }
 
 // SyncAsyncGrowingIndexBuild pushes the async growing-index first-build switch
-// into segcore and registers a hot-update watcher. SegmentGrowingImpl copies
-// SegcoreConfig at segment creation, so a runtime change only affects growing
-// segments created afterwards.
+// into segcore and registers hot-update watchers. Each growing segment captures
+// the settings at construction, including for fields staged during schema reopen.
 func SyncAsyncGrowingIndexBuild(ctx context.Context, params *paramtable.ComponentParam) {
 	v := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
 	C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(v))

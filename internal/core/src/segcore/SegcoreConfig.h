@@ -427,9 +427,8 @@ class SegcoreConfig {
     // segment construction loading it, hence std::atomic. inline static so
     // it does not participate in SegcoreConfig's (defaulted) copy
     // constructor. The "a toggle only affects growing segments created
-    // afterwards" contract is provided by each vector index owner snapshotting
-    // this value once at construction (async_build_enabled_), not by the
-    // per-segment SegcoreConfig copy.
+    // afterwards" contract is provided by GrowingIndexSet capturing these options
+    // at segment construction, including for later schema reopen.
     inline static std::atomic<bool> enable_async_growing_index_build_{false};
     inline static std::atomic<int64_t> async_growing_index_finalize_budget_ms_{
         20};
