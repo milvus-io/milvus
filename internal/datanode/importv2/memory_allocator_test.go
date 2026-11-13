@@ -28,6 +28,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -611,4 +616,67 @@ func TestMemoryAllocatorCancelRacesRelease(t *testing.T) {
 		t.Fatal("canceled waiter did not return")
 	}
 	assert.Equal(t, int64(0), ma.usedMemory, "canceled waiter must not be charged")
+}
+
+func TestMemoryAllocatorUsed(t *testing.T) {
+	ma := NewMemoryAllocator(1 << 30)
+	assert.Zero(t, ma.Used())
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, 1<<20))
+	assert.Equal(t, int64(1<<20), ma.Used())
+	ma.Release(1, 1<<20)
+	assert.Zero(t, ma.Used())
+}
+
+// TestBoundByImportMemoryLimit: a task whose readers all reserve from the
+// import allocator is booked at most the allocator's limit, the same share of
+// the machine DataCoord charges it at placement.
+func TestBoundByImportMemoryLimit(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.Key
+	defer paramtable.Get().Reset(key)
+	patch := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64 << 30)).Build()
+
+	paramtable.Get().Save(key, "10")
+	bound := func(factor float64) int64 { return int64(float64(64<<30) * 10 / 100 * factor) }
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: bound(1)}, boundByImportMemoryLimit(taskcommon.Resource{CPU: 1, Memory: 32 << 30}, 1))
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: bound(2)}, boundByImportMemoryLimit(taskcommon.Resource{CPU: 1, Memory: 32 << 30}, 2), "factor covers what is held outside the allocator")
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 1 << 30}, boundByImportMemoryLimit(taskcommon.Resource{CPU: 1, Memory: 1 << 30}, 2), "below the bound")
+	assert.Equal(t, int64(32<<30), boundByImportMemoryLimit(taskcommon.Resource{Memory: 32 << 30}, 0).Memory, "no factor, no bound")
+	patch.UnPatch()
+
+	// A machine whose memory cannot be read leaves the booking alone.
+	unknown := mockey.Mock(hardware.GetMemoryCount).Return(uint64(0)).Build()
+	defer unknown.UnPatch()
+	assert.Equal(t, int64(32<<30), boundByImportMemoryLimit(taskcommon.Resource{Memory: 32 << 30}, 2).Memory)
+}
+
+// TestImportTaskBookingBounded: every import is bounded; a pre-import only
+// when it reads snapshot sources, the pre-imports that reserve from the
+// allocator.
+func TestImportTaskBookingBounded(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.Key
+	defer paramtable.Get().Reset(key)
+	paramtable.Get().Save(key, "10")
+	patch := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64 << 30)).Build()
+	defer patch.UnPatch()
+	bound := func(factor float64) int64 { return int64(float64(64<<30) * 10 / 100 * factor) }
+	limit := bound(1)
+	priced := taskcommon.Resource{CPU: 1, Memory: 32 << 30}
+	factor := paramtable.Get().DataCoordCfg.TaskResourceImportMemoryFactor.GetAsFloat()
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	imp := NewImportTask(&datapb.ImportRequest{Schema: schema}, nil, nil, nil, priced)
+	assert.Equal(t, bound(factor), imp.GetResource().Memory, "an import keeps the factor for batches waiting for sync")
+
+	plain := NewPreImportTask(&datapb.PreImportRequest{ImportFiles: []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}}}, nil, nil, priced)
+	assert.Equal(t, priced, plain.GetResource(), "a plain pre-import does not reserve from the allocator")
+
+	snapshot := NewPreImportTask(&datapb.PreImportRequest{ImportFiles: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{}}}}, nil, nil, priced)
+	assert.Equal(t, limit, snapshot.GetResource().Memory)
+
+	sharedL0 := NewPreImportTask(&datapb.PreImportRequest{SnapshotL0Source: &internalpb.SnapshotImportL0Source{}}, nil, nil, priced)
+	assert.Equal(t, limit, sharedL0.GetResource().Memory)
 }

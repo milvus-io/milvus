@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -295,11 +297,11 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 		s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return errors.New("mock error")
@@ -336,10 +338,10 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return nil

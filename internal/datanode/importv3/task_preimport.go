@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -48,13 +49,14 @@ type preImportTask struct {
 }
 
 // NewPreImportTask builds the count-only preimport task. The Scheduler admits
-// it once the node has free slots.
-func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Task {
+// it once execution memory (legacy: slots) is available.
+func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager, resource taskcommon.Resource) Task {
 	return &preImportTask{
 		workerTaskBase: workerTaskBase{
-			taskID: req.GetTaskID(),
-			runID:  PreImportV3RunID,
-			slot:   req.GetTaskSlot(),
+			taskID:   req.GetTaskID(),
+			runID:    PreImportV3RunID,
+			slot:     req.GetTaskSlot(),
+			resource: resource,
 		},
 		req: req,
 		cm:  cm,
@@ -64,9 +66,9 @@ func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Tas
 func (t *preImportTask) Kind() string { return "preimport" }
 
 func (t *preImportTask) Execute(ctx context.Context) (any, error) {
-	// A single file failure short-circuits AwaitAll; cancel the shared ctx so
-	// the remaining per-file count tasks stop instead of scanning on after this
-	// task has reported failure and freed its slot.
+	// A file failure cancels sibling readers, but cancellation alone cannot
+	// prove that their buffers are free. Drain every file future before the
+	// scheduler returns this run's execution-memory reservation.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	bufferSize := int(paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64())
@@ -107,6 +109,8 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 		futures = append(futures, f)
 	}
 	if err := conc.AwaitAll(futures...); err != nil {
+		cancel()
+		_ = conc.BlockOnAll(futures...)
 		return nil, err
 	}
 	return stats, nil

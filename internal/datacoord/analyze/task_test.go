@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -186,7 +188,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("successful creation", func() {
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		// Mock the UpdateVersion function
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -333,13 +335,20 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.am.catalog = catalog
 
+	var placed taskcommon.Resource
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
 		return req.NumClusters == 1 // capped at MaxCentroidsNum=1
-	})).Return(nil)
+	}), mock.Anything).RunAndReturn(
+		func(_ int64, _ *workerpb.AnalyzeRequest, resource taskcommon.Resource) error {
+			placed = resource
+			return nil
+		})
 
 	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+	// The dispatch ships exactly what the scheduler placed the task on.
+	s.Equal(taskresource.Price(at.GetTaskResource()), placed)
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {
@@ -353,7 +362,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {
 	s.am.catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything).Return(fmt.Errorf("node down"))
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("node down"))
 	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
 	at.CreateTaskOnWorker(1, cluster)
@@ -399,7 +408,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
 			return false
 		}
 		return true
-	})).Return(nil)
+	}), mock.Anything).Return(nil)
 
 	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
@@ -453,7 +462,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
 			return false
 		}
 		return true
-	})).Return(nil)
+	}), mock.Anything).Return(nil)
 
 	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
