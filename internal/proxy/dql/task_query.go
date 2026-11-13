@@ -1175,18 +1175,52 @@ func (t *QueryTask) supportsStreamingReduce() bool {
 		// Missing requests and legacy count results cannot use the Query stream reducer.
 		return false
 	}
+	// Check every feature before accepting a combination such as Group By + ORDER BY.
+	switch reduce.IReduceType(req.GetReduceType()) {
+	case reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest:
+	default:
+		// Unknown stopping policies must not silently become unordered reduction.
+		return false
+	}
+	for _, aggregate := range req.GetAggregates() {
+		if aggregate == nil {
+			// Missing aggregate descriptors cannot be reduced.
+			return false
+		}
+		switch aggregate.GetOp() {
+		case planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max:
+			// AVG is prepared as SUM + COUNT before reaching this gate.
+		default:
+			// The partial-aggregation reducer does not implement other operators.
+			return false
+		}
+	}
+	for _, chain := range t.plan.GetQuerynodeFunctionChains() {
+		if chain == nil || chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageQueryScan {
+			// Only QueryScan computed columns are supported by Query streaming.
+			return false
+		}
+		if req.GetIsIterator() || len(req.GetGroupByFieldIds()) > 0 ||
+			len(req.GetAggregates()) > 0 || len(req.GetOrderByFields()) > 0 {
+			// QueryScan has only been integrated with plain Query row assembly.
+			return false
+		}
+	}
 	if len(req.GetOrderByFields()) > 0 {
 		// Plain ORDER BY drains and resolves worker versions before sorting.
 		// Group By + ORDER BY merges all groups before Proxy sorts them. Shared Query validation
 		// requires an explicit limit for ORDER BY in either reduction mode.
-		// Ungrouped aggregates with ORDER BY are not supported by this streaming path.
-		return req.GetLimit() > 0 && (len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) == 0)
+		// Iterators and ungrouped aggregates with ORDER BY are not supported.
+		if req.GetIsIterator() || req.GetLimit() <= 0 || (len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) > 0) {
+			return false
+		}
 	}
-	if len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) > 0 {
-		return true
+	if len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) == 0 &&
+		req.GetLimit() <= 0 && req.GetLimit() != typeutil.Unlimited {
+		// Plain Query needs a positive limit or the Unlimited sentinel.
+		return false
 	}
-	// Plain Query needs a positive limit or the Unlimited sentinel.
-	return req.GetLimit() > 0 || req.GetLimit() == typeutil.Unlimited
+	return true
 }
 
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
