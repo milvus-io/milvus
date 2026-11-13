@@ -123,6 +123,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
+	UpdateSearchFanoutThreadCoreCoefficient(paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat())
 
 	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
 	if knowhereBuildPoolSize < uint32(1) {

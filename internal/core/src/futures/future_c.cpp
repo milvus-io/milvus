@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "common/CGoCatch.h"
 #include "Executor.h"
 #include "Future.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
@@ -60,6 +61,14 @@ executor_set_search_thread_num(int thread_num) {
     milvus::monitor::internal_cgo_pool_size_search.Set(thread_num);
     LOG_INFO("future executor setup search cpu executor with thread num: {}",
              thread_num);
+}
+
+extern "C" void
+executor_set_search_fanout_thread_core_coefficient(float coefficient) {
+    try {
+        milvus::futures::setSearchFanoutThreadCoreCoefficient(coefficient);
+    }
+    CGO_CATCH_AND_LOG("executor_set_search_fanout_thread_core_coefficient")
 }
 
 extern "C" void
