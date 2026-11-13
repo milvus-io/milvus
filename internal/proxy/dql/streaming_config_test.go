@@ -45,14 +45,28 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 			oldBytes := cfg.ReduceStreamChunkBytes.GetValue()
 			t.Cleanup(func() { require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, oldBytes)) })
 			legacy := &fakeLegacyQueryClient{}
-			for i, enabled := range []bool{false, true, true, false} {
-				chunkBytes := 32 << i
+			for _, tc := range []struct {
+				enabled    bool
+				chunkBytes string
+				wantBytes  int
+			}{
+				{false, "32", 32},
+				{true, "64", 64},
+				{true, "0", 0},
+				{true, "128", 128},
+				{true, "-1", -1},
+				{true, "256KB", 0},
+				{true, "1", 1},
+				{true, "262144", 262144},
+				{false, "0", 0},
+			} {
+				wantStream := tc.enabled && tc.wantBytes > 0
 				task := newQueryViewSearchTask(t, legacy, 1)
-				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(enabled)))
-				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, strconv.Itoa(chunkBytes)))
+				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(tc.enabled)))
+				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.chunkBytes))
 				// Obsolete SDK parameters cannot override server configuration.
 				task.request.SearchParams = []*commonpb.KeyValuePair{
-					{Key: "enableReduceStream", Value: strconv.FormatBool(!enabled)},
+					{Key: "enableReduceStream", Value: strconv.FormatBool(!tc.enabled)},
 					{Key: "reduceStreamChunkBytes", Value: "1"},
 				}
 				if hybrid {
@@ -61,7 +75,7 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 					task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 1, SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
 				}
 				legacy.searchResult = &queryclient.LegacySearchResult{}
-				if enabled {
+				if wantStream {
 					stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{1}, []float32{.9}, "channel")}}}
 					if hybrid {
 						legacy.searchResult.SubStreams = []searchreducestream.ReduceStream{stream}
@@ -70,9 +84,10 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 					}
 				}
 				require.NoError(t, task.Execute(context.Background()))
-				require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
-				require.Equal(t, chunkBytes, legacy.lastSearchRequest.ReduceStreamChunkBytes)
-				require.Equal(t, enabled, task.reducedResult != nil || task.reducedSubResults != nil)
+				require.Equal(t, wantStream, legacy.lastSearchRequest.AllowStreaming, tc)
+				require.Equal(t, tc.wantBytes, legacy.lastSearchRequest.ReduceStreamChunkBytes)
+				require.Equal(t, wantStream, task.reducedResult != nil || task.reducedSubResults != nil)
+				require.Equal(t, tc.chunkBytes, cfg.ReduceStreamChunkBytes.GetValue())
 			}
 		})
 	}
@@ -86,8 +101,22 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 			oldBytes := cfg.ReduceStreamChunkBytes.GetValue()
 			t.Cleanup(func() { require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, oldBytes)) })
 			legacy := &fakeLegacyQueryClient{}
-			for i, enabled := range []bool{false, true, true, false} {
-				chunkBytes := 32 << i
+			for _, tc := range []struct {
+				enabled    bool
+				chunkBytes string
+				wantBytes  int
+			}{
+				{false, "32", 32},
+				{true, "64", 64},
+				{true, "0", 0},
+				{true, "128", 128},
+				{true, "-1", -1},
+				{true, "256KB", 0},
+				{true, "1", 1},
+				{true, "262144", 262144},
+				{false, "0", 0},
+			} {
+				wantStream := tc.enabled && tc.wantBytes > 0
 				task := newQueryViewQueryTask(t, legacy, 1)
 				task.IsIterator = shape == "iterator"
 				if shape == "grouped" || shape == "grouped_order_by" {
@@ -103,20 +132,21 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 					}
 					task.Aggregates = []*planpb.Aggregate{{Op: op, FieldId: 101}}
 				}
-				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(enabled)))
-				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, strconv.Itoa(chunkBytes)))
+				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(tc.enabled)))
+				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.chunkBytes))
 				task.request.QueryParams = []*commonpb.KeyValuePair{
-					{Key: "enableReduceStream", Value: strconv.FormatBool(!enabled)},
+					{Key: "enableReduceStream", Value: strconv.FormatBool(!tc.enabled)},
 					{Key: "reduceStreamChunkBytes", Value: "1"},
 				}
 				legacy.queryResult = &queryclient.LegacyQueryResult{}
-				if enabled {
+				if wantStream {
 					legacy.queryResult.Stream = &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}
 				}
 				require.NoError(t, task.Execute(context.Background()))
-				require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
-				require.Equal(t, chunkBytes, legacy.lastQueryRequest.ReduceStreamChunkBytes)
-				require.Equal(t, enabled, len(task.resultBuf.Collect()) > 0)
+				require.Equal(t, wantStream, legacy.lastQueryRequest.AllowStreaming, tc)
+				require.Equal(t, tc.wantBytes, legacy.lastQueryRequest.ReduceStreamChunkBytes)
+				require.Equal(t, wantStream, len(task.resultBuf.Collect()) > 0)
+				require.Equal(t, tc.chunkBytes, cfg.ReduceStreamChunkBytes.GetValue())
 			}
 		})
 	}
@@ -129,8 +159,22 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 		&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil).Build()
 	defer lookup.UnPatch()
 	for _, operation := range []string{"Search", "Hybrid", "Query"} {
-		for _, enabled := range []bool{false, true} {
-			t.Run(operation+"/"+strconv.FormatBool(enabled), func(t *testing.T) {
+		for _, tc := range []struct {
+			enabled        bool
+			chunkBytes     string
+			wantBytes      int
+			refreshedBytes string
+		}{
+			{false, "64", 64, "128"},
+			{true, "64", 64, "128"},
+			{true, "64", 64, "0"},
+			{true, "64", 64, "256KB"},
+			{true, "0", 0, "64"},
+			{true, "-1", -1, "64"},
+			{true, "256KB", 0, "64"},
+		} {
+			t.Run(operation+"/"+strconv.FormatBool(tc.enabled)+"/"+tc.chunkBytes+"->"+tc.refreshedBytes, func(t *testing.T) {
+				wantStream := tc.enabled && tc.wantBytes > 0
 				legacy := &fakeLegacyQueryClient{maxRetries: 2}
 				search := newQueryViewSearchTask(t, legacy, 1)
 				query := newQueryViewQueryTask(t, legacy, 1)
@@ -144,13 +188,13 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 				cfg := &params.ProxyCfg
 				oldBytes := cfg.ReduceStreamChunkBytes.GetValue()
 				t.Cleanup(func() { require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, oldBytes)) })
-				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(enabled)))
-				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, "64"))
+				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(tc.enabled)))
+				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.chunkBytes))
 				legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
-					require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
-					require.Equal(t, 64, legacy.lastSearchRequest.ReduceStreamChunkBytes)
-					require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(!enabled)))
-					require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, "128"))
+					require.Equal(t, wantStream, legacy.lastSearchRequest.AllowStreaming)
+					require.Equal(t, tc.wantBytes, legacy.lastSearchRequest.ReduceStreamChunkBytes)
+					require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(!tc.enabled)))
+					require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.refreshedBytes))
 					if attempt == 1 {
 						return nil, streamViewError(viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND, "retry")
 					}
@@ -161,10 +205,10 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 					return &queryclient.LegacySearchResult{Stream: stream}, nil
 				}
 				legacy.query = func(attempt int) (*queryclient.LegacyQueryResult, error) {
-					require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
-					require.Equal(t, 64, legacy.lastQueryRequest.ReduceStreamChunkBytes)
-					require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(!enabled)))
-					require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, "128"))
+					require.Equal(t, wantStream, legacy.lastQueryRequest.AllowStreaming)
+					require.Equal(t, tc.wantBytes, legacy.lastQueryRequest.ReduceStreamChunkBytes)
+					require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(!tc.enabled)))
+					require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.refreshedBytes))
 					if attempt == 1 {
 						return nil, streamViewError(viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND, "retry")
 					}
@@ -176,13 +220,14 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 				} else {
 					err = search.Execute(t.Context())
 				}
-				if enabled {
+				if wantStream {
 					require.NoError(t, err)
 					require.Equal(t, 2, legacy.searchCalled+legacy.queryCalled)
 				} else {
 					require.Error(t, err)
 					require.Equal(t, 1, legacy.searchCalled+legacy.queryCalled)
 				}
+				require.Equal(t, tc.refreshedBytes, cfg.ReduceStreamChunkBytes.GetValue())
 			})
 		}
 	}

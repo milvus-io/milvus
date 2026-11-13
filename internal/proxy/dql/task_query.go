@@ -1194,10 +1194,15 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
 	allowStreaming := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() &&
 		t.supportsStreamingReduce()
+	chunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
+	if allowStreaming && chunkBytes <= 0 {
+		mlog.Warn(ctx, "invalid reduceStreamChunkBytes, falling back to Batch", mlog.Int("chunkBytes", chunkBytes))
+		allowStreaming = false
+	}
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
-		ReduceStreamChunkBytes: paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt(),
+		ReduceStreamChunkBytes: chunkBytes,
 	}
 	retryStreaming := allowStreaming
 	maxAttempts := 1
