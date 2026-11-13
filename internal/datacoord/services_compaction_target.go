@@ -327,8 +327,16 @@ func compactionTargetReadModel(record *datapb.CompactionTarget, resource *datapb
 		StoppedAt: record.GetInactivatedAtTS(), StopReason: record.GetStopReason(),
 		TotalRows: record.TotalRows, Rewrite: record.GetRewrite(), Optimize: record.GetOptimize(),
 	}
-	if targets.IsStandingSort(record) {
+	if targets.HasStandingCondition(record) {
 		target.Enabled = record.Enabled
+		for _, key := range publicStandingConditionKeys(record.GetIntent()) {
+			if value, ok := record.GetProperties()[key]; ok {
+				if target.Parameters == nil {
+					target.Parameters = make(map[string]string)
+				}
+				target.Parameters[key] = value
+			}
+		}
 	}
 	switch target.GetState() {
 	case datapb.TargetState_TARGET_STATE_ACTIVE:
@@ -346,6 +354,19 @@ func compactionTargetReadModel(record *datapb.CompactionTarget, resource *datapb
 		return nil, merr.WrapErrDataIntegrityMsg("compaction target %d has an invalid total_rows", target.GetTargetId())
 	}
 	return target, nil
+}
+
+func publicStandingConditionKeys(intent datapb.TargetIntent) []string {
+	switch intent {
+	case datapb.TargetIntent_INTENT_INDEX_VERSION:
+		return []string{"vector_mode", "vector_version", "scalar_mode", "scalar_version"}
+	case datapb.TargetIntent_INTENT_STORAGE_VERSION:
+		return []string{"storage_version"}
+	case datapb.TargetIntent_INTENT_STORAGE_FORMAT:
+		return []string{"storage_format"}
+	default:
+		return nil
+	}
 }
 
 func (s *Server) ListCompactionTargets(ctx context.Context, req *datapb.ListCompactionTargetsRequest) (*datapb.ListCompactionTargetsResponse, error) {

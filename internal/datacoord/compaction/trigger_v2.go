@@ -116,6 +116,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	if compactionTargetMeta != nil {
 		m.singlePolicy.StandingSort = true
 		m.targetReconciler = targets.NewCompactionTargetReconciler(mt, indexMeta, compactionTargetMeta, handler, alloc)
+		m.targetReconciler.SetIndexVersionManager(versionManager)
 	}
 
 	// Initialize policies map for ticker handling

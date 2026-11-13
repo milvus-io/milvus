@@ -32,6 +32,11 @@ type CompactionTargetReconciler struct {
 	CompactionTargetMeta *CompactionTargetMeta
 	handler              meta.Handler
 	allocator            allocator.Allocator
+	versionManager       index.IndexEngineVersionManager
+}
+
+func (reconciler *CompactionTargetReconciler) SetIndexVersionManager(manager index.IndexEngineVersionManager) {
+	reconciler.versionManager = manager
 }
 
 func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, alloc allocator.Allocator) *CompactionTargetReconciler {

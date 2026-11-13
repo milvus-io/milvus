@@ -18,7 +18,9 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
@@ -425,15 +427,25 @@ func publicCompactionTarget(target *datapb.CompactionTargetReadModel) *milvuspb.
 		public.Target = &milvuspb.CompactionTargetInfo_Optimize{Optimize: &milvuspb.OptimizeTargetInfo{
 			InputTargetSizeBytes: target.GetOptimize().GetInputTargetSizeBytes(), ActualTargetSizeBytes: target.GetOptimize().GetActualTargetSizeBytes(),
 		}}
-	case target.GetIntent() == datapb.TargetIntent_INTENT_SORT && target.Enabled != nil:
-		public.Target = &milvuspb.CompactionTargetInfo_Other{Other: &milvuspb.OtherTargetSpec{
-			Condition: "SORT", ClusterWide: true, Parameters: []*commonpb.KeyValuePair{
-				{Key: "enabled", Value: strconv.FormatBool(target.GetEnabled())},
-			},
-		}}
 	default:
+		condition := target.GetIntent().String()
+		switch target.GetIntent() {
+		case datapb.TargetIntent_INTENT_SORT, datapb.TargetIntent_INTENT_SIZE,
+			datapb.TargetIntent_INTENT_INDEX_VERSION, datapb.TargetIntent_INTENT_SCHEMA_VERSION,
+			datapb.TargetIntent_INTENT_STORAGE_VERSION, datapb.TargetIntent_INTENT_STORAGE_FORMAT,
+			datapb.TargetIntent_INTENT_DELETE_CLEANUP, datapb.TargetIntent_INTENT_TTL:
+			condition = strings.TrimPrefix(condition, "INTENT_")
+		}
+		var parameters []*commonpb.KeyValuePair
+		if target.Enabled != nil {
+			parameters = append(parameters, &commonpb.KeyValuePair{Key: "enabled", Value: strconv.FormatBool(target.GetEnabled())})
+		}
+		for key, value := range target.GetParameters() {
+			parameters = append(parameters, &commonpb.KeyValuePair{Key: key, Value: value})
+		}
+		slices.SortFunc(parameters, func(a, b *commonpb.KeyValuePair) int { return strings.Compare(a.GetKey(), b.GetKey()) })
 		public.Target = &milvuspb.CompactionTargetInfo_Other{Other: &milvuspb.OtherTargetSpec{
-			Condition: target.GetIntent().String(), ClusterWide: resource.GetCollectionId() == 0,
+			Condition: condition, ClusterWide: resource.GetCollectionId() == 0, Parameters: parameters,
 		}}
 	}
 	return public

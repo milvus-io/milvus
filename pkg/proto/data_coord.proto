@@ -1827,6 +1827,12 @@ enum TargetIntent {
   INTENT_SORT = 3;
   INTENT_OPTIMIZE = 4;
   INTENT_BACKFILL = 5;
+  INTENT_INDEX_VERSION = 6;
+  INTENT_SCHEMA_VERSION = 7;
+  INTENT_STORAGE_VERSION = 8;
+  INTENT_STORAGE_FORMAT = 9;
+  INTENT_DELETE_CLEANUP = 10;
+  INTENT_TTL = 11;
 }
 
 // A resolved collection identity for authorization, including the metadata
@@ -1890,6 +1896,7 @@ message CompactionTargetReadModel {
   uint64 checked_at = 12;
   string message = 13;
   optional bool enabled = 14;
+  map<string, string> parameters = 15;
 }
 
 message DescribeCompactionTargetRequest {
