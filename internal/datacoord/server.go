@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
@@ -156,6 +157,7 @@ type Server struct {
 	compactionTrigger        compaction.Trigger
 	compactionInspector      compaction.CompactionInspector
 	compactionTriggerManager compaction.TriggerManager
+	compactionTargetTopology view.CollectionTopologyQuerier
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -797,6 +799,9 @@ func (s *Server) initCompaction() error {
 	manager.SetCompactionTargetMeta(s.compactionTargetMeta, s.compactionTargetCollectionAvailable)
 	s.compactionTriggerManager = manager
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
+	if s.compactionTargetMeta != nil {
+		s.compactionTargetTopology = view.NewMetricsNodeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
+	}
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 	return nil
 }

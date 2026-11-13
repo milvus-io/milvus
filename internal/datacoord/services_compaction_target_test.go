@@ -260,6 +260,31 @@ func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {
 	require.Equal(t, int64(7), record.GetTotalRows())
 }
 
+func TestCreateOptimizeConflictPrecedesCurrentSizeMinimum(t *testing.T) {
+	enableTestCompactionTargets(t)
+	const existingID int64 = 101
+	const size int64 = 1024 * 1024 * 1024
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t, &datapb.CompactionTarget{
+		TargetID: existingID, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 100, ActivatedAtTS: 100, TailLimit: 1, TotalRows: proto.Int64(0),
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: size, ActualTargetSizeBytes: size},
+	})
+	s, resource := newTargetRPCServer(t, catalog, nil)
+
+	for _, requested := range []int64{size, 1} {
+		response, err := s.CreateCompactionTarget(t.Context(), &datapb.CreateCompactionTargetRequest{
+			Collection: resource,
+			Target:     &datapb.CreateCompactionTargetRequest_InputTargetSizeBytes{InputTargetSizeBytes: requested},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrCompactionPlanConflict)
+		require.Contains(t, response.GetStatus().GetReason(), "101")
+		require.Contains(t, response.GetStatus().GetReason(), "not admitted")
+		require.False(t, response.GetStatus().GetRetriable())
+		require.Zero(t, response.GetTargetId())
+	}
+	require.Len(t, persisted, 1)
+}
+
 func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

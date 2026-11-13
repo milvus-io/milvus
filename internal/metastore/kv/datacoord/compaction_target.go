@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	tikverr "github.com/tikv/client-go/v2/error"
@@ -91,6 +92,7 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 		return false, err
 	}
 	guards := []predicates.Predicate{predicates.KeyNotExist(key)}
+	saves := map[string]string{key: value}
 	if id := record.GetCollectionID(); id != 0 {
 		if scope == nil {
 			return false, merr.WrapErrServiceInternalMsg("compaction target creation is missing the collection version")
@@ -120,8 +122,36 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 		}
 		guards = append(guards, predicates.ValueEqual(collectionKey, raw))
 	}
-	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, guards...)
-	return targetCreateMayHaveCommitted(err), err
+	if record.GetIntent() != datapb.TargetIntent_INTENT_OPTIMIZE {
+		err = kc.MetaKv.MultiSaveAndRemove(ctx, saves, nil, guards...)
+		return targetCreateMayHaveCommitted(err), err
+	}
+
+	// The active slot fences two different candidate IDs, including a late
+	// transaction from a previous coordinator. Its value is the Target ID.
+	slot := activeOptimizeTargetKey(record.GetCollectionID())
+	saves[slot] = strconv.FormatInt(record.GetTargetID(), 10)
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, saves, nil, append(guards, predicates.KeyNotExist(slot))...)
+	unknown := targetCreateMayHaveCommitted(err)
+	if err != nil && !unknown {
+		owner, readErr := kc.MetaKv.Load(ctx, slot)
+		if readErr == nil && owner != saves[slot] {
+			id, parseErr := strconv.ParseInt(owner, 10, 64)
+			if parseErr != nil || id <= 0 {
+				return false, merr.WrapErrDataIntegrityMsg("invalid active OPTIMIZE slot for collection %d", record.GetCollectionID())
+			}
+			return false, merr.Wrapf(merr.ErrCompactionPlanConflict, "collection %d already has active OPTIMIZE target %d; this Create was not admitted", record.GetCollectionID(), id)
+		}
+		if readErr == nil && owner == saves[slot] {
+			// A retry of the same candidate can discover its earlier commit.
+			unknown = true
+		}
+	}
+	return unknown, err
+}
+
+func activeOptimizeTargetKey(collectionID int64) string {
+	return activeOptimizeTargetPrefix + "/" + strconv.FormatInt(collectionID, 10)
 }
 
 func targetCreateMayHaveCommitted(err error) bool {
@@ -183,7 +213,26 @@ func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.Com
 	if err != nil {
 		return nil, false, err
 	}
-	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.ValueEqual(key, raw)); err != nil {
+	guards := []predicates.Predicate{predicates.ValueEqual(key, raw)}
+	var removes []string
+	if current.GetIntent() == datapb.TargetIntent_INTENT_OPTIMIZE {
+		slot := activeOptimizeTargetKey(current.GetCollectionID())
+		owner, err := kc.MetaKv.Load(ctx, slot)
+		if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, false, merr.Wrap(err, "load active OPTIMIZE slot")
+		}
+		if err == nil {
+			if owner != strconv.FormatInt(id, 10) {
+				return nil, false, merr.WrapErrDataIntegrityMsg("active OPTIMIZE slot for collection %d does not match target %d", current.GetCollectionID(), id)
+			}
+			guards = append(guards, predicates.ValueEqual(slot, owner))
+			removes = append(removes, slot)
+		} else {
+			// Retained target records created before the slot still close safely.
+			guards = append(guards, predicates.KeyNotExist(slot))
+		}
+	}
+	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, removes, guards...); err != nil {
 		return nil, false, err
 	}
 	return current, true, nil
