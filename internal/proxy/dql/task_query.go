@@ -1230,7 +1230,8 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			retryable := recvErr != nil && (viewerror.AsViewError(recvErr).IsRetryable() || status.Code(recvErr) == codes.Unavailable)
 			closeErr := result.Stream.Close()
 			if recvErr != nil {
-				attemptErr := merr.Combine(recvErr, closeErr)
+				// Keep the receive error discoverable if cleanup also fails.
+				attemptErr := errors.Join(recvErr, closeErr)
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
