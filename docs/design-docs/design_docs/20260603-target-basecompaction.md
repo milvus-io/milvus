@@ -78,6 +78,14 @@ confirmed pending ALTER when one exists, otherwise the published schema.
 It captures that schema in the planned task. Version confirmation and
 in-place materialization preserve segment identity and rewrite time.
 
+Index Version keeps one cluster-wide Target with independent vector and scalar
+conditions. Each enabled axis saves its resolved minimum or exact version.
+Describe counts segments with a live ordinary index artifact that violates the
+saved condition. A replacement joins that count after its ordinary index
+build publishes file keys and the worker's actual version. A stale index
+can remain in the count while the segment waits for index readiness or other
+Mix prerequisites. The scope excludes L0 and L2.
+
 Delete Cleanup and TTL use the existing statistics thresholds and share
 one physical Mix task when both apply to a segment. L2 inputs are eligible
 for cleanup. Their nonempty Mix replacements are published as L1.
@@ -140,6 +148,9 @@ changes.
   Confirm the storage version and data-group format from the written data.
 - Exercise Schema Version with real V3 workers and confirm which updates
   preserve the input and which publish a replacement.
+- Verify the Index Version source keeps its ID across configuration changes
+  and restart. Exercise both version axes with published index metadata,
+  including an empty rebuild and a worker-reported version that still differs.
 - Exercise the actual Mix worker with Delete Cleanup and TTL input. Check
   the resulting segment level, row count, and surviving primary keys.
 
