@@ -577,15 +577,18 @@ func (o *idfOracle) DirPath() string {
 	return o.dirPath
 }
 
-func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memoryStats bm25Stats) {
+func (o *idfOracle) registerSealedStats(segmentID int64, stats *sealedBm25Stats, memoryStats bm25Stats) {
 	// Read lock only, so loads of different segments merge into current in parallel.
 	// SyncDistribution sets the target version under the write lock, so the check below
 	// and the merge are atomic with respect to it.
 	o.RLock()
 	defer o.RUnlock()
 
-	// skip preload if first target was loaded.
-	if o.targetVersion.Load() != 0 {
+	// Publish the disk charge with the entry: sync may detach and remove it as
+	// soon as this read lock is released, without waiting for the loader.
+	o.sealedDiskSize.Add(stats.diskSize)
+	// Skip preload if disabled or the first target was already loaded.
+	if memoryStats == nil || o.targetVersion.Load() != 0 {
 		o.sealed.Insert(segmentID, stats)
 		return
 	}
@@ -626,6 +629,9 @@ func observeForReopen(seg *sealedBm25Stats, activateIfReadable bool) (reopenView
 	}
 	seg.RLock()
 	defer seg.RUnlock()
+	if seg.removed {
+		return reopenView{}, errReopenStateChanged(seg.segmentID)
+	}
 	view := reopenView{seg: seg, version: seg.version, active: seg.activate.Load()}
 	if activateIfReadable && !view.active {
 		existing, err := seg.fetchFieldsLocked(seg.fieldList)
@@ -652,13 +658,13 @@ func (o *idfOracle) activateExistingSealedStats(segmentID int64, view reopenView
 
 	segStats, existed := o.sealed.Get(segmentID)
 	if !existed {
-		return false, nil
+		return false, errReopenStateChanged(segmentID)
 	}
 
 	segStats.Lock()
 	defer segStats.Unlock()
 	if segStats.removed {
-		return false, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+		return false, errReopenStateChanged(segmentID)
 	}
 	if !view.stillHolds(segStats, existed) {
 		return false, errReopenStateChanged(segmentID)
@@ -713,7 +719,7 @@ func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 // Idempotent: skips if segment already loaded.
 func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
-		if o.sealed.Contain(segmentID) {
+		if _, loaded := o.sealed.Get(segmentID); loaded {
 			return nil, nil
 		}
 
@@ -734,11 +740,6 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 
 		result, err := o.streamLoad(ctx, segmentID, logpaths, cm, needParse)
 		if err != nil {
-			// cleanup on failure
-			cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
-			if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-				mlog.Warn(ctx, "failed to cleanup bm25 stats dir on load failure", mlog.Err(rmErr), mlog.String("path", cleanupPath))
-			}
 			return nil, err
 		}
 
@@ -751,12 +752,7 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 			diskSize:  result.diskSize,
 		}
 
-		if needParse && result.stats != nil {
-			o.preloadSealed(segmentID, segStats, result.stats)
-		} else {
-			o.sealed.Insert(segmentID, segStats)
-		}
-		o.sealedDiskSize.Add(result.diskSize)
+		o.registerSealedStats(segmentID, segStats, result.stats)
 
 		o.syncResource()
 		return nil, nil
@@ -814,24 +810,20 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			return nil, nil
 		}
 
-		installed := false
-		cleanup := func() {
-			if installed {
-				return
-			}
-			for fieldID := range missingPaths {
-				cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID), fmt.Sprintf("%d", fieldID))
-				if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-					logger.Warn(ctx, "failed to cleanup reopened bm25 stats field dir", mlog.Err(rmErr), mlog.String("path", cleanupPath))
-				}
-			}
-		}
-		defer cleanup()
-
 		result, err := o.streamLoad(ctx, segmentID, missingPaths, cm, true)
 		if err != nil {
 			return nil, err
 		}
+		installed := false
+		defer func() {
+			// An existing entry adopts the fields, not the staging directory.
+			// A new entry takes ownership of the whole directory on success.
+			if !installed || existedBeforeLoad {
+				if err := os.RemoveAll(result.localDir); err != nil {
+					logger.Warn(ctx, "failed to cleanup reopened bm25 stats staging dir", mlog.Err(err), mlog.String("path", result.localDir))
+				}
+			}
+		}()
 
 		var observed *sealedBm25Stats
 		if existedBeforeLoad {
@@ -858,7 +850,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 		}
 		if existed && segStats.removed {
 			unlock()
-			return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+			return nil, errReopenStateChanged(segmentID)
 		}
 		if !view.stillHolds(segStats, existed) {
 			unlock()
@@ -882,6 +874,10 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 				return nil, nil
 			}
 
+			if err := installReopenedFields(ctx, segStats.localDir, result.localDir, installedFields); err != nil {
+				unlock()
+				return nil, err
+			}
 			segStats.addFieldsLocked(installedFields)
 			segStats.diskSize += result.diskSize
 			switch {
@@ -919,6 +915,37 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 	return err
 }
 
+// installReopenedFields runs under the oracle and entry write locks, after the
+// entry view has been validated. None of these destinations is in fieldList yet.
+func installReopenedFields(ctx context.Context, localDir, stagingDir string, fieldIDs []int64) error {
+	moved := make([]string, 0, len(fieldIDs))
+	installed := false
+	defer func() {
+		if installed {
+			return
+		}
+		for _, dir := range moved {
+			if err := os.RemoveAll(dir); err != nil {
+				mlog.Warn(ctx, "failed to rollback reopened bm25 stats field", mlog.Err(err), mlog.String("path", dir))
+			}
+		}
+	}()
+	for _, fieldID := range fieldIDs {
+		name := fmt.Sprintf("%d", fieldID)
+		dst := path.Join(localDir, name)
+		// Also recover an unpublished destination left by a failed rollback.
+		if err := os.RemoveAll(dst); err != nil {
+			return merr.WrapErrIoFailed(dst, err)
+		}
+		if err := os.Rename(path.Join(stagingDir, name), dst); err != nil {
+			return merr.WrapErrIoFailed(dst, err)
+		}
+		moved = append(moved, dst)
+	}
+	installed = true
+	return nil
+}
+
 type streamLoadResult struct {
 	localDir  string
 	fieldList []int64
@@ -953,7 +980,23 @@ func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths
 	log := mlog.With(mlog.FieldSegmentID(segmentID))
 	startTs := time.Now()
 
-	segDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
+	// Both fresh entries and reopen attempts own a unique directory. Cleanup
+	// of a retired entry must never touch a replacement or an in-flight download.
+	if err := os.MkdirAll(o.dirPath, os.ModePerm); err != nil {
+		return streamLoadResult{}, merr.WrapErrIoFailed(o.dirPath, err)
+	}
+	segDir, err := os.MkdirTemp(o.dirPath, fmt.Sprintf("%d-", segmentID))
+	if err != nil {
+		return streamLoadResult{}, merr.WrapErrIoFailed(o.dirPath, err)
+	}
+	loaded := false
+	defer func() {
+		if !loaded {
+			if err := os.RemoveAll(segDir); err != nil {
+				log.Warn(ctx, "failed to cleanup bm25 stats download", mlog.Err(err), mlog.String("path", segDir))
+			}
+		}
+	}()
 	var totalDiskSize int64
 	var stats map[int64]*storage.BM25Stats
 	fieldList := make([]int64, 0, len(binlogPaths))
@@ -991,6 +1034,7 @@ func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths
 
 	log.Info(ctx, "stream load bm25 stats done", mlog.Duration("time", time.Since(startTs)), mlog.Int64("diskSize", totalDiskSize), mlog.Bool("parsed", needParse))
 
+	loaded = true
 	return streamLoadResult{
 		localDir:  segDir,
 		fieldList: fieldList,
@@ -1429,7 +1473,9 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		stats.Unlock()
 	}
 
-	// remove sealed segment not in target
+	// Detach obsolete entries while publishing the target. In particular,
+	// SyncFunctions must not find an entry whose physical cleanup may be blocked.
+	toRemove := make([]*sealedBm25Stats, 0)
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
 		reserve := reserveMap.Contain(segmentID)
 		intarget := targetMap.Contain(segmentID)
@@ -1441,12 +1487,10 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		// (forbid remove some new segment register after current snapshot)
 		stats.RLock()
 		remove := !intarget && !reserve && stats.ts.Before(snapshotTs)
-		diskSize := stats.diskSize
 		stats.RUnlock()
 		if remove {
-			o.sealedDiskSize.Add(-diskSize)
-			stats.Remove()
 			o.sealed.Remove(segmentID)
+			toRemove = append(toRemove, stats)
 		}
 		return true
 	})
@@ -1460,6 +1504,12 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 	sealedLen := o.sealed.Len()
 	o.Unlock()
 
+	// Each detached entry owns its directory. Wait only for its local readers,
+	// never for a replacement load or reopen's remote download.
+	for _, stats := range toRemove {
+		stats.Remove()
+		o.sealedDiskSize.Add(-stats.diskSize)
+	}
 	o.syncResource()
 	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
 	return false, nil
