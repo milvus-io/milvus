@@ -522,10 +522,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if _, _, err := common.GetCollectionSegmentMaxRows(t.GetProperties()); err != nil {
-		return err
-	}
-
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
@@ -2256,10 +2252,6 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
 		if exist && !timestamptz.IsTimezoneValid(userDefinedTimezone) {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
-		}
-
-		if _, _, err := common.GetCollectionSegmentMaxRows(t.GetProperties()); err != nil {
-			return err
 		}
 
 		hasTTL, err := validateCollectionTTL(t.GetProperties())

@@ -105,33 +105,22 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
-// GetSegmentMaxRows returns the number of rows a segment of a collection with
-// the given properties is capped at, or 0 when no cap applies.
+// GetSegmentMaxRows returns the number of rows a segment is capped at,
+// dataCoord.segment.maxRows, or 0 when no cap applies.
 //
 // Segments are sized in bytes. A segment of maxSize bytes of narrow rows holds
 // tens of millions of rows, and the per-segment serial work (scalar index
 // build, delete replay at load) grows with the row count. So a segment is full
-// at maxSize bytes or at this many rows, whichever comes first. The cap counts
-// rows; it does not depend on the schema or on any estimate of the row size,
-// so it does not change when a vector field is added or dropped: wide rows
-// reach the byte limit first and are not affected by it.
+// at maxSize bytes or at this many rows, whichever comes first, for every
+// collection. The cap counts rows; it does not depend on the schema or on any
+// estimate of the row size, so it does not change when a vector field or a
+// function field is added or dropped: wide rows reach the byte limit first and
+// are not affected by it.
 //
-// The collection property collection.segment.maxRows overrides
-// dataCoord.segment.maxRows; 0 in either turns the cap off. A property that
-// does not parse is ignored (it is rejected when it is set).
-//
-// The row count at which the cap takes over from the byte limit is
-// expectedSize / maxRows bytes per row, so it scales with the byte limit of
-// the collection: 268 B at the default maxSize, 537 B for a collection whose
-// vector indexes are all DiskANN (diskSegmentMaxSize), and more when maxSize is
-// raised. A deployment that raises maxSize should raise maxRows with it.
-func GetSegmentMaxRows(properties map[string]string) int64 {
-	maxRows, exist, err := common.GetCollectionSegmentMaxRowsFromMap(properties)
-	if err != nil {
-		mlog.RatedWarn(context.TODO(), 0.1, "ignore an invalid collection.segment.maxRows property, dataCoord.segment.maxRows applies", mlog.Err(err))
-	} else if exist {
-		return maxRows
-	}
+// The cap is an absolute number of rows and does not follow the byte limit.
+// With maxSize S a collection is affected when maxRows of its rows take less
+// than S, so a deployment that raises maxSize should raise maxRows with it.
+func GetSegmentMaxRows() int64 {
 	return max(Params.DataCoordCfg.SegmentMaxRows.GetAsInt64(), 0)
 }
 

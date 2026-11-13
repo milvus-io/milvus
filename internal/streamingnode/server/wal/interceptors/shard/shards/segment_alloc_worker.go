@@ -29,12 +29,11 @@ func (m *partitionManager) asyncAllocSegment() {
 	// Create a notifier to notify the waiter when the allocation is done.
 	m.onAllocating = make(chan struct{})
 	w := &segmentAllocWorker{
-		ctx:             m.ctx,
-		collectionID:    m.collectionID,
-		partitionID:     m.partitionID,
-		vchannel:        m.vchannel,
-		wal:             m.wal.Get(),
-		maxRowsOverride: m.collection.MaxRowsOverride(),
+		ctx:          m.ctx,
+		collectionID: m.collectionID,
+		partitionID:  m.partitionID,
+		vchannel:     m.vchannel,
+		wal:          m.wal.Get(),
 	}
 	w.SetLogger(m.Logger().With(
 		mlog.FieldVChannel(m.vchannel),
@@ -55,10 +54,9 @@ type segmentAllocWorker struct {
 	wal          wal.WAL
 	// The following fields are preserved across retries to ensure the same segment
 	// configuration is used when rebuilding the message after a failed append.
-	segmentID       uint64            // allocated segment ID
-	storageVersion  int64             // storage version determined at first attempt
-	limitation      segmentLimitation // segment limitation determined at first attempt
-	maxRowsOverride int64             // collection.segment.maxRows of the collection, negative when not set
+	segmentID      uint64            // allocated segment ID
+	storageVersion int64             // storage version determined at first attempt
+	limitation     segmentLimitation // segment limitation determined at first attempt
 }
 
 // do is the main loop of the segment allocation worker.
@@ -151,6 +149,6 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	}
 
 	// Generate growing segment limitation.
-	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1, w.maxRowsOverride)
+	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
 	return nil
 }

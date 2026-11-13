@@ -4893,31 +4893,6 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	t.Run("collection.segment.maxRows must be a non-negative integer", func(t *testing.T) {
-		col := "alter_segment_max_rows_" + funcutil.GenRandomStr()
-		createCollectionWithProps(col, nil)
-		alter := func(value string) error {
-			task := &AlterCollectionTask{
-				baseTask: baseTask{MetaCache: cache},
-				AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-					Base:           &commonpb.MsgBase{},
-					CollectionName: col,
-					Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionSegmentMaxRowsKey, Value: value}},
-				},
-				ctx:      ctx,
-				mixCoord: qc,
-			}
-			return task.PreExecute(ctx)
-		}
-		for _, value := range []string{"-1", "many", "1.5"} {
-			err := alter(value)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid, value)
-			assert.ErrorContains(t, err, common.CollectionSegmentMaxRowsKey, value)
-		}
-		assert.NoError(t, alter("0"))
-		assert.NoError(t, alter("1000000"))
-	})
-
 	t.Run("mutual exclusion: existing ttl.seconds, alter ttl.field should fail", func(t *testing.T) {
 		col := "alter_ttl_seconds_then_field_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
