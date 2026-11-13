@@ -70,6 +70,7 @@ func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, al
 	s.allocator = alloc
 	s.meta = segmentMeta
 	s.compactionTargetMeta = targetMeta
+	s.checkCompactionTargetReplication = func(context.Context) error { return nil }
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	return s, &datapb.CompactionTargetResource{
 		CollectionId: 1, DbId: 2, DbName: "default", CollectionName: "records", Revision: 10,
