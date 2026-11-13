@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -46,12 +47,14 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	itypes "github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -470,6 +473,67 @@ func TestRootCoord_DropCollection(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
+}
+
+func TestDropCollectionAckRetriesCompactionTargetClosureAfterTombstone(t *testing.T) {
+	ctx := t.Context()
+	mt, catalog := newCollectionGCMeta(t, etcdpb.CollectionState_CollectionCreated)
+	var durable *model.Collection
+	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, uint64(20), false).
+		Run(func(_ context.Context, _, next *model.Collection, _ metastore.AlterType, _ uint64, _ bool) {
+			durable = next.Clone()
+		}).Return(nil).Once()
+	catalog.EXPECT().DeleteGrantByCollectionName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Once()
+	tso := mocktso.NewAllocator(t)
+	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(21), nil).Once()
+	core := newTestCore(withMeta(mt), withValidProxyManager(), withTsoAllocator(tso))
+	core.tombstoneSweeper = tombstone.NewTombstoneSweeper()
+	t.Cleanup(core.tombstoneSweeper.Close)
+	core.session = &sessionutil.Session{}
+	closures := 0
+	core.mixCoord = &targetClosureMixCoord{
+		closeTargets: func(_ context.Context, id int64) error {
+			require.Equal(t, int64(100), id)
+			require.NotNil(t, durable)
+			require.Equal(t, etcdpb.CollectionState_CollectionDropping, durable.State)
+			closures++
+			if closures == 1 {
+				return merr.ErrIoFailed
+			}
+			return nil
+		},
+	}
+
+	control := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(control)
+	streaming.SetWALForTest(wal)
+	registry.ResetRegistration()
+	t.Cleanup(registry.ResetRegistration)
+	RegisterDDLCallbacks(core)
+	registry.RegisterDropLoadConfigV2AckCallback(func(context.Context, message.BroadcastResultDropLoadConfigMessageV2) error { return nil })
+	registry.RegisterDropIndexV2AckCallback(func(context.Context, message.BroadcastResultDropIndexMessageV2) error { return nil })
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(func(context.Context, message.BroadcastResultDropSnapshotsByCollectionMessageV2) error { return nil })
+
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 100, DbId: util.DefaultDBID}).
+		WithBody(&message.DropCollectionRequest{CollectionID: 100, DbName: util.DefaultDBName, CollectionName: "first"}).
+		WithBroadcast([]string{control}, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast().WithBroadcastID(1)
+	ack := map[string]*message.AppendResult{control: {TimeTick: 20}}
+	require.ErrorIs(t, registry.CallMessageAckCallback(ctx, msg, ack), merr.ErrIoFailed)
+	require.NoError(t, registry.CallMessageAckCallback(ctx, msg, ack))
+	require.Equal(t, 2, closures)
+}
+
+type targetClosureMixCoord struct {
+	itypes.MixCoord
+	closeTargets func(context.Context, int64) error
+}
+
+func (c *targetClosureMixCoord) DropCollectionCompactionTargets(ctx context.Context, collectionID int64) error {
+	return c.closeTargets(ctx, collectionID)
 }
 
 func TestRootCoord_TruncateCollection(t *testing.T) {
