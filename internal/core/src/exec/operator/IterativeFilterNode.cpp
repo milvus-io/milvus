@@ -35,7 +35,9 @@ PhyIterativeFilterNode::PhyIterativeFilterNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // Both evaluation paths exclude UNKNOWN rows together with FALSE.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     const auto& exprs = exprs_->exprs();
     for (const auto& expr : exprs) {
         is_native_supported_ =
@@ -202,6 +204,11 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec_size = col_vec->size();
                     TargetBitmapView bitsetview(col_vec->GetRawData(),
                                                 col_vec_size);
+                    // Native offset results are consumed on their data bits.
+                    // Fold UNKNOWN into FALSE before selecting rows.
+                    TargetBitmapView validview(col_vec->GetValidRawData(),
+                                               col_vec_size);
+                    bitsetview.inplace_and(validview, col_vec_size);
                     Assert(bitsetview.size() <= batch_size);
                     Assert(bitsetview.size() == offsets.size());
                     for (auto i = 0; i < offsets.size(); ++i) {

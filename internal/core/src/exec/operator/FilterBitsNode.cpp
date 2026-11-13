@@ -59,7 +59,10 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     filters.emplace_back(filter->filter());
     is_always_true_ = (std::dynamic_pointer_cast<const expr::AlwaysTrueExpr>(
                            filter->filter()) != nullptr);
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This consumer excludes UNKNOWN rows together with FALSE, so AND
+    // conjunctions may drop UNKNOWN rows from their active sets early.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 }
