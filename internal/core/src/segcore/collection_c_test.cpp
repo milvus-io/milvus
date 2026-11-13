@@ -33,6 +33,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     namespace schema = milvus::proto::schema;
     schema::CollectionSchema collection_schema;
     collection_schema.set_name("collection_test");
+    collection_schema.set_version(1);
 
     auto vec_field_schema = collection_schema.add_fields();
     vec_field_schema->set_name("fakevec");
@@ -67,11 +68,12 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_TRUE(marshal);
 
     // Call UpdateSchema CApi here
-    // UpdateSchema(CCollection, const void*, const int64_t)
+    const int64_t load_fields[] = {100, 101, 103};
     auto status = UpdateSchema(collection,
                                updated_schema_string.c_str(),
                                updated_schema_string.length(),
-                               100);
+                               load_fields,
+                               3);
     ASSERT_EQ(status.error_code, Success);
 
     auto col = static_cast<milvus::segcore::Collection*>(collection);
@@ -81,7 +83,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_EQ(add_field.get_name().get(), "added_field");
 
     // Test failure case, no panicking with failure code
-    status = UpdateSchema(collection, nullptr, 0, 200);
+    status = UpdateSchema(collection, nullptr, 0, load_fields, 3);
     ASSERT_NE(status.error_code, Success);
 
     DeleteCollection(collection);

@@ -35,7 +35,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func TestSchemaUpdateAddsLoadFieldsWithoutExpandingOldSelection(t *testing.T) {
+func addedFieldSchema(previous *schemapb.CollectionSchema, id int64, name string) *schemapb.CollectionSchema {
+	next := proto.Clone(previous).(*schemapb.CollectionSchema)
+	next.Version++
+	next.Fields = append(next.Fields, &schemapb.FieldSchema{
+		FieldID: id, Name: name, DataType: schemapb.DataType_Int64, Nullable: true,
+	})
+	return next
+}
+
+func requireNativeField(t *testing.T, collection *Collection, fieldID int64) {
+	t.Helper()
+	// Verify the real native schema: Go metadata alone cannot prove publication.
+	predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: fieldID, DataType: schemapb.DataType_Int64},
+		Op:         planpb.OpType_GreaterThan,
+		Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+	}}}
+	expr, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: predicate}})
+	require.NoError(t, err)
+	plan, err := segcore.NewRetrievePlan(collection.ccollection, expr, 0, 0, commonpb.ConsistencyLevel_Strong, 0)
+	require.NoError(t, err)
+	plan.Delete()
+}
+
+func testSchemaUpdateEntryPoints(t *testing.T, test func(*testing.T, *Collection, func(*schemapb.CollectionSchema, uint64) error)) {
+	t.Helper()
 	paramtable.Init()
 	for _, viaLoad := range []bool{false, true} {
 		name := "schema_rpc"
@@ -44,184 +69,109 @@ func TestSchemaUpdateAddsLoadFieldsWithoutExpandingOldSelection(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			schema := mock_segcore.GenTestCollectionSchema("load-hints", schemapb.DataType_Int64, false)
+			schema.Version = 1
 			manager := NewCollectionManager()
-			require.NoError(t, manager.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{LoadFields: []int64{100, 101}}))
+			require.NoError(t, manager.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+				LoadFields: []int64{100, 101}, SchemaVersion: 1000,
+			}))
 			collection := manager.Get(10)
 			defer DeleteCollection(collection)
-			apply := func(next *schemapb.CollectionSchema, version uint64) (uint64, bool, error) {
-				before := collection.schemaVersion
-				var err error
-				if viaLoad {
-					refs := collection.refCount.Load()
-					err = manager.PutOrRef(10, next, nil, &querypb.LoadMetaInfo{SchemaVersion: version})
-					if err != nil {
-						require.Equal(t, refs, collection.refCount.Load(), "failed load must not acquire a reference")
-					}
-				} else {
-					err = manager.UpdateSchema(10, next, version)
+			apply := func(next *schemapb.CollectionSchema, timestamp uint64) error {
+				if !viaLoad {
+					return manager.UpdateSchema(10, next, timestamp)
 				}
-				return collection.schemaVersion, collection.schemaVersion != before, err
+				refs := collection.refCount.Load()
+				err := manager.PutOrRef(10, next, nil, &querypb.LoadMetaInfo{SchemaVersion: timestamp})
+				if err != nil {
+					require.Equal(t, refs, collection.refCount.Load(), "failed load must not acquire a reference")
+				}
+				return err
 			}
-			next := proto.Clone(schema).(*schemapb.CollectionSchema)
-			next.Version = schema.GetVersion() + 1
-			next.Fields = append(next.Fields,
-				&schemapb.FieldSchema{FieldID: 200, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
-				&schemapb.FieldSchema{FieldID: 201, Name: "cold", DataType: schemapb.DataType_Int64, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.FieldSkipLoadKey, Value: "true"}}})
-			var nativeUpdate func(*segcore.CCollection, []int64) error
-			calls := 0
-			failed := merr.WrapErrServiceUnavailable("injected native hint failure")
-			patch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).Origin(&nativeUpdate).To(func(c *segcore.CCollection, fields []int64) error {
-				calls++
-				require.ElementsMatch(t, []int64{100, 101, 200}, fields)
-				if calls == 1 {
-					return failed
-				}
-				return nativeUpdate(c, fields)
-			}).Build()
-			defer patch.UnPatch()
-			_, changed, err := apply(next, 100)
-			require.ErrorIs(t, err, failed)
-			require.False(t, changed)
-			require.Equal(t, typeutil.NewSet[int64](100, 101), collection.loadFields)
-			require.Same(t, schema, collection.Schema(), "failed hint application must not publish the Go schema")
-			_, changed, err = apply(next, 100)
-			require.NoError(t, err)
-			require.True(t, changed)
-			require.Equal(t, typeutil.NewSet[int64](100, 101, 200), collection.loadFields)
-			require.Equal(t, 2, calls)
-			_, changed, err = apply(next, 100)
-			require.NoError(t, err)
-			require.False(t, changed)
-			require.Equal(t, 2, calls, "same schema replay does not rewrite hints")
+			test(t, collection, apply)
 		})
 	}
 }
 
-func TestSchemaUpdateDoesNotReuseNativeVersionAfterHintFailure(t *testing.T) {
-	paramtable.Init()
-	for _, viaLoad := range []bool{false, true} {
-		name := "schema_rpc"
-		if viaLoad {
-			name = "segment_load"
-		}
-		t.Run(name, func(t *testing.T) {
-			schema := mock_segcore.GenTestCollectionSchema("load-hint-versions", schemapb.DataType_Int64, false)
-			manager := NewCollectionManager()
-			require.NoError(t, manager.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{LoadFields: []int64{100, 101}}))
-			collection := manager.Get(10)
-			defer DeleteCollection(collection)
-			apply := func(next *schemapb.CollectionSchema, version uint64) (uint64, bool, error) {
-				before := collection.schemaVersion
-				var err error
-				if viaLoad {
-					refs := collection.refCount.Load()
-					err = manager.PutOrRef(10, next, nil, &querypb.LoadMetaInfo{SchemaVersion: version})
-					if err != nil {
-						require.Equal(t, refs, collection.refCount.Load(), "failed load must not acquire a reference")
-					}
-				} else {
-					err = manager.UpdateSchema(10, next, version)
-				}
-				return collection.schemaVersion, collection.schemaVersion != before, err
-			}
-			first := proto.Clone(schema).(*schemapb.CollectionSchema)
-			first.Version++
-			first.Fields = append(first.Fields, &schemapb.FieldSchema{FieldID: 200, Name: "first", DataType: schemapb.DataType_Int64, Nullable: true})
-			second := proto.Clone(first).(*schemapb.CollectionSchema)
-			second.Version++
-			second.Fields = append(second.Fields, &schemapb.FieldSchema{FieldID: 201, Name: "second", DataType: schemapb.DataType_Int64, Nullable: true})
-
-			var nativeUpdate func(*segcore.CCollection, *schemapb.CollectionSchema, uint64) error
-			var versions []uint64
-			versionPatch := mockey.Mock((*segcore.CCollection).UpdateSchema).Origin(&nativeUpdate).To(func(c *segcore.CCollection, next *schemapb.CollectionSchema, version uint64) error {
-				versions = append(versions, version)
-				return nativeUpdate(c, next, version)
-			}).Build()
-			defer versionPatch.UnPatch()
-			var nativeHints func(*segcore.CCollection, []int64) error
-			failed := merr.WrapErrServiceUnavailable("injected native hint failure")
-			hintCalls := 0
-			hintPatch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).Origin(&nativeHints).To(func(c *segcore.CCollection, fields []int64) error {
-				hintCalls++
-				if hintCalls <= 2 {
-					return failed
-				}
-				return nativeHints(c, fields)
-			}).Build()
-			defer hintPatch.UnPatch()
-
-			_, changed, err := apply(first, 100)
-			require.ErrorIs(t, err, failed)
-			require.False(t, changed)
-			require.Same(t, schema, collection.Schema())
-			_, changed, err = apply(first, 100)
-			require.ErrorIs(t, err, failed)
-			require.False(t, changed)
-			require.Same(t, schema, collection.Schema())
-			// A newer payload arrives before the failed one is retried. It must get a
-			// fresh native version instead of being silently skipped by segcore.
-			_, changed, err = apply(second, 101)
-			require.NoError(t, err)
-			require.True(t, changed)
-			require.Len(t, versions, 3)
-			require.Greater(t, versions[1], versions[0])
-			require.Greater(t, versions[2], versions[1])
-			require.Same(t, second, collection.Schema())
-			require.Equal(t, typeutil.NewSet[int64](100, 101, 200, 201), collection.loadFields)
-
-			// Check the real native schema, not only the outer Go snapshot: compiling
-			// a predicate on the second added field fails if segcore retained first.
-			predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: &planpb.ColumnInfo{FieldId: 201, DataType: schemapb.DataType_Int64},
-				Op:         planpb.OpType_GreaterThan,
-				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
-			}}}
-			expr, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: predicate}})
-			require.NoError(t, err)
-			plan, err := segcore.NewRetrievePlan(collection.ccollection, expr, 0, 0, commonpb.ConsistencyLevel_Strong, 0)
-			require.NoError(t, err)
-			defer plan.Delete()
-			_, changed, err = apply(first, 100)
-			require.NoError(t, err)
-			require.False(t, changed, "the superseded failed payload cannot overwrite the newer schema")
-			require.Len(t, versions, 3)
+func TestSchemaUpdateAddsLoadFieldsWithoutExpandingOldSelection(t *testing.T) {
+	testSchemaUpdateEntryPoints(t, func(t *testing.T, collection *Collection, apply func(*schemapb.CollectionSchema, uint64) error) {
+		schema := collection.Schema()
+		next := addedFieldSchema(schema, 200, "added")
+		next.Fields = append(next.Fields, &schemapb.FieldSchema{
+			FieldID: 201, Name: "cold", DataType: schemapb.DataType_Int64, Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.FieldSkipLoadKey, Value: "true"}},
 		})
-	}
+		var nativeUpdate func(*segcore.CCollection, *schemapb.CollectionSchema, []int64) error
+		calls := 0
+		failed := merr.WrapErrServiceUnavailable("injected native schema and hint failure")
+		patch := mockey.Mock((*segcore.CCollection).UpdateSchema).Origin(&nativeUpdate).To(func(c *segcore.CCollection, sch *schemapb.CollectionSchema, fields []int64) error {
+			calls++
+			require.ElementsMatch(t, []int64{100, 101, 200}, fields)
+			if calls == 1 {
+				return failed
+			}
+			return nativeUpdate(c, sch, fields)
+		}).Build()
+		defer patch.UnPatch()
+
+		require.ErrorIs(t, apply(next, 100), failed)
+		require.Same(t, schema, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101), collection.loadFields)
+		require.EqualValues(t, 1, collection.refCount.Load())
+
+		// Retrying the exact schema and timestamp must apply both native parts.
+		require.NoError(t, apply(next, 100))
+		require.Same(t, next, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101, 200), collection.loadFields)
+		requireNativeField(t, collection, 200)
+		require.NoError(t, apply(next, 5000))
+		require.Equal(t, 2, calls, "same schema with a higher timetick must not rewrite hints")
+	})
 }
 
-func TestSchemaUpdateFailureDoesNotPublishOrAcquireReference(t *testing.T) {
-	paramtable.Init()
-	for _, viaLoad := range []bool{false, true} {
-		name := "schema_rpc"
-		if viaLoad {
-			name = "segment_load"
-		}
-		t.Run(name, func(t *testing.T) {
-			schema := mock_segcore.GenTestCollectionSchema("failed-schema", schemapb.DataType_Int64, false)
-			manager := NewCollectionManager()
-			require.NoError(t, manager.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{LoadFields: []int64{100, 101}}))
-			collection := manager.Get(10)
-			defer DeleteCollection(collection)
-			next := proto.Clone(schema).(*schemapb.CollectionSchema)
-			next.Version++
-			next.Fields = append(next.Fields, &schemapb.FieldSchema{FieldID: 200, Name: "new_field", DataType: schemapb.DataType_Int64, Nullable: true})
-			failed := merr.WrapErrServiceUnavailable("injected native schema failure")
-			patch := mockey.Mock((*segcore.CCollection).UpdateSchema).Return(failed).Build()
-			defer patch.UnPatch()
-			var err error
-			if viaLoad {
-				err = manager.PutOrRef(10, next, nil, &querypb.LoadMetaInfo{SchemaVersion: 100})
-			} else {
-				err = manager.UpdateSchema(10, next, 100)
-			}
-			require.ErrorIs(t, err, failed)
-			require.Same(t, schema, collection.Schema())
-			require.Zero(t, collection.schemaVersion)
-			require.EqualValues(t, 1, collection.refCount.Load())
-			require.Equal(t, typeutil.NewSet[int64](100, 101), collection.loadFields)
-			patch.UnPatch()
-			require.NoError(t, manager.UpdateSchema(10, next, 100))
-			require.Same(t, next, collection.Schema())
-		})
-	}
+func TestSchemaUpdateOrdersBySchemaVersionAcrossChannels(t *testing.T) {
+	testSchemaUpdateEntryPoints(t, func(t *testing.T, collection *Collection, apply func(*schemapb.CollectionSchema, uint64) error) {
+		first := collection.Schema()
+		second := addedFieldSchema(first, 200, "second")
+		// A2's per-channel tick can be below A1's max tick used at creation.
+		require.NoError(t, apply(second, 100))
+		require.Same(t, second, collection.Schema())
+		requireNativeField(t, collection, 200)
+
+		// A delayed older schema can carry a larger tick from another channel.
+		require.NoError(t, apply(first, 10000))
+		require.Same(t, second, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101, 200), collection.loadFields)
+		requireNativeField(t, collection, 200)
+
+		third := addedFieldSchema(second, 201, "third")
+		require.NoError(t, apply(third, 50))
+		require.Same(t, third, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101, 200, 201), collection.loadFields)
+		requireNativeField(t, collection, 201)
+	})
+}
+
+func TestSchemaUpdateFailureDoesNotAllowStaleSchemaToOverwrite(t *testing.T) {
+	testSchemaUpdateEntryPoints(t, func(t *testing.T, collection *Collection, apply func(*schemapb.CollectionSchema, uint64) error) {
+		first := collection.Schema()
+		second := addedFieldSchema(first, 200, "second")
+		third := addedFieldSchema(second, 201, "third")
+		failed := merr.WrapErrServiceUnavailable("injected native update failure")
+		patch := mockey.Mock((*segcore.CCollection).UpdateSchema).Return(failed).Build()
+		defer patch.UnPatch()
+		require.ErrorIs(t, apply(second, 100), failed)
+		require.Same(t, first, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101), collection.loadFields)
+
+		// A replay after failure must remain a no-op even with a larger tick.
+		require.NoError(t, apply(first, 10000))
+		require.Same(t, first, collection.Schema())
+		patch.UnPatch()
+		// A later schema can supersede the failed attempt without retrying it.
+		require.NoError(t, apply(third, 50))
+		require.NoError(t, apply(second, 20000))
+		require.Same(t, third, collection.Schema())
+		require.Equal(t, typeutil.NewSet[int64](100, 101, 200, 201), collection.loadFields)
+		requireNativeField(t, collection, 201)
+	})
 }

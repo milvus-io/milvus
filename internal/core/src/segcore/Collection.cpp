@@ -68,20 +68,24 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
 void
 Collection::parse_schema(const void* schema_proto_blob,
                          const int64_t length,
-                         const uint64_t version) {
+                         const std::vector<int64_t>& load_fields) {
     Assert(schema_proto_blob != nullptr);
-
-    if (version <= get_schema_version()) {
-        return;
-    }
 
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_proto_blob, length);
 
     AssertInfo(suc, "parse schema proto failed");
 
+    if (collection_schema.version() <= get_schema_version()) {
+        return;
+    }
+
     auto new_schema = Schema::ParseFrom(collection_schema);
-    new_schema->set_schema_version(version);
+    // Readers retain schema pointers after releasing schema_mutex_. Prepare
+    // the complete snapshot before publishing it; never mutate their hints.
+    // If parsing or allocating the load fields fails, the old snapshot remains
+    // intact and the same schema version can be retried.
+    new_schema->UpdateLoadFields(load_fields);
     set_schema(new_schema);
 }
 

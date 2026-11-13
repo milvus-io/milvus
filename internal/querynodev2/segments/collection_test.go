@@ -57,6 +57,7 @@ func (s *CollectionManagerSuite) SetupTest() {
 func (s *CollectionManagerSuite) TestUpdateSchema() {
 	s.Run("normal_case", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		schema.Version++
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:  common.StartOfUserFieldID + int64(len(schema.Fields)),
 			Name:     "added_field",
@@ -66,10 +67,12 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.Same(schema, s.cm.Get(1).Schema())
 	})
 
 	s.Run("not_exist_collection", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		schema.Version++
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:  common.StartOfUserFieldID + int64(len(schema.Fields)),
 			Name:     "added_field",
@@ -302,6 +305,7 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	// Add a new vector field to simulate schema evolution.
 	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
 	newVecFieldID := int64(200)
+	schema.Version++
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID:  newVecFieldID,
 		Name:     "new_float_vector",

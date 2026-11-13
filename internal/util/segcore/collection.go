@@ -116,7 +116,7 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	return nil
 }
 
-func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
+func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, fields []int64) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
@@ -126,17 +126,12 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return err
 	}
 
-	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
-	return ConsumeCStatusIntoError(&status)
-}
-
-func (c *CCollection) UpdateLoadFields(fields []int64) error {
 	var empty C.int64_t
 	fieldPtr := &empty
 	if len(fields) > 0 {
 		fieldPtr = (*C.int64_t)(unsafe.Pointer(&fields[0]))
 	}
-	status := C.UpdateLoadFields(c.ptr, fieldPtr, C.int64_t(len(fields)))
+	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), fieldPtr, C.int64_t(len(fields)))
 	return ConsumeCStatusIntoError(&status)
 }
 
