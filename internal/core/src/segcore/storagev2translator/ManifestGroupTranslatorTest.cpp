@@ -329,7 +329,8 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
         auto [loading, private_overhead, shared_overhead] =
-            translator->estimated_loading_usage({i});
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
         const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
@@ -434,7 +435,8 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
         auto [loading, private_overhead, shared_overhead] =
-            translator->estimated_loading_usage({i});
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
         const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
