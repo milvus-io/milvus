@@ -8,9 +8,12 @@ pub const WORDS_DATA: &'static str = "dict.words";
 
 pub const BUILD_DIR_KEY: &'static str = "build_dir";
 
-#[cfg(not(feature = "analyzer-remote-tls"))]
+#[cfg(not(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+)))]
 pub fn download_disabled_error(dict: &str) -> crate::error::TantivyBindingError {
     crate::error::TantivyBindingError::InvalidArgument(format!(
-        "Lindera {dict} dictionary not found under build_dir and online download is disabled in this build (analyzer-remote-tls off); prebuild the dictionary there or compile with the matching lindera-* feature"
+        "Lindera {dict} dictionary not found under build_dir and online download is disabled in this build (analyzer-remote-tls and analyzer-remote-tls-openssl are off); prebuild the dictionary there or compile with the matching lindera-* feature"
     ))
 }
