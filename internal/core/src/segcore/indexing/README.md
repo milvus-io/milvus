@@ -55,6 +55,29 @@ The JSON stats shared-key loader, `BsonInvertedIndexTranslator`, lives under
 at `index/SingleCellIndexStorageTranslator.h`. `segcore/storagev1translator/`
 contains the field-data `ChunkTranslator` and `DefaultValueChunkTranslator`.
 
+## Packed-file metadata reuse
+
+Packed V3 inspection publishes a shared, immutable `storage::IndexEntryFile` after
+magic, directory, metadata checksum and JSON validation succeed. It retains the
+opened input stream, cached size, collection/encryption identity, parsed directory
+and metadata. `SealedIndexLoader` keeps this file state; each `CreateIndex` attempt
+creates a fresh storage reader through `FromFile`, without reopening or revalidating
+the same file. The storage reader's cancellation, priority and decoded-entry cache
+are not shared. Reloads retain the same file state through their index's source.
+
+The state belongs to one immutable artifact and its index version, with no global
+path-keyed cache. Replacement constructs a new loader and file state; older readers
+keep their original file alive. Failed opens publish no state. A failed index
+creation can retry using successfully inspected state and a new request context.
+
+Both storage readers temporarily reuse the initial 64 KiB tail when reading
+`__meta__`. A partially covered read fetches only its missing prefix; encrypted
+slices still pass through decryption and entry CRC verification. The tail is
+released before Open returns, and oversized serialized directories are not kept
+as a cache. Parsed metadata retains its existing format-derived size; this change
+does not add a global metadata budget. Header magic still requires its own read,
+and existing V3 files and their validation rules are unchanged.
+
 ## Sealed: loading and publication
 
 Lazy entry creation requires `queryNode.segcore.tieredStorage.lazyIndexSlotEnabled=true` and

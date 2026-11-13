@@ -45,6 +45,15 @@
 #include "storage/PluginLoader.h"
 
 namespace milvus::storage {
+
+std::unique_ptr<AsyncIndexEntryReader>
+AsyncIndexEntryReader::FromFile(std::shared_ptr<const IndexEntryFile> file) {
+    AssertInfo(file != nullptr, "Validated index file is null");
+    auto reader =
+        std::unique_ptr<AsyncIndexEntryReader>(new AsyncIndexEntryReader());
+    reader->file_ = std::move(file);
+    return reader;
+}
 folly::coro::Task<std::unique_ptr<AsyncIndexEntryReader>>
 AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                             int64_t collection_id,
@@ -66,8 +75,11 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     }
     auto reader =
         std::unique_ptr<AsyncIndexEntryReader>(new AsyncIndexEntryReader());
-    reader->input_ = std::move(input);
-    reader->collection_id_ = collection_id;
+    auto file = std::shared_ptr<IndexEntryFile>(new IndexEntryFile());
+    reader->file_ = file;
+    file->input = std::move(input);
+    file->collection_id = collection_id;
+    file->file_size = file_size;
     // Magic/footer and directory reads share one load slot without a byte charge.
     // Directory/metadata buffers and parsed JSON remain outside byte accounting.
     // __meta__ reads still use ReadEntriesAsync slice admission, which does not
@@ -93,15 +105,18 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         std::memcpy(full_tail.data() + missing, tail.data(), tail.size());
         tail = std::move(full_tail);
     }
-    std::tie(reader->directory_, reader->encryption_) =
-        ParseIndexEntryDirectory(
-            std::span(tail).subspan(tail.size() - needed, directory_bytes),
-            file_size);
-    // Release the serialized directory before allocating the metadata entry.
-    std::vector<uint8_t>().swap(tail);
-    if (reader->encryption_) {
-        reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        if (!(reader->cipher_plugin_ != nullptr)) {
+    std::tie(file->directory, file->encryption) = ParseIndexEntryDirectory(
+        std::span(tail).subspan(tail.size() - needed, directory_bytes),
+        file_size);
+    const auto tail_offset = file_size - tail.size();
+    tail.resize(tail.size() - needed);
+    if (tail.empty()) {
+        std::vector<uint8_t>().swap(tail);
+    }
+    reader->opening_tail_ = {tail_offset, std::move(tail)};
+    if (file->encryption) {
+        file->cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
+        if (!(file->cipher_plugin != nullptr)) {
             ThrowInfo(ErrorCode::ConfigInvalid,
                       "Cipher plugin required for encrypted V3 index");
         }
@@ -109,7 +124,7 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
 
     // ReadEntriesAsync acquires its own slots; do not retain the directory slot.
     metadata_lease.Release();
-    const auto& meta = reader->directory_.At(MILVUS_V3_META_ENTRY_NAME);
+    const auto& meta = file->directory.At(MILVUS_V3_META_ENTRY_NAME);
     auto data = std::make_shared<std::vector<uint8_t>>(meta.plaintext_size);
     std::vector<EntryLoadPlan> entries_to_read;
     entries_to_read.push_back(
@@ -118,14 +133,14 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     co_await reader->ReadEntriesAsync(entries_to_read, priority, token);
     if (!data->empty()) {
         try {
-            reader->metadata_ =
-                nlohmann::json::parse(data->begin(), data->end());
+            file->metadata = nlohmann::json::parse(data->begin(), data->end());
         } catch (const nlohmann::json::parse_error& error) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "Failed to parse V3 index meta JSON: {}",
                       error.what());
         }
     }
+    reader->opening_tail_ = {};
     ThrowIfCancelled(token, "AsyncIndexEntryReader::OpenComplete");
     co_return reader;
 }
@@ -136,6 +151,7 @@ AsyncIndexEntryReader::ReadExactlyAsync(uint64_t offset,
                                         size_t bytes,
                                         folly::CancellationToken token) const {
     ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadExactly");
+    bytes = opening_tail_.CopySuffix(offset, {destination, bytes});
     if (bytes == 0) {
         co_return;
     }
@@ -144,7 +160,7 @@ AsyncIndexEntryReader::ReadExactlyAsync(uint64_t offset,
     auto result =
         co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
             folly::CancellationToken{},
-            input_->ReadAtAsync(destination, offset, bytes)));
+            file_->input->ReadAtAsync(destination, offset, bytes)));
     ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadExactly");
     const auto n = std::move(result).value();
     if (!(n == bytes)) {
@@ -175,8 +191,10 @@ AsyncIndexEntryReader::ReadSliceIntoAsync(
     std::vector<uint8_t> ciphertext(slice.remote_bytes);
     co_await ReadExactlyAsync(
         slice.remote_offset, ciphertext.data(), ciphertext.size(), token);
-    auto decryptor = cipher_plugin_->GetDecryptor(
-        encryption_->ez_id, collection_id_, encryption_->edek);
+    auto decryptor =
+        file_->cipher_plugin->GetDecryptor(file_->encryption->ez_id,
+                                           file_->collection_id,
+                                           file_->encryption->edek);
     auto plaintext = decryptor->Decrypt(ciphertext.data(), ciphertext.size());
     if (!(plaintext.size() == destination.size())) {
         ThrowInfo(ErrorCode::DataFormatBroken,
