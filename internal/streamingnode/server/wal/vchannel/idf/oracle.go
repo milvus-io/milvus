@@ -211,11 +211,14 @@ type idfDiff struct {
 }
 
 type materializationCall struct {
-	target qviews.DataVersion
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	err    error
+	waiters     int
+	warmWaiters int
+	warmStarted bool
+	target      qviews.DataVersion
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	err         error
 }
 
 type oracleRuntime struct {
@@ -232,16 +235,17 @@ type oracleRuntime struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 
-	advanceMu       sync.Mutex
-	mu              sync.RWMutex
-	lazy            bool
-	closed          bool
-	currentVersion  qviews.DataVersion
-	currentStats    bm25Stats
-	currentSealed   map[int64]*datapb.StreamingNodeBM25Resource
-	currentGrowing  map[int64]struct{}
-	materialization *materializationCall
-	growingStore    *growingStatsStore
+	advanceMu         sync.Mutex
+	mu                sync.RWMutex
+	lazy              bool
+	closed            bool
+	currentVersion    qviews.DataVersion
+	currentStats      bm25Stats
+	currentSealed     map[int64]*datapb.StreamingNodeBM25Resource
+	currentGrowing    map[int64]struct{}
+	materialization   *materializationCall
+	materializationWG sync.WaitGroup
+	growingStore      *growingStatsStore
 
 	functionKey string // Owns the exact immutable schema and managed BM25 runners.
 	closeOnce   sync.Once
@@ -430,10 +434,16 @@ func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.Da
 		r.currentVersion = target
 		r.currentGrowing = nil
 		r.growingStore.cleanup(target, nil)
-		r.mu.Unlock()
 		if call != nil && !call.target.EQ(target) {
-			call.cancel()
+			if call.warmWaiters > 0 {
+				// The old request finishes the reads it borrowed. A query for
+				// the new target can independently materialize the new data.
+				r.materialization = nil
+			} else {
+				call.cancel()
+			}
 		}
+		r.mu.Unlock()
 		return nil
 	}
 	r.mu.Unlock()
@@ -446,51 +456,100 @@ func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.Da
 
 func (r *oracleRuntime) ensureMaterialized(ctx context.Context) error {
 	for {
-		if err := ctx.Err(); err != nil {
+		if retry, err := r.awaitMaterialization(ctx); !retry {
 			return err
 		}
+	}
+}
 
+// awaitMaterialization starts the shared materialization of the current target,
+// or joins the running one, and waits for it. retry reports that a newer target
+// canceled it.
+func (r *oracleRuntime) awaitMaterialization(ctx context.Context) (retry bool, err error) {
+	return r.awaitMaterializationAt(ctx, nil)
+}
+
+// A warm pins its target. Queries pass nil and may follow newer targets. Only
+// a warm-originated flight with no remaining waiters can be canceled by request
+// cancellation; an active query sharing that flight retains its own waiter.
+func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qviews.DataVersion) (retry bool, err error) {
+	var call *materializationCall
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		r.mu.Lock()
 		if r.closed {
 			r.mu.Unlock()
-			return context.Canceled
+			return false, context.Canceled
+		}
+		if target != nil && !r.currentVersion.EQ(*target) {
+			r.mu.Unlock()
+			return true, context.Canceled
 		}
 		if r.currentStats != nil {
 			r.mu.Unlock()
-			return nil
+			return false, nil
 		}
-		call := r.materialization
+		call = r.materialization
+		if call != nil && call.ctx.Err() != nil {
+			// Do not join an abandoned warm and surface its cancellation to a
+			// new query. Drain it before starting another flight.
+			r.mu.Unlock()
+			select {
+			case <-call.done:
+				continue
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
+		}
 		if call == nil {
 			materializationCtx, cancel := context.WithCancel(r.ctx)
 			call = &materializationCall{
-				target: r.currentVersion,
-				ctx:    materializationCtx,
-				cancel: cancel,
-				done:   make(chan struct{}),
+				target:      r.currentVersion,
+				ctx:         materializationCtx,
+				cancel:      cancel,
+				done:        make(chan struct{}),
+				warmStarted: target != nil,
 			}
 			r.materialization = call
-			go func() {
+			r.materializationWG.Add(1)
+			go func(call *materializationCall) {
+				defer r.materializationWG.Done()
 				defer cancel()
-				_ = r.materialize(call) // The deferred completion publishes the error to waiters.
-			}()
+				_ = r.materialize(call)
+			}(call)
+		}
+		call.waiters++
+		if target != nil {
+			call.warmWaiters++
 		}
 		r.mu.Unlock()
-
-		select {
-		case <-call.done:
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			r.mu.RLock()
-			targetChanged := !r.currentVersion.EQ(call.target)
-			r.mu.RUnlock()
-			if targetChanged {
-				continue
-			}
-			return call.err
-		case <-ctx.Done():
-			return ctx.Err()
+		break
+	}
+	defer func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		call.waiters--
+		if target != nil {
+			call.warmWaiters--
 		}
+		if call.warmStarted && call.waiters == 0 {
+			call.cancel()
+		}
+	}()
+
+	select {
+	case <-call.done:
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		r.mu.RLock()
+		targetChanged := !r.currentVersion.EQ(call.target)
+		r.mu.RUnlock()
+		return targetChanged, call.err
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 }
 
@@ -534,11 +593,16 @@ func (r *oracleRuntime) materialize(call *materializationCall) (resultErr error)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.materialization != call || r.currentStats != nil || !r.currentVersion.EQ(call.target) {
-		if err := call.ctx.Err(); err != nil {
-			return err
-		}
+	if err := call.ctx.Err(); err != nil {
+		return err
+	}
+	if r.closed {
 		return context.Canceled
+	}
+	if r.materialization != call || r.currentStats != nil || !r.currentVersion.EQ(call.target) {
+		// Cache reads completed, but this aggregate is no longer current.
+		// Queries observe the changed target and retry; prewarm ends here.
+		return nil
 	}
 	for id, segment := range r.growingStore.segments {
 		_, sealedHere := sealed[id]
@@ -694,11 +758,9 @@ func (r *oracleRuntime) Close() {
 		r.mu.Lock()
 		r.closed = true
 		r.cancel()
-		call := r.materialization
 		r.mu.Unlock()
-		if call != nil {
-			<-call.done
-		}
+		// Detached warmup flights still own resources from their old target.
+		r.materializationWG.Wait()
 		r.advanceMu.Lock()
 		defer r.advanceMu.Unlock()
 		r.mu.Lock()

@@ -3761,6 +3761,31 @@ ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
     prefetch_chunks_locked(op_ctx, field_id);
 }
 
+// Loads the chunks of a field in runs of about one load batch, so one run
+// holds no more than a load would, and checks cancellation between runs.
+void
+ChunkedSegmentSealedImpl::prewarm_chunks(milvus::OpContext* op_ctx,
+                                         FieldId field_id) const {
+    auto column = get_column(field_id);
+    if (column == nullptr) {
+        return;
+    }
+    const int64_t chunks_per_run =
+        std::max<int64_t>(1,
+                          FieldDataLoadBatchSplitTargetBytes() /
+                              storagev2translator::GetCellTargetSizeBytes());
+    column->Prepare(op_ctx);
+    const auto num_chunks = column->num_chunks();
+    for (int64_t begin = 0; begin < num_chunks; begin += chunks_per_run) {
+        CheckCancellation(op_ctx, id_, field_id.get(), "Prewarm");
+        std::vector<int64_t> chunk_ids(
+            std::min(chunks_per_run, num_chunks - begin));
+        std::iota(chunk_ids.begin(), chunk_ids.end(), begin);
+        std::shared_lock lck(mutex_);
+        column->PrefetchChunks(op_ctx, chunk_ids);
+    }
+}
+
 std::shared_ptr<milvus::exec::SimpleGeometryCache>
 ChunkedSegmentSealedImpl::GetGeometryCache(FieldId field_id) const {
     auto snapshot = CapturePublishedState();
@@ -11395,6 +11420,41 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         index_reader->Prefetch();
     } else {
         this->prefetch_chunks_locked(op_ctx, field_id);
+    }
+}
+
+// Prewarm loads every cache cell of the given fields (all fields when empty):
+// field data, indexes (text indexes included) and JSON stats, plus the
+// segment-wide PK and timestamp indexes.
+void
+ChunkedSegmentSealedImpl::Prewarm(
+    milvus::OpContext* op_ctx,
+    const std::vector<FieldId>& requested_field_ids) const {
+    auto runtime = CaptureRuntimeResourceState();
+    std::vector<FieldId> field_ids = requested_field_ids;
+    if (field_ids.empty()) {
+        auto published = CapturePublishedState();
+        if (published != nullptr && published->fields != nullptr) {
+            field_ids = published->fields->get_field_ids();
+        }
+    }
+
+    PinPkIndex(runtime, op_ctx);
+    PinTimestampIndex(runtime, op_ctx);
+    for (auto field_id : field_ids) {
+        prewarm_chunks(op_ctx, field_id);
+        GetJsonStats(op_ctx, field_id);
+        if (runtime == nullptr) {
+            continue;
+        }
+        // A prefetched reader loads the cells it reads. It is dropped right
+        // away; the warmed cells stay under the caching layer policy.
+        for (const auto& entry : runtime->indexes.Entries(field_id)) {
+            if (auto reader =
+                    runtime->indexes.CreateIndexReader(op_ctx, entry.key)) {
+                reader->Prefetch();
+            }
+        }
     }
 }
 }  // namespace milvus::segcore

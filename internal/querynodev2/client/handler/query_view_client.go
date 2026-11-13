@@ -13,6 +13,8 @@ import (
 
 // QueryViewClient is the QueryView domain client under the QueryNode handler client.
 type QueryViewClient interface {
+	PrewarmOnView(context.Context, int64, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
+
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
@@ -82,5 +84,11 @@ func (qvc *queryViewClient) close() {
 func (qvc *queryViewClient) StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
 		return client.StatisticsOnView(ctx, req)
+	})
+}
+
+func (qvc *queryViewClient) PrewarmOnView(ctx context.Context, nodeID int64, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.PrewarmOnViewResponse, error) {
+		return client.PrewarmOnView(ctx, req)
 	})
 }

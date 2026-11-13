@@ -201,3 +201,20 @@ func TestQueryPlanServiceRejectsUnavailableInputs(t *testing.T) {
 	}
 	require.NoError(t, normalizeQueryPlanError(nil))
 }
+
+func (w *fakeProviderWAL) GetPrewarmPlan(context.Context, *viewpb.GetPrewarmPlanRequest) (*viewpb.GetPrewarmPlanResponse, error) {
+	return &viewpb.GetPrewarmPlanResponse{Plan: w.plan}, w.err
+}
+
+func TestServerPrewarmPlanUsesLocalWALAndPreservesFailure(t *testing.T) {
+	raw := &fakeProviderWAL{plan: &viewpb.QueryPlan{Version: &viewpb.QueryViewVersion{QueryVersion: 7}}}
+	manager := &fakeWALManager{wal: raw}
+	server := NewServer(manager)
+	req := &viewpb.GetPrewarmPlanRequest{ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel}}
+	resp, err := server.GetPrewarmPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), req)
+	require.NoError(t, err)
+	require.Same(t, raw.plan, resp.Plan)
+	raw.err = merr.WrapErrCollectionNotLoaded(100)
+	_, err = server.GetPrewarmPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), req)
+	require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+}

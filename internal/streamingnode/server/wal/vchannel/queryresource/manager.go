@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -588,4 +589,18 @@ func (m *Manager) takeRuntimeLocked() (*QueryRuntime, *scheduledBuild) {
 	m.task = nil
 	m.err = nil
 	return runtime, task
+}
+
+// Prewarm borrows the resources selected by a serving View for one request.
+// The caller holds a query lease, so a handoff cannot retire them mid-call.
+func (m *Manager) Prewarm(ctx context.Context, key qviews.QueryViewKey) error {
+	m.mu.Lock()
+	ref, ok := m.refs[key]
+	if !ok || !ref.prepared {
+		m.mu.Unlock()
+		return viewerror.NewViewInvalidated("query view %s is not ready", key.String())
+	}
+	resources := ref.resources
+	m.mu.Unlock()
+	return resources.prewarm(ctx)
 }

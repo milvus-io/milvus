@@ -12,6 +12,7 @@ import (
 // Implementation handles StreamingNode resolution and gRPC connection management internally.
 // ShardID is used as the routing key to locate the owning StreamingNode.
 type QueryPlanClient interface {
+	GetPrewarmPlan(context.Context, qviews.ShardID, *viewpb.GetPrewarmPlanRequest) (*qviews.PrewarmPlan, error)
 	SubscribeReplicas(vchannel string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error)
 
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the given shard.
@@ -30,6 +31,7 @@ type QueryPlanClient interface {
 // with the resolver change channel captured before dispatch. This lets shard
 // orchestration retry other replicas and reconsider a racing session update.
 type ViewQueryServiceClient interface {
+	PrewarmOnView(context.Context, qviews.WorkNode, *qviews.PrewarmPlan) error
 	StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	// SearchOnView executes a vector search on the given work node.

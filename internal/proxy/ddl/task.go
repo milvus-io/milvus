@@ -3109,7 +3109,9 @@ type LoadCollectionTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID UniqueID
+	collectionID    UniqueID
+	warmupHint      bool
+	loadInfoVersion uint64
 }
 
 func (t *LoadCollectionTask) TraceCtx() context.Context {
@@ -3162,8 +3164,30 @@ func (t *LoadCollectionTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
+	warmupHint, err := loadWarmupHint(t.GetLoadParams())
+	if err != nil {
+		return err
+	}
+	t.warmupHint = warmupHint
+	if warmupHint && t.GetRefresh() {
+		return merr.WrapErrParameterInvalidMsg("load parameter %s cannot be used with refresh", common.WarmupHintKey)
+	}
 
 	return nil
+}
+
+// loadWarmupHint parses the optional load parameter requesting one background
+// prewarm pass independent of ordinary loading.
+func loadWarmupHint(params map[string]string) (bool, error) {
+	value, present := params[common.WarmupHintKey]
+	if !present {
+		return false, nil
+	}
+	warmupHint, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("load parameter %s must be true or false, got %q", common.WarmupHintKey, value)
+	}
+	return warmupHint, nil
 }
 
 func (t *LoadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
@@ -3195,6 +3219,10 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
 		return err
 	}
+	if t.warmupHint && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg("load warmup hint is not supported for external collections")
+	}
+
 	// prepare load field list
 	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
@@ -3263,6 +3291,12 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	if t.result == nil {
 		return merr.CheckRPCCall(t.result, nil)
 	}
+	// Missing or malformed metadata from an older coordinator disables only
+	// optional prewarming; it must never fall back to a later active load.
+	if version, parseErr := strconv.ParseUint(t.result.GetExtraInfo()[common.LoadInfoVersionKey], 10, 64); parseErr == nil {
+		t.loadInfoVersion = version
+	}
+	delete(t.result.ExtraInfo, common.LoadInfoVersionKey)
 	return nil
 }
 

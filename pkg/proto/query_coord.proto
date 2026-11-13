@@ -1260,6 +1260,7 @@ message GetQueryViewLoadInfoResponse {
     repeated view.LoadFieldConfig load_fields = 5; // Explicit preload set within required_fields; empty means none.
     repeated index.IndexInfo index_info_list = 6;
     repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
+    repeated int64 replica_ids = 8; // Replica set belonging to this immutable load configuration.
 }
 
 message EnsureCollectionReadyRequest {

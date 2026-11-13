@@ -61,8 +61,13 @@ func (s *LoadConfigStore) GetLoadInfo(ctx context.Context, collectionID int64, v
 		return nil, merr.WrapErrServiceNotReadyMsg("selected index metadata for load requirements %d of collection %d is unavailable", version, collectionID)
 	}
 	slices.SortFunc(indexes, func(a, b *indexpb.IndexInfo) int { return cmp.Compare(a.GetIndexID(), b.GetIndexID()) })
+	replicaIDs := make([]int64, 0, len(owned.Replicas))
+	for _, replica := range owned.Replicas {
+		replicaIDs = append(replicaIDs, replica.ReplicaID)
+	}
 	return &querypb.GetQueryViewLoadInfoResponse{
-		Status: merr.Success(), CollectionID: collectionID, Version: version,
+		ReplicaIds: replicaIDs,
+		Status:     merr.Success(), CollectionID: collectionID, Version: version,
 		PartitionIDs: owned.PartitionIDs, RequiredFields: owned.RequiredFields,
 		LoadFields: owned.LoadFields, IndexInfoList: indexes,
 	}, nil

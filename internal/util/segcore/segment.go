@@ -370,6 +370,25 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 	return err
 }
 
+// PrewarmSealedReadState fills caches of a retained sealed read state. The caller
+// owns its lifetime, as with PinSealedReadState and AdoptSealedReadState.
+func PrewarmSealedReadState(ctx context.Context, source CSegment, fieldIDs []int64) error {
+	var fields *C.int64_t
+	if len(fieldIDs) > 0 {
+		fields = (*C.int64_t)(unsafe.Pointer(&fieldIDs[0]))
+	}
+	// The field IDs are copied before AsyncSegmentPrewarm returns.
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSegmentPrewarm(C.CSegmentInterface(source.RawPointer()), fields, C.int64_t(len(fieldIDs))))
+		},
+		cgo.WithName("segment-prewarm"),
+	)
+	defer future.Release()
+	_, err := future.BlockAndLeakyGet()
+	return err
+}
+
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if req == nil {
 		return merr.WrapErrParameterInvalidMsg("reopen request is nil")

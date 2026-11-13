@@ -268,8 +268,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.dropCollection))))
 	router.POST(CollectionCategory+TruncateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.truncateCollection))))
 	router.POST(CollectionCategory+RenameAction, timeoutMiddleware(wrapperPost(func() any { return &RenameCollectionReq{} }, wrapperTraceLog(h.renameCollection))))
-	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.loadCollection))))
-	router.POST(CollectionCategory+RefreshLoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.refreshLoadCollection))))
+	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionLoadReq{} }, wrapperTraceLog(h.loadCollection))))
+	router.POST(CollectionCategory+RefreshLoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionLoadReq{} }, wrapperTraceLog(h.refreshLoadCollection))))
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 	router.POST(CollectionCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReqWithProperties{} }, wrapperTraceLog(h.alterCollectionProperties))))
 	router.POST(CollectionCategory+AddFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunction{} }, wrapperTraceLog(h.addCollectionFunction))))
@@ -1100,6 +1100,7 @@ func (h *HandlersV2) refreshLoadCollection(ctx context.Context, c *gin.Context, 
 		CollectionName: getter.GetCollectionName(),
 		Refresh:        true,
 	}
+	setLoadWarmupHint(req, anyReq)
 	return h.loadCollectionInternal(ctx, c, req, dbName)
 }
 
@@ -1109,7 +1110,16 @@ func (h *HandlersV2) loadCollection(ctx context.Context, c *gin.Context, anyReq 
 		DbName:         dbName,
 		CollectionName: getter.GetCollectionName(),
 	}
+	setLoadWarmupHint(req, anyReq)
 	return h.loadCollectionInternal(ctx, c, req, dbName)
+}
+
+// setLoadWarmupHint forwards an explicit warmup hint so the proxy validates it
+// instead of the REST layer dropping it.
+func setLoadWarmupHint(req *milvuspb.LoadCollectionRequest, anyReq any) {
+	if load, ok := anyReq.(*CollectionLoadReq); ok && load.WarmupHint != nil {
+		req.LoadParams = map[string]string{common.WarmupHintKey: strconv.FormatBool(*load.WarmupHint)}
+	}
 }
 
 func (h *HandlersV2) loadCollectionInternal(ctx context.Context, c *gin.Context, req *milvuspb.LoadCollectionRequest, dbName string) (interface{}, error) {

@@ -47,6 +47,7 @@ type LoadConfigStore struct {
 	version         uint64
 	listeners       map[uint64]LoadConfigListener
 	nextListener    uint64
+	loadCommits     map[int64]map[uint64]chan uint64
 
 	// configs keeps the live in-memory snapshot per collection.
 	configs  map[int64]*LoadConfig
@@ -130,6 +131,9 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	previous := s.configs[cfg.CollectionID]
 	s.mu.RUnlock()
 	if sameLoadRequirements(previous, cfg) {
+		s.mu.Lock()
+		s.notifyLoadCommitLocked(cfg.CollectionID, previous.Version)
+		s.mu.Unlock()
 		return nil
 	}
 	version, err := s.allocateVersion(ctx)
@@ -153,6 +157,7 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	s.configs[cfg.CollectionID], s.versions[cfg.CollectionID] = cfg, version
 	s.version++
 	s.publishConfigLocked(cfg.CollectionID)
+	s.notifyLoadCommitLocked(cfg.CollectionID, version)
 	s.mu.Unlock()
 	s.notifyObservers(cfg.CollectionID, false)
 	return nil
@@ -316,6 +321,40 @@ func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error
 // version; nil and version zero denote withdrawal of load intent.
 // It runs under the store lock and must not re-enter the store or perform I/O.
 type LoadConfigListener func(collectionID int64, config *LoadConfig, version uint64)
+
+// WatchNextLoadConfig observes the next successful Put for one collection,
+// including an unchanged configuration. The caller must hold its collection DDL
+// lock while registering, so the first commit belongs to that admission. The
+// observation is request-local and discarded when the caller stops waiting.
+func (s *LoadConfigStore) WatchNextLoadConfig(collectionID int64) (<-chan uint64, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loadCommits == nil {
+		s.loadCommits = make(map[int64]map[uint64]chan uint64)
+	}
+	if s.loadCommits[collectionID] == nil {
+		s.loadCommits[collectionID] = make(map[uint64]chan uint64)
+	}
+	s.nextListener++
+	id := s.nextListener
+	committed := make(chan uint64, 1)
+	s.loadCommits[collectionID][id] = committed
+	return committed, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.loadCommits[collectionID], id)
+		if len(s.loadCommits[collectionID]) == 0 {
+			delete(s.loadCommits, collectionID)
+		}
+	}
+}
+
+func (s *LoadConfigStore) notifyLoadCommitLocked(collectionID int64, version uint64) {
+	for _, committed := range s.loadCommits[collectionID] {
+		committed <- version // one buffered result, never waits for the caller
+	}
+	delete(s.loadCommits, collectionID)
+}
 
 // RegisterLoadConfigListener installs a listener and replays state atomically
 // with respect to source publications. The return value unregisters it.

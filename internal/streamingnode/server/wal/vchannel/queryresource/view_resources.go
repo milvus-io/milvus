@@ -16,6 +16,12 @@ type QueryViewResource interface {
 	Release()
 }
 
+// QueryViewResourcePrewarmer fills caches during an explicit read operation.
+// The call completes before its borrowed resource references are released.
+type QueryViewResourcePrewarmer interface {
+	Prewarm(context.Context) error
+}
+
 // QueryViewResourceModule binds immutable metadata under the owner lock. BindView
 // only acquires ownership; snapshot and external I/O belong in Prepare.
 type QueryViewResourceModule interface {
@@ -121,6 +127,25 @@ func (v *viewResources) prepare(ctx context.Context, provider LoadInfoProvider) 
 	for _, resource := range v.modules {
 		if err := resource.Prepare(ctx, provider); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (v *viewResources) prewarm(ctx context.Context) error {
+	ctx, end, err := v.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer end()
+	for _, resource := range v.modules {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if warmer, ok := resource.(QueryViewResourcePrewarmer); ok {
+			if err := warmer.Prewarm(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

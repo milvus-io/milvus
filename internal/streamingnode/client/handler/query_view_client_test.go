@@ -162,6 +162,7 @@ func (s fakeLazyService[T]) GetService(context.Context) (T, error) {
 func (s fakeLazyService[T]) Close() {}
 
 type fakeQueryPlanServiceClient struct {
+	viewpb.QueryPlanServiceClient
 	getQueryPlan     func(context.Context, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 	getMVCCTimestamp func(context.Context, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error)
 }

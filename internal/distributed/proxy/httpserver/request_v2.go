@@ -79,6 +79,12 @@ type CollectionNameReq struct {
 	PartitionNames []string `json:"partitionNames"` // get partitions load state
 }
 
+// CollectionLoadReq keeps the load-only option out of other collection APIs.
+type CollectionLoadReq struct {
+	CollectionNameReq
+	WarmupHint *bool `json:"warmupHint"`
+}
+
 func (req *CollectionNameReq) GetDbName() string {
 	return req.DbName
 }

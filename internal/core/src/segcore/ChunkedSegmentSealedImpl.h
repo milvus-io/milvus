@@ -689,6 +689,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetGeometryCache(FieldId field_id) const override;
 
     void
+    Prewarm(milvus::OpContext* op_ctx,
+            const std::vector<FieldId>& field_ids) const;
+
+    void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
                         FieldId field_id,
                         int64_t chunk_id,
@@ -1561,6 +1565,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     prefetch_chunks_locked(milvus::OpContext* op_ctx, FieldId field_id) const;
+
+    void
+    prewarm_chunks(milvus::OpContext* op_ctx, FieldId field_id) const;
 
     void
     fill_empty_field(const FieldMeta& field_meta,

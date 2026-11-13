@@ -175,6 +175,16 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		},
 		"methodConfig": []map[string]interface{}{
 			{
+				// A prewarm request borrows one serving generation and is never
+				// replayed, including by the transport's default retry policy.
+				"name": []map[string]string{{
+					"service": "milvus.proto.view.ViewQueryService", "method": "PrewarmOnView",
+				}, {
+					"service": "milvus.proto.view.QueryPlanService", "method": "GetPrewarmPlan",
+				}},
+				"waitForReady": false,
+			},
+			{
 				"name": []map[string]string{
 					{"service": "milvus.proto.streaming.StreamingNodeHandlerService"},
 					{"service": "milvus.proto.view.QueryPlanService"},
