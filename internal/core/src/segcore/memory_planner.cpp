@@ -328,13 +328,9 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     }
 }
 
-std::vector<CellLoadFuture>
-LoadCellBatchAsync(milvus::OpContext* op_ctx,
-                   std::vector<CellSpec> cell_specs,
-                   BatchReaderFactory reader_factory,
-                   const int64_t memory_limit,
-                   const milvus::proto::common::LoadPriority priority,
-                   CellFinalizeFunc finalize_cell) {
+std::vector<CellLoadBatch>
+PlanCellLoadBatches(std::vector<CellSpec> cell_specs,
+                    const int64_t memory_limit) {
     if (cell_specs.empty()) {
         return {};
     }
@@ -357,20 +353,10 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    spec.memory_size);
     }
 
-    // Group consecutive, same-key cells into batches for IO merging
-    struct CellBatch {
-        size_t file_idx;
-        int64_t rg_offset;
-        int64_t rg_count;
-        int64_t batch_loaded_memory_bytes = 0;
-        size_t batch_loading_overhead_bytes = 0;
-        std::vector<CellSpec> cells;
-    };
-
     const auto batch_limit_bytes =
         static_cast<size_t>(std::max<int64_t>(memory_limit, 1));
-    std::vector<CellBatch> batches;
-    CellBatch current{};
+    std::vector<CellLoadBatch> batches;
+    CellLoadBatch current{};
 
     for (const auto& spec : cell_specs) {
         const auto cell_loading_overhead_bytes = CellLoadingOverheadBytes(spec);
@@ -406,6 +392,18 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         batches.push_back(std::move(current));
     }
 
+    return batches;
+}
+
+std::vector<CellLoadFuture>
+LoadCellBatchAsync(milvus::OpContext* op_ctx,
+                   std::vector<CellSpec> cell_specs,
+                   BatchReaderFactory reader_factory,
+                   const int64_t memory_limit,
+                   const milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell) {
+    const auto cell_count = cell_specs.size();
+    auto batches = PlanCellLoadBatches(std::move(cell_specs), memory_limit);
     if (batches.empty()) {
         return {};
     }
@@ -413,7 +411,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     LOG_DEBUG(
         "[StorageV2] LoadCellBatchAsync: {} cells -> {} batches "
         "(memory_limit={}MB, budget_capacity={}MB, read_window={}MB)",
-        cell_specs.size(),
+        cell_count,
         batches.size(),
         memory_limit >> 20,
         milvus::storage::LoadAdmissionController::GetInstance()

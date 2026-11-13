@@ -139,6 +139,7 @@ arrow	internal/core/src/segcore/SegmentLoadInfo.cpp
 arrow	internal/core/src/segcore/storagev1translator/ChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev1translator/DefaultValueChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.cpp
+arrow	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.h
 arrow	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.h
 arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp

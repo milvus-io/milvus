@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "folly/coro/Task.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -899,21 +901,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
     /**
      * @brief Load a single column group and return field data
      *
-     * Reads a specific column group from milvus storage and converts it to
+     * Reads a column group using the selected load mode and converts it to
      * field data format that can be inserted into the growing segment.
      *
      * @param column_groups Metadata about all available column groups
      * @param properties Storage properties for accessing the data
      * @param index Index of the column group to load
+     * @param row_limit Number of rows covered by the recovery checkpoint
+     * @param enable_async_load Use coroutine windows instead of HIGH-pool reads
+     * @note Borrows the segment and arguments until the task completes.
      * @return Map of field IDs to their corresponding field data vectors
      */
-    std::unordered_map<FieldId, std::vector<FieldDataPtr>>
+    folly::coro::Task<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<const milvus_storage::api::Properties>&
             properties,
         int64_t index,
-        int64_t row_limit);
+        int64_t row_limit,
+        bool enable_async_load);
 
     void
     InitializeStructElementOffsets();

@@ -11,6 +11,7 @@
 
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include "monitor/Monitor.h"
 #include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
@@ -66,6 +67,9 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadAdmissionController.h"
+#include "folly/coro/BlockingWait.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -177,7 +181,36 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
-TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
+class GrowingManifestLoadTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        async_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        bytes_ = admission.CapacityBytes();
+        slots_ = admission.CapacitySlots();
+        storagev2translator::SetStorageV2AsyncLoadEnabled(GetParam());
+        admission.SetCapacityBytes(0);
+        admission.SetCapacitySlots(0);
+    }
+
+    void
+    TearDown() override {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled_);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacityBytes(bytes_);
+        admission.SetCapacitySlots(slots_);
+    }
+
+ private:
+    bool async_enabled_;
+    size_t bytes_;
+    size_t slots_;
+};
+
+INSTANTIATE_TEST_SUITE_P(LoadModes, GrowingManifestLoadTest, ::testing::Bool());
+
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -197,12 +230,25 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     schema->set_primary_field_id(pk);
 
     auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_checkpoint_row_cap")
+                      (GetParam() ? "growing_recovery_checkpoint_row_cap_async"
+                                  : "growing_recovery_checkpoint_row_cap_sync"))
                          .string();
     std::filesystem::remove_all(base_path);
-    milvus::test::V3SegmentTestData test_data(
-        schema, 2, 3, dim, TestLocalPath, base_path);
+    milvus::test::V3SegmentTestData test_data(schema,
+                                              2,
+                                              3,
+                                              dim,
+                                              TestLocalPath,
+                                              base_path,
+                                              "",
+                                              /*file_per_batch=*/true);
     ASSERT_EQ(test_data.NumColumnGroups(), 2);
+    for (int64_t i = 0; i < test_data.NumColumnGroups(); ++i) {
+        auto reader = test_data.CreateChunkReader(i);
+        auto rows = reader->get_chunk_rows();
+        ASSERT_TRUE(rows.ok());
+        ASSERT_EQ(rows.ValueOrDie(), (std::vector<uint64_t>{3, 3}));
+    }
     ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
     ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
 
@@ -220,7 +266,48 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    segment->Load(trace_ctx, nullptr);
+    // Force multiple async windows; synchronous recovery uses the sealed batch
+    // target and should merge the small groups, including the checkpoint tail.
+    const auto window_bytes =
+        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes();
+    storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    auto restore_window = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(
+            window_bytes);
+    });
+    const auto high_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_high
+            .Value();
+    const auto low_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value();
+    if (GetParam()) {
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacitySlots(1);
+        auto lease = folly::coro::blockingWait(admission.AcquireAsync(
+            {0, 1}, storage::LoadAdmissionPriority::High));
+        auto load = std::async(std::launch::async,
+                               [&] { segment->Load(trace_ctx, nullptr); });
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        lease.Release();
+        load.get();
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                .Value(),
+            high_tasks);
+    } else {
+        // Both optional admission limits are disabled; synchronous reads must
+        // still execute on the bounded HIGH pool.
+        segment->Load(trace_ctx, nullptr);
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                    .Value() -
+                high_tasks,
+            test_data.NumColumnGroups());
+    }
+    EXPECT_EQ(
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value(),
+        low_tasks);
     ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
     EXPECT_EQ(segment->get_real_count(), checkpoint_rows);
 
@@ -250,15 +337,17 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     std::filesystem::remove_all(base_path);
 }
 
-TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsShortRequiredRows) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
 
-    auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_short_required_rows")
-                         .string();
+    auto base_path =
+        (std::filesystem::path(TestLocalPath) /
+         (GetParam() ? "growing_recovery_short_required_rows_async"
+                     : "growing_recovery_short_required_rows_sync"))
+            .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
         schema, 1, 2, 1, TestLocalPath, base_path);
@@ -278,7 +367,51 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    try {
+        segment->Load(trace_ctx, nullptr);
+        FAIL() << "expected checkpoint row-count mismatch";
+    } catch (const SegcoreError& error) {
+        EXPECT_NE(std::string(error.what()).find("fewer rows than checkpoint"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsMissingDataFile) {
+    auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      (GetParam() ? "growing_recovery_missing_data_file_async"
+                                  : "growing_recovery_missing_data_file_sync"))
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 1, 2, 1, TestLocalPath, base_path);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(4);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    const auto& files = test_data.GetColumnGroups()->at(0)->files;
+    ASSERT_FALSE(files.empty());
+    ASSERT_TRUE(std::filesystem::remove(files.front().path));
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_THROW(segment->Load(trace_ctx, nullptr), SegcoreError);
     EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);

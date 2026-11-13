@@ -154,7 +154,8 @@ class V3SegmentTestData {
                       int64_t dim,
                       const std::string& root_path,
                       const std::string& base_path,
-                      const std::string& column_group_pattern = "")
+                      const std::string& column_group_pattern = "",
+                      bool file_per_batch = false)
         : schema_(schema),
           // Keys are complete paths: the loon local filesystem is rooted at
           // "/" and base_path lives under root_path (see LoonFSRootPath).
@@ -220,6 +221,12 @@ class V3SegmentTestData {
         milvus_storage::api::SetValue(
             props, PROPERTY_WRITER_SCHEMA_BASE_PATTERNS, pattern.c_str());
 
+        // Rolling each batch gives tests distinct small row groups.
+        if (file_per_batch) {
+            milvus_storage::api::SetValue(
+                props, PROPERTY_WRITER_FILE_ROLLING_SIZE, "1");
+        }
+
         auto shared_properties =
             std::make_shared<const milvus_storage::api::Properties>(
                 std::move(props));
@@ -238,6 +245,12 @@ class V3SegmentTestData {
             auto status = writer->write(batch);
             AssertInfo(
                 status.ok(), "Failed to write batch: {}", status.ToString());
+            if (file_per_batch) {
+                status = writer->flush();
+                AssertInfo(status.ok(),
+                           "Failed to flush batch: {}",
+                           status.ToString());
+            }
         }
         auto close_result = writer->close();
         AssertInfo(close_result.ok(),
