@@ -65,6 +65,9 @@ func (c *Client) CreateCompactionTarget(ctx context.Context, opt CreateCompactio
 			return merr.WrapErrCompactionTargetCreateOutcomeUnknown("missing response status")
 		}
 		if err := merr.Error(resp.GetStatus()); err != nil {
+			if resp.GetTargetId() != 0 || resp.GetTotalRows() != 0 || resp.GetOptimize() != nil {
+				return merr.WrapErrCompactionTargetCreateOutcomeUnknown("error response contains a creation result")
+			}
 			return err
 		}
 		if resp.GetTargetId() <= 0 || resp.GetTotalRows() < 0 {

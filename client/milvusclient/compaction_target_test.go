@@ -18,11 +18,13 @@ package milvusclient
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -64,10 +66,37 @@ func (s *CompactionTargetSuite) TestCreateDoesNotRetryAfterUnavailable() {
 	s.Nil(result)
 }
 
+func (s *CompactionTargetSuite) TestCreateDoesNotReplayWithGRPCServiceConfig() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	c, err := New(ctx, &ClientConfig{
+		Address: "bufnet",
+		DialOptions: []grpc.DialOption{
+			grpc.WithContextDialer(s.mockDialer),
+			grpc.WithDefaultServiceConfig(`{"methodConfig":[{"name":[{"service":"milvus.proto.milvus.MilvusService","method":"CreateCompactionTarget"}],"retryPolicy":{"maxAttempts":3,"initialBackoff":"0.001s","maxBackoff":"0.001s","backoffMultiplier":1,"retryableStatusCodes":["UNAVAILABLE"]}}]}`),
+		},
+	})
+	s.Require().NoError(err)
+	defer c.Close(ctx)
+
+	var attempts atomic.Int32
+	call := s.mock.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, *milvuspb.CreateCompactionTargetRequest) (*milvuspb.CreateCompactionTargetResponse, error) {
+			attempts.Add(1)
+			return nil, status.Error(codes.Unavailable, "reply unavailable")
+		})
+	defer call.Unset()
+
+	_, err = c.CreateCompactionTarget(ctx, NewRewriteCompactionTargetOption("products"))
+	s.ErrorIs(err, ErrCompactionTargetCreateOutcomeUnknown)
+	s.Equal(int32(1), attempts.Load())
+}
+
 func (s *CompactionTargetSuite) TestCreateRejectsMalformedSuccess() {
 	for _, response := range []*milvuspb.CreateCompactionTargetResponse{
 		{TargetId: 42},
 		{Status: &commonpb.Status{}},
+		{Status: &commonpb.Status{Code: 2302}, TargetId: 42},
 		{Status: &commonpb.Status{}, TargetId: 42, TotalRows: -1},
 		{Status: &commonpb.Status{}, TargetId: 42, Optimize: &milvuspb.OptimizeTargetCreateResult{InputTargetSizeBytes: 20, ActualTargetSizeBytes: 20}},
 	} {

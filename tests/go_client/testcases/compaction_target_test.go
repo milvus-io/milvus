@@ -18,6 +18,7 @@ package testcases
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -71,13 +72,13 @@ func TestCompactionTargetRewrite(t *testing.T) {
 
 	var inputID int64
 	require.Eventually(t, func() bool {
-		segments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(name))
-		if err != nil {
+		response, err := mc.GetService().GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{CollectionName: name})
+		if err != nil || response.GetStatus() == nil || response.GetStatus().GetCode() != 0 {
 			return false
 		}
-		for _, segment := range segments {
-			if segment.Flushed() && segment.NumRows == rows {
-				inputID = segment.ID
+		for _, segment := range response.GetInfos() {
+			if segment.GetIsSorted() && segment.GetNumRows() == rows {
+				inputID = segment.GetSegmentID()
 				return true
 			}
 		}
@@ -96,12 +97,14 @@ func TestCompactionTargetRewrite(t *testing.T) {
 	require.NotNil(t, target.RemainingRows)
 	require.Zero(t, target.GetRemainingRows())
 
-	segments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(name))
+	segments, err := mc.GetService().GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{CollectionName: name})
 	require.NoError(t, err)
+	require.NotNil(t, segments.GetStatus())
+	require.Zero(t, segments.GetStatus().GetCode())
 	var rewrittenRows int64
-	for _, segment := range segments {
-		if segment.Flushed() && segment.ID != inputID {
-			rewrittenRows += segment.NumRows
+	for _, segment := range segments.GetInfos() {
+		if slices.Contains(segment.GetCompactionFrom(), inputID) {
+			rewrittenRows += segment.GetNumRows()
 		}
 	}
 	require.EqualValues(t, rows, rewrittenRows)
