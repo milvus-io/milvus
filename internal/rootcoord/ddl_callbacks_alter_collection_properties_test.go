@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -678,7 +679,7 @@ func TestDDLCallbacksAlterCollectionPropertiesDisableDynamicFieldWaitsForSchemaD
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
-func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *testing.T) {
+func TestDDLCallbacksAlterCollectionProperties_TTLVersionAdvancement(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
 
@@ -698,6 +699,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 		Fields: []*schemapb.FieldSchema{
 			{Name: "field1", DataType: schemapb.DataType_Int64},
 			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+			{Name: "ttl2", DataType: schemapb.DataType_Timestamptz, Nullable: true},
 		},
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
@@ -712,14 +714,110 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
-	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
-	})
-	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	callback := &DDLCallback{Core: core}
+	for _, test := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+		version    int32
+	}{
+		{"set", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl"}), nil, 1},
+		{"set_again", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl"}), nil, 1},
+		{"change", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl2"}), nil, 2},
+		{"unrelated_property", common.NewKeyValuePairs(map[string]string{common.TimezoneKey: "UTC"}), nil, 2},
+		{"delete", nil, []string{common.CollectionTTLFieldKey}, 3},
+		{"delete_again", nil, []string{common.CollectionTTLFieldKey}, 3},
+		{"duration_set", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "3600"}), nil, 4},
+		{"duration_set_again", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "3600"}), nil, 4},
+		{"duration_change", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "600"}), nil, 5},
+		{"duration_disable", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "0"}), nil, 6},
+		{"duration_disable_again", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "0"}), nil, 6},
+		{"duration_delete", nil, []string{common.CollectionTTLConfigKey}, 7},
+		{"duration_delete_again", nil, []string{common.CollectionTTLConfigKey}, 7},
+		{"both_set", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl", common.CollectionTTLConfigKey: "1800"}), nil, 8},
+		{"both_set_again", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl", common.CollectionTTLConfigKey: "1800"}), nil, 8},
+		{"duration_change_with_field", common.NewKeyValuePairs(map[string]string{common.CollectionTTLConfigKey: "600"}), nil, 9},
+		{"duration_delete_with_field", nil, []string{common.CollectionTTLConfigKey}, 10},
+		{"both_change", common.NewKeyValuePairs(map[string]string{common.CollectionTTLFieldKey: "ttl2", common.CollectionTTLConfigKey: "3600"}), nil, 11},
+		{"both_delete", nil, []string{common.CollectionTTLFieldKey, common.CollectionTTLConfigKey}, 12},
+		{"both_delete_again", nil, []string{common.CollectionTTLFieldKey, common.CollectionTTLConfigKey}, 12},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resp, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Properties:     test.properties,
+				DeleteKeys:     test.deleteKeys,
+			})
+			require.NoError(t, merr.CheckRPCCall(resp, err))
+			assertSchemaVersion(t, ctx, core, dbName, collectionName, test.version)
+			coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+			require.NoError(t, err)
+			properties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+			for _, property := range test.properties {
+				require.Equal(t, property.GetValue(), properties[property.GetKey()])
+			}
+			for _, key := range test.deleteKeys {
+				require.NotContains(t, properties, key)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name           string
+		properties     map[string]string
+		withSchema     bool
+		advanceVersion bool
+	}{
+		{"legacy_ttl_field", map[string]string{common.CollectionTTLFieldKey: "ttl"}, true, false},
+		{"legacy_ttl_duration", map[string]string{common.CollectionTTLConfigKey: "3600"}, false, false},
+		{"versioned_ttl_field", map[string]string{common.CollectionTTLFieldKey: "ttl2"}, true, true},
+		{"versioned_ttl_duration", map[string]string{common.CollectionTTLConfigKey: "600"}, true, true},
+	} {
+		t.Run("callback_replay_retains_payload_version/"+test.name, func(t *testing.T) {
+			coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+			require.NoError(t, err)
+			properties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+			for key, value := range test.properties {
+				properties[key] = value
+			}
+			version := coll.SchemaVersion
+			if test.advanceVersion {
+				version++
+			}
+			paths := []string{message.FieldMaskCollectionProperties}
+			var schema *schemapb.CollectionSchema
+			if test.withSchema {
+				schema = coll.ToCollectionSchemaPB()
+				schema.Version = version
+				schema.Properties = common.NewKeyValuePairs(properties)
+				paths = append(paths, message.FieldMaskCollectionSchema)
+			}
+			// Recovery reuses the persisted payload, including legacy property-only TTL tasks.
+			raw := message.NewAlterCollectionMessageBuilderV2().
+				WithHeader(&message.AlterCollectionMessageHeader{
+					CollectionId:     coll.CollectionID,
+					CacheExpirations: ce.NewBuilder().Build(),
+					UpdateMask:       &fieldmaskpb.FieldMask{Paths: paths},
+				}).
+				WithBody(&message.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{
+					Schema: schema, Properties: common.NewKeyValuePairs(properties),
+				}}).
+				WithBroadcast(coll.VirtualChannelNames).MustBuildBroadcast()
+			persisted := raw.IntoMessageProto()
+			for _, timestamp := range []uint64{coll.UpdateTimestamp + 1, coll.UpdateTimestamp + 2} {
+				recovered := message.NewBroadcastMutableMessageBeforeAppend(persisted.Payload, persisted.Properties)
+				require.NoError(t, callback.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+					Message: message.MustAsBroadcastAlterCollectionMessageV2(recovered),
+					Results: map[string]*message.AppendResult{coll.VirtualChannelNames[0]: {TimeTick: timestamp}},
+				}))
+				updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+				require.NoError(t, err)
+				require.Equal(t, version, updated.SchemaVersion)
+				require.Equal(t, properties, common.CloneKeyValuePairs(updated.Properties).ToMap())
+			}
+		})
+	}
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
@@ -775,6 +873,17 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 		},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+
+	// A duration-only change advances the version and preserves the external source/spec.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 

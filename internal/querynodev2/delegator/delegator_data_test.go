@@ -485,6 +485,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.Require().NoError(err)
 	// load sealed
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -512,6 +513,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 
 	// load sealed
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -581,6 +583,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Return(nil)
 	// reload, refresh the state
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -616,6 +619,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Return(nil)
 	// reload, refresh the state
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -744,6 +748,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -797,6 +802,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -864,6 +870,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFail
 	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
 
 	err = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -905,6 +912,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanen
 	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
 
 	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -960,6 +968,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegmen
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -992,6 +1001,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRet
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -1021,6 +1031,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -1040,6 +1051,107 @@ func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
 	s.NoError(err)
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Empty(sealed)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsSchemaConsistency() {
+	ctx := context.Background()
+	worker := cluster.NewMockWorker(s.T())
+	worker.EXPECT().LoadSegments(mock.Anything, mock.Anything).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil)
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(_ context.Context, _ int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+		})
+	}, func(context.Context, int64, ...*querypb.SegmentLoadInfo) error { return nil })
+
+	baseSchema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	baseSchema.Version = 7
+	baseSchema.Fields = append(baseSchema.Fields,
+		&schemapb.FieldSchema{FieldID: 102, Name: "ttl_a", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		&schemapb.FieldSchema{FieldID: 103, Name: "ttl_b", DataType: schemapb.DataType_Timestamptz, Nullable: true})
+	makeSchema := func(version int32, ttl string) *schemapb.CollectionSchema {
+		schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+		schema.Version = version
+		if ttl != "" {
+			schema.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: ttl}}
+		}
+		return schema
+	}
+
+	for i, test := range []struct {
+		name           string
+		currentTTL     string
+		loadTTL        string
+		versionOffset  int32
+		loadTimestamp  uint64
+		missingSchema  bool
+		wantConsistent bool
+		wantError      error
+		wantRetryable  bool
+	}{
+		{name: "replayed_ddl", loadTimestamp: 100, wantConsistent: true},
+		{name: "replayed_legacy_ttl", currentTTL: "ttl_a", loadTTL: "ttl_a", loadTimestamp: 100, wantConsistent: true},
+		{name: "older_schema_with_newer_timestamp", versionOffset: -1, loadTimestamp: 1000, wantError: merr.ErrServiceInternal},
+		{name: "load_applies_newer_schema", versionOffset: 1, loadTimestamp: 1000, wantConsistent: true},
+		{name: "legacy_ttl_set", currentTTL: "ttl_a", loadTimestamp: 100, wantError: merr.ErrServiceNotReady, wantRetryable: true},
+		{name: "legacy_ttl_change", currentTTL: "ttl_b", loadTTL: "ttl_a", loadTimestamp: 100, wantError: merr.ErrServiceNotReady, wantRetryable: true},
+		{name: "legacy_ttl_remove", loadTTL: "ttl_b", loadTimestamp: 100, wantError: merr.ErrServiceNotReady, wantRetryable: true},
+		{name: "load_applies_newer_legacy_ttl", loadTTL: "ttl_a", loadTimestamp: 1000, wantConsistent: true},
+		{name: "missing_schema", missingSchema: true, loadTimestamp: 1000, wantError: merr.ErrServiceNotReady, wantRetryable: true},
+	} {
+		s.Run(test.name, func() {
+			// A load can advance the shared Collection. Start each case beyond the
+			// previous case's version and timestamp so their states do not interfere.
+			currentVersion := int32(7 + 2*i)
+			currentSchema := makeSchema(currentVersion, test.currentTTL)
+			// A retry append advances the physical timestamp without changing the logical DDL.
+			currentTimestamp := uint64(200 + 2000*i)
+			s.Require().NoError(s.manager.Collection.UpdateSchema(s.collectionID, currentSchema, currentTimestamp))
+			s.Require().NoError(s.delegator.UpdateDelegatorSchema(ctx))
+			s.Equal(currentTimestamp, s.delegator.schemaBarrierTs)
+			segmentID := int64(100 + i)
+			req := &querypb.LoadSegmentsRequest{
+				Base:          commonpbutil.NewMsgBase(),
+				DstNodeID:     1,
+				CollectionID:  s.collectionID,
+				Schema:        makeSchema(currentVersion+test.versionOffset, test.loadTTL),
+				LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: uint64(2000*i) + test.loadTimestamp},
+				IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, currentSchema),
+				Infos: []*querypb.SegmentLoadInfo{{
+					SegmentID: segmentID, PartitionID: 500, Level: datapb.SegmentLevel_L1,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: s.vchannelName,
+				}},
+			}
+			if test.missingSchema {
+				req.Schema = nil
+			}
+			err := s.delegator.LoadSegments(ctx, req)
+			if test.wantConsistent {
+				s.Require().NoError(err)
+				// Normal loads synchronize schema and index metadata before publication.
+				s.True(proto.Equal(req.Schema, s.delegator.collection.Schema()))
+				s.Equal(uint64(req.Schema.GetVersion()), s.delegator.collectionVersion.Load())
+			} else {
+				s.Require().Error(err)
+				s.True(proto.Equal(currentSchema, s.delegator.collection.Schema()))
+				// QueryNode returns a Status; the RPC client reconstructs it to decide
+				// whether to retry this immutable request before QueryCoord can refresh it.
+				wireErr := merr.Error(merr.Status(err))
+				s.ErrorIs(wireErr, test.wantError)
+				s.Equal(test.wantRetryable, merr.IsRetryableErr(wireErr))
+				s.Equal(merr.SystemError, merr.GetErrorType(wireErr))
+				s.False(s.delegator.distribution.SealedSegmentExistsOnNode(segmentID, 1))
+				// Metadata catches up to the same state; its ACK timestamp can still be older.
+				req.Schema = proto.Clone(currentSchema).(*schemapb.CollectionSchema)
+				req.LoadMeta.SchemaBarrierTs = 100
+				s.Require().NoError(s.delegator.LoadSegments(ctx, req))
+			}
+			s.True(s.delegator.distribution.SealedSegmentExistsOnNode(segmentID, 1))
+		})
+	}
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -1071,6 +1183,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -1155,6 +1268,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		defer cancel()
 
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -1233,6 +1347,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -1272,6 +1387,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -1317,6 +1433,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -1407,6 +1524,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	defer cancel()
 
 	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -1796,6 +1914,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.Require().NoError(err)
 	// load sealed
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Schema:       s.delegator.collection.Schema(),
 		Base:         commonpbutil.NewMsgBase(),
 		DstNodeID:    1,
 		CollectionID: s.collectionID,
@@ -2439,6 +2558,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_ = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -2554,6 +2674,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeletePhase3FlushStarvesProcessDelete
 	// Start the segment load; its Phase-3 Flush blocks in worker.Delete while holding RLock.
 	go func() {
 		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -2676,6 +2797,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpFlushDoesNotStarveProces
 
 	go func() {
 		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,
@@ -2802,6 +2924,7 @@ func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpPastCapTerminatesWithFin
 	loadDone := make(chan error, 1)
 	go func() {
 		loadDone <- s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Schema:       s.delegator.collection.Schema(),
 			Base:         commonpbutil.NewMsgBase(),
 			DstNodeID:    1,
 			CollectionID: s.collectionID,

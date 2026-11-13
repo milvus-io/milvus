@@ -143,6 +143,36 @@ func TestClientBase_Call(t *testing.T) {
 	testCall(t)
 }
 
+func TestClientBase_ReCallSchemaConsistencyStatus(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		loadError    error
+		wantAttempts int
+	}{
+		{"stale_load_requires_new_request", merr.WrapErrServiceInternalMsg("load schema version 6 is behind current schema version 7"), 1},
+		{"legacy_ttl_state_mismatch", merr.WrapErrServiceNotReadyMsg("load ttl_field does not match current schema"), 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := ClientBase[*mockClient]{
+				MaxAttempts: 3,
+				grpcClient:  &clientConnWrapper[*mockClient]{client: &mockClient{}},
+			}
+			attempts := 0
+			response, err := base.ReCall(context.Background(), func(*mockClient) (any, error) {
+				attempts++
+				return merr.Status(test.loadError), nil
+			})
+			assert.Equal(t, test.wantAttempts, attempts)
+			if merr.IsRetryableErr(test.loadError) {
+				assert.ErrorIs(t, err, test.loadError)
+			} else {
+				assert.NoError(t, err)
+				assert.ErrorIs(t, merr.Error(response.(*commonpb.Status)), test.loadError)
+			}
+		})
+	}
+}
+
 func testCall(t *testing.T) {
 	// mock client with nothing
 	base := ClientBase[*mockClient]{
