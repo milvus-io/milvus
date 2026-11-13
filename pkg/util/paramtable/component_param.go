@@ -7008,6 +7008,7 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		DefaultValue: "256",
 		Doc:          "Shared compaction task token bucket capacity and number of tokens replenished per refill interval",
 		Export:       true,
+		Sensitivity:  NonSensitive,
 	}
 	p.CompactionRateLimitTokens.Init(base.mgr)
 
