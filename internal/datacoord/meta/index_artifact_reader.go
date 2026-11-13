@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -30,6 +29,7 @@ import (
 func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.SegmentInfo) (map[int64]*model.SegmentIndex, error) {
 	records := make(map[int64]*model.SegmentIndex, len(segment.GetIndexSummaries()))
 	needManifest := false
+	fields := make(map[int64]int64, len(segment.GetIndexSummaries()))
 	for _, summary := range segment.GetIndexSummaries() {
 		if summary.GetBuildId() <= 0 || summary.GetIndexId() <= 0 {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid index summary for segment %d", segment.GetID())
@@ -38,6 +38,7 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "duplicate index summary for segment %d", segment.GetID())
 		}
 		records[summary.GetIndexId()] = SegmentIndexFromSummary(segment, summary)
+		fields[summary.GetIndexId()] = summary.GetFieldId()
 		needManifest = needManifest || summary.GetHasArtifact()
 	}
 	if !needManifest {
@@ -46,9 +47,7 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 	if segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
 		return nil, merr.Wrapf(merr.ErrDataIntegrity, "segment %d has index artifacts without a manifest", segment.GetID())
 	}
-	io := packed.NewManifestIOContext(1)
-	defer io.Close()
-	entries, err := m.ReadManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), CreateStorageConfig())
+	entries, err := m.ReadManifestIndexesWithIO(ctx, nil, segment.GetManifestPath(), CreateStorageConfig())
 	if err != nil {
 		return nil, merr.Wrapf(err, "read index artifacts for segment %d", segment.GetID())
 	}
@@ -58,13 +57,15 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 		if !ok || !record.ArtifactPresent {
 			continue
 		}
-		if resolved[entry.IndexID] || entry.BuildID != record.BuildID || entry.IndexVersion != record.IndexVersion {
+		if resolved[entry.IndexID] || entry.BuildID != record.BuildID || entry.IndexVersion != record.IndexVersion || entry.FieldID != fields[entry.IndexID] {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest index identity disagrees with summary for segment %d index %d", segment.GetID(), entry.IndexID)
 		}
 		if _, valid := ManifestIndexFilePathInfoForSegment(m.ChunkManager.RootPath(), segment, entry); !valid {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid manifest index for segment %d index %d", segment.GetID(), entry.IndexID)
 		}
-		records[entry.IndexID] = segmentIndexFromManifest(NewSegmentInfo(segment), entry)
+		loaded := segmentIndexFromManifest(&SegmentInfo{SegmentInfo: segment}, entry)
+		loaded.ArtifactPresent = true
+		records[entry.IndexID] = loaded
 		resolved[entry.IndexID] = true
 	}
 	for id, record := range records {

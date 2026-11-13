@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -31,6 +32,10 @@ func (m *IndexMeta) UsesSegmentSummaries() bool { return m.summarySource != nil 
 func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
 	for _, record := range m.SegmentBuildInfo.List() {
 		if record.IndexState == commonpb.IndexState_Finished {
+			segment, exists := source.GetSegment(record.SegmentID)
+			if !exists || segment.GetState() == commonpb.SegmentState_Dropped || !m.IsIndexExist(record.CollectionID, record.IndexID) {
+				continue
+			}
 			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode cannot recover completed task row %d", record.BuildID)
 		}
 	}
@@ -83,4 +88,12 @@ func (m *IndexMeta) GetSegmentIndexBuild(segmentID, buildID int64) (*model.Segme
 		return record, record.SegmentID == segmentID
 	}
 	return m.summaryRecord(segmentID, buildID)
+}
+
+// AccountCopiedIndexes runs after a fresh importing target becomes durable.
+func (m *IndexMeta) AccountCopiedIndexes(segment *datapb.SegmentInfo) {
+	for _, summary := range segment.GetIndexSummaries() {
+		m.taskCounts.replaceTask(nil, meta.SegmentIndexFromSummary(segment, summary))
+	}
+	m.taskCounts.publishStoredSizes()
 }

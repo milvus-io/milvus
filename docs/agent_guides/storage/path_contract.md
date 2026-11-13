@@ -62,6 +62,20 @@ snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. Snapshot generation uses its selected segment metadata.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
+## New-cluster index summary mode
+
+`dataCoord.index.segmentIndexSummariesEnabled` selects an immutable mode at
+initial startup of an empty cluster. Completed vector/scalar index inventory
+lives in `SegmentInfo.index_summaries`; file lists remain in segment manifests
+and are read on demand. Active and pending-cleanup tasks retain catalog rows.
+Manifest publication updates the pointer and summary and retires the task in
+one catalog transaction. An artifact-free completion retains a summary without
+creating a manifest index entry. GC must consult the current manifest after an
+active-task lookup misses; absence from the task table does not prove orphanhood.
+Historical migration, rollback, incompatible snapshot restore and direct manifest
+version adoption are unsupported in this mode. See the
+[index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
+
 ## Local upgrade compatibility
 
 The official Docker Compose and embedded standalone launchers run Milvus as the

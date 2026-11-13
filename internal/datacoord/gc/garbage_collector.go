@@ -1569,7 +1569,7 @@ func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 		return nil
 	}
 	for _, segIdx := range segIndexes {
-		if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+		if err := gc.removeIndexRecordLocked(ctx, segIdx); err != nil {
 			return err
 		}
 	}
@@ -1893,6 +1893,10 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 
 	io := packed.NewManifestIOContext(1)
 	defer io.Close()
+	if gc.Option.IndexMeta.UsesSegmentSummaries() {
+		gc.recycleSummaryIndexes(ctx, io, signal)
+		return
+	}
 	groups := make(map[int64][]*model.SegmentIndex)
 	segmentOrder := make([]int64, 0)
 	for _, candidate := range gc.Option.IndexMeta.GetAllSegIndexes() {
@@ -2042,7 +2046,7 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 		return
 	}
-	if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+	if err := gc.removeIndexRecordLocked(ctx, item.segIdx); err != nil {
 		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 		return
 	}
@@ -2102,7 +2106,7 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 		// further manifest revision; remove any surviving records via the legacy
 		// idempotent path so they do not strand the already-deleted files.
 		for _, item := range ready {
-			if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+			if err := gc.removeIndexRecordLocked(ctx, item.segIdx); err != nil {
 				segmentIndexGCLog(item).Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 			}
 		}
@@ -2188,7 +2192,7 @@ func (gc *GarbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentI
 	if gc.Option.IndexMeta == nil || gc.Option.IndexMeta.SegmentBuildInfo == nil {
 		return candidate, true
 	}
-	return gc.Option.IndexMeta.GetIndexJob(candidate.BuildID)
+	return gc.Option.IndexMeta.GetSegmentIndexBuild(candidate.SegmentID, candidate.BuildID)
 }
 
 // recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.
@@ -2408,6 +2412,16 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 		}
 		canRecycle, segIdx := gc.Option.IndexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
+			return d
+		}
+		if segIdx == nil && gc.Option.IndexMeta.UsesSegmentSummaries() {
+			// Completion publishes the segment before removing its active task.
+			// Refresh after that miss; the earlier snapshot can predate publication.
+			segment = gc.Meta.GetSegment(ctx, segmentID)
+			if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
+				return d
+			}
+			d.recorded, d.reclaimAll = gc.referencedSummaryBuild(ctx, segment, buildID)
 			return d
 		}
 		if segIdx == nil {
