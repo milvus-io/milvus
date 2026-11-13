@@ -797,7 +797,9 @@ func (s *Server) initCompaction() error {
 	manager.SetCompactionTargetMeta(s.compactionTargetMeta, s.compactionTargetCollectionAvailable)
 	s.compactionTriggerManager = manager
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
-	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	trigger := compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	trigger.SetStandingIndexVersion(s.targetCompactionEnabled)
+	s.compactionTrigger = trigger
 	return nil
 }
 

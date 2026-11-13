@@ -19,14 +19,18 @@ package datacoord
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -121,6 +125,7 @@ func TestStandingIndexVersionCompactionTargetCondition(t *testing.T) {
 	require.NoError(t, Params.Save(cfg.EnableAutoCompaction.Key, "true"))
 	check(true, bothAuto)
 }
+
 func TestStandingIndexVersionCompactionTargetUsesPublishedArtifacts(t *testing.T) {
 	ctx := t.Context()
 	enableTestCompactionTargets(t)
@@ -310,4 +315,95 @@ func TestStandingIndexVersionCompactionTargetUsesPublishedArtifacts(t *testing.T
 	}))
 	runRound()
 	checkRows(90)
+}
+
+func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T) {
+	ctx := t.Context()
+	enableTestCompactionTargets(t)
+	cfg := &Params.DataCoordCfg
+	for key, value := range map[string]string{
+		cfg.EnableAutoCompaction.Key:               "true",
+		cfg.StorageVersionCompactionEnabled.Key:    "false",
+		cfg.StorageFormatCompactionEnabled.Key:     "false",
+		cfg.AutoUpgradeSegmentIndex.Key:            "false",
+		cfg.ForceRebuildSegmentIndex.Key:           "true",
+		cfg.ForceRebuildScalarSegmentIndex.Key:     "false",
+		cfg.TargetVecIndexVersion.Key:              "2",
+		cfg.BumpSchemaVersionCompactionEnabled.Key: "false",
+	} {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+	sortConfig := &Params.DataCoordCfg.EnableSortCompaction
+	previousSort := sortConfig.SwapTempValue("true")
+	t.Cleanup(func() { sortConfig.SwapTempValue(previousSort) })
+	confirmed := &datapb.CompactionTarget{
+		TargetID: 40, Intent: datapb.TargetIntent_INTENT_INDEX_VERSION, TailLimit: -1,
+		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
+		Properties: map[string]string{"vector_mode": "EXACT", "vector_version": "1", "scalar_mode": "ABSENT"},
+	}
+	sortTarget := &datapb.CompactionTarget{
+		TargetID: 41, Intent: datapb.TargetIntent_INTENT_SORT, TailLimit: -1,
+		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
+	}
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{confirmed, sortTarget}, nil)
+	next := proto.CloneOf(confirmed)
+	next.ConditionRevision++
+	next.Properties["vector_version"] = "2"
+	previousCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, confirmed) })
+	nextCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, next) })
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, confirmed.GetTargetID()).Return(confirmed, nil).Times(3)
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(nil).Once()
+	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
+
+	for _, seg := range []*datapb.SegmentInfo{
+		{ID: 100, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, IsSorted: true, NumOfRows: 7},
+		{ID: 101, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, NumOfRows: 5},
+	} {
+		s.meta.Segments.SetSegment(seg.GetID(), meta.NewSegmentInfo(seg))
+	}
+	s.indexMeta = index.NewTestIndexMeta(1, 100, 10, "HNSW", &model.SegmentIndex{
+		CollectionID: 1, SegmentID: 100, IndexID: 10, IndexState: commonpb.IndexState_Finished,
+		CurrentIndexVersion: 1, IndexFileKeys: []string{"materialized"},
+	})
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, s.indexMeta, s.compactionTargetMeta, s.handler, s.allocator, s.compactionTargetCollectionAvailable)
+	reconciler.SetIndexVersionManager(index.NewIndexEngineVersionManager())
+	checkDescribe := func(version string, rows int64) {
+		t.Helper()
+		resp, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{
+			TargetId: confirmed.GetTargetID(), Collection: &datapb.CompactionTargetResource{},
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Equal(t, version, resp.GetTarget().GetParameters()["vector_version"])
+		require.NotNil(t, resp.GetTarget().RemainingRows)
+		require.Equal(t, rows, resp.GetTarget().GetRemainingRows())
+	}
+
+	checkPlanInputs := func(pools []view.TargetView, want ...int64) {
+		t.Helper()
+		var inputs []int64
+		for _, pool := range pools {
+			plans, err := pool.Plan()
+			require.NoError(t, err)
+			for _, plan := range plans {
+				inputs = append(inputs, plan.GetInputSegments()...)
+			}
+		}
+		require.ElementsMatch(t, want, inputs)
+	}
+
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	checkPlanInputs(events[policy.TriggerTypeSingle])
+	checkPlanInputs(events[policy.TriggerTypeSort], 101)
+	checkDescribe("1", 0)
+
+	events, err = reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	checkPlanInputs(events[policy.TriggerTypeSingle], 100)
+	checkPlanInputs(events[policy.TriggerTypeSort], 101)
+	checkDescribe("2", 7)
 }

@@ -129,6 +129,7 @@ type compactionTrigger struct {
 	closeWaiter   sync.WaitGroup
 
 	indexEngineVersionManager index.IndexEngineVersionManager
+	standingIndexVersion      bool
 
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
@@ -154,6 +155,10 @@ func NewCompactionTrigger(
 		handler:                   handler,
 		closeCh:                   lifetime.NewSafeChan(),
 	}
+}
+
+func (t *compactionTrigger) SetStandingIndexVersion(enabled bool) {
+	t.standingIndexVersion = enabled
 }
 
 func (t *compactionTrigger) Start() {
@@ -895,7 +900,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 		return true
 	}
 
-	if t.ShouldRebuildSegmentIndex(segment) {
+	if !t.standingIndexVersion && t.ShouldRebuildSegmentIndex(segment) {
 		return true
 	}
 
