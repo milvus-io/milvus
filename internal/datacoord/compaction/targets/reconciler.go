@@ -106,6 +106,16 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 	}
 	rewriteSelectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	for _, segment := range rewriteSelectable {
+		allocated[segment.GetID()] = struct{}{}
+	}
+	storageRewrites := reconciler.selectableStorageRewrites(ctx, Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(),
+		reconciler.meta.SelectSegments(ctx, meta.SegmentFilterFunc(storageSegment)))
+	for _, segment := range storageRewrites {
+		if _, assigned := allocated[segment.GetID()]; !assigned && reconciler.selectable(ctx, segment, eligible) {
+			rewriteSelectable = append(rewriteSelectable, segment)
+		}
+	}
 	if len(sortMatches) > len(sortSelectable) || len(matches) > len(rewriteSelectable) {
 		mlog.RatedInfo(ctx, rate.Limit(1), "compaction target inputs awaiting selection",
 			mlog.Int("sortMatches", len(sortMatches)), mlog.Int("sortSelectable", len(sortSelectable)),

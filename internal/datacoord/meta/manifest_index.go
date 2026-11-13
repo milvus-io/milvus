@@ -207,10 +207,14 @@ func SegmentIndexManifestReadConcurrency() int {
 	return max(1, limit)
 }
 
+func newManifestReadSlots() *semaphore.Weighted {
+	return semaphore.NewWeighted(int64(SegmentIndexManifestReadConcurrency()))
+}
+
 // readManifestIndexesWithIO shares a read budget across startup, restore and GC.
 // Waiting for admission is cancellable and does not enter cgo.
 func (m *Meta) ReadManifestIndexesWithIO(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(SegmentIndexManifestReadConcurrency())) })
+	m.manifestReadOnce.Do(func() { m.manifestReadSlots = newManifestReadSlots() })
 	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
@@ -225,7 +229,7 @@ func (m *Meta) ReadManifestIndexesWithIO(ctx context.Context, io *packed.Manifes
 // releases admission on the executor, so a submitting coordinator never needs
 // another goroutine to consume completions just to unblock admission.
 func (m *Meta) SubmitManifestIndexRead(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
-	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(SegmentIndexManifestReadConcurrency())) })
+	m.manifestReadOnce.Do(func() { m.manifestReadSlots = newManifestReadSlots() })
 	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {
 		return err
 	}
