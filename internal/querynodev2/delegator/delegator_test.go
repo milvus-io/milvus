@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -486,7 +487,10 @@ func (s *DelegatorSuite) TestSearch() {
 		workers[2] = worker2
 
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
+			Run(func(ctx context.Context, req *querypb.SearchRequest) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -499,7 +503,10 @@ func (s *DelegatorSuite) TestSearch() {
 				}
 			}).Return(&internalpb.SearchResults{}, nil)
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
+			Run(func(ctx context.Context, req *querypb.SearchRequest) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
@@ -774,7 +781,10 @@ func (s *DelegatorSuite) TestQuery() {
 		workers[2] = worker2
 
 		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
-			Run(func(_ context.Context, req *querypb.QueryRequest) {
+			Run(func(ctx context.Context, req *querypb.QueryRequest) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -787,7 +797,10 @@ func (s *DelegatorSuite) TestQuery() {
 				}
 			}).Return(&internalpb.RetrieveResults{}, nil)
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
-			Run(func(_ context.Context, req *querypb.QueryRequest) {
+			Run(func(ctx context.Context, req *querypb.QueryRequest) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
@@ -973,6 +986,9 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -996,6 +1012,9 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
+				attempts, ok := retry.MaxAttemptsFromContext(ctx)
+				s.True(ok)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
