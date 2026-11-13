@@ -57,7 +57,7 @@ func (c *Client) CreateCollection(ctx context.Context, option CreateCollectionOp
 		}
 		err = task.Await(ctx)
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 
