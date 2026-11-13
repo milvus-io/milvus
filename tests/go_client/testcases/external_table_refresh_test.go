@@ -3,6 +3,7 @@ package testcases
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -2115,8 +2116,8 @@ func mapToEnvSlice(m map[string]string) []string {
 }
 
 // TestExternalCollectionLanceFormat tests external collections with lance-table format:
-//  1. Generate Lance dataset on MinIO using Python
-//  2. Create external collection with lance-table format
+//  1. Generate two Lance dataset versions with different rows on MinIO
+//  2. Create external collection with lance-table format pinned to the old version
 //  3. Refresh and wait for completion
 //  4. Create index and load collection
 //  5. Query count(*) and verify row count
@@ -2156,13 +2157,22 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 			fmt.Sprintf("%s/%s/", minioCfg.rootPath, extPath))
 	})
 
+	// Overwrite the fresh dataset to create v2 with only id=100000. Selecting
+	// v1 must still return the original 100000 rows, not the latest snapshot.
+	generateLanceDataOnMinIO(t, s3URI, externalDataSchemaBasic, 1, totalRows)
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal([]byte(extTestSpec(minioCfg, "lance-table")), &spec))
+	spec["snapshot_id"] = "1"
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+
 	// ---------------------------------------------------------------
 	// Step 2: Create external collection with lance-table format
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource(extTestURI(minioCfg, extPath)).
-		WithExternalSpec(extTestSpec(minioCfg, "lance-table")).
+		WithExternalSpec(string(specJSON)).
 		WithField(
 			entity.NewField().
 				WithName("id").
