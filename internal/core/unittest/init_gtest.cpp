@@ -83,11 +83,14 @@ main(int argc, char** argv) {
     int random = std::rand();
     // Ensure random % total_shards == shard_index so different shards use different paths
     random = random - (random % total_shards) + shard_index;
-    TestLocalPath =
-        base_dir + "/test_" + std::to_string(random) + "/local_data/";
-    TestRemotePath =
-        base_dir + "/test_" + std::to_string(random) + "/remote_data/";
-    TestMmapPath = base_dir + "/test_" + std::to_string(random) + "/mmap_data/";
+    // Production local storage keeps every durable object under one
+    // localStorage.path. The per-run test root plays that role for the default
+    // filesystem, which persists directory entries only within its root.
+    const std::string test_root =
+        base_dir + "/test_" + std::to_string(random) + "/";
+    TestLocalPath = test_root + "local_data/";
+    TestRemotePath = test_root + "remote_data/";
+    TestMmapPath = test_root + "mmap_data/";
 
     // Ensure test directories exist before any Init calls
     std::filesystem::create_directories(TestLocalPath);
@@ -122,7 +125,7 @@ main(int argc, char** argv) {
          false});
 
     CStorageConfig arrow_fs_config = {};
-    arrow_fs_config.root_path = TestLocalPath.c_str();
+    arrow_fs_config.root_path = test_root.c_str();
     arrow_fs_config.storage_type = "local";
     auto c_status = InitArrowFileSystem(arrow_fs_config);
     if (c_status.error_code != 0) {

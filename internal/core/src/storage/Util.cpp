@@ -1316,7 +1316,7 @@ CreateLegacyChunkManager(const StorageConfig& storage_config) {
     auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
     switch (storage_type) {
         case ChunkManagerType::Local: {
-            return std::make_shared<LocalChunkManager>(
+            return std::make_shared<DurableLocalChunkManager>(
                 storage_config.root_path);
         }
         case ChunkManagerType::Minio: {

@@ -166,11 +166,16 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     std::vector<int64_t> serialized_insert_sizes;
     serialized_insert_sizes.reserve(field_datas.size());
     int64_t row_count = 0;
+    // Binlogs belong to the chunk manager that writes them: a durable local
+    // manager persists only within its own root.
+    auto root = cm->GetRootPath();
+    if (!root.empty() && root.back() != '/') {
+        root += '/';
+    }
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
         row_count += field_data->get_num_rows();
-        auto file = TestRemotePath + "data/test/" +
-                    std::to_string(collection_id) + "/" +
+        auto file = root + "data/test/" + std::to_string(collection_id) + "/" +
                     std::to_string(partition_id) + "/" +
                     std::to_string(segment_id) + "/" +
                     std::to_string(field_id) + "/" + std::to_string(i);

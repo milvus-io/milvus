@@ -63,8 +63,11 @@ main(int argc, char** argv) {
                                     uint64_t{4} * 1024 * 1024,
                                     false});
 
+    // Like production's single localStorage.path, the per-process root bounds
+    // the default filesystem's directory persistence (see init_gtest.cpp).
+    const auto root_path = root.string() + "/";
     CStorageConfig arrow_fs_config = {};
-    arrow_fs_config.root_path = TestLocalPath.c_str();
+    arrow_fs_config.root_path = root_path.c_str();
     arrow_fs_config.storage_type = "local";
     const auto status = InitArrowFileSystem(arrow_fs_config);
     if (status.error_code != 0) {

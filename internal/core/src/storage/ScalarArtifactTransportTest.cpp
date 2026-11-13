@@ -44,7 +44,9 @@ class ScalarArtifactTransportTest : public ::testing::Test {
             "scalar transport test");
         StorageConfig storage;
         storage.storage_type = "local";
-        // The output writer must create this missing parent itself.
+        // Durable local storage provisions a missing root once at
+        // initialization; the output writer must create the missing
+        // publication parents below it.
         storage.root_path = root_->Path() + "/remote";
         FieldDataMeta field{1, 2, 3, 101};
         field.field_schema.set_data_type(proto::schema::DataType::VarChar);
@@ -100,7 +102,9 @@ TEST_F(ScalarArtifactTransportTest,
        MarisaCreatesMissingPublicationAndMmapParents) {
     const std::vector<std::string_view> values{"alpha", "beta", "alpha"};
     auto artifact = Build(values);
-    ASSERT_FALSE(std::filesystem::exists(root_->Path() + "/remote"));
+    ASSERT_TRUE(std::filesystem::is_directory(root_->Path() + "/remote"));
+    ASSERT_FALSE(std::filesystem::exists(
+        MemFileManagerImpl(context_).GetRemoteIndexObjectPrefix()));
     const auto path = Publish(*artifact);
     ASSERT_TRUE(std::filesystem::is_regular_file(path));
     ASSERT_FALSE(std::filesystem::exists(root_->Path() + "/missing"));

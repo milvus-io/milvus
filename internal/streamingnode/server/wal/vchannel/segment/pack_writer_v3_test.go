@@ -56,10 +56,14 @@ func setupV3TestEnv(t *testing.T) (*indexpb.StorageConfig, storage.ChunkManager)
 	pt.Save(pt.CommonCfg.StorageType.Key, "local")
 	pt.Save(pt.CommonCfg.UseLoonFFI.Key, "true")
 	pt.Save(pt.MinioCfg.RootPath.Key, rootPath)
+	// Local storage composes object paths from localStorage.path; keep it equal
+	// to the filesystem root, as production does.
+	pt.Save(pt.LocalStorageCfg.Path.Key, rootPath)
 	t.Cleanup(func() {
 		pt.Reset(pt.CommonCfg.StorageType.Key)
 		pt.Reset(pt.CommonCfg.UseLoonFFI.Key)
 		pt.Reset(pt.MinioCfg.RootPath.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))

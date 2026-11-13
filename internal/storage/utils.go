@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,11 +77,9 @@ func ReadFile(filepath string) ([]byte, error) {
 	return data, nil
 }
 
-// WriteFile writes file as os.WriteFile works，
-// also converts the os errors to Milvus errors
+// WriteFile durably publishes a complete local file and converts OS errors.
 func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
-	// NOLINT
-	err := os.WriteFile(filepath, data, perm)
+	err := localstorage.WriteFile(filepath, data, perm)
 	if err != nil {
 		return merr.WrapErrIoFailed(filepath, err)
 	}
