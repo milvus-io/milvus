@@ -70,8 +70,10 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	sortMatches := reconciler.observeStandingSort(ctx)
 	auto := Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 	segments := standingSegments(ctx, reconciler.meta)
+	eligible := make(map[int64]collectionPlanningFacts)
 	standingRewrites := reconciler.selectableIndexRewrites(ctx, auto, segments)
 	standingRewrites = append(standingRewrites, reconciler.selectableStorageRewrites(ctx, auto, segments)...)
+	standingRewrites = append(standingRewrites, reconciler.selectableCleanupRewrites(ctx, auto, segments, eligible)...)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	var size SizeCondition
@@ -115,7 +117,6 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 	// Pick the physical path for each segment before constructing any View.
 	// An independently selectable SORT takes precedence over a matching REWRITE.
-	eligible := make(map[int64]collectionPlanningFacts)
 	sortSelectable := make([]*meta.SegmentInfo, 0, len(sortMatches))
 	allocated := make(map[int64]struct{}, len(sortMatches))
 	for _, segment := range sortMatches {
@@ -178,22 +179,34 @@ func (reconciler *CompactionTargetReconciler) selectable(
 	facts, checked := collections[id]
 	if !checked {
 		collection := reconciler.meta.GetCollection(id)
-		facts.blocked = !collection.IsCreated() || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(id)
-		if !facts.blocked {
+		if collection.IsCreated() && !collection.IsExternal() {
 			ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
-			if err != nil {
-				mlog.RatedWarn(ctx, rate.Limit(1), "could not determine collection TTL for compaction target",
-					mlog.FieldCollectionID(id), mlog.Err(err))
-				facts.blocked = true
-			} else {
-				facts.ttl = ttl
-				facts.schema = proto.CloneOf(collection.Schema)
-				facts.expectedSize = policy.GetExpectedSegmentSize(reconciler.IndexMeta, id, facts.schema)
-			}
+			facts = reconciler.collectionFacts(ctx, id, collection, ttl, err)
+		} else {
+			facts.blocked = true
 		}
 		collections[id] = facts
 	}
 	return !facts.blocked && segment.GetNumOfRows() >= 0 && policy.IsSharedCompactionSelectable(reconciler.meta, segment)
+}
+
+// collectionFacts uses the same collection snapshot and TTL for matching
+// cleanup and preparing the physical View.
+func (reconciler *CompactionTargetReconciler) collectionFacts(
+	ctx context.Context, id int64, collection *meta.CollectionInfo, ttl time.Duration, ttlErr error,
+) collectionPlanningFacts {
+	if reconciler.meta.IsCollectionCompactionBlocked(id) {
+		return collectionPlanningFacts{blocked: true}
+	}
+	if ttlErr != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not determine collection TTL for compaction target",
+			mlog.FieldCollectionID(id), mlog.Err(ttlErr))
+		return collectionPlanningFacts{blocked: true}
+	}
+	schema := proto.CloneOf(collection.Schema)
+	return collectionPlanningFacts{
+		ttl: ttl, schema: schema, expectedSize: policy.GetExpectedSegmentSize(reconciler.IndexMeta, id, schema),
+	}
 }
 
 func targetViews(segments []*meta.SegmentInfo, collections map[int64]collectionPlanningFacts, sorting bool) []view.TargetView {

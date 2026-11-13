@@ -123,9 +123,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	// Initialize policies map for ticker handling
 	m.policies[L0Ticker] = m.l0Policy
 	m.policies[ClusteringTicker] = m.clusteringPolicy
-	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	if m.targetReconciler == nil {
+		m.policies[SingleTicker] = m.singlePolicy
 		m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
 	}
 	return m
@@ -170,10 +170,11 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
-	singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
-	defer singleTicker.Stop()
-	var storageVersionTick <-chan time.Time
+	var singleTick, storageVersionTick <-chan time.Time
 	if m.targetReconciler == nil {
+		singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+		defer singleTicker.Stop()
+		singleTick = singleTicker.C
 		storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 		defer storageVersionTicker.Stop()
 		storageVersionTick = storageVersionTicker.C
@@ -195,7 +196,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, L0Ticker)
 		case <-clusteringTicker.C:
 			m.handleTicker(ctx, ClusteringTicker)
-		case <-singleTicker.C:
+		case <-singleTick:
 			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTick:
 			m.handleTicker(ctx, StorageVersionTicker)
