@@ -1,0 +1,35 @@
+{
+  "stage": "FunctionChainStageL2Rerank",
+  "ops": [
+    {
+      "op": "map",
+      "expr": {
+        "name": "rerank_model",
+        "args": [
+          {
+            "column": {
+              "name": "text"
+            }
+          }
+        ],
+        "params": {
+          "queries": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "query"
+                }
+              ]
+            }
+          },
+          "provider": {
+            "stringValue": "voyageai"
+          }
+        }
+      },
+      "outputs": [
+        "$score"
+      ]
+    }
+  ]
+}

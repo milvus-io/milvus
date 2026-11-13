@@ -1,0 +1,80 @@
+{
+  "stage": "FunctionChainStagePostProcess",
+  "ops": [
+    {
+      "op": "map",
+      "expr": {
+        "name": "custom",
+        "args": [
+          {
+            "column": {
+              "name": "text"
+            }
+          },
+          {
+            "literal": {
+              "stringValue": "literal"
+            }
+          },
+          {
+            "literal": {
+              "boolValue": true
+            }
+          },
+          {
+            "literal": {
+              "int64Value": "-12"
+            }
+          },
+          {
+            "literal": {
+              "doubleValue": 1.25
+            }
+          },
+          {
+            "literal": {
+              "bytesValue": "AP8="
+            }
+          },
+          {
+            "literal": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "int64Value": "1"
+                  },
+                  {
+                    "stringValue": "x"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "literal": {
+              "objectValue": {
+                "fields": {
+                  "nested": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "boolValue": true
+                        },
+                        {
+                          "boolValue": false
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "outputs": [
+        "out"
+      ]
+    }
+  ]
+}
