@@ -408,6 +408,11 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
+	if err = retry.Do(s.ctx, func() error {
+		return s.recoverCompactionTargetScopes(s.ctx)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
 
 	s.initAnalyzeInspector()
 	mlog.Info(s.ctx, "init analyze inspector done")

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,8 +53,8 @@ func NewCompactionTargetTestCatalog(
 			}
 			return result, nil
 		}).Maybe()
-	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) (bool, error) {
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if stored[record.GetTargetID()] != nil {

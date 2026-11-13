@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -1244,7 +1246,7 @@ func (kc *Catalog) loadCompactionTarget(ctx context.Context, targetID int64) (*d
 	return record, value, nil
 }
 
-func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (bool, error) {
+func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *metastore.CompactionTargetCollectionVersion) (bool, error) {
 	key, value, err := buildCompactionTargetKV(record)
 	if err != nil {
 		return false, err
@@ -1252,7 +1254,33 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.KeyNotExist(key))
+	guards := []predicates.Predicate{predicates.KeyNotExist(key)}
+	if record.GetCollectionID() != 0 {
+		if collection == nil {
+			return false, merr.WrapErrServiceInternalMsg("compaction target creation is missing the collection version")
+		}
+		// Guard the same row that RootCoord replaces with its DropCollection
+		// tombstone. A timed-out create must not commit after ACK closes the
+		// scope, even if an earlier read did not find the candidate.
+		collectionKey := rootcatalog.BuildCollectionKey(collection.DatabaseID, record.GetCollectionID())
+		raw, err := kc.MetaKv.Load(ctx, collectionKey)
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+		}
+		if err != nil {
+			return false, merr.Wrap(err, "load collection for compaction target creation")
+		}
+		current := &etcdpb.CollectionInfo{}
+		if err := proto.Unmarshal([]byte(raw), current); err != nil {
+			return false, merr.Wrap(err, "decode collection for compaction target creation")
+		}
+		if current.GetID() != record.GetCollectionID() || current.GetState() != etcdpb.CollectionState_CollectionCreated ||
+			current.GetUpdateTimestamp() != collection.Revision {
+			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+		}
+		guards = append(guards, predicates.ValueEqual(collectionKey, raw))
+	}
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, guards...)
 	return targetCreateMayHaveCommitted(err), err
 }
 
