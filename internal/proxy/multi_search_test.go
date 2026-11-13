@@ -208,7 +208,7 @@ func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 		release := make(chan struct{})
 		releaseSearch := sync.OnceFunc(func() { close(release) })
 		defer releaseSearch()
-		cancelled := make(chan error, 1)
+		canceled := make(chan error, 1)
 		items := []MultiSearchPrepare{
 			multiSearchTestPrepare("finished"),
 			multiSearchTestPrepare("late"),
@@ -226,7 +226,7 @@ func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 				time.Sleep(500 * time.Millisecond)
 			case "late":
 				<-ctx.Done()
-				cancelled <- ctx.Err()
+				canceled <- ctx.Err()
 				<-release
 			default:
 				t.Error("dispatched a Search after expiry")
@@ -238,7 +238,7 @@ func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 		require.Equal(t, "finished", results[0].GetCollectionName())
 		require.Equal(t, merr.TimeoutCode, results[1].GetStatus().GetCode())
 		require.Equal(t, merr.TimeoutCode, results[2].GetStatus().GetCode())
-		require.ErrorIs(t, <-cancelled, context.DeadlineExceeded)
+		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
 
 		releaseSearch()
 		synctest.Wait()
@@ -305,13 +305,13 @@ func TestMultiSearchParentCancellationEndsCall(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		started := make(chan struct{})
-		cancelled := make(chan error, 1)
+		canceled := make(chan error, 1)
 		finished := make(chan error, 1)
 		go func() {
 			items, err := p.RunMultiSearch(ctx, MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Hour)}, []MultiSearchPrepare{multiSearchTestPrepare("running")}, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				close(started)
 				<-ctx.Done()
-				cancelled <- ctx.Err()
+				canceled <- ctx.Err()
 				return &milvuspb.SearchResults{Status: merr.Success()}, nil
 			})
 			if len(items) != 0 {
@@ -322,7 +322,7 @@ func TestMultiSearchParentCancellationEndsCall(t *testing.T) {
 		<-started
 		cancel()
 		require.ErrorIs(t, <-finished, context.Canceled)
-		require.ErrorIs(t, <-cancelled, context.Canceled)
+		require.ErrorIs(t, <-canceled, context.Canceled)
 	})
 }
 
@@ -400,8 +400,10 @@ func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 		budget   time.Duration
 		attempts []time.Duration
 	}{
-		{"exhausted", 0, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond, 1400 * time.Millisecond,
-			3 * time.Second, 6 * time.Second, 9 * time.Second, 12 * time.Second, 15 * time.Second, 18 * time.Second}},
+		{"exhausted", 0, []time.Duration{
+			0, 200 * time.Millisecond, 600 * time.Millisecond, 1400 * time.Millisecond,
+			3 * time.Second, 6 * time.Second, 9 * time.Second, 12 * time.Second, 15 * time.Second, 18 * time.Second,
+		}},
 		{"next backoff exceeds budget", time.Second, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

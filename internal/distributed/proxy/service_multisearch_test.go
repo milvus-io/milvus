@@ -18,6 +18,7 @@ package grpcproxy
 
 import (
 	"context"
+	"crypto/rand"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -221,8 +222,8 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(quotaKey)) })
 	const username = "grpc_multisearch_reader"
 	const role = "grpc_multisearch_role"
-	const apiKey = "grpc-multisearch-test"
 	const collection = "papers"
+	apiKey := rand.Text()
 	cache := proxy.InitEmptyMetaCacheForTest()
 	policy := privilege.GetPrivilegeCache()
 	require.NoError(t, policy.RefreshPolicyInfo(typeutil.CacheOp{

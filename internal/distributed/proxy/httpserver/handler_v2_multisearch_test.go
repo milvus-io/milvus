@@ -169,8 +169,10 @@ func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
 		Name: "papers",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			{
+				FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -256,8 +258,10 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 			Name: target.collection,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: target.dim}}},
+				{
+					FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: target.dim}},
+				},
 			},
 		})
 		require.NoError(t, err)

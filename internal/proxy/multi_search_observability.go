@@ -104,7 +104,7 @@ func (p multiSearchItemProgress) observe(ctx context.Context, nodeID string, ind
 	case merr.TimeoutCode:
 		result = "timeout"
 	case merr.CanceledCode, merr.Code(merr.ErrRequestCanceled):
-		result = "cancelled"
+		result = "cancelled" //nolint:misspell // Preserve the documented cancellation label.
 	}
 	metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, result).Inc()
 

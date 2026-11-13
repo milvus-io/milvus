@@ -116,8 +116,10 @@ func newMultiSearchHTTPProxy(t *testing.T, onSchema func(context.Context, string
 		Name: "ready",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			{
+				FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -172,13 +174,13 @@ func TestMultiSearchRESTDeliversPartialResultsAfterExpiry(t *testing.T) {
 		release := make(chan struct{})
 		releasePrepare := sync.OnceFunc(func() { close(release) })
 		defer releasePrepare()
-		cancelled := make(chan error, 1)
+		canceled := make(chan error, 1)
 		p := newMultiSearchHTTPProxy(t, func(ctx context.Context, collection string) {
 			switch collection {
 			case "ready":
 			case "preparing":
 				<-ctx.Done()
-				cancelled <- ctx.Err()
+				canceled <- ctx.Err()
 				<-release
 			default:
 				t.Error("prepared an undispatched search")
@@ -205,7 +207,7 @@ func TestMultiSearchRESTDeliversPartialResultsAfterExpiry(t *testing.T) {
 		require.Equal(t, merr.TimeoutCode, body.Data[2].Search.Code)
 		require.Empty(t, body.Data[2].Search.Data)
 		require.Equal(t, merr.TimeoutCode, body.Data[3].Search.Code)
-		require.ErrorIs(t, <-cancelled, context.DeadlineExceeded)
+		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
 
 		releasePrepare()
 		synctest.Wait()
@@ -257,10 +259,10 @@ func TestMultiSearchRESTReturnsAsSoonAsAllItemsFinish(t *testing.T) {
 
 func TestMultiSearchRESTTransportDeadlineEndsCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		cancelled := make(chan error, 1)
+		canceled := make(chan error, 1)
 		p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			<-ctx.Done()
-			cancelled <- ctx.Err()
+			canceled <- ctx.Err()
 			return successfulSearchResult(), nil
 		})
 		payload := `{"timeoutMs":5000,"requests":[` + readySearch + `]}`
@@ -268,7 +270,7 @@ func TestMultiSearchRESTTransportDeadlineEndsCall(t *testing.T) {
 		require.Equal(t, http.StatusRequestTimeout, status)
 		require.Equal(t, merr.TimeoutCode, body.Code)
 		require.Empty(t, body.Data)
-		require.ErrorIs(t, <-cancelled, context.DeadlineExceeded)
+		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
 	})
 }
 
@@ -574,8 +576,10 @@ func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
 			Name: collection,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+				{
+					FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+				},
 			},
 		})
 		require.NoError(t, err)
