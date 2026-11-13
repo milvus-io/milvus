@@ -42,6 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func UnindexedSegmentsForTest(ctx context.Context, mt *meta.Meta, im *IndexMeta) []int64 {
+	return (&IndexInspector{meta: mt, indexMeta: im}).getUnIndexTaskSegments(ctx)
+}
+
 func NewTestVersionManager() IndexEngineVersionManager {
 	return &VersionManagerImpl{}
 }

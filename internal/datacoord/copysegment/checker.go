@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -394,6 +395,9 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 
 	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
+		maxSegmentsPerTask = min(maxSegmentsPerTask, max(1, Params.DataCoordCfg.SegmentChangeGroupMaxMembers.GetAsInt()))
+	}
 	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
 
 	// Step 4: Create task for each group
@@ -513,6 +517,15 @@ func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 
 	// Step 2: Count tasks by state
 	for _, task := range tasks {
+		if group := c.Meta.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			switch group.State {
+			case model.SegmentChangeStateStaged, model.SegmentChangeStateReady:
+				continue
+			case model.SegmentChangeStateFailed, model.SegmentChangeStateAborted:
+				failedTasks++
+				continue
+			}
+		}
 		switch task.GetState() {
 		case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 			completedTasks++
@@ -565,6 +578,14 @@ func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 	// Step 6: All tasks completed - collect total rows and finish job
 	var totalRows int64
 	for _, task := range tasks {
+		if group := c.Meta.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			for _, id := range group.NewSegmentIDs {
+				if seg := c.Meta.GetSegment(c.Ctx, id); seg != nil && seg.GetState() != commonpb.SegmentState_Dropped {
+					totalRows += seg.GetNumOfRows()
+				}
+			}
+			continue
+		}
 		for _, mapping := range task.GetIdMappings() {
 			targetSegID := mapping.GetTargetSegmentId()
 			segment := c.Meta.GetSegment(c.Ctx, targetSegID)
@@ -610,6 +631,10 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 	tasks := c.CopyMeta.GetTasksByJobID(c.Ctx, job.GetJobId())
 	targetSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
+		if group := c.Meta.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			targetSegmentIDs = append(targetSegmentIDs, group.NewSegmentIDs...)
+			continue
+		}
 		for _, mapping := range task.GetIdMappings() {
 			targetSegmentIDs = append(targetSegmentIDs, mapping.GetTargetSegmentId())
 		}
@@ -643,7 +668,7 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 				meta.NotifySegmentStatsBuild(segID)
 				continue
 			}
-			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
+			if segment != nil && !meta.IsEmptySegmentChangeOutput(segment) && segment.GetState() != commonpb.SegmentState_Flushed {
 				op := meta.UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
 				if err := c.Meta.UpdateSegmentsInfo(c.Ctx, op); err != nil {
 					log.Error(c.Ctx, "failed to update segment state to Flushed",
@@ -747,6 +772,15 @@ func (c *Checker) CheckFailedJob(job CopySegmentJob) {
 
 	// Find all Pending/InProgress tasks
 	allTasks := c.CopyMeta.GetTasksByJobID(c.Ctx, job.GetJobId())
+	if c.Meta != nil {
+		for _, t := range allTasks {
+			g := c.Meta.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, t.GetTaskId(), "")
+			if err := c.Meta.AbortProducerChange(c.Ctx, g, "copy job failed"); err != nil {
+				log.Warn(c.Ctx, "cannot reclaim failed copy group", mlog.Err(err))
+				return
+			}
+		}
+	}
 	tasks := lo.Filter(allTasks, func(t CopySegmentTask, _ int) bool {
 		return t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending ||
 			t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress

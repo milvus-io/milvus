@@ -61,6 +61,21 @@ import (
 )
 
 type CompactionMeta interface {
+	GetProducerChangeGroup(source model.SegmentChangeSource, jobID int64, channel string) *model.SegmentChangeGroup
+	StageAdmittedChange(ctx context.Context, group *model.SegmentChangeGroup, admitted bool, operators ...UpdateOperator) (*model.SegmentChangeGroup, bool, error)
+	AbortProducerChange(ctx context.Context, group *model.SegmentChangeGroup, reason string) error
+	RecomputeCompactionDataView(ctx context.Context, collectionID int64)
+	GetCompactionChangeGroup(task *datapb.CompactionTask) (*model.SegmentChangeGroup, error)
+	ReserveGroupSort(task *datapb.CompactionTask) bool
+	UnpublishedSegmentMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet
+	GetSegmentChangeGroupBySegmentID(ctx context.Context, segmentID int64) *model.SegmentChangeGroup
+	SegmentChangeL0Channels(copyCollectionIDs []int64) typeutil.Set[string]
+	CompactionContext() context.Context
+	CommitSegmentManifests(context.Context, []SegmentManifestCommit, ...UpdateOperator) error
+	CommitSegmentManifest(context.Context, SegmentManifestCommit) error
+	GetCollection(collectionID UniqueID) *CollectionInfo
+	GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool)
+	CompactionStorageRoot() string
 	GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo
 	SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo
@@ -116,6 +131,7 @@ type Meta struct {
 	IndexCatalog         SegmentIndexCatalog
 	Broker               broker.Broker
 	CompactionProtection CompactionProtection
+	PartitionStats       PartitionStatsPublication
 
 	// groupMu guards segmentChangeGroups and its reverse indexes. A write that
 	// also writes segments takes it after their writer locks.
@@ -129,9 +145,12 @@ type Meta struct {
 	// member or a superseded parent — by at most one alive group):
 	//   - stagedSegmentToGroup:    new_segment (member)     -> groupID
 	//   - supersededSegmentToGroup: superseded (parent)      -> groupID
+	//   - segmentChangeSuccessors: predecessor groupID -> number of persisted
+	//     successor groups; a predecessor cannot be deleted while this is nonzero.
 	segmentChangeGroups      map[int64]*model.SegmentChangeGroup
 	stagedSegmentToGroup     map[int64]int64
 	supersededSegmentToGroup map[int64]int64
+	segmentChangeSuccessors  map[int64]int
 }
 
 // collectionInfo is DataCoord's name for the collection metadata held in the
@@ -189,6 +208,7 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		segmentChangeGroups:      make(map[int64]*model.SegmentChangeGroup),
 		stagedSegmentToGroup:     make(map[int64]int64),
 		supersededSegmentToGroup: make(map[int64]int64),
+		segmentChangeSuccessors:  make(map[int64]int),
 	}
 
 	initialized := false
@@ -252,6 +272,7 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.segmentChangeGroups = scg
 	mt.stagedSegmentToGroup = stag
 	mt.supersededSegmentToGroup = sup
+	mt.rebuildSegmentChangeSuccessorsLocked()
 
 	initialized = true
 	return mt, nil
@@ -381,12 +402,7 @@ func GetSegmentsChanPart(m *Meta, collectionID int64, filters ...SegmentFilter) 
 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *Meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
-	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(IsSegmentHealthy))
-	for _, segment := range segments {
-		ret += segment.GetNumOfRows()
-	}
-	return ret
+	return m.countPublishedRows(collectionID, nil)
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
@@ -573,6 +589,9 @@ func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 		mlog.Info(ctx, "segment is already exists, ignore the operation", mlog.Int64("segmentID", segment.ID))
 		return nil
 	}
+	if err := m.validateSegmentChangeVisibility(map[int64]*SegmentInfo{segment.GetID(): segment}); err != nil {
+		return err
+	}
 	if err := m.Catalog.AddSegment(ctx, segment.SegmentInfo); err != nil {
 		mlog.Error(ctx, "meta update: adding segment failed",
 			mlog.Int64("segmentID", segment.GetID()),
@@ -593,6 +612,15 @@ func (m *Meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 		mlog.Warn(ctx, "meta update: dropping segment failed - segment not found",
 			mlog.Int64("segmentID", segmentID))
 		return nil
+	}
+	m.groupMu.RLock()
+	groupID := m.stagedSegmentToGroup[segmentID]
+	m.groupMu.RUnlock()
+	if isEmptySegmentChangeOutput(segment) && groupID != 0 {
+		// Keep the durable no-output evidence until the owning group finishes.
+		// Otherwise GC could turn a legitimate empty result into a missing
+		// member, causing recovery to fail or abandon the rest of the batch.
+		return merr.WrapErrServiceUnavailableMsg("zero-row segment %d is retained by segment change group %d", segmentID, groupID)
 	}
 	if err := m.Catalog.DropSegment(ctx, segment.SegmentInfo); err != nil {
 		mlog.Warn(ctx, "meta update: dropping segment failed",
@@ -2139,6 +2167,9 @@ func (m *Meta) runOperators(operators []UpdateOperator) (*segmentLockSet, *Updat
 // finishUpdateSegmentPack commits the L0 manifest updates of a pack whose
 // operators ran and validates it.
 func (m *Meta) finishUpdateSegmentPack(ctx context.Context, updatePack *UpdateSegmentPack) (*UpdateSegmentPack, error) {
+	if err := m.validateSegmentChangeVisibility(updatePack.Segments); err != nil {
+		return nil, err
+	}
 	if err := CommitL0ManifestUpdates(ctx, m.ManifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return nil, err
 	}
@@ -2370,9 +2401,17 @@ func (m *Meta) GetSegmentsIDOfPartitionWithDropped(ctx context.Context, collecti
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *Meta) GetNumRowsOfPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) int64 {
+	return m.countPublishedRows(collectionID, &partitionID)
+}
+
+// countPublishedRows observes group exclusions and segment states atomically.
+func (m *Meta) countPublishedRows(collectionID UniqueID, partitionID *UniqueID) int64 {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
 	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return IsSegmentHealthy(si) && si.GetPartitionID() == partitionID
+	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return IsSegmentHealthy(si) && !unpublished.Contain(si.GetID()) && (partitionID == nil || si.GetPartitionID() == *partitionID)
 	}))
 	for _, segment := range segments {
 		ret += segment.NumOfRows
@@ -2438,12 +2477,15 @@ func (m *Meta) IsSegmentCompacting(segmentID UniqueID) bool {
 // if false, skip setting and
 func (m *Meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID) (exist, canDo bool) {
 	defer m.LockSegments(segmentIDs...)()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	var hasCompacting bool
+	excluded := m.segmentChangeExclusionsLocked(0, true)
 	exist = true
 	for _, segmentID := range segmentIDs {
 		seg := m.Segments.GetSegment(segmentID)
 		if seg != nil {
-			if seg.IsCompacting {
+			if seg.IsCompacting || excluded.Contain(segmentID) {
 				hasCompacting = true
 			}
 		} else {
@@ -2754,6 +2796,14 @@ func (m *Meta) completeMixCompactionMutation(
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
+	if m.canStageCompactionOutputs(t, compactToSegments) {
+		// Persist outputs and their group together. Originals remain live and
+		// reserved until the inspector commits the group's publication.
+		if err := m.stageCompactionOutputsLocked(m.Ctx, t, compactToSegments); err != nil {
+			return nil, err
+		}
+		return compactToSegments, nil
+	}
 
 	mlog.Debug(m.Ctx, "meta update: prepare for meta mutation - complete")
 	compactFromInfos := lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
@@ -2793,6 +2843,12 @@ func (m *Meta) completeMixCompactionMutation(
 }
 
 func (m *Meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
+	if group, err := m.GetCompactionChangeGroup(t); err != nil {
+		return err
+	} else if group != nil {
+		return nil // The output/group transaction already owns this mutation.
+	}
+
 	// Snapshot compaction protection exists to keep the sealed-segment list stable during
 	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
@@ -2929,6 +2985,9 @@ func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		}
 	}()
 	defer m.LockSegments(compactionSegmentIDs(t, result)...)()
+	if segments, applied, err := m.stagedCompactionResultLocked(t, result); applied || err != nil {
+		return segments, err
+	}
 	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
 		newSegments = appliedSegments
 		retErr = appliedErr
@@ -3265,6 +3324,21 @@ func (m *Meta) CompleteSortCompactionMutation(
 		segment.DroppedAt = uint64(time.Now().UnixNano())
 		mlog.Info(m.Ctx, "drop segment due to 0 rows", mlog.Int64("segmentID", segment.GetID()))
 	}
+	if handled, err := m.completeGroupSortLocked(t, segment); handled {
+		if err != nil {
+			return nil, err
+		}
+		return []*SegmentInfo{segment}, nil
+	}
+	// Import and clustering prepare their private sort chains before their
+	// enclosing producer registers the final publication group.
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() && !oldSegment.GetIsImporting() &&
+		(!oldSegment.GetCreatedByCompaction() || !oldSegment.GetIsInvisible()) {
+		if err := m.stageCompactionOutputsLocked(m.Ctx, t, []*SegmentInfo{segment}); err != nil {
+			return nil, err
+		}
+		return []*SegmentInfo{segment}, nil
+	}
 
 	cloned := oldSegment.Clone()
 	UpdateSegState(cloned, commonpb.SegmentState_Dropped)
@@ -3519,6 +3593,12 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 	if newSegment.GetNumOfRows() <= 0 {
 		newSegment.State = commonpb.SegmentState_Dropped
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())
+	}
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
+		if err := m.stageCompactionOutputsLocked(m.Ctx, t, []*SegmentInfo{newSegment}); err != nil {
+			return nil, err
+		}
+		return []*SegmentInfo{newSegment}, nil
 	}
 
 	binlogsIncrement := metastore.BinlogsIncrement{Segment: newSegment.SegmentInfo}

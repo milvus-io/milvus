@@ -885,7 +885,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 
 	meta.DrainStatsBuildChForTest()
 	defer meta.DrainStatsBuildChForTest()
-	err = SyncCopySegmentTask(task, resp, copyMeta, m, nil)
+	err = SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, nil)
 	s.NoError(err)
 	s.Equal([]UniqueID{2001}, meta.DrainStatsBuildChForTest(), "restored segments may still need stats the snapshot did not carry")
 
@@ -910,6 +910,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ctx := context.Background()
 	task := CreateTestCopyTask(100, 2001).(*Task)
 	copyMeta, m := NewCopySegmentTaskTestMeta(s.T(), task)
@@ -930,7 +931,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
 	// Copy completion no longer synchronously publishes the DataView; the
 	// SegmentMeta mutation commits and the async recompute converges the
 	// snapshot. Drive the same projection the queue worker would run.
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, nil)
+	err := SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, nil)
 	s.NoError(err)
 
 	segments, err := m.LoadableProjection(ctx, 100, nil)
@@ -952,7 +953,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_FailedResponseUpdatesTask
 	task := CreateTestCopyTask(100, 2001).(*Task)
 	copyMeta, _ := NewCopySegmentTaskTestMeta(s.T(), task)
 
-	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	err := SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
 		Reason: "worker failed",
@@ -969,7 +970,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_DefaultStateNoop() {
 	task := CreateTestCopyTask(100, 2001).(*Task)
 	copyMeta, _ := NewCopySegmentTaskTestMeta(s.T(), task)
 
-	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	err := SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 	}, copyMeta, nil, nil)
@@ -986,7 +987,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMa
 	err := m.AddSegment(ctx, NewTestCopySegment(2001))
 	s.NoError(err)
 
-	err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	err = SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{
@@ -1254,6 +1255,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnCompletion() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	collectionID := int64(1)
 	segmentID := int64(100)
 
@@ -1296,7 +1298,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt, nil)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
@@ -1304,7 +1306,71 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	s.False(updated.GetIsImporting())
 }
 
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_StagingAllowsL0() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	store := metacache.NewMetaStore(catalog)
+	mt := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(store), MetaStore: store}
+	mt.Segments.SetSegment(100, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 100, CollectionID: 1, PartitionID: 10, InsertChannel: "ch1",
+		State: commonpb.SegmentState_Importing, Level: datapb.SegmentLevel_L0, IsImporting: true,
+	}))
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, nil, nil, nil, nil)
+	s.Require().NoError(err)
+	task := CreateTestCopyTask(1, 100)
+	resp := &datapb.QueryCopySegmentResponse{
+		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 100}},
+	}
+	s.Require().NoError(SyncCopySegmentTask(ctx, task, resp, copyMeta, mt, nil))
+	segment := mt.GetSegment(ctx, 100)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.False(segment.GetIsImporting())
+	s.Nil(mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""))
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_StagesOnlyNonL0() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(s.T())
+	s.Require().NoError(err)
+	for id, level := range map[int64]datapb.SegmentLevel{100: datapb.SegmentLevel_L0, 101: datapb.SegmentLevel_L1} {
+		s.Require().NoError(mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 10, InsertChannel: "ch1",
+			State: commonpb.SegmentState_Importing, Level: level, IsImporting: true, NumOfRows: 10,
+		})))
+	}
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, nil, nil, nil, nil)
+	s.Require().NoError(err)
+	task := CreateTestCopyTask(1, 100).(*Task)
+	taskProto := proto.Clone(task.Task.Load()).(*datapb.CopySegmentTask)
+	taskProto.IdMappings = append(taskProto.IdMappings, &datapb.CopySegmentIDMapping{SourceSegmentId: 2, TargetSegmentId: 101, PartitionId: 10})
+	task.Task.Store(taskProto)
+	resp := &datapb.QueryCopySegmentResponse{
+		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 100}, {SegmentId: 101}},
+	}
+	s.Require().NoError(SyncCopySegmentTask(ctx, task, resp, copyMeta, mt, nil))
+	s.False(mt.GetSegment(ctx, 100).GetIsImporting())
+	s.False(mt.GetSegment(ctx, 100).GetIsInvisible())
+	s.True(mt.GetSegment(ctx, 101).GetIsInvisible())
+	group := mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), "")
+	s.Require().NotNil(group)
+	s.Equal([]int64{101}, group.NewSegmentIDs)
+}
+
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	collectionID := int64(1)
 	segmentID := int64(101)
 
@@ -1342,7 +1408,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt, nil)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
@@ -1352,6 +1418,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	meta.MockManifestIndexSubmissions(s.T())
 	collectionID := int64(1)
 	segmentID := int64(102)
@@ -1398,7 +1465,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt, nil)
 	s.Require().NoError(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
@@ -1467,7 +1534,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntry
 		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
 	}, nil).Build().UnPatch()
 
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
+	err := SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, im)
 	s.Require().Error(err)
 	s.ErrorIs(err, merr.ErrServiceInternal)
 	s.Contains(err.Error(), "2001", "the error must name the segment")
@@ -1496,7 +1563,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPubl
 		copiedManifestReviewEntry(),
 	}, nil).Build().UnPatch()
 
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
+	err := SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, im)
 	s.Require().NoError(err)
 
 	segment := m.GetSegment(ctx, 2001)
@@ -1532,7 +1599,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBef
 			return nil, merr.WrapErrIoFailedReason("must not be read")
 		}).Build().UnPatch()
 
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
+	err := SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, im)
 	s.Require().Error(err)
 	s.Contains(err.Error(), "path version")
 	s.Zero(manifestReads, "current worker acknowledgement must be used without read-back")
@@ -1651,7 +1718,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 				}},
 			}
 
-			s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m, dm.IndexMeta))
+			s.Require().NoError(SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, dm.IndexMeta))
 			if tc.enabled {
 				s.Equal(1, store.ReadCount, "artifact-bearing results must verify the dispatched index identity")
 			} else {
@@ -1727,7 +1794,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdI
 				task = copies.GetTask(ctx, task.GetTaskId()).(*Task)
 				reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 				defer reader.UnPatch()
-				s.Require().NoError(SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+				s.Require().NoError(SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 					State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 					SegmentResults: []*datapb.CopySegmentResult{{
 						SegmentId: 2001, ImportedRows: 100, Binlogs: MakeTestCopySegmentBinlogs(),
@@ -1794,7 +1861,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
+	err = SyncCopySegmentTask(context.TODO(), task, result, copyMeta, mt, nil)
 	s.Require().Error(err)
 	updated := mt.GetSegment(context.Background(), segmentID)
 	s.Require().NotNil(updated)
@@ -2220,7 +2287,7 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 					entry.IndexFileKeys = []string{"other.bin"}
 				}
 				defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
-				s.Error(SyncCopySegmentTask(task, resp, copyMeta, m, im))
+				s.Error(SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, im))
 				segment := m.GetSegment(context.Background(), 2001)
 				s.Equal(commonpb.SegmentState_Importing, segment.GetState())
 				s.False(segment.GetManifestHasIndex())
@@ -2288,6 +2355,8 @@ func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed
 	task, copies, m, im, resp := s.newCopiedManifestReadBackFixture()
 	original := resp.GetSegmentResults()[0]
 	for _, id := range []int64{2002, 2003} {
+		taskProto := task.(*Task).Task.Load()
+		taskProto.IdMappings = append(taskProto.IdMappings, &datapb.CopySegmentIDMapping{TargetSegmentId: id})
 		segment := m.GetSegment(context.Background(), 2001).Clone()
 		segment.ID = id
 		s.Require().NoError(m.AddSegment(context.Background(), segment))
@@ -2304,7 +2373,7 @@ func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed
 		return nil, merr.ErrServiceUnavailable
 	}).Build().UnPatch()
 	finished := make(chan error, 1)
-	go func() { finished <- SyncCopySegmentTask(task, resp, copies, m, im) }()
+	go func() { finished <- SyncCopySegmentTask(context.TODO(), task, resp, copies, m, im) }()
 	for range 2 {
 		select {
 		case <-started:

@@ -45,6 +45,8 @@ func (c *indexSortReadinessCatalog) AlterSegments(_ context.Context, segments []
 }
 
 func TestIndexServingReadinessSortTransition(t *testing.T) {
+	// This test asserts the legacy sort transition's immediate visibility.
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	for _, input := range []struct {
 		name  string
 		state commonpb.IndexState

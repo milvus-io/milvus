@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -3220,11 +3221,39 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
+	isNotCreated := broadcaster.IsBroadcastTaskNotCreated
 	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
+	if err := s.prepareImportPublication(ctx, job); err != nil {
+		return err
+	}
+	markedByAttempt := false
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
+		(s.meta != nil && len(s.meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
+		// Preparation may have registered groups long before they became READY.
+		// Persist the point of no return immediately before starting the WAL
+		// broadcast. Timeout and other failure updates share importMeta's lock
+		// with this action and cannot reclaim a possibly durable commit.
+		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			markedByAttempt = current.GetState() == internalpb.ImportJobState_Uncommitted && !current.GetCommitBroadcastStarted()
+			bulkimport.UpdateJobCommitBroadcastStarted(current)
+		}); err != nil {
+			return err
+		}
+		current := s.importMeta.GetJob(ctx, job.GetJobID())
+		if current == nil {
+			return merr.WrapErrServiceUnavailableMsg("import job %d disappeared before commit broadcast", job.GetJobID())
+		}
+		if current.GetState() == internalpb.ImportJobState_Committing || current.GetState() == internalpb.ImportJobState_Completed {
+			return nil
+		}
+		if current.GetState() != internalpb.ImportJobState_Uncommitted || !current.GetCommitBroadcastStarted() {
+			return merr.WrapErrServiceUnavailableMsg("import job %d became %s before commit broadcast", job.GetJobID(), current.GetState())
+		}
+	}
 
 	var opts []message.OptBuildBroadcast
 	if job.GetCommitByCoordinator() {
@@ -3244,6 +3273,20 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
+	if err != nil && markedByAttempt && isNotCreated(err) {
+		// Only the broadcaster's explicit pre-registration result proves that
+		// this attempt cannot have reached the WAL. A prior attempt or an
+		// ambiguous error must keep the fence for recovery.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if clearErr := s.importMeta.UpdateJob(cleanupCtx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			if current.GetState() == internalpb.ImportJobState_Uncommitted {
+				current.(*bulkimport.Job).CommitBroadcastStarted = false
+			}
+		}); clearErr != nil {
+			mlog.Warn(ctx, "failed to clear import broadcast marker after rejected task", mlog.FieldJobID(job.GetJobID()), mlog.Err(clearErr))
+		}
+	}
 	return err
 }
 
@@ -3412,6 +3455,10 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 			if state == internalpb.ImportJobState_Failed && job.GetReason() == bulkimport.ImportJobReasonAbortedByUser {
 				return merr.Success()
 			}
+			if job.GetCommitBroadcastStarted() {
+				return merr.Status(merr.WrapErrImportFailed(
+					fmt.Sprintf("job %d commit broadcast may have started, abort not allowed", req.GetJobId())))
+			}
 			// Committed states are truly terminal and cannot be rolled back.
 			if bulkimport.UnfailableJobStates.Contain(state) {
 				return merr.Status(merr.WrapErrImportFailed(
@@ -3451,6 +3498,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// reenter importMeta while updating segment visibility.
 	ids := bulkimport.GetImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
 	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		if job != nil {
+			if staged, err := s.stageImportChange(ctx, job, req.GetVchannel(), ids, req.GetCommitTimestamp()); staged {
+				return err
+			}
+		}
 		ops := make([]meta.UpdateOperator, 0, len(ids)*2)
 		for _, id := range ids {
 			ops = append(ops, meta.UpdateCommitTimestamp(id, req.GetCommitTimestamp()), meta.UpdateIsImporting(id, false))

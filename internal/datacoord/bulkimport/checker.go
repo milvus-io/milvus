@@ -550,7 +550,7 @@ func (c *Checker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
 
 	// Bound the WAL append / ack wait of the broadcast, so a stalled WAL or unavailable
 	// streamingnode becomes a transient status instead of parking the state-machine loop
-	// under the server-lifetime c.ctx (same pattern as checkGC).
+	// under the server-lifetime c.Ctx (same pattern as checkGC).
 	//
 	// This does NOT bound the resource-key acquire: the lock is ctx-insensitive (same as
 	// checkGC), so a wait behind a pending broadcast on the same collection ends only when
@@ -857,6 +857,10 @@ func (c *Checker) CheckCommittingJob(job ImportJob) {
 }
 
 func (c *Checker) CheckFailedJob(job ImportJob) {
+	if err := c.Meta.AbortFailedImportGroups(c.Ctx, job.GetJobID()); err != nil {
+		mlog.Warn(c.Ctx, "cannot reclaim failed import group", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+		return
+	}
 	c.tryFailingTasks(job)
 }
 
@@ -884,6 +888,12 @@ func (c *Checker) TryTimeoutJob(job ImportJob) {
 		internalpb.ImportJobState_Committing:
 		// Fast path on this tick's snapshot only; UpdateJobState enforces the
 		// rule against the current state under importMeta's lock.
+		return
+	}
+	// Prepared groups alone do not prove a WAL append was attempted. The
+	// durable job marker is set only after all groups pass readiness checks.
+	// UpdateJobState also guards a timeout racing the marker write.
+	if job.GetCommitBroadcastStarted() {
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
@@ -950,7 +960,7 @@ func (c *Checker) CheckGC(job ImportJob) {
 		if c.Hooks.RollbackImport != nil && c.Hooks.GetReplicationRole != nil &&
 			job.GetState() == internalpb.ImportJobState_Failed && !job.GetAutoCommit() {
 			// The check reaches the streaming balancer future, which blocks until the
-			// balancer is registered — under the server-lifetime c.ctx that would park
+			// balancer is registered — under the server-lifetime c.Ctx that would park
 			// the GC loop during the window before streamingcoord registers
 			// it (e.g. a restart recovering a job already past retention). Bound it like
 			// checkCollection does; a timeout is just another indeterminate status.
@@ -975,7 +985,7 @@ func (c *Checker) CheckGC(job ImportJob) {
 				//
 				// Bound the broadcast like the replication check above: it blocks in
 				// BlockUntilDone until every vchannel append succeeds, and under the
-				// server-lifetime c.ctx an unavailable streamingnode would park this
+				// server-lifetime c.Ctx an unavailable streamingnode would park this
 				// loop until shutdown. A timeout is just another transient status —
 				// keep the job and retry on the next GC tick. The resource-key lock on
 				// the broadcast path is still ctx-insensitive (making it fail-fast is a
