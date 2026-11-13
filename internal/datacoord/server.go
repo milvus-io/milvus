@@ -350,7 +350,7 @@ func (s *Server) Init() error {
 func (s *Server) initDataCoord() (initErr error) {
 	defer func() {
 		if initErr != nil && s.meta != nil {
-			s.meta.CloseManifestCommitExecutor()
+			s.meta.CloseManifestExecutors()
 		}
 	}()
 	mlog.Info(s.ctx, "DataCoord try to wait for MixCoord ready")
@@ -911,7 +911,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	defer func() {
 		if s.meta != recoveredMeta {
-			recoveredMeta.CloseManifestCommitExecutor()
+			recoveredMeta.CloseManifestExecutors()
 		}
 	}()
 	// Retry each recovery phase independently: a later metadata error must
@@ -1577,7 +1577,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	mlog.Info(s.ctx, "datacoord serverloop stopped")
 	if s.meta != nil {
-		s.meta.CloseManifestCommitExecutor()
+		s.meta.CloseManifestExecutors()
 	}
 	mlog.Warn(s.ctx, "datacoord stop successful")
 	return nil

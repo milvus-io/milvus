@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -56,9 +55,6 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	}{
 		{&Params.DataCoordCfg.EnableAutoCompaction, "false"},
 		{&Params.DataCoordCfg.EnableSortCompaction, "true"},
-		{&Params.DataCoordCfg.AutoUpgradeSegmentIndex, "false"},
-		{&Params.DataCoordCfg.ForceRebuildSegmentIndex, "false"},
-		{&Params.DataCoordCfg.ForceRebuildScalarSegmentIndex, "false"},
 		{&Params.DataCoordCfg.CompactionMaxTaskNum, "1"},
 		{&Params.DataCoordCfg.CompactionRateLimitTokens, "1"},
 		{&Params.DataCoordCfg.CompactionRateLimitInterval, "3600"},
@@ -82,12 +78,6 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(kv.Close)
 	catalog := kvdatacoord.NewCatalog(kv, "", "")
-	_, err = catalog.CreateCompactionTarget(ctx, &datapb.CompactionTarget{
-		TargetID: 300, Intent: datapb.TargetIntent_INTENT_INDEX_VERSION, TailLimit: -1,
-		ActivatedAtTS: 100, Enabled: proto.Bool(false), ConditionRevision: 1,
-		Properties: map[string]string{"vector_mode": "ABSENT", "scalar_mode": "ABSENT"},
-	}, nil)
-	require.NoError(t, err)
 	collection := &model.Collection{CollectionID: 1, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
 	require.NoError(t, rootcatalog.NewCatalog(kv).CreateCollection(ctx, collection, collection.UpdateTimestamp))
 	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
@@ -113,8 +103,8 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Revision: collection.UpdateTimestamp}
 	_, err = manager.Create(ctx, rewrite, scope, func() error { return nil })
 	require.NoError(t, err)
-	alloc.EXPECT().AllocID(mock.Anything).Return(200, nil).Once()
-	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(110), nil).Once()
+	standing, err := manager.SyncSort(ctx, meta.NewMockAllocator(t), true)
+	require.NoError(t, err)
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(120), nil).Once()
 	alloc.EXPECT().AllocN(int64(3)).Return(10_000, 10_003, nil).Once()
 
@@ -123,6 +113,15 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	inspector := NewCompactionInspector(segmentMeta, taskMeta, indexMeta, nil, nil, manager, nil, alloc, handler, nil, nil, index.NewTestVersionManager())
 	require.NoError(t, inspector.InitAdmission())
 	triggers := NewCompactionTriggerManager(alloc, handler, inspector, segmentMeta, indexMeta, taskMeta, nil, manager, index.NewTestVersionManager())
+	standingAllocator := allocator.NewMockAllocator(t)
+	nextID := int64(200)
+	standingAllocator.EXPECT().AllocID(mock.Anything).RunAndReturn(func(context.Context) (int64, error) {
+		nextID++
+		return nextID, nil
+	}).Maybe()
+	standingAllocator.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(110), nil).Maybe()
+	triggers.targetReconciler = targets.NewCompactionTargetReconciler(segmentMeta, indexMeta, manager, handler, standingAllocator)
+	triggers.targetReconciler.SetIndexVersionManager(index.NewTestVersionManager())
 	triggers.handleTicker(ctx, TargetTicker)
 
 	stored, err := catalog.ListCompactionTask(ctx)
@@ -153,7 +152,7 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	restarted, err := targets.NewCompactionTargetMeta(ctx, catalog)
 	require.NoError(t, err)
 	require.Equal(t, targets.StopSatisfied, restarted.GetCompactionTarget(rewrite.GetTargetID()).GetStopReason())
-	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, restarted.GetCompactionTarget(200).GetState())
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, restarted.GetCompactionTarget(standing.GetTargetID()).GetState())
 }
 
 func TestTargetSubmissionRotatesIndependentPlansAfterFailure(t *testing.T) {

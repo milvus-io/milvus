@@ -320,12 +320,14 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 	enableTestCompactionTargets(t)
 	cfg := &Params.DataCoordCfg
 	for key, value := range map[string]string{
-		cfg.EnableAutoCompaction.Key:           "true",
-		cfg.EnableSortCompaction.Key:           "true",
-		cfg.AutoUpgradeSegmentIndex.Key:        "false",
-		cfg.ForceRebuildSegmentIndex.Key:       "true",
-		cfg.ForceRebuildScalarSegmentIndex.Key: "false",
-		cfg.TargetVecIndexVersion.Key:          "2",
+		cfg.EnableAutoCompaction.Key:            "true",
+		cfg.StorageVersionCompactionEnabled.Key: "false",
+		cfg.StorageFormatCompactionEnabled.Key:  "false",
+		cfg.EnableSortCompaction.Key:            "true",
+		cfg.AutoUpgradeSegmentIndex.Key:         "false",
+		cfg.ForceRebuildSegmentIndex.Key:        "true",
+		cfg.ForceRebuildScalarSegmentIndex.Key:  "false",
+		cfg.TargetVecIndexVersion.Key:           "2",
 	} {
 		require.NoError(t, Params.Save(key, value))
 		t.Cleanup(func() { Params.Reset(key) })
@@ -340,6 +342,7 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
 	}
 	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{confirmed, sortTarget}, nil)
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, confirmed.GetTargetID()).Return(confirmed, nil)
 	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()

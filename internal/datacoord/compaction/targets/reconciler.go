@@ -71,6 +71,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	auto := Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 	segments := standingSegments(ctx, reconciler.meta)
 	standingRewrites := reconciler.selectableIndexRewrites(ctx, auto, segments)
+	standingRewrites = append(standingRewrites, reconciler.selectableStorageRewrites(ctx, auto, segments)...)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	var size SizeCondition

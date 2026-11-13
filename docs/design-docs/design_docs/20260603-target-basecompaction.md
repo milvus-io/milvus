@@ -102,6 +102,24 @@ Recovery and requeue of previously accepted tasks use the original admission.
 configure the shared bucket. The legacy `target.maxEventsPerReconcile` setting
 is deprecated.
 
+### Standing storage maintenance
+
+Storage Version and Storage Format keep separate cluster-wide identities and
+save their conditions independently. Both use global auto compaction and their
+own enable settings. Storage Version observes the published segment version
+against the V2 or V3 writer mode. Storage Format is enabled only for a valid
+V3 writer format and observes all insert group formats in the published
+manifest revision. DataCoord reuses successful reads of that revision.
+A missing manifest or a nonempty segment with no identifiable insert groups
+leaves the Format observation incomplete.
+
+Both sources can plan Mix tasks for healthy, flushed internal segments,
+including L2. The existing query node version requirement and TEXT downgrade
+restriction apply to execution. Each source reports its own remaining rows
+through Describe while compatible demands share physical work. Mix uses the
+writer settings read at dispatch and publishes its output version and
+manifest through the ordinary task path.
+
 ### Compatibility and verification
 
 `dataCoord.compaction.enableTargetBasedCompaction` is a default-off startup

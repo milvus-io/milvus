@@ -336,6 +336,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case record.GetIntent() == datapb.TargetIntent_INTENT_INDEX_VERSION && targets.HasStandingCondition(record) && record.GetEnabled():
 		rows, observationErr = targets.ObserveIndexVersion(ctx, s.meta, s.indexMeta, record)
 		observed = true
+	case targets.IsStandingStorage(record) && record.GetEnabled():
+		rows, observationErr = targets.ObserveStorage(ctx, s.meta, record)
+		observed = true
 	}
 	if observed && observationErr == nil {
 		target.RemainingRows = proto.Int64(rows)

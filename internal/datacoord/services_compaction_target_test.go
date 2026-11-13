@@ -698,14 +698,24 @@ func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
 	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{}))
 	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{IncludeSystem: true, DbName: "default"}))
 	active := &datapb.ListCompactionTargetsRequest{IncludeSystem: true, States: []datapb.TargetState{datapb.TargetState_TARGET_STATE_ACTIVE}}
-	standing := list(active)
-	require.Len(t, standing, 1)
-	id := standing[0].GetTargetId()
+	listSort := func() *datapb.CompactionTargetReadModel {
+		t.Helper()
+		var sort *datapb.CompactionTargetReadModel
+		for _, target := range list(active) {
+			if target.GetIntent() == datapb.TargetIntent_INTENT_SORT {
+				require.Nil(t, sort)
+				sort = target
+			}
+		}
+		require.NotNil(t, sort)
+		return sort
+	}
+	standing := listSort()
+	id := standing.GetTargetId()
 	require.NotZero(t, id)
-	require.True(t, standing[0].GetEnabled())
-	require.Nil(t, standing[0].RemainingRows)
-	require.Equal(t, datapb.TargetIntent_INTENT_SORT, standing[0].GetIntent())
-	require.Zero(t, standing[0].GetResource().GetCollectionId())
+	require.True(t, standing.GetEnabled())
+	require.Nil(t, standing.RemainingRows)
+	require.Zero(t, standing.GetResource().GetCollectionId())
 
 	describe := func() *datapb.CompactionTargetReadModel {
 		t.Helper()
@@ -730,19 +740,19 @@ func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
 	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 	restart()
 	require.Zero(t, runRound())
-	require.Len(t, records, 1)
+	require.NotNil(t, records[id])
 	disabled := describe()
 	require.False(t, disabled.GetEnabled())
 	require.NotNil(t, disabled.Enabled)
 	require.Nil(t, disabled.RemainingRows)
 	require.Zero(t, disabled.GetCheckedAt())
-	require.Equal(t, id, list(active)[0].GetTargetId())
+	require.Equal(t, id, listSort().GetTargetId())
 
 	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
 	restart()
 	s.meta.SetSegmentCompacting(10, false)
 	require.Equal(t, 1, runRound())
-	require.Len(t, records, 1)
+	require.NotNil(t, records[id])
 	require.True(t, describe().GetEnabled())
 }
 
@@ -761,6 +771,7 @@ func TestStandingSortConditionSaveFailureKeepsLastConfirmedDefinition(t *testing
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil).Once()
 	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Twice()
 	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 
 	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
 	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
