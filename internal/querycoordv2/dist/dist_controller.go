@@ -45,6 +45,8 @@ type ControllerImpl struct {
 	scheduler   task.Scheduler
 
 	notifyFunc NotifyDelegatorChanges
+
+	triggerTargetCheck TriggerUpdateTargetVersion
 }
 
 func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
@@ -54,7 +56,7 @@ func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
 		log.Info("node has started", zap.Int64("nodeID", nodeID))
 		return
 	}
-	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.notifyFunc)
+	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.notifyFunc, dc.triggerTargetCheck)
 	dc.handlers[nodeID] = h
 }
 
@@ -76,6 +78,9 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 		wg.Add(1)
 		go func(handler *distHandler) {
 			defer wg.Done()
+			// Fetch and apply under the handler's lock, so this does not interleave with its pull loop.
+			handler.mu.Lock()
+			defer handler.mu.Unlock()
 			resp, err := handler.getDistribution(ctx)
 			if err != nil {
 				log.Warn("SyncAll come across err when getting data distribution", zap.Error(err))
@@ -103,6 +108,7 @@ func NewDistController(
 	targetMgr meta.TargetManagerInterface,
 	scheduler task.Scheduler,
 	notifyFunc NotifyDelegatorChanges,
+	triggerTargetCheck TriggerUpdateTargetVersion,
 ) *ControllerImpl {
 	return &ControllerImpl{
 		handlers:    make(map[int64]*distHandler),
@@ -112,5 +118,7 @@ func NewDistController(
 		targetMgr:   targetMgr,
 		scheduler:   scheduler,
 		notifyFunc:  notifyFunc,
+
+		triggerTargetCheck: triggerTargetCheck,
 	}
 }

@@ -54,7 +54,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	info := nodeMgr.Get(leader.ID)
 	if info == nil {
 		err := merr.WrapErrNodeOffline(leader.ID)
-		log.Info("leader is not available", zap.Error(err))
+		log.RatedInfo(10, "leader is not available", zap.Error(err))
 		return merr.Wrap(err, "leader not available")
 	}
 
@@ -78,7 +78,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 		info := nodeMgr.Get(version.GetNodeID())
 		if info == nil {
 			err := merr.WrapErrNodeOffline(leader.ID)
-			log.Info("leader is not available due to QueryNode unavailable",
+			log.RatedInfo(10, "leader is not available due to QueryNode unavailable",
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
 			return err
