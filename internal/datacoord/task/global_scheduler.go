@@ -333,7 +333,7 @@ func (s *globalTaskScheduler) schedule() {
 		// otherwise pay for the walk twice.
 		//
 		// A family that cannot resolve its inputs yet answers with an upper
-		// bound, not the floor, so the task is always placeable. Waiting for an
+		// bound, not the floor, and is placed when capacity fits. Waiting for an
 		// exact price instead would strand any task whose inputs are gone for
 		// good: such a task can never resolve, and CreateTaskOnWorker -- the only
 		// code that retires it -- sits behind this point.

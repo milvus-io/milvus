@@ -43,10 +43,8 @@ const (
 //     filter, cpu only ranks;
 //   - workers that do not are placed by the pre-existing slot max-heap.
 //
-// A worker that reports cpu/memory is still gated by its scalar slots, with
-// the heap's own rule (slotAdmits), matching master's placement rule while
-// preserving 3.0's existing worker execution pools and slot accounting.
-// Memory then decides among the workers whose slots admit the task.
+// A priced task uses memory admission on a resource-reporting worker. Scalar
+// slots only admit unpriced tasks and tasks placed on legacy workers.
 //
 // Nothing gets worse for a task: one that finds no home in the first tier
 // falls through to the tier that existed before.
@@ -153,94 +151,44 @@ func (p *nodePicker) pick(d demand) int64 {
 	if nodeID, ok := p.pickByResource(d); ok {
 		return nodeID
 	}
-	if nodeID := pickNodeFromHeap(p.heap, d.slot); nodeID != NullNodeID {
-		return nodeID
-	}
-	// No worker of either tier can take it as it stands. Only a task that is
-	// larger than any resource-reporting worker even when empty is dispatched
-	// anyway: for it, waiting never helps.
-	return p.pickOversized(d)
-}
-
-// slotAdmits is the slot heap's rule applied to one dimensioned worker: a
-// task that asks for no slot always fits; otherwise the worker must have a
-// slot left. A task asking for more slots than any dimensioned worker has
-// left is still admitted by the worker with the most (see pickByResource), as
-// the heap admits it best-effort on its most-available node.
-func (n *resourceNode) slotAdmits(taskSlot int64) bool {
-	return taskSlot <= 0 || n.availableSlots > 0
+	return pickNodeFromHeap(p.heap, d.slot)
 }
 
 // pickByResource returns ok=false when no resource-reporting worker can hold
 // the task now, so the caller falls through to the scalar tier.
 //
-// Memory and slots are the hard filters; cpu only ranks. Among the workers
-// whose slots and memory both admit the task, those with taskSlot slots left
-// are preferred; only when none has them does the task go best-effort to the
-// fitting worker with the most slots left, which mirrors the heap.
+// Priced tasks use memory as the only hard filter and CPU to rank. Unpriced
+// tasks retain slot admission and ranking, including on upgraded workers.
 func (p *nodePicker) pickByResource(d demand) (int64, bool) {
 	var (
 		best      *resourceNode
 		bestScore = math.Inf(-1)
-		// bestEffort is the fitting worker with the most slots left, used only
-		// when no fitting worker has taskSlot slots.
-		bestEffort *resourceNode
 	)
-	taskSlot := d.slot
 	for _, n := range p.nodes {
 		req := d.on(n)
-		if n.availableMemory < req.Memory || !n.slotAdmits(taskSlot) {
-			// Memory gates because exceeding it kills the process rather than
-			// slowing it down; slots gate because the worker rejects work
-			// beyond them.
-			continue
-		}
-		if taskSlot > 0 && n.availableSlots < taskSlot {
-			if bestEffort == nil || n.availableSlots > bestEffort.availableSlots {
-				bestEffort = n
+		var score float64
+		if req.IsZero() {
+			// An old coordinator or task family has no memory price. Keep its
+			// original slot admission and spreading, rather than treating it as free.
+			if d.slot > 0 && n.availableSlots <= 0 {
+				continue
 			}
-			continue
+			score = float64(n.availableSlots)
+		} else {
+			if n.availableMemory < req.Memory {
+				continue
+			}
+			score = n.score(req)
 		}
-		if s := n.score(req); s > bestScore {
-			best, bestScore = n, s
+		if score > bestScore {
+			best, bestScore = n, score
 		}
-	}
-	if best == nil {
-		best = bestEffort
 	}
 	if best == nil {
 		return NullNodeID, false
 	}
-	best.charge(taskSlot, d.on(best))
+	best.charge(d.slot, d.on(best))
 	return best.nodeID, true
-}
-
-// pickOversized dispatches a task whose memory exceeds every
-// resource-reporting worker's total, so no amount of waiting can make it fit.
-// It goes to the worker with the most free memory among those whose slots
-// admit it; it is never sent to a worker that has no free memory at all, or no
-// slot left. A task that would fit some worker's total memory but not its
-// current free memory waits instead.
-func (p *nodePicker) pickOversized(d demand) int64 {
-	for _, n := range p.nodes {
-		if d.on(n).Memory <= n.totalMemory {
-			return NullNodeID
-		}
-	}
-	var emptiest *resourceNode
-	for _, n := range p.nodes {
-		if n.availableMemory <= 0 || !n.slotAdmits(d.slot) {
-			continue
-		}
-		if emptiest == nil || n.availableMemory > emptiest.availableMemory {
-			emptiest = n
-		}
-	}
-	if emptiest == nil {
-		return NullNodeID
-	}
-	emptiest.charge(d.slot, d.on(emptiest))
-	return emptiest.nodeID
 }
 
 // nodeRemaining is what one resource-reporting worker has left after the

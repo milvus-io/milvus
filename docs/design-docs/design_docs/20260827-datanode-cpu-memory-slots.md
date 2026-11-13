@@ -104,10 +104,9 @@ see.
 
 Known gap, a follow-up: clustering compaction and analyze are bounded only by
 their input, not by the machine share the worker actually caps them at
-(`memoryBufferRatio`, `maxTrainSizeRatio`). One larger than every worker is
-dispatched as oversized and booked in full, so that worker reports no free
-memory until the task ends; on a single DataNode or in standalone nothing else
-is placed meanwhile.
+(`memoryBufferRatio`, `maxTrainSizeRatio`). If the resulting estimate exceeds
+every worker's available memory, dispatch waits, including on empty workers.
+As with any task that does not fit, this can hold up tasks behind it.
 
 | task | CPU | memory | mirrors |
 |---|---|---|---|
@@ -187,9 +186,9 @@ when one file fails, or that is dropped (`DropImport` after its job failed, or
 a user abort) while its other readers still run, therefore keeps its whole
 booking -- read buffers and in-flight sync alike -- until they return.
 
-Every memory estimate is clamped to at least `minTaskMemory` (64MB), and every
-answer is placeable: the scheduler never waits for a better number. A task that
-cannot be priced exactly answers `(resource, false)`, and the `false` only
+Every memory estimate is clamped to at least `minTaskMemory` (64MB).
+The scheduler uses inexact answers immediately, subject to memory admission.
+A task that cannot be priced exactly answers `(resource, false)`, and the `false` only
 stops the answer from being cached. Two cases are priced differently:
 
 - **inputs still resolving** (a collection schema not cached yet after a
@@ -250,17 +249,16 @@ recorded size comes from `meta.SegmentInfo.RecordedFieldSize`), in this order:
 Steps 2 and 3 are capped at the segment size: one field never holds more than
 its segment. The cap matters because a schema bound is `rows x` the per-row
 limit, which for a `varchar(65535)` or a JSON field (64KB per value) is orders
-of magnitude above the data. Uncapped, such a task exceeds every worker, is
-dispatched as oversized, and the worker books all of it and reports no free
-memory for the task's whole run.
+of magnitude above the data. Uncapped, such a task can exceed every worker and
+block dispatch until the estimate or worker capacity changes.
 
 When meta has neither positive size statistics nor binlogs, that cap itself is
 an estimate: `EstimateSegmentSize` deliberately uses rows x
 `typeutil.EstimateSizePerRecord(schema)`. As discussed in the earlier review,
 the task memory formulas are already conservative, with expansion factors and
 a memory floor, so this fallback keeps average per-record sizes rather than
-schema maxima that can serialize work through the oversized path. This is an
-accepted estimation trade-off, not a strict upper-bound guarantee for every
+schema maxima that can prevent dispatch by exceeding every worker's memory.
+This is an accepted estimation trade-off, not a strict upper-bound guarantee for every
 variable-width value. `EstimateMaxSizePerRecord` also still uses heuristics for
 text/JSON/array/geometry and sparse vectors. Recording actual field sizes
 remains a follow-up; this change keeps the existing fallback.
@@ -365,40 +363,25 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
 
 ## DataCoord picker (`internal/datacoord/task/node_picker.go`)
 
-Same rules as PR #52561, implemented thinner:
+- A priced task on a worker reporting `total_memory > 0` uses the two
+  dimensions. Skip only when `available_memory < req.Memory`. CPU never
+  refuses; scalar slots neither gate nor reorder this tier.
+- Rank fitting workers by
+  `0.6 x memFrac + 0.25 x cpuFrac + 0.15 x (1 - |memFrac - cpuFrac|)`,
+  where each fraction is what remains after the task relative to the total.
+  Charge CPU and memory immediately so later picks in the round see the
+  reservation. Scalar slots are still charged for compatibility tasks in the
+  same round, but exhausting them does not stop priced work.
+- A task without a resource price retains scalar slot admission and ranking,
+  including on upgraded workers. Every current DataCoord task family floors
+  its memory at `minTaskMemory`, so this is a compatibility fallback.
+- Workers without a resource report use the existing slot max-heap. If no
+  reporting worker fits, try that compatibility tier before returning
+  `NullNodeID`.
+- A task exceeding every reporting worker's total memory waits too. There is
+  no oversized dispatch exception: memory admission may not be bypassed.
+  Such a task needs its estimate or worker capacity to change before it fits.
 
-- A worker that reports `total_memory > 0` is placed on the two dimensions;
-  any other worker is placed by the existing max-heap, which is unchanged.
-- Two-dimensional placement: skip a worker whose
-  `available_memory < req.Memory`, and a worker whose slots do not admit the
-  task by the heap's own rule (a task asking for slots needs the worker to have
-  at least one left). This preserves the existing scalar slot budget on the
-  resource-aware tier too, matching master's placement rule. CPU never refuses. Among the admitted workers, those with `taskSlot` slots left
-  are preferred; when none has them the task goes, best-effort like the heap,
-  to the admitted worker with the most slots left.
-  Rank the rest by `0.6 x memFrac + 0.25 x cpuFrac + 0.15 x (1 - |memFrac - cpuFrac|)`
-  where each fraction is what remains after the task, as a fraction of the
-  worker's total. Take the highest; charge cpu, memory and slots on the picked
-  worker so later picks in the round see it.
-- Nothing fits: fall through to the scalar heap first ("no dimensioned home →
-  scalar heap" outranks the oversized rule). Only when the scalar heap has no
-  room either does the oversized rule apply: if `req.Memory` (bounded per node
-  for a `NodeMemoryBounded` task, which therefore never takes this path while
-  share x `machine_memory` <= `total_memory` -- for an import, while
-  `dataNode.import.memoryLimitPercentage x importMemoryFactor` is at most 100%,
-  or at most `standaloneSlotFactor` in standalone; the default is 10% x 2,
-  under the default 0.25) exceeds the `total_memory` of every worker, dispatch to the dimensioned worker with the most
-  `available_memory` (waiting never helps such a task); otherwise return
-  `NullNodeID`. The slot rule applies here too. Only a worker that
-  still has free memory takes an oversized task: otherwise a round of them piles
-  onto whichever worker is least loaded, each charging memory that worker does
-  not have, and every other family then sees a cluster with nothing free.
-- A task with a zero requirement (family that does not estimate) is placed on
-  the dimensioned tier when one exists — the memory filter passes trivially —
-  and only reaches the scalar heap when no dimensioned worker has free memory.
-  Sending it "straight to the scalar heap" would starve it in an
-  all-dimensioned cluster. Unreachable in practice, since every family floors
-  its memory at `minTaskMemory`.
 - A `NullNodeID` ends the round, exactly as the slot heap always has: the task
   goes back on the queue and nothing behind it is placed this round. The queue
   is ordered by task ID, so the oldest waiting task keeps its place at the head,
@@ -468,8 +451,9 @@ Same rules as PR #52561, implemented thinner:
   non-empty `Stats` (the shape PR #52561's review missed).
 - Ledger: Accept/Release/Snapshot, negative clamp, standalone discount
   (mockey on `hardware.GetCPUNum` / `hardware.GetMemoryCount`).
-- Picker: memory filter, score ordering, in-round charging, oversized to the
-  emptiest worker, all-old-workers fall back to the heap, mixed cluster.
+- Picker: memory filter, CPU/slot exhaustion with spare memory, score ordering,
+  in-round charging, oversized requests waiting, unpriced slot compatibility,
+  all-old-workers falling back to the heap, and mixed clusters.
 - Executors: ledger and `usingSlots` move together on enqueue and completion.
 - Coverage target >= 90% on touched code; run with
   `-tags dynamic,test -gcflags="all=-N -l"`.
