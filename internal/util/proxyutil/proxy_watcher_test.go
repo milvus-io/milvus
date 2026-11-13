@@ -172,13 +172,12 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 func TestProxyManager_StopInterruptsReWatchRetry(t *testing.T) {
 	paramtable.Init()
 
-	// Every re-watch attempt fails with a retriable auth-token error, so the
-	// bounded retry would otherwise sleep through its full backoff budget on
-	// the component ctx. Stop() closes closeCh, which must abort the retry
-	// promptly and let startWatchEtcd return quietly instead of stalling
-	// Stop() (or panicking after the retries are exhausted).
-	mockWatch := mockey.Mock((*ProxyWatcher).WatchProxy).Return(rpctypes.ErrInvalidAuthToken).Build()
-	defer mockWatch.UnPatch()
+	// Every re-list fails with a retriable auth-token error, so recovery keeps
+	// retrying until etcd recovers. Stop() cancels the watcher ctx, which must
+	// abort the retry promptly and let startWatchEtcd return quietly instead
+	// of stalling Stop() or panicking.
+	mockList := mockey.Mock((*ProxyWatcher).getSessionsOnEtcd).Return(nil, int64(0), rpctypes.ErrInvalidAuthToken).Build()
+	defer mockList.UnPatch()
 
 	pm := NewProxyWatcher(nil)
 
@@ -194,7 +193,7 @@ func TestProxyManager_StopInterruptsReWatchRetry(t *testing.T) {
 
 	start := time.Now()
 	assert.NotPanics(t, func() {
-		pm.startWatchEtcd(context.Background(), watchCh)
+		pm.startWatchEtcd(pm.ctx, watchCh)
 	})
 	assert.Less(t, time.Since(start), 5*time.Second)
 }
