@@ -18,12 +18,15 @@ package dql
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -243,6 +246,8 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 	for _, req := range []*internalpb.RetrieveRequest{
 		{},
 		{Limit: 1, IsCount: true},
+		{Limit: 1, ReduceType: 99},
+		{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp(99)}}},
 		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}, OrderByFields: []*planpb.OrderByField{{FieldId: 101}}},
 	} {
 		query := newQueryViewQueryTask(t, legacy, 1)
@@ -251,6 +256,20 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 		query.request.QueryParams = search.request.SearchParams
 		require.NoError(t, query.Execute(t.Context()))
 		require.False(t, legacy.lastQueryRequest.AllowStreaming)
+	}
+	for _, hybrid := range []bool{false, true} {
+		search := newQueryViewSearchTask(t, legacy, 1)
+		search.IsIterator, search.IsAdvanced = false, hybrid
+		search.GroupByFieldIds = []int64{100}
+		search.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
+		if hybrid {
+			search.rerankMeta = &legacyRerankMeta{}
+			search.SubReqs = []*internalpb.SubSearchRequest{{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
+			search.request.SubReqs = []*milvuspb.SubSearchRequest{{FunctionChains: search.request.FunctionChains}}
+			search.request.FunctionChains = nil
+		}
+		require.NoError(t, search.Execute(t.Context()))
+		require.False(t, legacy.lastSearchRequest.AllowStreaming)
 	}
 }
 
@@ -262,10 +281,95 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 		old := cfg.GetValue()
 		t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(cfg.Key, old)) })
 		require.NoError(t, paramtable.Get().Save(cfg.Key, strconv.FormatBool(enabled)))
-		query.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+		prepared := queryStageTestTask()
+		require.NoError(t, prepared.createPlan(t.Context()))
+		query.request.FunctionChains, query.plan = prepared.request.FunctionChains, prepared.plan
+		require.NotEmpty(t, query.plan.GetQuerynodeFunctionChains())
 		require.NoError(t, query.Execute(t.Context()))
 		require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
 	}
+}
+
+func TestStreamingEligibilitySchemaCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		message   proto.Message
+		reduction string
+		other     string
+	}{
+		{
+			message: &internalpb.RetrieveRequest{},
+			reduction: `serialized_expr_plan output_fields_id limit is_count reduce_type is_iterator
+				group_by_field_ids aggregates order_by_fields`,
+			other: `base reqID dbID collectionID partitionIDs mvcc_timestamp guarantee_timestamp timeout_timestamp
+				ignoreGrowing iteration_extension_reduce_rate username reduce_stop_for_best consistency_level
+				collection_ttl_timestamps entity_ttl_physical_time query_label pk_filter schema_version`,
+		},
+		{
+			message: &internalpb.SearchRequest{},
+			reduction: `serialized_expr_plan output_fields_id nq topk metricType sub_reqs is_advanced offset
+				group_by_field_id group_size is_topk_reduce is_recall_evaluation is_iterator search_type group_by_field_ids`,
+			other: `base reqID dbID collectionID partitionIDs dsl placeholder_group dsl_type mvcc_timestamp
+				guarantee_timestamp timeout_timestamp ignoreGrowing username consistency_level field_id analyzer_name
+				collection_ttl_timestamps entity_ttl_physical_time pk_filter schema_version`,
+		},
+		{
+			message:   &internalpb.SubSearchRequest{},
+			reduction: `serialized_expr_plan nq topk offset metricType group_by_field_id group_size search_type skip`,
+			other:     `dsl placeholder_group dsl_type partitionIDs field_id ignore_growing analyzer_name`,
+		},
+		{
+			message:   &planpb.PlanNode{},
+			reduction: `vector_anns query output_field_ids dynamic_fields scorers score_option querynode_function_chains`,
+			other:     `predicates plan_options namespace`,
+		},
+		{
+			message:   &planpb.QueryPlanNode{},
+			reduction: `is_count limit group_by_field_ids aggregates order_by_fields query_iterator_cursor`,
+			other:     `predicates`,
+		},
+		{
+			message: &planpb.QueryInfo{},
+			reduction: `topk metric_type search_params round_decimal group_by_field_id group_size strict_group_size
+				hints search_iterator_v2_info json_path json_type strict_cast group_by_field_ids`,
+			other: `materialized_view_involved bm25_avgdl query_field_id search_topk_ratio refine_topk_ratio`,
+		},
+		{
+			message:   &milvuspb.QueryRequest{},
+			reduction: `output_fields query_params function_chains`,
+			other: `base db_name collection_name expr partition_names travel_timestamp guarantee_timestamp
+				not_return_all_meta consistency_level use_default_consistency expr_template_values namespace rls_principal skip_rls`,
+		},
+		{
+			message:   &milvuspb.SearchRequest{},
+			reduction: `output_fields search_params nq sub_reqs function_score search_aggregation function_chains`,
+			other: `base db_name collection_name partition_names dsl placeholder_group ids dsl_type travel_timestamp
+				guarantee_timestamp not_return_all_meta consistency_level use_default_consistency search_by_primary_keys
+				expr_template_values namespace highlighter rls_principal skip_rls`,
+		},
+		{
+			message:   &milvuspb.SubSearchRequest{},
+			reduction: `search_params nq function_chains`,
+			other:     `dsl placeholder_group dsl_type expr_template_values namespace`,
+		},
+	} {
+		descriptor := tc.message.ProtoReflect().Descriptor()
+		t.Run(string(descriptor.FullName()), func(t *testing.T) {
+			fields := descriptor.Fields()
+			names := make([]string, fields.Len())
+			for i := range names {
+				names[i] = string(fields.Get(i).Name())
+			}
+			require.ElementsMatch(t, strings.Fields(tc.reduction+" "+tc.other), names,
+				"Review new fields for streaming compatibility and classify them as reduction-related or independent; update gate/parity tests where needed")
+		})
+	}
+	require.Equal(t, map[int32]string{0: "sum", 1: "count", 2: "avg", 3: "min", 4: "max"}, planpb.AggregateOp_name)
+	require.Equal(t, map[int32]string{0: "DEFAULT", 1: "PURE_ANN_SEARCH_NO_FILTER", 2: "PURE_ANN_SEARCH_WITH_FILTER"}, internalpb.SearchType_name)
+	require.Equal(t, map[int32]string{
+		0: "FunctionChainStageUnspecified", 1: "FunctionChainStageIngestion", 2: "FunctionChainStagePreProcess",
+		3: "FunctionChainStageL0Rerank", 4: "FunctionChainStageL1Rerank", 5: "FunctionChainStageL2Rerank",
+		6: "FunctionChainStagePostProcess", 7: "FunctionChainStageQueryScan",
+	}, schemapb.FunctionChainStage_name)
 }
 
 func TestStreamingConfigLeavesRetainedPlansOnBatch(t *testing.T) {

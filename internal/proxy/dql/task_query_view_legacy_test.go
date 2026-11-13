@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
@@ -69,6 +70,7 @@ func TestQuerySupportsStreamingReduce(t *testing.T) {
 		{name: "unlimited", req: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited}, want: true},
 		{name: "limited", req: &internalpb.RetrieveRequest{Limit: 1}, want: true},
 		{name: "ordered", req: &internalpb.RetrieveRequest{Limit: 1, OrderByFields: order}, want: true},
+		{name: "ordered iterator", req: &internalpb.RetrieveRequest{Limit: 1, OrderByFields: order, IsIterator: true}},
 		{name: "unlimited ordered", req: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, OrderByFields: order}},
 		{name: "grouped ordered missing limit", req: &internalpb.RetrieveRequest{GroupByFieldIds: []int64{101}, OrderByFields: order}},
 		{name: "grouped ordered", req: &internalpb.RetrieveRequest{Limit: 1, GroupByFieldIds: []int64{101}, OrderByFields: order}, want: true},
@@ -84,6 +86,61 @@ func TestQuerySupportsStreamingReduce(t *testing.T) {
 	for _, op := range []planpb.AggregateOp{planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max} {
 		task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: op, FieldId: 101}}}}
 		require.True(t, task.supportsStreamingReduce())
+	}
+}
+
+func TestQueryStreamingEligibilityChecksEveryFeature(t *testing.T) {
+	for _, grouped := range []bool{false, true} {
+		for _, tc := range []struct {
+			name   string
+			change func(*QueryTask)
+			want   bool
+		}{
+			{name: "plain", want: true},
+			{name: "in order", want: true, change: func(task *QueryTask) { task.ReduceType = int32(reduce.IReduceInOrder) }},
+			{name: "in order for best", want: true, change: func(task *QueryTask) { task.ReduceType = int32(reduce.IReduceInOrderForBest) }},
+			{name: "unknown reduce type", change: func(task *QueryTask) { task.ReduceType = 99 }},
+			{name: "unknown aggregate", change: func(task *QueryTask) {
+				task.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp(99)}}
+			}},
+			{name: "nil aggregate", change: func(task *QueryTask) { task.Aggregates = []*planpb.Aggregate{nil} }},
+			{name: "normalized AVG", want: true, change: func(task *QueryTask) {
+				task.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}, {Op: planpb.AggregateOp_count, FieldId: 101}}
+			}},
+			{name: "unnormalized AVG", change: func(task *QueryTask) {
+				task.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_avg, FieldId: 101}}
+			}},
+			{name: "QueryScan", want: !grouped, change: func(task *QueryTask) {
+				task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+			}},
+			{name: "unknown chain stage", change: func(task *QueryTask) {
+				task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
+			}},
+			{name: "nil chain", change: func(task *QueryTask) { task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{nil} }},
+			{name: "QueryScan with iterator", change: func(task *QueryTask) {
+				task.IsIterator = true
+				task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+			}},
+			{name: "QueryScan with ORDER BY", change: func(task *QueryTask) {
+				task.OrderByFields = []*planpb.OrderByField{{FieldId: 101}}
+				task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+			}},
+			{name: "QueryScan with aggregate", change: func(task *QueryTask) {
+				task.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}}
+				task.plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+			}},
+		} {
+			t.Run(fmt.Sprintf("grouped=%v/%s", grouped, tc.name), func(t *testing.T) {
+				task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: 10}, plan: &planpb.PlanNode{}}
+				if grouped {
+					task.GroupByFieldIds = []int64{100}
+				}
+				if tc.change != nil {
+					tc.change(task)
+				}
+				require.Equal(t, tc.want, task.supportsStreamingReduce())
+			})
+		}
 	}
 }
 

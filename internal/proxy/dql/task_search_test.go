@@ -5496,6 +5496,27 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		}
 	}
 
+	for _, grouped := range []bool{false, true} {
+		for _, ordered := range []bool{false, true} {
+			t.Run(fmt.Sprintf("empty_function_score/grouped=%t/ordered=%t", grouped, ordered), func(t *testing.T) {
+				request := newRequest()
+				request.FunctionScore = &schemapb.FunctionScore{}
+				if grouped {
+					request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+				}
+				if ordered {
+					request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+				}
+				task := newTask(request)
+				require.NoError(t, task.initSearchRequest(ctx))
+				require.Nil(t, task.rerankMeta)
+				assert.Equal(t, grouped, task.supportsStreamingReduce())
+				task.SearchType = internalpb.SearchType(-1)
+				assert.False(t, task.supportsStreamingReduce())
+			})
+		}
+	}
+
 	t.Run("ordinary search initializes function chain rerank meta", func(t *testing.T) {
 		task := newTask(newFunctionChainRequest())
 

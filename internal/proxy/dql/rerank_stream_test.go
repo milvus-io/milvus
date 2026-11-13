@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -184,6 +185,94 @@ func TestHybridRerankStreamingEligibility(t *testing.T) {
 			}
 			require.Equal(t, tc.want, task.supportsStreamingReduce())
 		})
+	}
+}
+
+func TestSearchStreamingEligibilityChecksEveryFeature(t *testing.T) {
+	for _, shape := range []string{"plain", "grouped", "aggregation", "iterator"} {
+		for _, tc := range []struct {
+			name   string
+			change func(*SearchTask)
+			want   bool
+		}{
+			{name: "unknown search type", change: func(task *SearchTask) { task.SearchType = internalpb.SearchType(99) }},
+			{name: "nil chain", change: func(task *SearchTask) { task.request.FunctionChains = []*schemapb.FunctionChain{nil} }},
+			{name: "unknown chain stage", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
+			}},
+			{name: "unprepared L2", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{l2LimitFunctionChain(2)}
+			}},
+			{name: "L0", want: shape != "iterator", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{l0FunctionChain()}
+			}},
+			{name: "L1", want: shape != "iterator" && shape != "aggregation", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			}},
+			{name: "L2", want: shape != "iterator", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{l2LimitFunctionChain(2)}
+				task.rerankMeta = &functionChainRerankMeta{}
+			}},
+			{name: "rerank with ORDER BY", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{l2LimitFunctionChain(2)}
+				task.rerankMeta, task.orderByFields = &functionChainRerankMeta{}, []OrderByField{{FieldID: 101}}
+			}},
+		} {
+			t.Run(shape+"/"+tc.name, func(t *testing.T) {
+				task := &SearchTask{SearchRequest: &internalpb.SearchRequest{}, request: &milvuspb.SearchRequest{}}
+				if shape == "grouped" || shape == "aggregation" {
+					task.GroupByFieldIds = []int64{100}
+				}
+				if shape == "aggregation" {
+					task.aggCtx = &search_agg.SearchAggregationContext{}
+				}
+				task.IsIterator = shape == "iterator"
+				tc.change(task)
+				require.Equal(t, tc.want, task.supportsStreamingReduce())
+			})
+		}
+	}
+}
+
+func TestHybridStreamingEligibilityChecksEverySubSearch(t *testing.T) {
+	for _, searchType := range []internalpb.SearchType{
+		internalpb.SearchType_DEFAULT, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+	} {
+		for _, tc := range []struct {
+			name   string
+			change func(*SearchTask)
+			want   bool
+		}{
+			{name: "L0 L1", want: true},
+			{name: "nil sub-search chain", change: func(task *SearchTask) { task.request.SubReqs[1].FunctionChains = []*schemapb.FunctionChain{nil} }},
+			{name: "unknown sub-search stage", change: func(task *SearchTask) {
+				task.request.SubReqs[1].FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
+			}},
+			{name: "sub-search L2", change: func(task *SearchTask) {
+				task.request.SubReqs[1].FunctionChains = []*schemapb.FunctionChain{l2LimitFunctionChain(2)}
+			}},
+			{name: "unknown sub-search type", change: func(task *SearchTask) { task.SubReqs[1].SearchType = internalpb.SearchType(99) }},
+			{name: "top-level L0", change: func(task *SearchTask) { task.request.FunctionChains = []*schemapb.FunctionChain{l0FunctionChain()} }},
+			{name: "unknown top-level stage", change: func(task *SearchTask) {
+				task.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
+			}},
+		} {
+			t.Run(searchType.String()+"/"+tc.name, func(t *testing.T) {
+				task := &SearchTask{
+					SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{
+						{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}, {SearchType: searchType},
+					}},
+					request: &milvuspb.SearchRequest{SubReqs: []*milvuspb.SubSearchRequest{
+						{}, {FunctionChains: []*schemapb.FunctionChain{l0FunctionChain(), l1LimitFunctionChain(2)}},
+					}},
+					rerankMeta: &legacyRerankMeta{}, queryInfos: []*planpb.QueryInfo{{}, {}},
+				}
+				if tc.change != nil {
+					tc.change(task)
+				}
+				require.Equal(t, tc.want, task.supportsStreamingReduce())
+			})
+		}
 	}
 }
 
