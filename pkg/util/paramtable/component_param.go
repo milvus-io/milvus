@@ -7090,7 +7090,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Version:      "3.0.1",
 		DefaultValue: "0",
 		Doc: `Soft cap on pending and running compaction tasks. Concurrent submissions can briefly exceed it.
-Sort tasks required by an admitted clustering task may pass this cap while still using the shared bucket and queue.
+Sort tasks required by an admitted import or clustering task may pass this cap while still using the shared bucket and queue.
 0 or a negative value means unlimited.`,
 		Export: true,
 	}
