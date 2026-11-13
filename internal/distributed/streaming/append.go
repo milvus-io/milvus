@@ -17,7 +17,8 @@ func (w *walAccesserImpl) getProducer(channel string) *producer.ResumableProduce
 		return p
 	}
 	p := producer.NewResumableProducer(w.handlerClient.CreateProducer, &producer.ProducerOptions{
-		PChannel: pchannel,
+		PChannel:                pchannel,
+		OnSchemaVersionMismatch: w.onSchemaVersionMismatch,
 	})
 	w.producers[pchannel] = p
 	return p
@@ -45,5 +46,11 @@ func assertValidBroadcastMessage(msg message.BroadcastMutableMessage) {
 	}
 	if msg.MessageType().IsSelfControlled() {
 		panic("self controlled message is not allowed to broadcast append from client")
+	}
+}
+
+func (w *walAccesserImpl) onSchemaVersionMismatch(channel string) {
+	if w.schemaClient != nil {
+		w.schemaClient.invalidateWriteSchema(channel)
 	}
 }

@@ -499,8 +499,13 @@ introduced:
 
 #### Expression counters and the parser cache
 
-`planparserv2` caches parsed expressions by string (`exprCache`, LRU of 1024 entries with a 10-minute
-TTL, `internal/parser/planparserv2/plan_parser_v2.go:30`). A counter placed inside the ANTLR visitor
+`planparserv2` caches expression parse trees and parsing errors by expression string (`exprCache`,
+`internal/parser/planparserv2/expr_cache.go`). Each process using the parser has its own cache,
+controlled by `proxy.exprParseCache.enabled` (default `true`) and
+`proxy.exprParseCache.maxEntries` (default `1024`). These static settings are captured on first use
+and require a restart to change. When enabled, the cache is an LRU with a fixed 10-minute TTL;
+when disabled, no LRU is allocated and expressions are still parsed normally.
+A counter placed inside the ANTLR visitor
 would fire only on cache misses and undercount every repeated expression by orders of magnitude.
 
 Counters therefore hang off the **output** of the parse: one walk over the `planpb.Expr` tree per
@@ -1708,7 +1713,7 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 - `internal/metastore/model/collection.go`, `internal/metastore/model/index.go` — the metadata walked
 - `internal/rootcoord/meta_table.go` — `FeatureUsageSnapshot`, `listCollectionFromCache` (the per-database scan it replaces)
 - `internal/proxy/dql/search_util.go` — `parseSearchInfo`, `parseGroupByInfo`, `parseRankParams`; `internal/proxy/dql/util_dql.go:174` — `translateOutputFields`
-- `internal/parser/planparserv2/plan_parser_v2.go:30` — `exprCache`
+- `internal/parser/planparserv2/expr_cache.go` — `exprCache` and its static enablement/capacity controls
 - `internal/util/function/rerank/function_score.go` — built-in rerank function names; `GetRerankName` returns a lowercased user string
 - `internal/proxy/dql/rerank_meta.go:119` (`newRerankMetaFromLegacy`), reached through `selectHybridRerankMeta` (`internal/proxy/dql/function_chain_validator.go:54`, called at `internal/proxy/dql/task_search.go:685`) — legacy `rank_params` passed through unvalidated
 - `pkg/metrics/proxy_metrics.go` — `proxyCollectionScopedMetrics`, `CleanupProxyCollectionMetrics`, and the leak history recorded above them; `internal/proxy/impl.go:280` — the `DropCollection` cleanup hook

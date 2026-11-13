@@ -120,3 +120,9 @@ type ViewSyncClient interface {
 	// Close closes the client and releases resources.
 	Close()
 }
+
+// ViewFeedbackHandler receives bounded batches independently of pending Views.
+// Implementations must be thread-safe and must not perform I/O.
+type ViewFeedbackHandler interface {
+	OnViewFeedback(qviews.ViewFeedbackWindow)
+}

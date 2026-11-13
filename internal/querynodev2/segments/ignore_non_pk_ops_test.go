@@ -311,6 +311,7 @@ func TestFetchFieldsAsRecordReleasesLocalPins(t *testing.T) {
 		wantPin, wantUnpin, wantFill int
 	}{
 		{"sn", []Segment{sn}, 0, 0, 1},
+		{"sealed_read_state", []Segment{&sealedReadState{}}, 0, 0, 1},
 		{"mixed_fill_failure", []Segment{sn, local}, 1, 1, 1},
 		{"partial_pin_failure", []Segment{local, sn, failed}, 2, 1, 0},
 		{"unsupported_segment", []Segment{local, nil}, 1, 1, 0},
@@ -329,7 +330,7 @@ func TestFetchFieldsAsRecordReleasesLocalPins(t *testing.T) {
 			defer unpin.UnPatch()
 			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Return(nil, context.Canceled).Build()
 			defer fill.UnPatch()
-			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{})
+			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{}, 1024)
 			require.Error(t, err)
 			require.EqualValues(t, tc.wantPin, pin.Times())
 			require.EqualValues(t, tc.wantUnpin, unpin.Times())

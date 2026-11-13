@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -30,13 +31,13 @@ func TestSaveBinlogPathsDistinguishesWALOwnership(t *testing.T) {
 		{name: "current owner reaches segment lookup", owner: 1, want: merr.ErrSegmentNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &Server{meta: &meta{}}
+			s := &Server{meta: &meta.Meta{}}
 			s.stateCode.Store(commonpb.StateCode_Healthy)
 			var checkpoint *msgpb.MsgPosition
 			if tc.dropped {
 				checkpoint = &msgpb.MsgPosition{Timestamp: funcutil.DroppedChannelCheckpointTimestamp}
 			}
-			patchCP := mockey.Mock((*meta).GetChannelCheckpoint).Return(checkpoint).Build()
+			patchCP := mockey.Mock((*meta.Meta).GetChannelCheckpoint).Return(checkpoint).Build()
 			defer patchCP.UnPatch()
 			lookups := 0
 			patchOwner := mockey.Mock((*snmanager.StreamingNodeManager).GetLatestWALLocated).To(func(_ *snmanager.StreamingNodeManager, _ context.Context, _ string) (int64, error) {
@@ -44,7 +45,7 @@ func TestSaveBinlogPathsDistinguishesWALOwnership(t *testing.T) {
 				return tc.owner, tc.lookupErr
 			}).Build()
 			defer patchOwner.UnPatch()
-			patchSegment := mockey.Mock((*meta).GetSegment).Return(nil).Build()
+			patchSegment := mockey.Mock((*meta.Meta).GetSegment).Return(nil).Build()
 			defer patchSegment.UnPatch()
 			status, err := s.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
 				Base: &commonpb.MsgBase{SourceID: 1}, Channel: "v1", SegmentID: 10, SegLevel: datapb.SegmentLevel_L1,

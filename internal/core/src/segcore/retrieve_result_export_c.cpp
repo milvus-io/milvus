@@ -33,6 +33,7 @@
 #include "monitor/scope_metric.h"
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/OutputFields.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
@@ -196,6 +197,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,
+                          int64_t max_output_size,
                           ArrowSchema* out_schema,
                           ArrowArray* out_array,
                           void* cancellation_source) {
@@ -205,6 +207,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
         AssertInfo(num_segments > 0, "num_segments must be positive");
         AssertInfo(c_plan != nullptr, "null retrieve plan");
         AssertInfo(total_rows >= 0, "total_rows must not be negative");
+        AssertInfo(max_output_size >= 0, "negative output byte budget");
         AssertInfo(total_rows == 0 || seg_indices != nullptr,
                    "null seg_indices for non-empty rows");
         AssertInfo(total_rows == 0 || seg_offsets != nullptr,
@@ -238,12 +241,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             }
             batch = *empty_batch_result;
         } else {
-            // Group rows by segment index (dense, so vector is ideal).
-            std::vector<RetrieveSegmentFields> segment_fields(num_segments);
-            for (int64_t i = 0; i < num_segments; ++i) {
-                segment_fields[i].segment =
-                    static_cast<SegmentInternalInterface*>(segments[i]);
-            }
+            // Only segments with selected rows need output tasks.
+            std::map<int32_t, RetrieveSegmentFields> segment_fields;
             for (int64_t pos = 0; pos < total_rows; ++pos) {
                 auto seg_idx = seg_indices[pos];
                 AssertInfo(seg_idx >= 0 && seg_idx < num_segments,
@@ -253,17 +252,37 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 segment_fields[seg_idx].result_positions.push_back(pos);
                 segment_fields[seg_idx].segment_offsets.push_back(
                     seg_offsets[pos]);
+                segment_fields[seg_idx].segment =
+                    static_cast<SegmentInternalInterface*>(segments[seg_idx]);
+            }
+
+            // Check the aggregate for all winning segments before reading any
+            // output fields. Reuse ordinary Retrieve's per-field statistics.
+            int64_t estimated_size = 0;
+            for (const auto& [segment_index, selected] : segment_fields) {
+                if (selected.segment_offsets.empty()) {
+                    continue;
+                }
+                milvus::futures::throwIfCancelled(cancel_token);
+                estimated_size +=
+                    selected.segment->get_fields_avg_size(plan->field_ids_) *
+                    static_cast<int64_t>(selected.segment_offsets.size());
+            }
+            if (estimated_size > max_output_size) {
+                ThrowInfo(milvus::InvalidParameter,
+                          "estimated query output size {} exceeds remaining "
+                          "output byte budget {}",
+                          estimated_size,
+                          max_output_size);
             }
 
             auto dynamic_field_id = plan->schema_->get_dynamic_field_id();
 
-            // Materialize fields per segment via bulk_subscript.
-            for (auto& materialized : segment_fields) {
-                if (materialized.segment_offsets.empty()) {
-                    continue;
-                }
-                milvus::futures::throwIfCancelled(cancel_token);
+            auto materialize_segment = [&](RetrieveSegmentFields&
+                                               materialized) {
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 auto read_lease =
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 // Capture the request-scoped read snapshot once per segment so
@@ -272,15 +291,15 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 // segments return a null snapshot and fall back to the virtual
                 // bulk_subscript.
                 auto snapshot = materialized.segment->CaptureReadSnapshot();
-                for (auto field_id : plan->field_ids_) {
-                    milvus::futures::throwIfCancelled(cancel_token);
+                auto fetch_one = [&](FieldId field_id,
+                                     milvus::OpContext* field_ctx) {
                     if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         auto system_type = milvus::SystemProperty::Instance()
                                                .GetSystemFieldType(field_id);
                         auto count = materialized.segment_offsets.size();
                         milvus::FixedVector<int64_t> output(count);
                         materialized.segment->bulk_subscript(
-                            &op_ctx,
+                            field_ctx,
                             system_type,
                             materialized.segment_offsets.data(),
                             count,
@@ -294,8 +313,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                         auto* raw =
                             reinterpret_cast<const int64_t*>(output.data());
                         obj->mutable_data()->Add(raw, raw + count);
-                        materialized.fields[field_id] = std::move(data_array);
-                        continue;
+                        return data_array;
                     }
                     auto& field_meta = plan->schema_->operator[](field_id);
                     const std::vector<std::string>* dynamic_field_names =
@@ -304,22 +322,32 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                          !plan->target_dynamic_fields_.empty())
                             ? &plan->target_dynamic_fields_
                             : nullptr;
-                    materialized.fields[field_id] =
-                        milvus::segcore::BulkSubscriptWithSnapshot(
-                            materialized.segment,
-                            snapshot,
-                            &op_ctx,
-                            field_id,
-                            field_meta,
-                            materialized.segment_offsets.data(),
-                            materialized.segment_offsets.size(),
-                            dynamic_field_names);
+                    return milvus::segcore::BulkSubscriptWithSnapshot(
+                        materialized.segment,
+                        snapshot,
+                        field_ctx,
+                        field_id,
+                        field_meta,
+                        materialized.segment_offsets.data(),
+                        materialized.segment_offsets.size(),
+                        dynamic_field_names);
+                };
+                auto fetched_fields = milvus::segcore::FetchOutputFields(
+                    plan->field_ids_,
+                    materialized.segment->get_segment_id(),
+                    &op_ctx,
+                    fetch_one);
+                for (auto& fetched : fetched_fields) {
+                    materialized.fields[fetched.field_id] =
+                        std::move(fetched.field_data);
                 }
-            }
+            };
+            milvus::segcore::MaterializeOutputSegments(
+                segment_fields, cancel_token, materialize_segment);
 
             // Build result_pairs for MergeDataArray.
             std::vector<MergeBase> result_pairs(total_rows);
-            for (auto& materialized : segment_fields) {
+            for (auto& [segment_index, materialized] : segment_fields) {
                 for (size_t row_idx = 0;
                      row_idx < materialized.result_positions.size();
                      ++row_idx) {
@@ -332,10 +360,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // values while retaining a logical validity bitmap. Record the
             // compacted physical offset for each output row before
             // MergeDataArray scatters rows into final order.
-            for (auto& materialized : segment_fields) {
-                if (materialized.segment_offsets.empty()) {
-                    continue;
-                }
+            for (auto& [segment_index, materialized] : segment_fields) {
                 for (auto field_id : plan->field_ids_) {
                     if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         continue;

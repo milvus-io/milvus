@@ -188,18 +188,20 @@ func resolveMilvusTableSourceManifestPath(
 	if resolveSourcePath == nil {
 		return manifestPath, nil
 	}
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", err
 	}
-	resolvedBasePath, err := resolveSourcePath(basePath)
+	resolvedBasePath, err := resolveSourcePath(manifest.BasePath)
 	if err != nil {
 		return "", err
 	}
-	if resolvedBasePath == basePath {
+	if resolvedBasePath == manifest.BasePath {
 		return manifestPath, nil
 	}
-	return MarshalManifestPath(resolvedBasePath, version), nil
+	// The resolved base addresses the same manifest object, so its size holds.
+	manifest.BasePath = resolvedBasePath
+	return marshalManifestPath(manifest), nil
 }
 
 // resolveMilvusTableSegmentDeltalogPaths rewrites deltalog paths found in a

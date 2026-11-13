@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"testing"
 	"testing/iotest"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -273,14 +274,14 @@ func TestMarshalStats(t *testing.T) {
 func TestBM25Stats_MemSize(t *testing.T) {
 	stats := NewBM25Stats()
 	baseSize := stats.MemSize()
-	assert.Equal(t, int64(120), baseSize)
+	assert.Equal(t, int64(unsafe.Sizeof(*stats)), baseSize)
 
 	// Add tokens and verify size grows
 	for i := uint32(0); i < 100; i++ {
 		stats.Append(map[uint32]float32{i: 1})
 	}
 	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
-	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
+	assert.Equal(t, baseSize+bm25StatsShards*bm25StatsMapOverhead+100*bytesPerEntry, stats.MemSize())
 }
 
 func TestBM25Stats_MinusRemovesZeroEntries(t *testing.T) {
@@ -294,14 +295,14 @@ func TestBM25Stats_MinusRemovesZeroEntries(t *testing.T) {
 
 	stats.Minus(removed)
 
-	assert.NotContains(t, stats.rowsWithToken, uint32(1))
-	assert.Equal(t, int32(2), stats.rowsWithToken[2])
+	assert.NotContains(t, stats.rowsWithToken[shardOf(1)], uint32(1))
+	assert.Equal(t, int32(2), stats.rowsWithToken.get(2))
 	assert.Equal(t, int64(1), stats.NumRow())
 
 	missing := NewBM25Stats()
 	missing.Append(map[uint32]float32{3: 1})
 	stats.Minus(missing)
-	assert.Equal(t, int32(-1), stats.rowsWithToken[3])
+	assert.Equal(t, int32(-1), stats.rowsWithToken.get(3))
 }
 
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {
@@ -412,12 +413,12 @@ func TestBM25StatsAtomicDeltaAndVocabularyCleanup(t *testing.T) {
 	aggregate.ApplyDelta(add, remove)
 	require.Equal(t, int64(1), aggregate.NumRow())
 	require.Equal(t, float64(3), aggregate.GetAvgdl())
-	require.Len(t, aggregate.rowsWithToken, 1)
+	require.Equal(t, 1, aggregate.rowsWithToken.len())
 	before := aggregate.Clone()
 	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), remove))
 	require.Equal(t, before, aggregate)
 	corrupt := NewBM25Stats()
-	corrupt.rowsWithToken[9000] = 2
+	corrupt.rowsWithToken.add(9000, 2)
 	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), corrupt))
 }
 
@@ -445,7 +446,7 @@ func TestBM25DeserializeTruncatedBoundaries(t *testing.T) {
 			stats := NewBM25Stats()
 			assert.Equal(t, want, stats.DeserializeFromReader(bytes.NewReader(data[:n])))
 			if n >= 28 {
-				assert.Equal(t, int32(2), stats.rowsWithToken[7])
+				assert.Equal(t, int32(2), stats.rowsWithToken.get(7))
 			}
 			// Slice deserialization historically ignores an incomplete tail.
 			if n >= 20 {

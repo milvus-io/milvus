@@ -135,8 +135,9 @@ class Base:
 
         return errors
 
-    def _teardown_objects(self):
-        # Prioritize uri and token for connection
+    @staticmethod
+    def _connection_params():
+        """Resolve the shared connection settings for SDK and raw request tests."""
         if cf.param_info.param_uri:
             uri = cf.param_info.param_uri
         else:
@@ -151,6 +152,10 @@ class Base:
                 else None
             )
 
+        return uri, token
+
+    def _teardown_objects(self):
+        uri, token = self._connection_params()
         cleanup_errors = []
         try:
             """ Drop collection before disconnect """
@@ -243,20 +248,7 @@ class TestcaseBase(Base):
         if self.skip_connection:
             return None
 
-        # Prioritize uri and token for connection
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
-
-        if cf.param_info.param_token:
-            token = cf.param_info.param_token
-        else:
-            token = (
-                f"{cf.param_info.param_user}:{cf.param_info.param_password}"
-                if cf.param_info.param_user and cf.param_info.param_password
-                else None
-            )
+        uri, token = self._connection_params()
 
         if enable_milvus_client_api:
             self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)

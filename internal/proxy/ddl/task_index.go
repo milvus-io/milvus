@@ -156,6 +156,7 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 	}
 
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
+	isTextField := typeutil.IsTextType(cit.fieldSchema.DataType)
 	indexParamsMap, err := indexparamcheck.ExpandIndexParams(cit.req.GetExtraParams())
 	if err != nil {
 		return err
@@ -175,8 +176,8 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		return err
 	}
 
-	if cit.fieldSchema.GetDataType() == schemapb.DataType_Text {
-		return merr.WrapErrParameterInvalidMsg("TEXT field does not support user-created scalar index")
+	if isTextField && indexParamsMap[common.IndexTypeKey] != indexparamcheck.IndexNGRAM {
+		return merr.WrapErrParameterInvalidMsg("TEXT fields require an explicit NGRAM index; AUTOINDEX and other scalar index types are not supported")
 	}
 
 	if err := fieldvalidator.ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
@@ -209,7 +210,9 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		autoIndexEnable := paramtable.Get().AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
 
-		if autoIndexEnable || !exist || specifyIndexType == AutoIndexName {
+		// TEXT supports explicit NGRAM only. Preserve that choice even when
+		// scalar autoindex overrides explicit types for other scalar fields.
+		if !isTextField && (autoIndexEnable || !exist || specifyIndexType == AutoIndexName) {
 			getPrimitiveIndexType := func(dataType schemapb.DataType) string {
 				if typeutil.IsBoolType(dataType) {
 					return paramtable.Get().AutoIndexConfig.ScalarBoolIndexType.GetValue()
@@ -476,6 +479,9 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 			indexParamsMap[common.JSONPathKey] = cit.req.FieldName
 		}
 	}
+	if isTextField && (indexParamsMap[common.IndexTypeKey] != indexparamcheck.IndexNGRAM || cit.isAutoIndex) {
+		return merr.WrapErrServiceInternalMsg("explicit TEXT NGRAM index changed during parameter resolution")
+	}
 
 	if err := indexparamcheck.ValidateIndexParamsMapSize(indexParamsMap); err != nil {
 		return err
@@ -510,6 +516,11 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 
 	for k, v := range typeParamsMap {
 		if _, ok := indexParamsMap[k]; ok {
+			continue
+		}
+		// The struct sub-field origin marker is a schema-internal key; keep it
+		// out of index meta, DescribeIndex and the index build parameters.
+		if k == common.StructSubFieldAddedKey {
 			continue
 		}
 		cit.newTypeParams = append(cit.newTypeParams, &commonpb.KeyValuePair{Key: k, Value: v})

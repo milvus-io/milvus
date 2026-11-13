@@ -228,7 +228,7 @@ func fetchFieldsArrow(
 	merged *MergedResultWithOffsets,
 	ret *segcorepb.RetrieveResults,
 ) ([]any, error) {
-	rec, err := fetchFieldsAsRecord(ctx, validSegments, retrievePlan, merged)
+	rec, err := fetchFieldsAsRecord(ctx, validSegments, retrievePlan, merged, paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +362,7 @@ func fetchFieldsAsRecord(
 	validSegments []Segment,
 	retrievePlan *segcore.RetrievePlan,
 	merged *MergedResultWithOffsets,
+	maxOutputSize int64,
 ) (arrow.Record, error) {
 	var pinned []*LocalSegment
 	defer func() {
@@ -378,6 +379,9 @@ func fetchFieldsAsRecord(
 			}
 			pinned = append(pinned, segment)
 			cSegments[i] = segment.csegment
+		case *sealedReadState:
+			// QueryOnView retains the read state and schema through Arrow refill.
+			cSegments[i] = segment.native
 		case *viewQueryGrowingSegment:
 			// QueryOnView holds the growing handles through execution and
 			// Arrow conversion. This adapter only borrows their C segments.
@@ -396,6 +400,6 @@ func fetchFieldsAsRecord(
 
 	return retrySegmentReadGate(ctx, SegmentTypeSealed,
 		func() (arrow.Record, error) {
-			return segcore.FillRetrieveFieldsOrdered(ctx, cSegments, retrievePlan, segIndices, segOffsets)
+			return segcore.FillRetrieveFieldsOrdered(ctx, cSegments, retrievePlan, segIndices, segOffsets, maxOutputSize)
 		}, waitSegmentReadGateRetry)
 }

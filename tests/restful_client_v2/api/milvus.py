@@ -358,15 +358,26 @@ class CollectionClient(Requests):
         self.name_list = []
         self.headers = self.update_headers()
 
-    def wait_load_completed(self, collection_name, db_name="default", timeout=5):
+    def wait_load_completed(self, collection_name, db_name="default", timeout=60):
+        """Poll describe until the collection reports LoadStateLoaded.
+
+        Raises AssertionError when the state is not reached within ``timeout`` seconds,
+        so a slow or failed load fails here with the last describe response instead of
+        surfacing later as a confusing error from the first request that needs the
+        loaded collection.
+        """
         t0 = time.time()
-        while True and time.time() - t0 < timeout:
+        rsp = None
+        while time.time() - t0 < timeout:
             rsp = self.collection_describe(collection_name, db_name=db_name)
-            if "data" in rsp and "load" in rsp["data"] and rsp["data"]["load"] == "LoadStateLoaded":
-                logger.info(f"collection {collection_name} load completed in {time.time() - t0} seconds")
-                break
-            else:
-                time.sleep(1)
+            if (rsp.get("data") or {}).get("load") == "LoadStateLoaded":
+                logger.info(f"collection {collection_name} load completed in {time.time() - t0:.1f} seconds")
+                return rsp
+            time.sleep(1)
+        raise AssertionError(
+            f"collection {collection_name} did not reach LoadStateLoaded within {timeout}s, "
+            f"last describe response: {rsp}"
+        )
 
     def update_headers(self, headers=None):
         if headers is not None:
@@ -1004,9 +1015,8 @@ class ImportJobClient(Requests):
         return response.json()
 
     def wait_import_job_state(self, job_id, expected_state, timeout=120, db_name="default", interval=2):
-        t0 = time.time()
-        last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
-        while time.time() - t0 < timeout:
+        deadline = time.monotonic() + timeout
+        while True:
             last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
             if last_rsp.get("code") == 0:
                 state = last_rsp.get("data", {}).get("state")
@@ -1014,8 +1024,11 @@ class ImportJobClient(Requests):
                     return last_rsp, True
                 if state in ("Completed", "Failed"):
                     return last_rsp, False
-            time.sleep(interval)
-        return last_rsp, False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return last_rsp, False
+            # Poll once at the deadline instead of returning a stale pre-sleep response.
+            time.sleep(min(interval, remaining))
 
     def wait_import_job_completed(self, job_id):
         finished = False

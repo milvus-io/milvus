@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -156,7 +156,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	}
 
 	expectRecoveryInfo(suite.broker, suite.metaStore, mock.Anything, suite.nextTargetChannels, suite.nextTargetSegments, nil)
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: suite.collectionID})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.observer.Start()
@@ -267,7 +267,7 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	// Setup mocks for the new segment discovery phase
 	// These mocks will be used by the background goroutine when it polls for updates
 	expectRecoveryInfo(suite.broker, suite.metaStore, mock.Anything, suite.nextTargetChannels, suite.nextTargetSegments, nil)
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: suite.collectionID})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	// Manually trigger update so the observer discovers the new segment immediately
@@ -526,8 +526,9 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	// Create mock ReplicaManager
 	replicaMgr := meta.NewReplicaManager(nil, nil)
 
+	viewStore := metacache.NewMetaStore(nil)
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(nil, viewStore),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -547,7 +548,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
+	viewStore.PutCollection(&metacache.CollectionInfo{ID: collectionID})
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
@@ -649,8 +650,9 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	err := replicaMgr.Put(ctx, replica)
 	assert.NoError(t, err)
 
+	viewStore := metacache.NewMetaStore(nil)
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(nil, viewStore),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -682,17 +684,19 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+	viewStore.PutCollection(&metacache.CollectionInfo{
+		ID:              collectionID,
 		Schema:          schema,
 		UpdateTimestamp: schemaBarrierTs,
-	}, nil).Once()
+	})
 
 	// Track which nodes receive SyncDistribution calls
 	syncedNodes := make([]int64, 0)
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 			syncedNodes = append(syncedNodes, nodeID)
-			assert.Same(t, schema, req.GetSchema())
+			assert.True(t, proto.Equal(schema, req.GetSchema()))
+			assert.NotSame(t, schema, req.GetSchema(), "the shared view schema is copied")
 			assert.Equal(t, schemaBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
 			return merr.Success(), nil
 		}).Maybe()
@@ -792,8 +796,9 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	err := replicaMgr.Put(ctx, replica)
 	assert.NoError(t, err)
 
+	viewStore := metacache.NewMetaStore(nil)
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(nil, viewStore),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -838,7 +843,7 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	// Return segments for CheckSegmentDataReady
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(allSegments).Maybe()
 
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
+	viewStore.PutCollection(&metacache.CollectionInfo{ID: collectionID})
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
@@ -934,8 +939,9 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	err := replicaMgr.Put(ctx, replica)
 	assert.NoError(t, err)
 
+	viewStore := metacache.NewMetaStore(nil)
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(nil, viewStore),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -980,7 +986,7 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	// Return segments for CheckSegmentDataReady - this will fail since segment distribution is incomplete
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(allSegments).Maybe()
 
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
+	viewStore.PutCollection(&metacache.CollectionInfo{ID: collectionID})
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
@@ -1059,8 +1065,9 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	err := replicaMgr.Put(ctx, replica)
 	assert.NoError(t, err)
 
+	viewStore := metacache.NewMetaStore(nil)
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(nil, viewStore),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -1090,7 +1097,7 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	// Return segments for CheckSegmentDataReady - this will fail since no segment in distribution
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
+	viewStore.PutCollection(&metacache.CollectionInfo{ID: collectionID})
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 

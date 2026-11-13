@@ -170,58 +170,324 @@ func normalizeFieldDataRange(fieldName string, start, end, logicalLen int) (int,
 }
 
 func parseArrayData(fieldName string, elementType schemapb.DataType, fieldDataList []*schemapb.ScalarField, validData []bool, begin, end int) (Column, error) {
+	if elementType == schemapb.DataType_Array {
+		return parseNestedArrayData(fieldName, fieldDataList, validData, begin, end)
+	}
+	// Element-nullable rows carry their element validity; rows of a column whose elements
+	// cannot be null never do.
+	elementNullable := hasScalarElementValidData(fieldDataList)
 	switch elementType {
 	case schemapb.DataType_Bool:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []bool {
+		get := func(fd *schemapb.ScalarField) []bool {
 			return fd.GetBoolData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnBoolArray, NewNullableColumnBoolArray)
+		}
+		if elementNullable {
+			col := NewColumnBoolArray(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []bool { return get(fd) }),
+			begin, end, validData, NewColumnBoolArray, NewNullableColumnBoolArray)
 
 	case schemapb.DataType_Int8:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int8 {
+		get := func(fd *schemapb.ScalarField) []int8 {
 			return int32ToType[int8](fd.GetIntData().GetData())
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnInt8Array, NewNullableColumnInt8Array)
+		}
+		if elementNullable {
+			col := NewColumnInt8Array(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int8 { return get(fd) }),
+			begin, end, validData, NewColumnInt8Array, NewNullableColumnInt8Array)
 
 	case schemapb.DataType_Int16:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int16 {
+		get := func(fd *schemapb.ScalarField) []int16 {
 			return int32ToType[int16](fd.GetIntData().GetData())
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnInt16Array, NewNullableColumnInt16Array)
+		}
+		if elementNullable {
+			col := NewColumnInt16Array(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int16 { return get(fd) }),
+			begin, end, validData, NewColumnInt16Array, NewNullableColumnInt16Array)
 
 	case schemapb.DataType_Int32:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int32 {
+		get := func(fd *schemapb.ScalarField) []int32 {
 			return fd.GetIntData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnInt32Array, NewNullableColumnInt32Array)
+		}
+		if elementNullable {
+			col := NewColumnInt32Array(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int32 { return get(fd) }),
+			begin, end, validData, NewColumnInt32Array, NewNullableColumnInt32Array)
 
 	case schemapb.DataType_Int64:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int64 {
+		get := func(fd *schemapb.ScalarField) []int64 {
 			return fd.GetLongData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnInt64Array, NewNullableColumnInt64Array)
+		}
+		if elementNullable {
+			col := NewColumnInt64Array(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []int64 { return get(fd) }),
+			begin, end, validData, NewColumnInt64Array, NewNullableColumnInt64Array)
 
 	case schemapb.DataType_Float:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []float32 {
+		get := func(fd *schemapb.ScalarField) []float32 {
 			return fd.GetFloatData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnFloatArray, NewNullableColumnFloatArray)
+		}
+		if elementNullable {
+			col := NewColumnFloatArray(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []float32 { return get(fd) }),
+			begin, end, validData, NewColumnFloatArray, NewNullableColumnFloatArray)
 
 	case schemapb.DataType_Double:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []float64 {
+		get := func(fd *schemapb.ScalarField) []float64 {
 			return fd.GetDoubleData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnDoubleArray, NewNullableColumnDoubleArray)
+		}
+		if elementNullable {
+			col := NewColumnDoubleArray(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []float64 { return get(fd) }),
+			begin, end, validData, NewColumnDoubleArray, NewNullableColumnDoubleArray)
 
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		data := lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []string {
+		get := func(fd *schemapb.ScalarField) []string {
 			return fd.GetStringData().GetData()
-		})
-		return parseScalarData(fieldName, data, begin, end, validData, NewColumnVarCharArray, NewNullableColumnVarCharArray)
+		}
+		if elementNullable {
+			col := NewColumnVarCharArray(fieldName, nil)
+			return col, parseElementNullableArray(col.columnArrayBase, fieldDataList, get, validData, begin, end)
+		}
+		return parseScalarData(fieldName, lo.Map(fieldDataList, func(fd *schemapb.ScalarField, _ int) []string { return get(fd) }),
+			begin, end, validData, NewColumnVarCharArray, NewNullableColumnVarCharArray)
 
 	default:
 		return nil, fmt.Errorf("unsupported element type %s", elementType)
 	}
+}
+
+func hasScalarElementValidData(rows []*schemapb.ScalarField) bool {
+	for _, row := range rows {
+		if len(getArrayElementValidData(row)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// selectPayloadRows returns the payload rows of logical rows [begin, end) together with their row
+// validity and whether the payload is row-dense (sparse mode).
+func selectPayloadRows[R any](fieldName string, rows []R, validData []bool, begin, end int) ([]R, []bool, bool, error) {
+	logicalLen := len(rows)
+	if validData != nil {
+		logicalLen = len(validData)
+	}
+	begin, end, err := normalizeFieldDataRange(fieldName, begin, end, logicalLen)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if validData == nil {
+		return rows[begin:end], nil, false, nil
+	}
+	if len(rows) == logicalLen {
+		return rows[begin:end], validData[begin:end], true, nil
+	}
+	valueBegin, valueEnd, validCount := countValidBounds(validData, begin, end)
+	if len(rows) != validCount {
+		return nil, nil, false, fmt.Errorf("field %q payload row count %d does not match logical row count %d or valid count %d",
+			fieldName, len(rows), logicalLen, validCount)
+	}
+	return rows[valueBegin:valueEnd], validData[begin:end], false, nil
+}
+
+// parseElementNullableArray fills an element-nullable array column from result rows. Elements are
+// kept in sparse form: a null element holds the zero value.
+func parseElementNullableArray[T any](
+	base *columnArrayBase[T],
+	rows []*schemapb.ScalarField,
+	get func(*schemapb.ScalarField) []T,
+	validData []bool,
+	begin, end int,
+) error {
+	selected, selectedValid, rowSparse, err := selectPayloadRows(base.name, rows, validData, begin, end)
+	if err != nil {
+		return err
+	}
+	values := make([][]T, len(selected))
+	elementValid := make([][]bool, len(selected))
+	for i, row := range selected {
+		if rowSparse && !selectedValid[i] {
+			continue
+		}
+		values[i], elementValid[i], err = denseRow(base.name, i, get(row), getArrayElementValidData(row))
+		if err != nil {
+			return err
+		}
+	}
+	base.values = values
+	base.setElementValidData(elementValid)
+	if validData != nil {
+		base.nullable = true
+		base.validData = selectedValid
+		base.sparseMode = rowSparse
+	}
+	return base.ValidateNullable()
+}
+
+// parseNestedArrayData converts the rows of an Array<T> sub-field. The outer element type is Array;
+// each row carries its leaf type and the validity of its inner arrays, and each inner array the
+// validity of its leaves.
+func parseNestedArrayData(fieldName string, rows []*schemapb.ScalarField, validData []bool, begin, end int) (Column, error) {
+	var leafType schemapb.DataType
+	for _, row := range rows {
+		if arrayData := row.GetArrayData(); arrayData != nil && arrayData.GetElementType() != schemapb.DataType_None {
+			leafType = arrayData.GetElementType()
+			break
+		}
+	}
+	switch leafType {
+	case schemapb.DataType_Bool:
+		col := NewColumnBoolArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []bool {
+			return fd.GetBoolData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_Int8:
+		col := NewColumnInt8ArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []int8 {
+			return int32ToType[int8](fd.GetIntData().GetData())
+		}, validData, begin, end)
+	case schemapb.DataType_Int16:
+		col := NewColumnInt16ArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []int16 {
+			return int32ToType[int16](fd.GetIntData().GetData())
+		}, validData, begin, end)
+	case schemapb.DataType_Int32:
+		col := NewColumnInt32ArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []int32 {
+			return fd.GetIntData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_Int64:
+		col := NewColumnInt64ArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []int64 {
+			return fd.GetLongData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_Float:
+		col := NewColumnFloatArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []float32 {
+			return fd.GetFloatData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_Double:
+		col := NewColumnDoubleArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []float64 {
+			return fd.GetDoubleData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		col := NewColumnVarCharArrayArray(fieldName, nil)
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []string {
+			return fd.GetStringData().GetData()
+		}, validData, begin, end)
+	case schemapb.DataType_None:
+		col := &columnUntypedArrayArray{columnNestedArrayBase: newNestedArrayBase[any](fieldName, nil, entity.FieldTypeNone)}
+		return col, parseNestedArray(col.columnNestedArrayBase, rows, func(fd *schemapb.ScalarField) []any {
+			return nil
+		}, validData, begin, end)
+	default:
+		return nil, fmt.Errorf("unsupported nested array leaf type %s", leafType)
+	}
+}
+
+// parseNestedArray fills a nested array column from result rows in sparse form: every inner array
+// is kept (a null one is nil) and leaves are dense.
+func parseNestedArray[T any](
+	base *columnNestedArrayBase[T],
+	rows []*schemapb.ScalarField,
+	get func(*schemapb.ScalarField) []T,
+	validData []bool,
+	begin, end int,
+) error {
+	selected, selectedValid, rowSparse, err := selectPayloadRows(base.name, rows, validData, begin, end)
+	if err != nil {
+		return err
+	}
+	elementNullable := hasScalarElementValidData(selected)
+	leafNullable := false
+	for _, row := range selected {
+		if hasScalarElementValidData(row.GetArrayData().GetData()) {
+			leafNullable = true
+			break
+		}
+	}
+
+	values := make([][][]T, len(selected))
+	elementValid := make([][]bool, len(selected))
+	leafValid := make([][][]bool, len(selected))
+	for i, row := range selected {
+		if rowSparse && !selectedValid[i] {
+			continue
+		}
+		inner := row.GetArrayData().GetData()
+		innerValid := getArrayElementValidData(row)
+		n := len(inner)
+		if len(innerValid) > 0 {
+			n = len(innerValid)
+		}
+		dense := len(inner) == n
+		if !dense && len(inner) != countValid(innerValid) {
+			return fmt.Errorf("nested array %q row %d has %d inner arrays for %d elements with %d valid",
+				base.name, i, len(inner), n, countValid(innerValid))
+		}
+		rowValues := make([][]T, n)
+		rowElementValid := make([]bool, n)
+		rowLeafValid := make([][]bool, n)
+		next := 0
+		for j := 0; j < n; j++ {
+			valid := len(innerValid) == 0 || innerValid[j]
+			var sf *schemapb.ScalarField
+			if dense {
+				sf = inner[j]
+			} else if valid {
+				sf = inner[next]
+				next++
+			}
+			if !valid {
+				continue
+			}
+			leaves, leafValidity, err := denseRow(base.name, i, get(sf), getArrayElementValidData(sf))
+			if err != nil {
+				return errors.Wrapf(err, "nested array %q element %d", base.name, j)
+			}
+			if leaves == nil {
+				leaves = []T{}
+			}
+			rowValues[j] = leaves
+			rowElementValid[j] = true
+			rowLeafValid[j] = leafValidity
+		}
+		values[i] = rowValues
+		elementValid[i] = rowElementValid
+		leafValid[i] = rowLeafValid
+	}
+
+	base.values = values
+	base.elementSparse = true
+	if elementNullable {
+		base.elementNullable = true
+		base.elementValid = elementValid
+	}
+	if leafNullable {
+		base.leafNullable = true
+		base.leafValid = leafValid
+	}
+	if validData != nil {
+		base.nullable = true
+		base.validData = selectedValid
+		base.sparseMode = rowSparse
+	}
+	return base.ValidateNullable()
 }
 
 func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayField, begin, end int) (Column, error) {
@@ -298,8 +564,19 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 	} else {
 		rows = rows[begin:end]
 	}
-	finish := func(column Column) (Column, error) {
+	elementNullable := hasVectorElementValidData(rows)
+	finish := func(column Column, elementValid [][]bool) (Column, error) {
+		if elementNullable {
+			vectorColumn, ok := column.(interface{ setElementValidData([][]bool) })
+			if !ok {
+				return nil, fmt.Errorf("vector array %q column does not support element nullable data", fieldName)
+			}
+			vectorColumn.setElementValidData(elementValid)
+		}
 		if !nullable {
+			if err := column.ValidateNullable(); err != nil {
+				return nil, errors.Wrapf(err, "invalid vector array %q element nullable data", fieldName)
+			}
 			return column, nil
 		}
 		vectorColumn, ok := column.(interface {
@@ -326,7 +603,11 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 		if err != nil {
 			return nil, err
 		}
-		return finish(NewColumnFloatVectorArray(fieldName, dim, out))
+		out, elementValid, err := expandVectorArrayRows(fieldName, out, rows, elementNullable)
+		if err != nil {
+			return nil, err
+		}
+		return finish(NewColumnFloatVectorArray(fieldName, dim, out), elementValid)
 
 	case schemapb.DataType_Float16Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
@@ -335,7 +616,11 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 		if err != nil {
 			return nil, err
 		}
-		return finish(NewColumnFloat16VectorArray(fieldName, dim, out))
+		out, elementValid, err := expandVectorArrayRows(fieldName, out, rows, elementNullable)
+		if err != nil {
+			return nil, err
+		}
+		return finish(NewColumnFloat16VectorArray(fieldName, dim, out), elementValid)
 
 	case schemapb.DataType_BFloat16Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim*2, func(vf *schemapb.VectorField) []byte {
@@ -344,7 +629,11 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 		if err != nil {
 			return nil, err
 		}
-		return finish(NewColumnBFloat16VectorArray(fieldName, dim, out))
+		out, elementValid, err := expandVectorArrayRows(fieldName, out, rows, elementNullable)
+		if err != nil {
+			return nil, err
+		}
+		return finish(NewColumnBFloat16VectorArray(fieldName, dim, out), elementValid)
 
 	case schemapb.DataType_BinaryVector:
 		if dim%8 != 0 {
@@ -356,7 +645,11 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 		if err != nil {
 			return nil, err
 		}
-		return finish(NewColumnBinaryVectorArray(fieldName, dim, out))
+		out, elementValid, err := expandVectorArrayRows(fieldName, out, rows, elementNullable)
+		if err != nil {
+			return nil, err
+		}
+		return finish(NewColumnBinaryVectorArray(fieldName, dim, out), elementValid)
 
 	case schemapb.DataType_Int8Vector:
 		out, err := splitVectorArrayRows(fieldName, rows, dim, func(vf *schemapb.VectorField) []byte {
@@ -371,11 +664,48 @@ func parseVectorArrayData(fieldName string, va *schemapb.VectorArray, outerDim i
 		if err != nil {
 			return nil, err
 		}
-		return finish(NewColumnInt8VectorArray(fieldName, dim, out))
+		out, elementValid, err := expandVectorArrayRows(fieldName, out, rows, elementNullable)
+		if err != nil {
+			return nil, err
+		}
+		return finish(NewColumnInt8VectorArray(fieldName, dim, out), elementValid)
 
 	default:
 		return nil, fmt.Errorf("unsupported vector array element type %s", va.GetElementType())
 	}
+}
+
+func hasVectorElementValidData(rows []*schemapb.VectorField) bool {
+	for _, row := range rows {
+		if len(getVectorArrayElementValidData(row)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// expandVectorArrayRows places the compact vectors of element-nullable rows at their logical
+// positions; a null vector is nil. A row's payload must hold exactly its valid vectors. It returns
+// the rows unchanged for a column whose vectors cannot be null.
+func expandVectorArrayRows[E any](fieldName string, out [][][]E, rows []*schemapb.VectorField, elementNullable bool) ([][][]E, [][]bool, error) {
+	if !elementNullable {
+		return out, nil, nil
+	}
+	elementValid := make([][]bool, len(out))
+	for i, vectors := range out {
+		valid := getVectorArrayElementValidData(rows[i])
+		if len(valid) == 0 {
+			elementValid[i] = allValid(len(vectors))
+			continue
+		}
+		if len(vectors) != countValid(valid) {
+			return nil, nil, fmt.Errorf("vector array %q row %d has %d vectors for %d elements with %d valid",
+				fieldName, i, len(vectors), len(valid), countValid(valid))
+		}
+		out[i] = denseElements(vectors, valid)
+		elementValid[i] = valid
+	}
+	return out, elementValid, nil
 }
 
 // splitVectorArrayRows extracts per-row flat payloads via `get` and splits each by `width` using

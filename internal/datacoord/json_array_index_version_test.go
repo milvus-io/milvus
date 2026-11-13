@@ -25,48 +25,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func jsonArrayVersionManager(t *testing.T, version int32) IndexEngineVersionManager {
-	t.Helper()
-	manager := newIndexEngineVersionManager()
-	manager.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
-		ServerID: 1,
-		ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
-			CurrentIndexVersion: version,
-			MaximumIndexVersion: common.MaximumScalarIndexEngineVersion,
-		},
-	}})
-	require.Equal(t, version, manager.ResolveScalarIndexVersion())
-	return manager
-}
-
-func resetJSONVersionTargets(t *testing.T) {
-	t.Helper()
-	paramtable.Init()
-	target := Params.DataCoordCfg.TargetScalarIndexVersion.GetValue()
-	force := Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetValue()
-	require.NoError(t, Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "-1"))
-	require.NoError(t, Params.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, target))
-		require.NoError(t, Params.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, force))
-	})
-}
 
 func setJSONArrayIndexGate(t *testing.T, enabled bool) {
 	t.Helper()
@@ -75,7 +46,7 @@ func setJSONArrayIndexGate(t *testing.T, enabled bool) {
 }
 
 func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
-	resetJSONVersionTargets(t)
+	index.ResetJSONVersionTargets(t)
 	initStreamingSystem(t)
 	for _, indexType := range []string{indexparamcheck.IndexHybrid, indexparamcheck.IndexSTLSORT} {
 		casts := []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}
@@ -105,12 +76,6 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 							params = append(params, &commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: cast},
 								&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: `payload["a"]`})
 						}
-						coordinator := mocks.NewMixCoord(t)
-						coordinator.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(
-							&milvuspb.DescribeCollectionResponse{
-								Status: merr.Success(), CollectionName: "collection", DbName: "default",
-								Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
-							}, nil).Twice()
 						alloc := allocator.NewMockAllocator(t)
 						incompatible := !tc.enabled || tc.version < 3
 						blocked := incompatible && !auto
@@ -120,10 +85,14 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 								merr.WrapErrServiceInternalMsg("passed JSON software gate")).Once()
 						}
 						server := &Server{
-							broker:                    broker.NewCoordinatorBroker(coordinator),
+							meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+								ID: 1, DatabaseName: "default",
+								Schema: &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{field}},
+							}),
 							allocator:                 alloc,
-							indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
+							indexEngineVersionManager: index.JSONArrayVersionManager(t, tc.version),
 						}
+						server.ddl = newDDLCallbacks(server)
 						server.stateCode.Store(commonpb.StateCode_Healthy)
 						request := &indexpb.CreateIndexRequest{
 							CollectionID: 1, FieldID: 100, IndexName: "json_array",
@@ -155,7 +124,7 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 }
 
 func TestRestoreJSONArraySoftwareGate(t *testing.T) {
-	resetJSONVersionTargets(t)
+	index.ResetJSONVersionTargets(t)
 	for _, indexType := range []string{indexparamcheck.IndexHybrid, indexparamcheck.IndexSTLSORT} {
 		for _, cast := range []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
 			for _, enabled := range []bool{false, true} {
@@ -166,8 +135,8 @@ func TestRestoreJSONArraySoftwareGate(t *testing.T) {
 				for _, version := range versions {
 					t.Run(fmt.Sprintf("%s/%s/v%d/enabled=%t", indexType, cast, version, enabled), func(t *testing.T) {
 						setJSONArrayIndexGate(t, enabled)
-						manager := &snapshotManager{indexEngineVersionManager: jsonArrayVersionManager(t, version)}
-						err := manager.checkJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
+						manager := &snapshot.Manager{IndexEngineVersionManager: index.JSONArrayVersionManager(t, version)}
+						err := manager.CheckJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
 							{Key: common.IndexTypeKey, Value: indexType},
 							{Key: common.JSONCastTypeKey, Value: cast},
 							{Key: common.JSONPathKey, Value: "/a"},
@@ -196,8 +165,8 @@ func TestRestoreJSONArraySoftwareGate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setJSONArrayIndexGate(t, false)
-			manager := &snapshotManager{indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
-			require.NoError(t, manager.checkJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
+			manager := &snapshot.Manager{IndexEngineVersionManager: index.JSONArrayVersionManager(t, tc.version)}
+			require.NoError(t, manager.CheckJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: tc.indexType},
 				{Key: common.JSONCastTypeKey, Value: tc.cast},
 				{Key: common.JSONPathKey, Value: "/a"},
@@ -207,7 +176,7 @@ func TestRestoreJSONArraySoftwareGate(t *testing.T) {
 }
 
 func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
-	resetJSONVersionTargets(t)
+	index.ResetJSONVersionTargets(t)
 	for _, tc := range []struct {
 		name     string
 		field    *schemapb.FieldSchema
@@ -224,12 +193,11 @@ func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setJSONArrayIndexGate(t, tc.enabled)
 			tc.field.FieldID = 100
-			mockBroker := broker.NewMockBroker(t)
-			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(
-				&milvuspb.DescribeCollectionResponse{DbName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}}}, nil).Once()
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
-			sm := &snapshotManager{broker: mockBroker, allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
+			sm := snapshot.NewSnapshotManager(meta.NewMetaWithCollections(&meta.CollectionInfo{
+				ID: 1, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}},
+			}), nil, nil, alloc, nil, nil, nil, index.JSONArrayVersionManager(t, tc.version))
 			broadcastStarted := false
 			err := sm.RestoreIndexes(context.Background(), &snapshotstorage.SnapshotData{Indexes: []*indexpb.IndexInfo{{
 				FieldID: 100, IndexName: "array_sort", IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}},

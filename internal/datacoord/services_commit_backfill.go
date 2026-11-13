@@ -25,8 +25,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -63,7 +63,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 	total := int32(len(result.Segments))
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	coll, err := s.meta.GetCollectionOrNotFound(result.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
@@ -74,11 +74,11 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// while the Spark job was in flight) must not be committed against the
 	// current segments. The fence is re-checked before each commit batch below
 	// to narrow the window between this read and the catalog writes.
-	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll); err != nil {
+	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll.Schema); err != nil {
 		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
 			mlog.Err(err),
 			mlog.Int32("resultSchemaVersion", result.SchemaVersion),
-			mlog.Int32("collectionSchemaVersion", coll.GetSchema().GetVersion()))
+			mlog.Int32("collectionSchemaVersion", coll.Schema.GetVersion()))
 		return &datapb.CommitBackfillResultResponse{
 			Status:          merr.Status(err),
 			TotalSegments:   total,
@@ -108,8 +108,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 
 	// Split the units into the two dispatch paths and apply them directly:
 	// every V2 column-group upsert in bounded batches of UpdateSegmentsInfo
-	// (each batch one catalog transaction holding segMu for at most
-	// maxBackfillCommitBatch records), and the V3 manifest commits in bounded
+	// (each batch one catalog transaction holding the writer locks of at most
+	// maxBackfillCommitBatch segments), and the V3 manifest commits in bounded
 	// batches of CommitSegmentManifests (each batch one all-or-nothing catalog
 	// transaction). A failed batch does not cancel later batches; per-segment
 	// statuses reflect batch-level outcomes.
@@ -127,9 +127,9 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// V2 dispatch: bounded UpdateSegmentsInfo batches, gated by the schema fence
 	// re-check. On mismatch the schema moved after the fast-fail, so the whole
 	// result (V2 and V3 alike) is stale and nothing is applied. Batching bounds
-	// the segMu hold time of each AlterSegments, matching the old broadcast cap
-	// of maxItemsPerBroadcast so a large V2 result cannot block flush/compaction
-	// meta writes for the whole commit.
+	// the segment writer locks each AlterSegments holds, matching the old
+	// broadcast cap of maxItemsPerBroadcast so a large V2 result cannot block
+	// flush/compaction meta writes of its segments for the whole commit.
 	for start := 0; start < len(v2Units); start += maxBackfillCommitBatch {
 		end := start + maxBackfillCommitBatch
 		if end > len(v2Units) {
@@ -159,7 +159,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 				SegmentStatuses:   sortStatuses(statuses),
 			}, nil
 		}
-		operators := make([]UpdateOperator, 0, len(batch))
+		operators := make([]meta.UpdateOperator, 0, len(batch))
 		for _, unit := range batch {
 			operators = append(operators, unit.operator)
 		}
@@ -194,14 +194,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		appendUnitStatuses(&statuses, v3Applied, true, "")
 	}
 
-	// A V3 commit advances the manifest pointer that the DataView snapshot
-	// serves; recompute so consumers observe the new manifest versions. The
-	// framework does not recompute for manifest commits (stats, L0, bump-schema
-	// and the old ack callback all call recomputeDataView themselves), so this
-	// path must do it too, once, whenever any V3 segment was committed.
-	v3Committed := false
-	markV3Committed := func() { v3Committed = true }
-
+	// Metadata commit primitives notify DataView reconciliation after publication
+	// and after releasing their locks, including partially successful batches.
 	// Per-segment commits (replace of a dropped column): each goes through
 	// meta.CommitSegmentManifest so the SegmentIndexRemove lands in the same
 	// catalog transaction as the new manifest pointer. Each commit does manifest
@@ -233,7 +227,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 					}
 					mu.Lock()
 					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
-					markV3Committed()
 					mu.Unlock()
 					return nil
 				})
@@ -262,7 +255,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			break
 		}
 
-		commits := make([]SegmentManifestCommit, 0, len(batch))
+		commits := make([]meta.SegmentManifestCommit, 0, len(batch))
 		for _, unit := range batch {
 			commits = append(commits, unit.commit)
 		}
@@ -274,15 +267,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			continue
 		}
 		appendUnitStatuses(&statuses, batch, true, "")
-		markV3Committed()
-	}
-
-	// The backfill commit is a Flushed->Flushed SegmentMeta mutation that
-	// advances manifest pointers; reconcile the DataView snapshot so consumers
-	// observe the new versions. V2 column-group upserts do not touch the
-	// manifest, so only V3 commits trigger.
-	if v3Committed {
-		s.meta.recomputeDataView(ctx, result.CollectionID)
 	}
 
 	committed, failed := countStatuses(statuses)
@@ -321,9 +305,9 @@ type backfillCommitUnit struct {
 	segmentID int64
 	kind      string // "v2" | "v3"
 	// set for v2: the column-group upsert operator
-	operator UpdateOperator
+	operator meta.UpdateOperator
 	// set for v3: the manifest commit (delta CommitUpdates or legacy Noop)
-	commit SegmentManifestCommit
+	commit meta.SegmentManifestCommit
 	// alreadyApplied is set for a V3 delta replay that the pre-validation
 	// recognized as already committed (the target column exists in the
 	// manifest with exactly the ops' descriptors). Such a segment is reported
@@ -361,14 +345,14 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 	if rawPath == "" {
 		return nil, merr.WrapErrParameterMissingMsg("result_path is required")
 	}
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
 	key, err := normalizeObjectKey(rawPath, bucket)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
 	}
 	// Pre-check the object size so an untrusted external caller cannot force
 	// an unbounded in-memory Read.
-	size, err := s.meta.chunkManager.Size(ctx, key)
+	size, err := s.meta.ChunkManager.Size(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +361,7 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 			"backfill result JSON " + strconv.FormatInt(size, 10) +
 				" bytes exceeds limit " + strconv.FormatInt(maxBackfillResultBytes, 10))
 	}
-	raw, err := s.meta.chunkManager.Read(ctx, key)
+	raw, err := s.meta.ChunkManager.Read(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -407,9 +391,9 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // callers can surface them even when a segment never reached a commit). coll is
 // the live collection description: op columns and V2 column-group field IDs
 // are validated against its schema (nil schema disables the check).
-func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *milvuspb.DescribeCollectionResponse) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
-	validFields := backfillOpColumnFieldIDs(coll.GetSchema())
+func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *meta.CollectionInfo) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
+	validFields := backfillOpColumnFieldIDs(coll.Schema)
 
 	// Deterministic order so commit units & diagnostic output are stable.
 	segIDs := make([]string, 0, len(result.Segments))
@@ -422,7 +406,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	// storage per V3 delta entry (the replay/conflict pre-check). Run it with
 	// bounded concurrency so a large result does not pay the object-storage
 	// latency serially, while preserving the deterministic per-segment order in
-	// the returned units and statuses. Meta reads (GetSegment) take segMu.RLock;
+	// the returned units and statuses. Meta reads (GetSegment) take no lock;
 	// the per-segment body appends nothing to shared slices. errgroup.SetLimit
 	// bounds the live goroutine count, so a result with hundreds of thousands of
 	// segments does not park one goroutine per segment.
@@ -570,7 +554,7 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		return classifySegmentResult{unit: &backfillCommitUnit{
 			segmentID: segID,
 			kind:      "v2",
-			operator:  UpdateSegmentColumnGroupsOperator(segID, groups),
+			operator:  meta.UpdateSegmentColumnGroupsOperator(segID, groups),
 		}}
 	}
 
@@ -639,11 +623,11 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		unit := backfillCommitUnit{
 			segmentID: segID,
 			kind:      "v3",
-			commit: SegmentManifestCommit{
+			commit: meta.SegmentManifestCommit{
 				SegmentID:     segID,
-				StorageConfig: createStorageConfig(),
-				Mutation: ManifestMutation{
-					Type:    ManifestMutationCommitUpdates,
+				StorageConfig: meta.CreateStorageConfig(),
+				Mutation: meta.ManifestMutation{
+					Type:    meta.ManifestMutationCommitUpdates,
 					Updates: updates,
 				},
 			},
@@ -707,12 +691,12 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 	return classifySegmentResult{unit: &backfillCommitUnit{
 		segmentID: segID,
 		kind:      "v3",
-		commit: SegmentManifestCommit{
+		commit: meta.SegmentManifestCommit{
 			SegmentID:        segID,
-			StorageConfig:    createStorageConfig(),
+			StorageConfig:    meta.CreateStorageConfig(),
 			ExpectedManifest: expectedManifest,
-			Mutation: ManifestMutation{
-				Type:         ManifestMutationNoop,
+			Mutation: meta.ManifestMutation{
+				Type:         meta.ManifestMutationNoop,
 				ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
 			},
 		},
@@ -735,8 +719,8 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 // the caller must then pin the inspected manifest pointer (InspectedManifest)
 // so the commit re-validates the omission under the manifest lock instead of
 // trusting this unlocked read.
-func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *SegmentInfo, basePath string, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
-	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), createStorageConfig())
+func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *meta.SegmentInfo, basePath string, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
+	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), meta.CreateStorageConfig())
 	if err != nil {
 		return nil, false, false, merr.Wrap(err, "read segment manifest for backfill delta replay check")
 	}
@@ -936,14 +920,11 @@ func checkBackfillV2GroupFields(validFields map[int64]struct{}, entry *BackfillS
 // committed against the current segments. Results that carry no version (0 —
 // produced before Spark stamped the schema version it read) are exempt from
 // the fence for backward compatibility.
-func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, coll *milvuspb.DescribeCollectionResponse) error {
+func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, schema *schemapb.CollectionSchema) error {
 	if expectedSchemaVersion == 0 {
 		return nil
 	}
-	currentVersion := int32(0)
-	if coll.GetSchema() != nil {
-		currentVersion = coll.GetSchema().GetVersion()
-	}
+	currentVersion := schema.GetVersion()
 	if expectedSchemaVersion != currentVersion {
 		return merr.WrapErrCollectionSchemaMisMatch(
 			collectionID,
@@ -963,11 +944,11 @@ func (s *Server) recheckBackfillSchemaVersion(ctx context.Context, result *Backf
 	if result.SchemaVersion == 0 {
 		return nil
 	}
-	freshColl, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	freshColl, err := s.meta.GetCollectionOrNotFound(result.CollectionID)
 	if err != nil {
 		return err
 	}
-	return checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, freshColl)
+	return checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, freshColl.Schema)
 }
 
 // allSegmentsFailed builds a per-segment failure status for every segment in

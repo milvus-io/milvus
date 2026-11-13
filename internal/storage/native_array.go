@@ -5,11 +5,131 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// pickStructSibling selects a stored child whose physical representation gives
+// the struct's per-row element counts. List columns avoid decoding legacy rows.
+func pickStructSibling(structSchema *schemapb.StructArrayFieldSchema, present func(int64) bool) *schemapb.FieldSchema {
+	var legacy *schemapb.FieldSchema
+	for _, child := range structSchema.GetFields() {
+		if !present(child.GetFieldID()) {
+			continue
+		}
+		if child.GetDataType() == schemapb.DataType_ArrayOfVector || typeutil.IsNativeListArrayField(child) {
+			return child
+		}
+		if legacy == nil && child.GetDataType() == schemapb.DataType_Array {
+			legacy = child
+		}
+	}
+	return legacy
+}
+
+// checkStructProviderNotDropped is called when a struct child must be filled
+// and no sibling column can provide its element counts and row validity.
+// stored is the set of field IDs the segment physically stores.
+//
+// If the segment stores a sub-field of st that is still in the schema, the
+// sibling is only not part of this read; nothing is decided here. Otherwise
+// the field IDs tell two cases apart. Field IDs are allocated in increasing
+// order and the sub-fields of a struct get IDs above the struct's own ID, so
+// a segment written (or rewritten) after st appeared stores the sub-fields st
+// had then, all with IDs above st's ID:
+//   - the segment stores a field ID above st's ID: it holds rows written after
+//     st appeared, but every sub-field it stores has been dropped. Its rows
+//     may be non-null with elements, and filling them with null rows or empty
+//     arrays would be wrong data, so this returns a data-integrity error;
+//   - otherwise the segment predates st, its rows are null struct rows, and
+//     the caller fills whole-row nulls as before.
+//
+// The drop rule (schemautil.CheckStructKeepsOriginalSubField) keeps an
+// original sub-field in every struct, so the error only fires for data whose
+// sub-fields were dropped without that rule.
+func checkStructProviderNotDropped(st *schemapb.StructArrayFieldSchema, field *schemapb.FieldSchema, stored map[FieldID]struct{}) error {
+	for _, child := range st.GetFields() {
+		if _, ok := stored[child.GetFieldID()]; ok {
+			return nil
+		}
+	}
+	for id := range stored {
+		if id > st.GetFieldID() {
+			return merr.WrapErrDataIntegrityMsg(
+				"cannot fill struct sub-field %s: the segment stores field %d, written after struct field %s (id %d) was created, but none of the struct's current sub-fields; the stored sub-fields that give its element counts were dropped",
+				field.GetName(), id, st.GetName(), st.GetFieldID())
+		}
+	}
+	return nil
+}
+
+// GenerateNullElementsArrayFromSibling backfills a newly added struct child.
+// A null struct row has no child elements; a valid row inherits the sibling's
+// logical element count, with each new element null.
+func GenerateNullElementsArrayFromSibling(field *schemapb.FieldSchema, sibling arrow.Array, siblingSchema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
+	if sibling == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling for %s is missing", field.GetName())
+	}
+	if sibling.Len() != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling for %s has %d rows, expected %d", field.GetName(), sibling.Len(), numRows)
+	}
+	arrowType, err := ArrowTypeForField(field)
+	if err != nil {
+		return nil, err
+	}
+	baseBuilder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+	defer baseBuilder.Release()
+	builder, ok := baseBuilder.(*array.ListBuilder)
+	if !ok {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sub-field %s is not an Arrow list", field.GetName())
+	}
+	for i := 0; i < numRows; i++ {
+		if sibling.IsNull(i) {
+			if !field.GetNullable() {
+				return nil, merr.WrapErrDataIntegrityMsg("non-nullable struct sub-field %s has null sibling row %d", field.GetName(), i)
+			}
+			builder.AppendNull()
+			continue
+		}
+		var n int
+		switch source := sibling.(type) {
+		case *array.List:
+			start, end := source.ValueOffsets(i)
+			n = int(end - start)
+		case *array.Binary:
+			if siblingSchema == nil || siblingSchema.GetDataType() != schemapb.DataType_Array {
+				return nil, merr.WrapErrDataIntegrityMsg("binary struct sibling has no Array schema")
+			}
+			row := &schemapb.ScalarField{}
+			if err := proto.Unmarshal(source.Value(i), row); err != nil {
+				return nil, merr.WrapErrDataIntegrity(err, "decode struct sibling %s row %d", siblingSchema.GetName(), i)
+			}
+			if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) && row.GetArrayData() == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("nested struct sibling %s row %d has no ArrayData", siblingSchema.GetName(), i)
+			}
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetArrayElementValidData(row))
+			} else if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) {
+				n = len(row.GetArrayData().GetData())
+			} else {
+				var err error
+				n, err = nativeArrayLength(row, siblingSchema.GetElementType())
+				if err != nil {
+					return nil, err
+				}
+			}
+		default:
+			return nil, merr.WrapErrDataIntegrityMsg("unsupported struct sibling Arrow type %T", sibling)
+		}
+		builder.Append(true)
+		builder.ValueBuilder().AppendNulls(n)
+	}
+	return builder.NewArray(), nil
+}
 
 // nativeArrayLeaf returns the leaf type and leaf nullability of a native-list
 // scalar Array column and whether it has two list levels. Storage writes at
@@ -142,6 +262,15 @@ func appendNativeLeaf(b array.Builder, row *schemapb.ScalarField, leaf schemapb.
 		return err
 	}
 	valid := typeutil.GetArrayElementValidData(row)
+	if nullable && n == 0 && len(valid) > 0 {
+		for _, isValid := range valid {
+			if isValid {
+				return merr.WrapErrDataIntegrityMsg("compact native Array row has a valid element without payload")
+			}
+		}
+		b.AppendNulls(len(valid))
+		return nil
+	}
 	if nullable && len(valid) != n || !nullable && len(valid) != 0 {
 		return merr.WrapErrDataIntegrityMsg("native Array validity length %d does not match payload length %d and nullable=%t", len(valid), n, nullable)
 	}
@@ -248,6 +377,72 @@ func emptyNativeScalar(leaf schemapb.DataType) *schemapb.ScalarField {
 		row.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}
 	}
 	return row
+}
+
+// zeroNativeScalar returns a typed leaf payload of n zero values.
+func zeroNativeScalar(leaf schemapb.DataType, n int) *schemapb.ScalarField {
+	row := emptyNativeScalar(leaf)
+	switch leaf {
+	case schemapb.DataType_Bool:
+		row.GetBoolData().Data = make([]bool, n)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		row.GetIntData().Data = make([]int32, n)
+	case schemapb.DataType_Int64:
+		row.GetLongData().Data = make([]int64, n)
+	case schemapb.DataType_Float:
+		row.GetFloatData().Data = make([]float32, n)
+	case schemapb.DataType_Double:
+		row.GetDoubleData().Data = make([]float64, n)
+	case schemapb.DataType_VarChar:
+		row.GetStringData().Data = make([]string, n)
+	}
+	return row
+}
+
+// NullElementsArrayRow builds a valid row of n null elements for an
+// element-nullable scalar Array struct sub-field, in the dense layout
+// SerializeNativeArrayRow accepts: a single-level Array gets n zero
+// placeholders, a nested Array gets n typed empty leaf children, and both get
+// an all-false element valid_data of length n. The schema was validated at
+// DDL time, so any other field is a caller bug.
+func NullElementsArrayRow(field *schemapb.FieldSchema, n int) (*schemapb.ScalarField, error) {
+	if field.GetDataType() != schemapb.DataType_Array || !field.GetElementNullable() {
+		return nil, merr.WrapErrServiceInternalMsg("field %s is not an element-nullable Array", field.GetName())
+	}
+	leaf, _, nested, err := nativeArrayLeaf(field)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := nativeArrayLeafArrowType(leaf); err != nil {
+		return nil, err
+	}
+	var row *schemapb.ScalarField
+	if nested {
+		children := make([]*schemapb.ScalarField, n)
+		for i := range children {
+			children[i] = emptyNativeScalar(leaf)
+		}
+		row = &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: leaf, Data: children}}}
+	} else {
+		row = zeroNativeScalar(leaf, n)
+	}
+	typeutil.SetArrayElementValidData(row, make([]bool, n))
+	return row, nil
+}
+
+// NullElementsVectorArrayRow builds a valid row of n null vectors for an
+// element-nullable ArrayOfVector struct sub-field: a typed empty payload with
+// an all-false element valid_data of length n.
+func NullElementsVectorArrayRow(field *schemapb.FieldSchema, dim int64, n int) (*schemapb.VectorField, error) {
+	if field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable() {
+		return nil, merr.WrapErrServiceInternalMsg("field %s is not an element-nullable ArrayOfVector", field.GetName())
+	}
+	row, err := typeutil.NewEmptyArrayOfVectorRow(dim, field.GetElementType())
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "build null ArrayOfVector row of field %s", field.GetName())
+	}
+	typeutil.SetVectorArrayElementValidData(row, make([]bool, n))
+	return row, nil
 }
 
 func readNativeLeaf(values arrow.Array, start, end int64, leaf schemapb.DataType, nullable bool) (*schemapb.ScalarField, error) {

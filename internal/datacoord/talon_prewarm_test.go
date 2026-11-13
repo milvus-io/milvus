@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -34,7 +36,9 @@ import (
 )
 
 func TestManifestPrewarmURI(t *testing.T) {
-	descriptor := packed.MarshalManifestPath("files//literal/../insert_log/1/2/3/", 17)
+	const basePath = "files//literal/../insert_log/1/2/3/"
+	descriptor := packed.MarshalManifestPath(basePath, 17)
+	sized := packed.CommittedManifestPath(basePath, 17, 4096, "remote")
 	for _, provider := range []string{"aws", "aliyun", "tencent", "huawei", "gcp", "azure"} {
 		t.Run(provider, func(t *testing.T) {
 			scheme := "s3"
@@ -43,14 +47,20 @@ func TestManifestPrewarmURI(t *testing.T) {
 			}
 			resolve, err := manifestPrewarmResolver(provider, "bucket///")
 			require.NoError(t, err)
-			uri, err := resolve(descriptor)
+			uri, size, err := resolve(descriptor)
 			require.NoError(t, err)
 			require.Equal(t, scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
+			require.Zero(t, size)
+			// A committed revision records its manifest size, which is not part of the URI.
+			sizedURI, size, err := resolve(sized)
+			require.NoError(t, err)
+			require.Equal(t, uri, sizedURI)
+			require.Equal(t, uint64(4096), size)
 			// Growing V3 metadata starts at ManifestEarliest before any physical file.
-			uri, err = resolve(packed.MarshalManifestPath("files/insert_log/1/2/3", 0))
+			uri, _, err = resolve(packed.MarshalManifestPath("files/insert_log/1/2/3", 0))
 			require.NoError(t, err)
 			require.Empty(t, uri)
-			_, err = resolve("not-json")
+			_, _, err = resolve("not-json")
 			require.Error(t, err)
 			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 		})
@@ -142,24 +152,26 @@ func TestTalonPrewarmDataCoordStartAfterHealthy(t *testing.T) {
 	// server-info file.
 	patchScheduler := mockey.Mock((*Server).startTaskScheduler).To(func(*Server) {}).Build()
 	defer patchScheduler.UnPatch()
-	patchImportReload := mockey.Mock((*importInspector).Reload).To(func(*importInspector) {}).Build()
+	patchImportReload := mockey.Mock((*bulkimport.Inspector).Reload).To(func(*bulkimport.Inspector) {}).Build()
 	defer patchImportReload.UnPatch()
 	patchLoops := mockey.Mock((*Server).startServerLoop).To(func(*Server) {}).Build()
 	defer patchLoops.UnPatch()
 	patchInfo := mockey.Mock(sessionutil.SaveServerInfo).To(func(string, int64) {}).Build()
 	defer patchInfo.UnPatch()
 
-	s := &Server{ctx: context.Background(), meta: newEmptyTestMeta(), importInspector: &importInspector{}}
+	s := &Server{
+		ctx:             context.Background(),
+		meta:            meta.NewEmptyTestMeta(),
+		importInspector: &bulkimport.Inspector{},
+		session:         &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
+	}
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
-	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.Segments.SetSegment(1, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, ManifestPath: "unloaded/object",
 	}))
-	session := sessionutil.NewMockSession(t)
-	session.EXPECT().GetServerID().Return(int64(1))
-	s.session = session
 	c := &recordingTalonPrewarm{stats: map[string]int{}, pending: make(chan struct{}), closeStarted: make(chan struct{})}
 	s.talonPrewarmInspector = NewTalonPrewarmInspector(s.ctx, s.GetPublishedManifestPaths, c,
-		func(s string) (string, error) { return s, nil }, time.Hour, 1)
+		func(s string) (string, uint64, error) { return s, 0, nil }, time.Hour, 1)
 	t.Cleanup(func() {
 		s.talonPrewarmInspector.Stop()
 		<-c.closeStarted

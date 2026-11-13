@@ -159,7 +159,6 @@ func setupArrowFetchFixture(tb testing.TB, rowsPerSegment int) *arrowFetchFixtur
 	})
 	require.NoError(tb, err)
 	collection := manager.Collection.Get(collectionID)
-	loader := NewLoader(ctx, manager, chunkManager)
 
 	segments := make([]Segment, 0, 2)
 	for i := range 2 {
@@ -181,10 +180,6 @@ func setupArrowFetchFixture(tb testing.TB, rowsPerSegment int) *arrowFetchFixtur
 
 		seg, err := NewSegment(ctx, collection, manager.Segment, SegmentTypeSealed, 0, loadInfo)
 		require.NoError(tb, err)
-
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, collectionID, loadInfo, SegmentTypeSealed)
-		require.NoError(tb, err)
-		seg.SetPKCandidate(bfs)
 
 		localSeg, ok := seg.(*LocalSegment)
 		require.True(tb, ok, "sealed segment must be *LocalSegment for the Arrow retrieve path")
@@ -262,7 +257,7 @@ func TestFetchFieldsData_ArrowMatchesRetrieveByOffsets(t *testing.T) {
 	defer fx.teardown()
 
 	// Arrow path.
-	rec, err := fetchFieldsAsRecord(fx.ctx, fx.segments, fx.plan, fx.merged)
+	rec, err := fetchFieldsAsRecord(fx.ctx, fx.segments, fx.plan, fx.merged, paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
 	require.NoError(t, err)
 	defer rec.Release()
 	require.Equal(t, len(fx.fieldSchemaMap), int(rec.NumCols()), "Arrow record column count must match requested output fields")
@@ -375,7 +370,7 @@ func BenchmarkFetchFieldsData_Arrow(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		cgoStart := time.Now()
-		rec, err := segcore.FillRetrieveFieldsOrdered(fx.ctx, cSegments, fx.plan, segIndices, segOffsets)
+		rec, err := segcore.FillRetrieveFieldsOrdered(fx.ctx, cSegments, fx.plan, segIndices, segOffsets, paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
 		cgoNs += time.Since(cgoStart).Nanoseconds()
 		if err != nil {
 			b.Fatal(err)
@@ -545,7 +540,7 @@ func BenchmarkOverheadRatio_SearchVsRetrieve(b *testing.B) {
 
 		// Retrieve via Arrow (100 rows × 3 fields incl. FloatVector dim=128).
 		arrowStart := time.Now()
-		rec, err := segcore.FillRetrieveFieldsOrdered(fx.ctx, cSegments, fx.plan, segIndices, segOffsets)
+		rec, err := segcore.FillRetrieveFieldsOrdered(fx.ctx, cSegments, fx.plan, segIndices, segOffsets, paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
 		if err != nil {
 			b.Fatal(err)
 		}

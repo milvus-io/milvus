@@ -144,14 +144,14 @@ class GrowingIndexSet {
     // publication for deferred publishers. Synchronous vector owners only
     // check published failure state before pinning the available record.
     index::GrowingIndexSnapshotPin
-    PinSnapshot(FieldId field_id) const {
+    PinSnapshot(milvus::OpContext* op_ctx, FieldId field_id) const {
         std::shared_lock lock(mutex_);
         auto it = appenders_.find(field_id);
         if (it == appenders_.end() || !it->second.owner) {
             return {};
         }
         it->second.owner->CommitIfNeeded();
-        return it->second.owner->PinSnapshot();
+        return it->second.owner->PinSnapshot(op_ctx);
     }
 
     FieldIndexCapability

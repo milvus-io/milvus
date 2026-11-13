@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -35,8 +36,8 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+			{Name: "pk", FieldID: 101, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "value", FieldID: 102, DataType: schemapb.DataType_Int64},
 		},
 	})
 	require.NoError(t, err)
@@ -73,8 +74,8 @@ func TestInsertTaskKeylessAutoIDIsNewWrite(t *testing.T) {
 	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+			{Name: "pk", FieldID: 101, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "value", FieldID: 102, DataType: schemapb.DataType_Int64},
 		},
 	})
 	require.NoError(t, err)
@@ -117,8 +118,8 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+			{Name: "pk", FieldID: 101, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "value", FieldID: 102, DataType: schemapb.DataType_Int64},
 		},
 	})
 	require.NoError(t, err)
@@ -238,6 +239,7 @@ func TestMergeDuplicateInsertResultsAcrossVChannels(t *testing.T) {
 }
 
 func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) Cache {
+	metacache.MockWriteSchemaForTest(t)
 	t.Helper()
 
 	cache := NewMockCache(t)
@@ -298,8 +300,8 @@ func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAlloc
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 				NumRows:        2,
 				FieldsData: []*schemapb.FieldData{
-					int64FieldData("pk", 1, []int64{10, 11}),
-					int64FieldData("value", 2, []int64{100, 101}),
+					int64FieldData("pk", 101, []int64{10, 11}),
+					int64FieldData("value", 102, []int64{100, 101}),
 				},
 			},
 		},
@@ -324,7 +326,7 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 				NumRows:        6,
 				FieldsData: []*schemapb.FieldData{
-					int64FieldData("value", 2, []int64{100, 101, 102, 103, 104, 105}),
+					int64FieldData("value", 102, []int64{100, 101, 102, 103, 104, 105}),
 				},
 			},
 		},

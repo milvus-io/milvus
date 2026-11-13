@@ -45,17 +45,15 @@
 namespace milvus::query {
 
 void
-SearchOnSealedIndex(const Schema& schema,
+SearchOnSealedIndex(const FieldMeta& field,
                     const index::IVectorReader& reader,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    milvus::OpContext* op_context,
                     SearchResult& search_result) {
-    const auto* schema_ptr = &schema;
-    // The reader stays pinned for the lifetime of the SearchResult that owns
+    // The reader stays alive for the lifetime of the SearchResult that owns
     // the recreator.
     const auto* reader_ptr = &reader;
     auto register_vector_search_provider = [&] {
@@ -66,24 +64,22 @@ SearchOnSealedIndex(const Schema& schema,
         }
         search_result.SetVectorSearchProvider(
             bitset,
-            [schema_ptr,
+            [field,
              reader_ptr,
              phase1_search_info = search_info,
              query_data,
              query_offsets,
-             num_queries,
-             op_context](const BitsetView& combined_filter,
-                         int64_t remaining_topk,
-                         SearchResult& filtered_result) {
+             num_queries](const BitsetView& combined_filter,
+                          int64_t remaining_topk,
+                          SearchResult& filtered_result) {
                 SearchOnSealedIndex(
-                    *schema_ptr,
+                    field,
                     *reader_ptr,
                     StrictGroupSearchInfo(phase1_search_info, remaining_topk),
                     query_data,
                     query_offsets,
                     num_queries,
                     combined_filter,
-                    op_context,
                     filtered_result);
             });
     };
@@ -91,12 +87,15 @@ SearchOnSealedIndex(const Schema& schema,
     auto topK = search_info.topk_;
 
     auto field_id = search_info.field_id_;
-    auto& field = schema[field_id];
+    // Element-nullable VECTOR_ARRAY supports element-level search only; the
+    // reader's IdMap returns logical element ids. Embedding-list search is
+    // rejected.
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
     auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
@@ -134,7 +133,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            reader, dataset, search_info, search_bitset, op_context);
+            reader, dataset, search_info, search_bitset);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());
@@ -147,13 +146,11 @@ SearchOnSealedIndex(const Schema& schema,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      reader,
-                                                      op_context);
+                                                      reader);
     if (!use_iterator) {
         reader.Search(dataset,
                       milvus::exec::ProjectVectorSearchParams(search_info),
                       search_bitset,
-                      op_context,
                       search_result);
     }
     FinalizeVectorSearchOffsets(
@@ -165,7 +162,7 @@ SearchOnSealedIndex(const Schema& schema,
 }
 
 void
-SearchOnSealedColumn(const Schema& schema,
+SearchOnSealedColumn(const FieldMeta& field,
                      ChunkedColumnInterface* column,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
@@ -176,7 +173,6 @@ SearchOnSealedColumn(const Schema& schema,
                      const BitsetView& bitview,
                      milvus::OpContext* op_context,
                      SearchResult& result) {
-    const auto* schema_ptr = &schema;
     auto register_vector_search_provider = [&] {
         if (!result.allow_filtered_vector_search_ ||
             !CanUseStrictGroupSearch(search_info, num_queries) ||
@@ -185,7 +181,7 @@ SearchOnSealedColumn(const Schema& schema,
         }
         result.SetVectorSearchProvider(
             bitview,
-            [schema_ptr,
+            [field,
              column,
              phase1_search_info = search_info,
              phase1_index_info = index_info,
@@ -197,7 +193,7 @@ SearchOnSealedColumn(const Schema& schema,
                          int64_t remaining_topk,
                          SearchResult& filtered_result) {
                 SearchOnSealedColumn(
-                    *schema_ptr,
+                    field,
                     column,
                     StrictGroupSearchInfo(phase1_search_info, remaining_topk),
                     phase1_index_info,
@@ -212,12 +208,12 @@ SearchOnSealedColumn(const Schema& schema,
     };
 
     auto field_id = search_info.field_id_;
-    auto& field = schema[field_id];
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
 
     auto data_type = field.get_data_type();
@@ -245,6 +241,13 @@ SearchOnSealedColumn(const Schema& schema,
         column->IsNullable() && !is_element_level_search;
     if (needs_offset_mapping) {
         column->BuildValidRowIds(op_context);
+    }
+    // Element-nullable chunks store only valid vectors: scan physical
+    // elements and map them to logical element ids through the bitset.
+    const bool has_element_id_mapping =
+        is_element_level_search && field.is_element_nullable();
+    if (has_element_id_mapping) {
+        column->BuildElementPhysicalToLogicalIds(op_context);
     }
 
     // Check for nullable vector field with all null values - must be done before creating iterators
@@ -282,7 +285,8 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_info,
                                          index_info,
                                          search_bitview,
-                                         data_type);
+                                         data_type,
+                                         op_context);
         cached_iter.NextBatch(search_info, result);
         FinalizeVectorSearchOffsets(result,
                                     search_info.struct_element_offsets_.get());
@@ -322,6 +326,14 @@ SearchOnSealedColumn(const Schema& schema,
         if (has_offset_mapping) {
             id_view =
                 offset_mapping.GetPhysicalToLogicalIds(offset, chunk_size);
+            chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
+        } else if (has_element_id_mapping) {
+            id_view = column->GetElementPhysicalToLogicalIds(i);
+            AssertInfo(id_view.count == chunk_size,
+                       "element id map of chunk {} has {} ids, expected {}",
+                       i,
+                       id_view.count,
+                       chunk_size);
             chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
         }
 

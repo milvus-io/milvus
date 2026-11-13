@@ -14,12 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <nlohmann/json.hpp>
+#include "milvus-storage/filesystem/fs.h"
+#include <algorithm>
 #include <arrow/array.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
 #include <arrow/table.h>
 #include <arrow/type.h>
+#include <folly/ScopeGuard.h>
+#include <folly/system/ThreadName.h>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,22 +43,32 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/VirtualPK.h"
+#include "futures/Executor.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "monitor/Monitor.h"
+#include "segcore/arrow_field_utils.h"
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/search_result_export_c.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/output_field_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+using milvus::test::AssertCompletesInChild;
 
 namespace {
 
@@ -157,6 +177,7 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
 class MockTakeReader : public milvus_storage::api::Reader {
  public:
     std::shared_ptr<arrow::Table> table_;
+    std::function<void()> before_take;
 
     explicit MockTakeReader(std::shared_ptr<arrow::Table> table)
         : table_(std::move(table)) {
@@ -183,6 +204,10 @@ class MockTakeReader : public milvus_storage::api::Reader {
          size_t,
          const std::shared_ptr<std::vector<std::string>>& needed_columns)
         override {
+        take_calls_.fetch_add(1, std::memory_order_relaxed);
+        if (before_take) {
+            before_take();
+        }
         if (!table_) {
             return arrow::Status::Invalid("no table");
         }
@@ -205,12 +230,19 @@ class MockTakeReader : public milvus_storage::api::Reader {
         return SelectRows(table_, row_indices);
     }
 
+    int64_t
+    take_calls() const {
+        return take_calls_.load(std::memory_order_relaxed);
+    }
+
     void
     set_keyretriever(
         const std::function<std::string(const std::string&)>&) override {
     }
 
  private:
+    std::atomic<int64_t> take_calls_{0};
+
     // Select rows from table at given indices using arrow::compute::Take.
     static arrow::Result<std::shared_ptr<arrow::Table>>
     SelectRows(const std::shared_ptr<arrow::Table>& table,
@@ -1061,14 +1093,14 @@ LoadExternalTextColumnForTesting(ChunkedSegmentSealedImpl* segment,
     auto runtime = segment->TestCloneMutableRuntimeResourceState();
 
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = segment->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
     auto staged = segment->TestBuildNextPublishedState(current, initial_delta);
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
 
@@ -1430,6 +1462,95 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorUsesCompactData) {
     EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
 }
 
+// The Arrow retrieve path (AsyncRetrieveAsArrow) converts what take produced
+// with FieldDataToArrow, which is how an external collection reaches Materialize.
+TEST(ExternalTakeTest, TryTakeForRetrieve_ExportsToArrow) {
+    auto info = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.bool_id,
+                        info.int8_id,
+                        info.int64_id,
+                        info.varchar_id,
+                        info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 2, 4};
+    int64_t size = offsets.size();
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), size, false, false));
+    ASSERT_EQ(results->fields_data_size(), 5);
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (int i = 0; i < results->fields_data_size(); ++i) {
+        const auto& fd = results->fields_data(i);
+        const auto& meta = (*info.schema)[FieldId(fd.field_id())];
+        auto converted = FieldDataToArrow(std::string(meta.get_name().get()),
+                                          fd,
+                                          size,
+                                          false,
+                                          nullptr,
+                                          &meta);
+        ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+        ASSERT_EQ(converted->second->length(), size);
+        ASSERT_EQ(converted->second->null_count(), 0);
+        arrays.push_back(converted->second);
+    }
+
+    auto bools = std::static_pointer_cast<arrow::BooleanArray>(arrays[0]);
+    EXPECT_TRUE(bools->Value(1));
+    // INT8 stays widened to int32, as a Query reply has it.
+    auto int8s = std::static_pointer_cast<arrow::Int32Array>(arrays[1]);
+    EXPECT_EQ(int8s->Value(1), 20);
+    auto int64s = std::static_pointer_cast<arrow::Int64Array>(arrays[2]);
+    EXPECT_EQ(int64s->Value(1), 20000);
+    auto strs = std::static_pointer_cast<arrow::StringArray>(arrays[3]);
+    EXPECT_EQ(strs->GetString(1), "row_2");
+    auto vecs =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arrays[4]);
+    ASSERT_EQ(vecs->byte_width(), kVecDim * sizeof(float));
+    EXPECT_FLOAT_EQ(reinterpret_cast<const float*>(vecs->GetValue(1))[0], 8.0f);
+}
+
+TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorExportsToArrow) {
+    auto info = BuildExternalSchema();
+    auto table = BuildNullableVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false));
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    const auto& meta = (*info.schema)[info.vec_id];
+    auto converted = FieldDataToArrow(std::string(meta.get_name().get()),
+                                      results->fields_data(0),
+                                      offsets.size(),
+                                      false,
+                                      nullptr,
+                                      &meta);
+    ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+    auto vecs = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+        converted->second);
+    ASSERT_EQ(vecs->length(), 3);
+    EXPECT_FALSE(vecs->IsNull(0));
+    EXPECT_TRUE(vecs->IsNull(1));
+    EXPECT_FALSE(vecs->IsNull(2));
+    EXPECT_FLOAT_EQ(reinterpret_cast<const float*>(vecs->GetValue(2))[0], 8.0f);
+}
+
 TEST(ExternalTakeTest, TryTakeForRetrieve_AdditionalVectorTypes) {
     auto info = BuildAdditionalVectorSchema();
     auto table = BuildAdditionalVectorArrowTable();
@@ -1603,6 +1724,193 @@ TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     // Row 1: [4,5,6,7], Row 3: [12,13,14,15]
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(0), 4.0f);
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(4), 12.0f);
+}
+
+TEST(ExternalTakeTest,
+     OrderedSearchOutputKeepsBatchTakeForOneOrMultipleFields) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    milvus::futures::getSearchFanoutCPUExecutor();
+    const auto middle_submitted =
+        milvus::monitor::internal_storage_pool_task_submitted_total_middle
+            .Value();
+    const auto search_fanout_submitted =
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value();
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {int64_id, varchar_id};
+    SearchResult result;
+    result.segment_ = segment;
+    result.read_lease_ = segment->AcquireReadLease(folly::CancellationToken());
+    result.read_snapshot_ = segment->CaptureReadSnapshot();
+    CSearchResult c_results[] = {reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0, 0};
+    int64_t segment_offsets[] = {1, 3};
+    CProto c_proto{};
+    auto status = FillOutputFieldsOrdered(c_results,
+                                          1,
+                                          reinterpret_cast<CSearchPlan>(&plan),
+                                          segment_indices,
+                                          segment_offsets,
+                                          2,
+                                          &c_proto,
+                                          nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData output;
+    ASSERT_TRUE(output.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    ASSERT_EQ(output.fields_data_size(), 2);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(0), 10000);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(1), 30000);
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(0), "row_1");
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(1), "row_3");
+    EXPECT_EQ(reader_ptr->take_calls(), 1);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted);
+    EXPECT_EQ(
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value(),
+        search_fanout_submitted);
+    free(const_cast<void*>(c_proto.proto_blob));
+
+    plan.target_entries_ = {int64_id};
+    CProto single_field_proto{};
+    status = FillOutputFieldsOrdered(c_results,
+                                     1,
+                                     reinterpret_cast<CSearchPlan>(&plan),
+                                     segment_indices,
+                                     segment_offsets,
+                                     2,
+                                     &single_field_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData single_field_output;
+    ASSERT_TRUE(single_field_output.ParseFromArray(
+        single_field_proto.proto_blob, single_field_proto.proto_size));
+    ASSERT_EQ(single_field_output.fields_data_size(), 1);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(0),
+              10000);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(1),
+              30000);
+    EXPECT_EQ(reader_ptr->take_calls(), 2);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted);
+    EXPECT_EQ(
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value(),
+        search_fanout_submitted);
+    free(const_cast<void*>(single_field_proto.proto_blob));
+}
+
+TEST(ExternalTakeTest, OrderedSearchOutputOtherSegmentReadsDuringTake) {
+    AssertCompletesInChild([&] {
+        class SignallingGrowingSegment : public SegmentGrowingImpl {
+         public:
+            using SegmentGrowingImpl::bulk_subscript;
+            using SegmentGrowingImpl::SegmentGrowingImpl;
+
+            std::unique_ptr<DataArray>
+            bulk_subscript(milvus::OpContext* ctx,
+                           FieldId field_id,
+                           const int64_t* offsets,
+                           int64_t count) const override {
+                EXPECT_TRUE(
+                    folly::getCurrentThreadName().value_or("").starts_with(
+                        "MILVUS_SEARCH_"));
+                on_read();
+                return SegmentGrowingImpl::bulk_subscript(
+                    ctx, field_id, offsets, count);
+            }
+
+            std::function<void()> on_read;
+        };
+
+        auto info = BuildExternalSchema();
+        auto* search = milvus::futures::getSearchCPUExecutor();
+        auto* fanout = milvus::futures::getSearchFanoutCPUExecutor();
+        const auto original_search_size = search->numThreads();
+        const auto original_fanout_size = fanout->numThreads();
+        search->setNumThreads(2);
+        fanout->setNumThreads(1);
+        auto restore_pools = folly::makeGuard([&] {
+            search->setNumThreads(original_search_size);
+            fanout->setNumThreads(original_fanout_size);
+        });
+
+        std::promise<void> field_started;
+        auto field_ready = field_started.get_future();
+        SegmentSealedUPtr holder;
+        auto* sealed = CreateExternalSegment(holder, info.schema);
+        auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+        reader->before_take = [&] {
+            EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+                "MILVUS_SEARCH_"));
+            // One segment's take must not hold up another segment's field reads.
+            EXPECT_EQ(field_ready.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
+        };
+        sealed->SetReaderForTesting(std::move(reader));
+        sealed->SetUseTakeForOutputForTesting(true);
+
+        SignallingGrowingSegment growing(
+            info.schema, nullptr, SegcoreConfig::default_config(), 102);
+        auto data = DataGen(info.schema, kTestRows);
+        auto reserved = growing.PreInsert(kTestRows);
+        growing.Insert(reserved,
+                       kTestRows,
+                       data.row_ids_.data(),
+                       data.timestamps_.data(),
+                       std::make_shared<InsertRecordProto>(*data.raw_));
+        growing.on_read = [&] { field_started.set_value(); };
+
+        query::Plan plan(info.schema);
+        plan.target_entries_ = {info.int64_id};
+        SearchResult sealed_result, growing_result;
+        sealed_result.segment_ = sealed;
+        sealed_result.read_lease_ =
+            sealed->AcquireReadLease(folly::CancellationToken());
+        sealed_result.read_snapshot_ = sealed->CaptureReadSnapshot();
+        growing_result.segment_ = &growing;
+        CSearchResult results[] = {&sealed_result, &growing_result};
+        int32_t indices[] = {0, 1};
+        int64_t offsets[] = {1, 3};
+        CProto output{};
+        auto release_output = folly::makeGuard(
+            [&] { free(const_cast<void*>(output.proto_blob)); });
+        auto pending = std::async(std::launch::async, [&] {
+            return FillOutputFieldsOrdered(
+                results, 2, &plan, indices, offsets, 2, &output, nullptr);
+        });
+        ASSERT_EQ(pending.wait_for(std::chrono::seconds(10)),
+                  std::future_status::ready);
+        auto status = pending.get();
+        ASSERT_EQ(status.error_code, 0) << status.error_msg;
+        proto::schema::SearchResultData decoded;
+        ASSERT_TRUE(
+            decoded.ParseFromArray(output.proto_blob, output.proto_size));
+        ASSERT_EQ(decoded.fields_data_size(), 1);
+        EXPECT_EQ(decoded.fields_data(0).scalars().long_data().data(0), 10000);
+        EXPECT_EQ(decoded.fields_data(0).scalars().long_data().data(1),
+                  data.get_col<int64_t>(info.int64_id)[3]);
+    });
 }
 
 TEST(ExternalTakeTest, TryTakeForSearch_FunctionOutputStoredColumn) {
@@ -1979,6 +2287,164 @@ TEST(InternalTakeTest, TryTakeForRetrieve_ProjectsDynamicField) {
     ASSERT_EQ(dynamic_data.scalars().json_data().data_size(), 2);
     EXPECT_EQ(dynamic_data.scalars().json_data().data(0), R"({"foo":3})");
     EXPECT_EQ(dynamic_data.scalars().json_data().data(1), R"({"foo":1})");
+}
+
+// A VECTOR_ARRAY column taken from a manifest-backed sealed segment must carry
+// the collection-level element type and dim, which the Go reduce and the SDK
+// read to decode the rows.
+TEST(InternalTakeTest, TryTakeForRetrieve_VectorArraySetsElementTypeAndDim) {
+    constexpr int64_t kRows = 3;
+    constexpr int kWidth = kVecDim * sizeof(float);
+    const FieldId pk_id(100);
+    const FieldId dense_id(101);
+    const FieldId element_nullable_id(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->AddField(FieldMeta(
+        FieldName("pk"), pk_id, DataType::INT64, false, std::nullopt));
+    schema->AddField(FieldMeta(FieldName("dense_vecs"),
+                               dense_id,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               false,
+                               false));
+    schema->AddField(FieldMeta(FieldName("element_nullable_vecs"),
+                               element_nullable_id,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               false,
+                               true));
+    schema->set_primary_field_id(pk_id);
+
+    auto vector_of = [](int64_t row, int64_t element) {
+        std::vector<float> v(kVecDim);
+        for (int64_t k = 0; k < kVecDim; ++k) {
+            v[k] = static_cast<float>(row * 100 + element * 10 + k);
+        }
+        return v;
+    };
+
+    // Row r of dense_vecs holds r + 1 vectors. Every row of
+    // element_nullable_vecs holds three elements, the middle one null.
+    arrow::Int64Builder pk_builder;
+    auto dense_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+            arrow::fixed_size_binary(kWidth)));
+    auto* dense_values = static_cast<arrow::FixedSizeBinaryBuilder*>(
+        dense_builder->value_builder());
+    auto nullable_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), std::make_shared<arrow::BinaryBuilder>());
+    auto* nullable_values =
+        static_cast<arrow::BinaryBuilder*>(nullable_builder->value_builder());
+    for (int64_t row = 0; row < kRows; ++row) {
+        ASSERT_TRUE(pk_builder.Append(row).ok());
+        ASSERT_TRUE(dense_builder->Append().ok());
+        for (int64_t j = 0; j <= row; ++j) {
+            auto v = vector_of(row, j);
+            ASSERT_TRUE(
+                dense_values->Append(reinterpret_cast<const uint8_t*>(v.data()))
+                    .ok());
+        }
+        ASSERT_TRUE(nullable_builder->Append().ok());
+        for (int64_t j = 0; j < 3; ++j) {
+            if (j == 1) {
+                ASSERT_TRUE(nullable_values->AppendNull().ok());
+                continue;
+            }
+            auto v = vector_of(row, j);
+            ASSERT_TRUE(
+                nullable_values
+                    ->Append(reinterpret_cast<const uint8_t*>(v.data()), kWidth)
+                    .ok());
+        }
+    }
+    auto table = arrow::Table::Make(
+        arrow::schema({
+            arrow::field(std::to_string(pk_id.get()), arrow::int64()),
+            arrow::field(std::to_string(dense_id.get()),
+                         arrow::list(arrow::fixed_size_binary(kWidth))),
+            arrow::field(std::to_string(element_nullable_id.get()),
+                         arrow::list(arrow::binary())),
+        }),
+        {pk_builder.Finish().ValueOrDie(),
+         dense_builder->Finish().ValueOrDie(),
+         nullable_builder->Finish().ValueOrDie()});
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {pk_id, dense_id, element_nullable_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {2, 0, 2};
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true));
+    ASSERT_EQ(results->fields_data_size(), 3);
+
+    auto assert_row = [&](const proto::schema::VectorField& row,
+                          int64_t source_row,
+                          const std::vector<int64_t>& elements) {
+        EXPECT_EQ(row.dim(), kVecDim);
+        ASSERT_EQ(row.float_vector().data_size(), elements.size() * kVecDim);
+        for (size_t j = 0; j < elements.size(); ++j) {
+            auto expected = vector_of(source_row, elements[j]);
+            for (int64_t k = 0; k < kVecDim; ++k) {
+                EXPECT_FLOAT_EQ(row.float_vector().data(j * kVecDim + k),
+                                expected[k]);
+            }
+        }
+    };
+
+    const auto& dense = results->fields_data(1);
+    ASSERT_EQ(dense.field_id(), dense_id.get());
+    ASSERT_EQ(dense.type(), proto::schema::DataType::ArrayOfVector);
+    EXPECT_EQ(dense.vectors().dim(), kVecDim);
+    const auto& dense_array = dense.vectors().vector_array();
+    EXPECT_EQ(dense_array.element_type(), proto::schema::DataType::FloatVector);
+    EXPECT_EQ(dense_array.dim(), kVecDim);
+    ASSERT_EQ(dense_array.data_size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(i);
+        std::vector<int64_t> elements;
+        for (int64_t j = 0; j <= offsets[i]; ++j) {
+            elements.push_back(j);
+        }
+        assert_row(dense_array.data(i), offsets[i], elements);
+        EXPECT_EQ(dense_array.data(i).valid_data_size(), 0);
+    }
+
+    const auto& nullable = results->fields_data(2);
+    ASSERT_EQ(nullable.field_id(), element_nullable_id.get());
+    EXPECT_EQ(nullable.vectors().dim(), kVecDim);
+    const auto& nullable_array = nullable.vectors().vector_array();
+    EXPECT_EQ(nullable_array.element_type(),
+              proto::schema::DataType::FloatVector);
+    EXPECT_EQ(nullable_array.dim(), kVecDim);
+    ASSERT_EQ(nullable_array.data_size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(i);
+        const auto& row = nullable_array.data(i);
+        assert_row(row, offsets[i], {0, 2});
+        ASSERT_EQ(row.valid_data_size(), 3);
+        EXPECT_TRUE(row.valid_data(0));
+        EXPECT_FALSE(row.valid_data(1));
+        EXPECT_TRUE(row.valid_data(2));
+    }
 }
 
 TEST(InternalTakeTest, TryTakeForSearch_ResolvesTextOutputField) {
@@ -3426,6 +3892,12 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
 }
 
 TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec = R"({
@@ -3443,6 +3915,14 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
     ::InjectExternalSpecProperties(
         props, coll_id, "azure://core.windows.net/container/path", spec);
 
+    auto config = milvus_storage::FilesystemCache::resolve_config(
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        "azure://core.windows.net/container/path");
+    ASSERT_TRUE(config.ok()) << config.status().ToString();
+    EXPECT_EQ(config->credential_endpoint,
+              "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
               "core.windows.net");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
@@ -3453,11 +3933,43 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
               "client");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_tenant_id")),
               "tenant");
-    EXPECT_EQ(
-        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
-        "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, AzureLegacyBrokerQuery) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/"
+        "assume-role?api-version=1&scope=a%2Fb+x";
+    auto inject = [&](const std::string& url) {
+        milvus_storage::api::Properties props;
+        const std::string spec =
+            R"({"format":"parquet","extfs":{"cloud_provider":"azure","access_key_id":"account","region":"westus3","azure_client_id":"client","azure_tenant_id":"tenant","azure_credential_endpoint":")" +
+            url + R"("}})";
+        ::InjectExternalSpecProperties(
+            props, 42, "azure://core.windows.net/container/path", spec);
+        return props;
+    };
+    auto props = inject(endpoint);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_ANY_THROW(inject(endpoint + "&extra=1"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?api-version=2&scope=a%2Fb+x"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?scope=a%2Fb+x&api-version=1"));
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
@@ -3470,7 +3982,9 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
         {"chinaeast", "core.chinacloudapi.cn"},
         {"usgovvirginia", "core.usgovcloudapi.net"},
         {"usdodcentral", "core.usgovcloudapi.net"},
-        {"germanynortheast", "core.cloudapi.de"},
+        // Microsoft Cloud Germany closed; these are public Azure regions.
+        {"germanywestcentral", "core.windows.net"},
+        {"germanynorth", "core.windows.net"},
         {"eastus", "core.windows.net"},
     };
     for (const auto& c : cases) {
@@ -3487,6 +4001,78 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
                   c.expected_suffix)
             << "region=" << c.region;
     }
+}
+
+// Spec producers write azure://core.windows.net/<container>/<blob> together
+// with the storage account's region. The authority in the source wins over the
+// region-derived one, so a region never turns the authority into a container.
+TEST(InjectExtfsAllowlist, AzureAuthorityHostWinsOverRegion) {
+    // The native policy is process-wide and immutable: reuse the allowlist
+    // that the other Broker tests in this binary install.
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    struct Case {
+        std::string source;
+        std::string region;
+        std::string address;
+    };
+    const std::vector<Case> cases = {
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "westeurope",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "germanywestcentral",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "germanynorth",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "chinaeast2",
+         "core.windows.net"},
+        {"azure://core.windows.net/ctr/dir/file.parquet",
+         "usgovvirginia",
+         "core.windows.net"},
+        {"azure://core.chinacloudapi.cn/ctr/dir/file.parquet",
+         "eastus",
+         "core.chinacloudapi.cn"},
+        {"azure://CORE.WINDOWS.NET/ctr/dir/file.parquet",
+         "eastus",
+         "CORE.WINDOWS.NET"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.source + " region=" + c.region);
+        // The target-mode spec the Zilliz Cloud control plane builds.
+        nlohmann::json spec = {{"format", "parquet"},
+                               {"extfs",
+                                {{"cloud_provider", "azure"},
+                                 {"region", c.region},
+                                 {"access_key_id", "account"},
+                                 {"azure_client_id", "client"},
+                                 {"azure_tenant_id", "tenant"},
+                                 {"azure_credential_endpoint", endpoint},
+                                 {"load_frequency", "3600"}}}};
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(props, 42, c.source, spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.address);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "ctr");
+    }
+    // A container host still takes its authority from the region.
+    milvus_storage::api::Properties props;
+    ::InjectExternalSpecProperties(
+        props,
+        42,
+        "azure://ctr/dir/file.parquet",
+        R"({"format":"parquet","extfs":{"cloud_provider":"azure","region":"germanywestcentral","access_key_id":"account","access_key_value":"KEY"}})");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "core.windows.net");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")), "ctr");
 }
 
 TEST(InjectExtfsAllowlist, AzuriteMilvusFormURIUsesHostAsEndpoint) {
@@ -3657,7 +4243,8 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
         // Read the same typed property as IcebergFormat::explore so a stale
         // property key cannot silently fall back to the latest snapshot.
         const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
-            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
         ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
         EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
     }
@@ -3688,7 +4275,7 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
         EXPECT_STREQ(loon_properties_get(&properties,
                                          PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
                      "5320540205222981137");
-        milvus_storage::api::Properties round_tripped;
+        std::shared_ptr<const milvus_storage::api::Properties> round_tripped;
         const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
             round_tripped, &properties);
         loon_properties_free(&properties);
@@ -3729,6 +4316,172 @@ TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
         EXPECT_NE(error.find("-2"), std::string::npos);
         loon_ffi_free_result(&result);
         loon_properties_free(&properties);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDAcceptsStringAndNumber) {
+    const int64_t coll_id = 42;
+    {
+        milvus_storage::api::Properties props;
+        std::string spec =
+            R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{5320540205222981137});
+    }
+    {
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"paimon-table","snapshot_id":7})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{7});
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDSurvivesCABIConversion) {
+    LoonProperties props{nullptr, 0};
+    auto result = loon_properties_inject_external_spec(
+        &props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})",
+        2000,
+        5000);
+    ASSERT_NE(loon_ffi_is_success(&result), 0);
+    loon_ffi_free_result(&result);
+
+    const auto* snapshot_id =
+        loon_properties_get(&props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+    ASSERT_NE(snapshot_id, nullptr);
+    EXPECT_STREQ(snapshot_id, "5320540205222981137");
+
+    const auto* use_ssl = loon_properties_get(&props, "extfs.42.use_ssl");
+    ASSERT_NE(use_ssl, nullptr);
+    EXPECT_STREQ(use_ssl, "true");
+
+    loon_properties_free(&props);
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDOptional) {
+    // Without snapshot_id the property must stay absent so the paimon
+    // planner falls back to the latest snapshot.
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"paimon-table"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(props.count(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID), 0u);
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeIsInjected) {
+    for (const auto& mode : {"auto", "direct-file", "data-split"}) {
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":")") + mode +
+            "\"}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  mode);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeDefaults) {
+    for (const auto& value : {"\"\"", "null"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "auto");
+    }
+}
+
+TEST(InjectExtfsAllowlist, InvalidPaimonScanModeIsRejected) {
+    for (const auto& value : {"\"native\"", "true", "1", "{}", "[]"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
+                     milvus::SegcoreError);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonFormatPropertiesIgnoreFieldOrder) {
+    for (const std::string snapshot : {"7", "\"7\"", "null"}) {
+        for (const std::string value : {"\"auto\"",
+                                        "\"direct-file\"",
+                                        "\"data-split\"",
+                                        "\"\"",
+                                        "null",
+                                        "\"invalid\"",
+                                        "true",
+                                        "1",
+                                        "{}",
+                                        "[]"}) {
+            const bool valid =
+                value == "\"auto\"" || value == "\"direct-file\"" ||
+                value == "\"data-split\"" || value == "\"\"" || value == "null";
+            const auto expected = value == "\"\"" || value == "null"
+                                      ? "auto"
+                                      : value.substr(1, value.size() - 2);
+            std::vector<std::string> fields{"\"format\":\"paimon-table\"",
+                                            "\"snapshot_id\":" + snapshot,
+                                            "\"scan_mode\":" + value};
+            std::sort(fields.begin(), fields.end());
+            do {
+                const auto spec =
+                    "{" + fields[0] + "," + fields[1] + "," + fields[2] + "}";
+                SCOPED_TRACE(spec);
+                LoonProperties props{nullptr, 0};
+                auto result = loon_properties_inject_external_spec(
+                    &props, 42, "s3://bucket/table", spec.c_str(), 2000, 5000);
+                if (valid) {
+                    EXPECT_EQ(result.err_code, loon_errcode_success);
+                    EXPECT_STREQ(
+                        loon_properties_get(&props, PROPERTY_PAIMON_SCAN_MODE),
+                        expected.c_str());
+                    if (snapshot != "null") {
+                        EXPECT_STREQ(
+                            loon_properties_get(
+                                &props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
+                            "7");
+                    }
+                } else {
+                    EXPECT_EQ(result.err_code, loon_errcode_invalid_properties);
+                }
+                loon_ffi_free_result(&result);
+                loon_properties_free(&props);
+            } while (std::next_permutation(fields.begin(), fields.end()));
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, MissingPaimonScanModePreservesReaderDefault) {
+    for (const std::string spec : {
+             R"({"format":"paimon-table"})",
+             R"({"snapshot_id":7,"format":"paimon-table"})",
+         }) {
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(props.count(PROPERTY_PAIMON_SCAN_MODE), 0u);
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "data-split");
     }
 }
 
@@ -3902,4 +4655,138 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
 
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());
+}
+
+TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    const auto policy = std::string(
+        R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])");
+    ASSERT_TRUE(InitCredentialBrokerPolicy(policy).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("[]")).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("invalid")).ok());
+    EXPECT_FALSE(
+        InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
+            .ok());
+    for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
+        for (const auto* format : {"parquet", "milvus-table"}) {
+            for (uint32_t mode : {0u, 1u, 2u}) {
+                milvus_storage::api::Properties props;
+                props["milvus.talon.external_mode"] = mode;
+                props[PROPERTY_FS_TALON_MODE] = uint32_t{1};
+                props[PROPERTY_FS_TALON_COORDINATOR] =
+                    std::string("talon:1234");
+                auto spec =
+                    nlohmann::json{{"format", format},
+                                   {"extfs",
+                                    {{"cloud_provider", cloud},
+                                     {"region", "us-west-2"},
+                                     {"use_iam", "true"},
+                                     {"credential_endpoint", endpoint}}}};
+                InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump());
+                EXPECT_EQ(std::get<std::string>(
+                              props.at("extfs.42.credential_endpoint")),
+                          endpoint);
+                EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+                auto address =
+                    std::get<std::string>(props.at("extfs.42.address"));
+                auto scheme_end = address.find("://");
+                if (scheme_end != std::string::npos)
+                    address = address.substr(scheme_end + 3);
+                auto config = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        props),
+                    "s3://" + address + "/bucket/path");
+                ASSERT_TRUE(config.ok()) << config.status();
+                EXPECT_TRUE(config->use_iam);
+                EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+                EXPECT_EQ(config->credential_endpoint, endpoint);
+                EXPECT_FALSE(config->s3_use_crt);
+                EXPECT_EQ(config->talon_mode,
+                          milvus_storage::TalonMode::Disabled);
+                EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+                spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+                EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump()));
+            }
+        }
+    }
+    auto spec = nlohmann::json{
+        {"format", "parquet"},
+        {"extfs",
+         {{"cloud_provider", "azure"},
+          {"region", "westus3"},
+          {"azure_client_id", "client"},
+          {"azure_tenant_id", "tenant"},
+          {"access_key_id", "account"},
+          {"credential_endpoint", endpoint},
+          {"azure_credential_endpoint",
+           "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
+    milvus_storage::api::Properties props;
+    props["milvus.talon.external_mode"] = uint32_t{2};
+    props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+    InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump());
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
+    EXPECT_ANY_THROW(InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump()));
+}
+
+TEST(InjectExtfsAllowlist, NonBrokerRetainsTalonMode) {
+    for (uint32_t mode : {0u, 1u, 2u}) {
+        milvus_storage::api::Properties props;
+        props["milvus.talon.external_mode"] = mode;
+        props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+        const auto spec = nlohmann::json{{"format", "parquet"},
+                                         {"extfs",
+                                          {{"cloud_provider", "aws"},
+                                           {"region", "us-west-2"},
+                                           {"use_iam", "true"}}}};
+        InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")),
+                  std::to_string(mode));
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.coordinator")),
+                  "talon:1234");
+        EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.s3.use_crt")),
+                  "false");
+    }
+}
+
+TEST(InjectExtfsAllowlist, BrokerEndpointNormalization) {
+    for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+             {"HTTPS://BROKER.example.com:443/path",
+              "https://broker.example.com/path"},
+             {"http://broker:080/path", "http://broker/path"},
+             {"HTTPS://BROKER:443/path?api-version=1&scope=a%2Fb+x&scope=y",
+              "https://broker/path?api-version=1&scope=a%2Fb+x&scope=y"},
+             {"https://broker?", "https://broker/?"},
+             {"http://[::1]:80/path", "http://[::1]/path"},
+             {"https://broker:8443/a_b/", "https://broker:8443/a_b/"}}) {
+        auto result = NormalizeBrokerEndpoint(entry.first);
+        ASSERT_TRUE(result.ok()) << result.status();
+        EXPECT_EQ(*result, entry.second);
+    }
+    for (const auto& raw : {"",
+                            "ftp://broker/path",
+                            "https:///path",
+                            "https://user@broker/path",
+                            "https://broker/path#",
+                            "https://broker:",
+                            "https://broker:0/path",
+                            "https://broker:65536/path",
+                            "https://*.broker/path",
+                            "https://broker/a%2Fb/",
+                            "https://broker/allowed//admin",
+                            "https://broker/a/../admin",
+                            "https://broker/a:b"}) {
+        EXPECT_FALSE(NormalizeBrokerEndpoint(raw).ok()) << raw;
+    }
 }

@@ -490,7 +490,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     HasIndex(FieldId field_id) const override {
@@ -518,14 +520,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return registrations;
     }
 
-    IndexPin
-    PinIndex(milvus::OpContext*, const IndexKey&) const override {
+    index::IIndexReaderBasePtr
+    CreateIndexReader(milvus::OpContext*, const IndexKey&) const override {
         return {};
     }
 
     index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId field_id) const override {
-        return growing_indexes_.PinSnapshot(field_id);
+    PinGrowingIndex(milvus::OpContext* op_ctx,
+                    FieldId field_id) const override {
+        return growing_indexes_.PinSnapshot(op_ctx, field_id);
     }
 
     bool
@@ -561,7 +564,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!growing_indexes_.Has(id)) {
             return true;
         }
-        auto pin = growing_indexes_.PinSnapshot(id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, id);
         if (!pin) {
             // Below threshold an all-null compact column has no chunks and no
             // engine, but validity alone is a complete materialization.
@@ -575,7 +578,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     CanReadRawVectorFromIndex(FieldId field_id) const {
-        auto pin = growing_indexes_.PinSnapshot(field_id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, field_id);
         if (!pin) {
             return false;
         }
@@ -658,16 +661,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const override {
-        const auto& field_meta = get_schema_snapshot()->operator[](field_id);
-        if (field_meta.has_nullable_array_element() ||
-            (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
-             field_meta.is_element_nullable())) {
-            ThrowInfo(
-                ErrorCode::NotImplemented,
-                "struct element offsets on element-nullable array field {} "
-                "are not supported yet",
-                field_meta.get_name().get());
-        }
+        // No check against the current schema: a reader may have taken the
+        // previous schema before a Reopen published a new one, and the alias
+        // of a sub-field that schema dropped must still resolve for it (see
+        // Reopen). Field IDs are never reused, so a kept alias cannot answer
+        // for a different field.
         std::shared_lock lock(struct_element_offsets_map_mutex_);
         auto it = struct_element_offsets_map_.find(field_id);
         if (it != struct_element_offsets_map_.end()) {
@@ -912,7 +910,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::unordered_map<FieldId, std::vector<FieldDataPtr>>
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         int64_t row_limit);
 

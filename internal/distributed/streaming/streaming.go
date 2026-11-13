@@ -163,15 +163,6 @@ type Balancer interface {
 	// GetFrozenNodeIDs returns the frozen node ids.
 	GetFrozenNodeIDs(ctx context.Context) ([]int64, error)
 
-	// IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
-	IsRebalanceSuspended(ctx context.Context) (bool, error)
-
-	// SuspendRebalance suspends the rebalance of the wal.
-	SuspendRebalance(ctx context.Context) error
-
-	// ResumeRebalance resumes the rebalance of the wal.
-	ResumeRebalance(ctx context.Context) error
-
 	// FreezeNodeIDs freezes the streaming node.
 	// The wal will not be assigned to the frozen nodes and the wal will be removed from the frozen nodes.
 	FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error
@@ -249,7 +240,8 @@ type Local interface {
 // Broadcast is the interface for writing broadcast message into the wal.
 type Broadcast interface {
 	// Ack acknowledges a broadcast message at the specified vchannel.
-	// It must be called after the message is comsumed by the unique-consumer.
-	// It will only return error when the ctx is canceled.
+	// It must be called after the message is consumed by the unique-consumer.
+	// It uses the caller's context and does not retry internally.
+	// The consumer controls timeouts and retries after errors.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }

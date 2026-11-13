@@ -1336,7 +1336,7 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	})
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (c *Client) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetFlushStateResponse, error) {
 		return client.GetFlushState(ctx, req)
@@ -1667,6 +1667,14 @@ func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 	})
 }
 
+func (c *Client) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())))
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.EnsureCollectionReady(ctx, req, opts...)
+	})
+}
+
 func (c *Client) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -1951,6 +1959,28 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ClearReadTaskQueueResponse, error) {
 		return client.RootCoordClient.ClearReadTaskQueue(ctx, req)
+	})
+}
+
+func (c *Client) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ListRunningRequestsResponse, error) {
+		return client.ListRunningRequests(ctx, req)
+	})
+}
+
+func (c *Client) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.CancelRequestsResponse, error) {
+		return client.CancelRequests(ctx, req)
 	})
 }
 
@@ -2396,5 +2426,11 @@ func (c *Client) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
 		return client.GetStreamingNodeQueryViewResources(ctx, req)
+	})
+}
+
+func (c *Client) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+		return client.GetQueryViewSegmentLoadInfo(ctx, req, opts...)
 	})
 }

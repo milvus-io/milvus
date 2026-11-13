@@ -85,6 +85,7 @@ func TestRolesAndDataNodeMappings(t *testing.T) {
 	assert.Equal(t, RoleProxy, FeatureRunAnalyzer.Role())
 	assert.Equal(t, RoleProxy, Feature(-1).Role())
 
+	assert.Equal(t, FeatureCompactionL0Delete, CompactionTypeFeature(datapb.CompactionType_RestoreLevel0DeleteCompaction))
 	assert.Equal(t, FeatureCompactionMix, CompactionTypeFeature(datapb.CompactionType_MixCompaction))
 	assert.Equal(t, FeatureCompactionClustering, CompactionTypeFeature(datapb.CompactionType_ClusteringCompaction))
 	assert.Equal(t, FeatureCompactionOther, CompactionTypeFeature(datapb.CompactionType_UndefinedCompaction))

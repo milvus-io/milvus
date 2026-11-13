@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -297,7 +298,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		return err
 	}
 
-	if err := kc.SaveByBatch(ctx, kvs); err != nil {
+	if err := kc.saveAlteredSegments(ctx, segments, kvs); err != nil {
 		return err
 	}
 	// Explicit removal is required: AlterSegments persists binlogs as
@@ -312,6 +313,46 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		}
 	}
 	return nil
+}
+
+// L0 completion publishes a replay prefix. On the oversized fallback, binlogs
+// must precede target base/cursor records, and every target must precede input
+// retirement: a retired L0 is no longer counted as a gap by other completions.
+// When the bundle fits, all three stages still commit in one transaction.
+func (kc *Catalog) saveAlteredSegments(ctx context.Context, segments []*datapb.SegmentInfo, kvs map[string]string) error {
+	retiringL0 := false
+	for _, segment := range segments {
+		if isRetiringL0(segment) {
+			retiringL0 = true
+			break
+		}
+	}
+	if !retiringL0 {
+		return kc.SaveByBatch(ctx, kvs)
+	}
+	b := txn.New()
+	records := make(map[string]struct{}, len(segments))
+	for _, segment := range segments {
+		records[buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())] = struct{}{}
+	}
+	for key, value := range kvs {
+		if _, record := records[key]; !record {
+			b.Save(key, value)
+		}
+	}
+	for _, retiring := range []bool{false, true} {
+		for _, segment := range segments {
+			if isRetiringL0(segment) == retiring {
+				key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+				b.Save(key, kvs[key])
+			}
+		}
+	}
+	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func isRetiringL0(segment *datapb.SegmentInfo) bool {
+	return segment.GetLevel() == datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Dropped && segment.GetCompacted()
 }
 
 // buildAlterSegmentsKvs computes the persisted key/value writes and orphan
@@ -574,15 +615,6 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
-func (kc *Catalog) ShouldDropChannel(ctx context.Context, channel string) bool {
-	key := buildChannelRemovePath(channel)
-	v, err := kc.MetaKv.Load(ctx, key)
-	if err != nil || v != RemoveFlagTomestone {
-		return false
-	}
-	return true
-}
-
 // ChannelExists reports whether the channel marker is active. Missing keys are
 // treated as absent; other lookup failures are returned to the caller.
 func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
@@ -597,11 +629,32 @@ func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, err
 	return v == NonRemoveFlagTomestone, nil
 }
 
-// DropChannel removes channel remove flag after whole procedure is finished
-func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
-	key := buildChannelRemovePath(channel)
-	mlog.Info(ctx, "removing channel remove path", mlog.String("channel", channel))
-	return kc.MetaKv.Remove(ctx, key)
+// RemoveDroppedChannelFlags deletes every channel removal flag whose value is
+// "removed". Older versions rewrote the flag to "removed" when a channel was
+// dropped and never deleted it. A missing flag reads the same as "removed" for
+// every reader, including older versions after a downgrade, so the delete
+// changes no behavior.
+func (kc *Catalog) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {
+	keys := make([]string, 0)
+	applyFn := func(key []byte, value []byte) error {
+		if string(value) != RemoveFlagTomestone {
+			return nil
+		}
+		ss := strings.Split(string(key), "/")
+		keys = append(keys, buildChannelRemovePath(ss[len(ss)-1]))
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ChannelRemovePrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return 0, err
+	}
+	removeFn := func(partialKeys []string) error {
+		return kc.MetaKv.MultiRemove(ctx, partialKeys)
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if err := etcd.RemoveByBatchWithLimit(keys, maxTxnNum, removeFn); err != nil {
+		return 0, err
+	}
+	return len(keys), nil
 }
 
 func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {

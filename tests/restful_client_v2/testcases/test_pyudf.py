@@ -13,7 +13,7 @@ from utils.constant import CaseLabel
 from utils.utils import gen_collection_name, gen_unique_str
 
 
-class TestPyUDF(TestBase):
+class PyUDFRestBase(TestBase):
     """REST Search coverage with real FileResource wheels and deterministic results."""
 
     @staticmethod
@@ -206,6 +206,10 @@ def create_udf(context):
         assert [hit["id"] for hit in response["data"]] == [3, 2, 1]
         assert [hit["distance"] for hit in response["data"]] == pytest.approx([60, 40, 20], rel=1e-5, abs=1e-5)
         assert [hit["ts"] for hit in response["data"]] == [30, 20, 10]
+
+
+class TestPyUDF(PyUDFRestBase):
+    """REST Search coverage with real FileResource wheels and deterministic results."""
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_pyudf_reranks_results(self):
@@ -555,3 +559,132 @@ def create_udf(context):
             assert listed["code"] == 0, listed
             assert any(item["name"] == resource for item in listed["data"]), listed
             self._assert_ranked_response(self._search_once(payload))
+
+
+class TestPyUDFRequestParameters(PyUDFRestBase):
+    @staticmethod
+    def _wheel_bytes(package):
+        module = """import math
+import os
+import pyarrow as pa
+class UDF:
+    def __init__(self, context):
+        self.context = context
+    def transform_query(self, params, columns):
+        mode = params.get("mode", "valid")
+        self.context.logger.warning("PYUDF_R2_REST resource=%s pid=%s mode=%s rows=%s",
+            self.context.resource_name, os.getpid(), mode, len(columns[0]))
+        if mode == "repair":
+            invalid = params["invalid"]
+            for value in columns[0].to_pylist():
+                expected = value is None if invalid == "null" else math.isnan(value) if invalid == "nan" else value == -float("inf") if invalid == "negative_inf" else value == float("inf")
+                if not expected:
+                    raise AssertionError("invalid intermediate value was lost")
+        if mode == "depth":
+            value = params["payload"]
+            for _ in range(params["depth"]):
+                value = value["next"]
+            if value != 7:
+                raise AssertionError("nested payload changed")
+        if mode in ("valid", "repair", "depth"):
+            return [pa.array([value.as_py() * 2 for value in columns[1]], type=pa.float32())]
+        value = {"null": None, "nan": float("nan"), "positive_inf": float("inf"), "negative_inf": -float("inf"), "overflow": 1e40}[mode]
+        return [pa.array([value] * len(columns[0]), type=pa.float64())]
+def create_udf(context):
+    return UDF(context)
+"""
+        sink = io.BytesIO()
+        with zipfile.ZipFile(sink, "w") as wheel:
+            wheel.writestr(f"{package}/__init__.py", module)
+            wheel.writestr(
+                f"{package}-0.0.1.dist-info/entry_points.txt", f"[milvus.pyudf]\nmain = {package}:create_udf\n"
+            )
+            wheel.writestr(
+                f"{package}-0.0.1.dist-info/METADATA", f"Metadata-Version: 2.1\nName: {package}\nVersion: 0.0.1\n"
+            )
+        return sink.getvalue()
+
+    def _recovery(self, payload, resource):
+        self._assert_ranked_response(self._search_once(payload))
+        plain = copy.deepcopy(payload)
+        plain.pop("functionChains")
+        response = self._search_once(plain)
+        assert response["code"] == 0, response
+        assert [hit["id"] for hit in response["data"]] == [1, 2, 3]
+        assert [hit["ts"] for hit in response["data"]] == [10, 20, 30]
+        listed = self.file_resource_client.file_resource_list()
+        assert listed["code"] == 0 and any(item["name"] == resource for item in listed["data"]), listed
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid", ["null", "nan", "positive_inf", "negative_inf", "overflow"])
+    @pytest.mark.parametrize("flow", ["final", "ascending", "group", "range_offset"])
+    def test_pyudf_nonfinite_query_combinations(self, invalid, flow):
+        """target: finite export; method: raw REST map/repair plus query combinations; expected: exact rejection or rows."""
+        with self._pyudf_environment() as resource:
+            control = self._search_payload(resource)
+            self._assert_ranked_response(self._search_after_resource_sync(control))
+            payload = copy.deepcopy(control)
+            ops = payload["functionChains"][0]["ops"]
+            ops[0]["expr"]["params"]["udf_params"] = {"mode": invalid}
+            expected_ids = [3, 2, 1]
+            if flow != "final":
+                repaired = copy.deepcopy(ops[0])
+                repaired["expr"]["params"]["udf_params"] = {"mode": "repair", "invalid": invalid}
+                ops.insert(1, repaired)
+            if flow == "ascending":
+                ops[-1]["params"]["desc"] = False
+                payload["filter"] = "id >= 2"
+                expected_ids = [2, 3]
+            elif flow == "group":
+                response = self.vector_client.vector_insert(
+                    {"collectionName": self.name, "data": [{"id": 4, "ts": 10, "vector": [0.001, 0.0]}]}
+                )
+                assert response["code"] == 0 and response["data"]["insertCount"] == 1, response
+                payload["groupingField"] = "ts"
+            elif flow == "range_offset":
+                payload["data"] = [[0.009, 0.0]]
+                payload["searchParams"]["params"] = {"radius": 0.0001, "range_filter": 0.0}
+                payload["offset"] = 1
+                payload["limit"] = 2
+                expected_ids = [1]
+            response = self._search_once(payload)
+            if flow == "final":
+                assert response["code"] == 2400 and "$score" in response["message"], response
+                assert not response.get("data"), response
+            else:
+                assert response["code"] == 0, response
+                assert [hit["id"] for hit in response["data"]] == expected_ids
+                assert [hit["distance"] for hit in response["data"]] == [pk * 20 for pk in expected_ids]
+                assert [hit["ts"] for hit in response["data"]] == [pk * 10 for pk in expected_ids]
+            if flow == "group":
+                response = self.vector_client.vector_delete({"collectionName": self.name, "filter": "id == 4"})
+                assert response["code"] == 0, response
+            self._recovery(control, resource)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("depth", [1, 16, 24, 32, 64, 65])
+    def test_pyudf_raw_rest_nested_parameter_boundary(self, depth, record_property):
+        """target: server depth boundary; method: JSON bypasses SDK serializer; expected: values or explicit depth rejection."""
+        with self._pyudf_environment() as resource:
+            control = self._search_payload(resource)
+            self._assert_ranked_response(self._search_after_resource_sync(control))
+            payload = copy.deepcopy(control)
+            value = 7
+            for _ in range(depth):
+                value = {"next": value}
+            payload["functionChains"][0]["ops"][0]["expr"]["params"]["udf_params"] = {
+                "mode": "depth",
+                "depth": depth,
+                "payload": value,
+            }
+            response = self._search_once(payload)
+            record_property("rest_depth_response", str({"depth": depth, "response": response}))
+            if depth < 64:
+                self._assert_ranked_response(response)
+            else:
+                # protobuf 6.33.5 rejects this ExecuteRequest during gRPC
+                # deserialization, before the runtime depth-64 validator.
+                assert response["code"] == 5, response
+                assert "Exception deserializing request" in response["message"], response
+                assert not response.get("data"), response
+            self._recovery(control, resource)

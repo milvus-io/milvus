@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -362,48 +361,54 @@ func TestManagerKeepsDataVersionWhileAnotherQueryViewReferencesIt(t *testing.T) 
 	require.Equal(t, int32(0), releases.Load())
 }
 
-func TestManagerReleaseQueuesDroppedCallbackInNodeScheduler(t *testing.T) {
-	scheduler := nodescheduler.New(1)
-	defer scheduler.Close()
-	manager := NewManager(Config{Scheduler: scheduler})
+func TestResourceCallbacksRunWhileSchedulerIsFull(t *testing.T) {
+	for _, action := range []string{"reject", "release"} {
+		t.Run(action, func(t *testing.T) {
+			scheduler := nodescheduler.New(1)
+			defer scheduler.Close()
+			started := make(chan struct{})
+			scheduler.Submit(queryResourceTaskFunc(func(ctx context.Context) error {
+				close(started)
+				<-ctx.Done()
+				return nil
+			}))
+			<-started
+			manager := NewManager(Config{Scheduler: scheduler})
+			defer manager.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
 
-	started := make(chan struct{})
-	release := make(chan struct{})
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
-	blocker := scheduler.Submit(queryResourceTaskFunc(func(context.Context) error {
-		close(started)
-		<-release
-		return nil
-	}))
-	<-started
-
-	dropped := make(chan struct{})
-	manager.Release(snview.ReleaseResource{
-		Key:       qviews.QueryViewKey{},
-		OnDropped: func() { close(dropped) },
-	})
-	select {
-	case <-dropped:
-		t.Fatal("drop callback bypassed node scheduler")
-	case <-time.After(20 * time.Millisecond):
+			var callerMu sync.Mutex
+			returned, notified := make(chan struct{}), make(chan struct{})
+			callback := func() {
+				callerMu.Lock()
+				defer callerMu.Unlock()
+				close(notified)
+			}
+			go func() {
+				// Model a shard calling the resource manager while holding the
+				// same lock its completion callback needs to acquire.
+				callerMu.Lock()
+				defer callerMu.Unlock()
+				if action == "reject" {
+					manager.Reject(snview.AcquireResource{OnUnrecoverable: callback})
+				} else {
+					manager.Release(snview.ReleaseResource{OnDropped: callback})
+				}
+				close(returned)
+			}()
+			select {
+			case <-returned:
+			case <-ctx.Done():
+				t.Fatal("resource notification reentered the caller's lock")
+			}
+			select {
+			case <-notified:
+			case <-ctx.Done():
+				t.Fatal("resource notification waited for a scheduler worker")
+			}
+		})
 	}
-
-	close(release)
-	require.NoError(t, blocker.Wait(context.Background()))
-	require.Eventually(t, func() bool {
-		select {
-		case <-dropped:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
 }
 
 func TestManagerCloseWaitsForRunningBuild(t *testing.T) {
@@ -496,9 +501,9 @@ func TestManagerClassifiesLoadInfoPreparationFailure(t *testing.T) {
 			defer manager.Close()
 			meta, key := testManagerQueryViewMetaAndKey(1)
 			meta.LoadInfoVersion = 7
-			rejected := false
+			var rejected atomic.Bool
 			manager.AcquireLocked(snview.AcquireResource{
-				Key: key, Meta: meta, OnUnrecoverable: func() { rejected = true },
+				Key: key, Meta: meta, OnUnrecoverable: func() { rejected.Store(true) },
 			}, func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
 				return walview.VChannelWALView{
 					CollectionID:    1,
@@ -514,20 +519,19 @@ func TestManagerClassifiesLoadInfoPreparationFailure(t *testing.T) {
 			require.Nil(t, manager.runtime)
 			if tc.retryable {
 				require.NotNil(t, manager.task)
-				require.False(t, rejected)
+				require.False(t, rejected.Load())
 			} else {
 				require.Nil(t, manager.task)
-				require.NoError(t, scheduler.task.Execute(context.Background()))
-				require.True(t, rejected)
+				require.Eventually(t, rejected.Load, time.Second, time.Millisecond)
 			}
 		})
 	}
 }
 
-func loadFields(fieldIDs ...int64) []*messagespb.LoadFieldConfig {
-	fields := make([]*messagespb.LoadFieldConfig, 0, len(fieldIDs))
+func loadFields(fieldIDs ...int64) []*viewpb.LoadFieldConfig {
+	fields := make([]*viewpb.LoadFieldConfig, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
-		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
+		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: fieldID})
 	}
 	return fields
 }
@@ -541,7 +545,7 @@ type capturedNodeScheduler struct {
 	task nodescheduler.Task
 }
 
-func (s *capturedNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *capturedNodeScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.task = task
 	return noopTaskHandle{}
 }

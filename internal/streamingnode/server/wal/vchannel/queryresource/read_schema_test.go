@@ -21,10 +21,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestReadSchemasShareAcrossViewsAndReclaimUnusedSchemas(t *testing.T) {
+func TestReadSchemasShareSameBindingAcrossViewsAndReclaimUnusedSchemas(t *testing.T) {
 	paramtable.Init()
 	schema := mock_segcore.GenTestCollectionSchema("read-schemas", schemapb.DataType_Int64, false)
 	pool := &readSchemaPool{resources: make(map[collectionSchemaKey]*readSchema)}
@@ -45,10 +46,10 @@ func TestReadSchemasShareAcrossViewsAndReclaimUnusedSchemas(t *testing.T) {
 		require.NoError(t, ref.prepare(t.Context(), nil))
 		return ref
 	}
-	first, second := bind(1, 10), bind(1, 20)
+	first, second := bind(1, 10), bind(1, 10)
 	old, _ := first.readRuntime()
 	shared, _ := second.readRuntime()
-	require.Same(t, old.schema, shared.schema, "load identities do not duplicate a schema collection")
+	require.Same(t, old.schema, shared.schema, "Views with the same schema and load version share their immutable binding")
 	require.True(t, old.schema.pin())
 	first.retire()
 	require.NoError(t, first.release())
@@ -89,7 +90,7 @@ func TestReadSchemaPreparationRejectsWrongCapture(t *testing.T) {
 	require.Empty(t, module.pool.resources)
 }
 
-func TestReadSchemaLoadScopesPreserveSharedIndexMetadata(t *testing.T) {
+func TestReadSchemaLoadScopesIsolateIndexMetadata(t *testing.T) {
 	paramtable.Init()
 	pool := &readSchemaPool{resources: make(map[collectionSchemaKey]*readSchema)}
 	params := []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}
@@ -118,14 +119,15 @@ func TestReadSchemaLoadScopesPreserveSharedIndexMetadata(t *testing.T) {
 	require.NoError(t, a.Prepare(t.Context(), provider))
 	require.NoError(t, b.Prepare(t.Context(), provider))
 	require.NoError(t, a.Prepare(t.Context(), provider))
-	require.Same(t, a.schema, b.schema)
-	require.Len(t, a.schema.collection.IndexMeta().GetIndexMetas(), 2)
+	require.NotSame(t, a.schema, b.schema)
+	require.Len(t, a.schema.collection.IndexMeta().GetIndexMetas(), 1)
+	require.Len(t, b.schema.collection.IndexMeta().GetIndexMetas(), 1)
 	holder, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{make([]byte, 16)}}}})
 	require.NoError(t, err)
-	for _, field := range []int64{101, 102} {
+	for field, binding := range map[int64]*readSchemaBinding{101: a, 102: b} {
 		plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{VectorType: planpb.VectorType_FloatVector, FieldId: field, PlaceholderTag: "$0", QueryInfo: &planpb.QueryInfo{Topk: 10, MetricType: "COSINE", SearchParams: "{}", RoundDecimal: -1}}}})
 		require.NoError(t, err)
-		req, err := segcore.NewSearchRequest(a.schema.collection, &querypb.SearchRequest{Req: &internalpb.SearchRequest{SerializedExprPlan: plan, MetricType: "COSINE"}}, holder)
+		req, err := segcore.NewSearchRequest(binding.schema.collection, &querypb.SearchRequest{Req: &internalpb.SearchRequest{SerializedExprPlan: plan, MetricType: "COSINE"}}, holder)
 		require.NoError(t, err)
 		req.Delete()
 	}
@@ -182,17 +184,19 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
 		require.NoError(t, err)
 		ref.retire()
-		require.NoError(t, ref.release())
-		require.Empty(t, pool.resources)
-		require.Equal(t, 1, read.schema.refs)
+		require.ErrorIs(t, ref.release(), nodescheduler.ErrDelay, "View cleanup waits for execution handles")
+		require.NotEmpty(t, pool.resources)
+		require.Equal(t, 2, read.schema.refs)
 		require.Same(t, read.schema.collection, handles[0].Collection())
 		handles[0].Release()
 		handles[0].Release()
 		require.Equal(t, 1, releases)
+		require.NoError(t, ref.release())
+		require.Empty(t, pool.resources)
 		require.Zero(t, read.schema.refs)
 		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
-		require.ErrorIs(t, err, merr.ErrServiceNotReady)
-		require.Equal(t, 2, releases, "late acquisition must release its physical handle when schema pin fails")
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 1, releases, "retired View rejects acquisition before touching physical resources")
 	})
 	mockey.PatchConvey("physical acquisition error is preserved", t, func() {
 		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).Return(nil, context.Canceled).Build()

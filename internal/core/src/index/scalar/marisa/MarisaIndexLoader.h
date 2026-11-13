@@ -24,11 +24,13 @@
 #include "index/IndexLoadInput.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+struct MarisaIndexStorage;
 
 /**
  * @brief Loads MARISA trie readers from legacy or packed V3 artifacts.
@@ -48,19 +50,19 @@ class MarisaIndexLoader final : public IndexLoader {
      * Load.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -68,14 +70,16 @@ class MarisaIndexLoader final : public IndexLoader {
         : source_(std::move(source)), options_(std::move(options)) {
     }
 
-    /**
-     * @brief Load the trie and row mapping, then attach JSON projection state.
-     * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
-     */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    LoadLegacy(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
+    // Loads the concrete cell, including validation, inside the load transaction.
+    static folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Allocate payload destinations and state for one packed Load.
@@ -85,17 +89,6 @@ class MarisaIndexLoader final : public IndexLoader {
     PlanPacked(const storage::IndexEntryDirectory& directory,
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts);
-
-    /**
-     * @brief Initialize a reader from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
 };
 
 }  // namespace milvus::index

@@ -8,9 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -117,7 +115,7 @@ func TestServerGetMVCCTimestampDelegatesToLocalWALProvider(t *testing.T) {
 	assert.Equal(t, types.PChannelInfo{Name: "by-dev-rootcoord-dml_0", Term: 7, AccessMode: types.AccessModeRW}, manager.channel)
 }
 
-func TestServerGetQueryPlanProjectsViewErrorToGRPCStatus(t *testing.T) {
+func TestServerGetQueryPlanPreservesViewError(t *testing.T) {
 	manager := &fakeWALManager{wal: &fakeProviderWAL{err: viewerror.NewViewNotFound("missing view")}}
 	server := NewServer(manager)
 
@@ -126,7 +124,7 @@ func TestServerGetQueryPlanProjectsViewErrorToGRPCStatus(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	require.Equal(t, codes.NotFound, status.Code(err))
+	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 }
 
 func TestServerGetQueryPlanProjectsReleasedLoadInfoAsViewInvalidated(t *testing.T) {
@@ -141,19 +139,17 @@ func TestServerGetQueryPlanProjectsReleasedLoadInfoAsViewInvalidated(t *testing.
 	})
 
 	require.Error(t, err)
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	viewErr := viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err))
+	require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+	viewErr := viewerror.AsViewError(err)
 	require.True(t, viewErr.IsViewInvalidated())
 	require.True(t, viewErr.IsRetryable())
 	require.Contains(t, viewErr.Cause, "get sealed BM25 resources for data version 6/5")
 	require.Contains(t, viewErr.Cause, "collection not loaded")
 }
 
-func TestToRPCErrorLeavesOtherMerrAsUnknown(t *testing.T) {
-	err := toRPCError(merr.WrapErrServiceInternalMsg("BM25 resource response is invalid"))
-	require.Equal(t, codes.Unknown, status.Code(err))
-	require.Equal(t, viewpb.ViewCode_VIEW_CODE_UNKNOWN,
-		viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err)).Code)
+func TestNormalizeQueryPlanErrorPreservesBusinessError(t *testing.T) {
+	err := normalizeQueryPlanError(merr.WrapErrServiceInternalMsg("BM25 resource response is invalid"))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func TestServerGetQueryPlanRejectsMismatchedPChannelMetadata(t *testing.T) {
@@ -165,12 +161,12 @@ func TestServerGetQueryPlanRejectsMismatchedPChannelMetadata(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Equal(t, viewpb.ViewCode_VIEW_CODE_UNKNOWN, viewerror.AsViewError(err).Code)
 }
 
-func TestToRPCErrorPreservesContextError(t *testing.T) {
-	assert.ErrorIs(t, toRPCError(context.Canceled), context.Canceled)
-	assert.ErrorIs(t, toRPCError(context.DeadlineExceeded), context.DeadlineExceeded)
+func TestNormalizeQueryPlanErrorPreservesContextError(t *testing.T) {
+	assert.ErrorIs(t, normalizeQueryPlanError(context.Canceled), context.Canceled)
+	assert.ErrorIs(t, normalizeQueryPlanError(context.DeadlineExceeded), context.DeadlineExceeded)
 }
 
 func newIncomingPChannelContext(pchannel string) context.Context {
@@ -189,19 +185,19 @@ func TestQueryPlanServiceRejectsUnavailableInputs(t *testing.T) {
 		server  *Server
 		ctx     context.Context
 		channel string
-		code    codes.Code
+		code    viewpb.ViewCode
 	}{
-		{"shutdown", NewServer(nil), context.Background(), testVChannel, codes.Unavailable},
-		{"missing channel", NewServer(&fakeWALManager{}), context.Background(), "", codes.Unknown},
-		{"missing routing", NewServer(&fakeWALManager{}), context.Background(), testVChannel, codes.Unknown},
-		{"unavailable WAL", NewServer(&fakeWALManager{err: context.Canceled}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, codes.Unavailable},
-		{"old WAL", NewServer(&fakeWALManager{}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, codes.Unknown},
-		{"provider error", NewServer(&fakeWALManager{wal: &fakeProviderWAL{err: viewerror.NewNotPrimaryError("fenced")}}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, codes.FailedPrecondition},
+		{"shutdown", NewServer(nil), context.Background(), testVChannel, viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN},
+		{"missing channel", NewServer(&fakeWALManager{}), context.Background(), "", viewpb.ViewCode_VIEW_CODE_UNKNOWN},
+		{"missing routing", NewServer(&fakeWALManager{}), context.Background(), testVChannel, viewpb.ViewCode_VIEW_CODE_UNKNOWN},
+		{"unavailable WAL", NewServer(&fakeWALManager{err: context.Canceled}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN},
+		{"old WAL", NewServer(&fakeWALManager{}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, viewpb.ViewCode_VIEW_CODE_UNKNOWN},
+		{"provider error", NewServer(&fakeWALManager{wal: &fakeProviderWAL{err: viewerror.NewNotPrimaryError("fenced")}}), newIncomingPChannelContext("by-dev-rootcoord-dml_0"), testVChannel, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.server.GetMVCCTimestamp(tc.ctx, &viewpb.GetMVCCTimestampRequest{Vchannel: tc.channel})
-			require.Equal(t, tc.code, status.Code(err))
+			require.Equal(t, tc.code, viewerror.AsViewError(err).Code)
 		})
 	}
-	require.NoError(t, toRPCError(nil))
+	require.NoError(t, normalizeQueryPlanError(nil))
 }

@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include <parquet/arrow/writer.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -92,10 +93,15 @@ class FaultingSegment final : public SegmentGrowingImpl {
     std::function<void()> fault = [] {};
 
     std::unique_ptr<DataArray>
-    bulk_subscript(OpContext*,
+    bulk_subscript(OpContext* ctx,
                    FieldId field_id,
                    const int64_t*,
                    int64_t count) const override {
+        EXPECT_NE(ctx, nullptr);
+        if (ctx != nullptr) {
+            EXPECT_EQ(ctx->runtime_load_priority,
+                      proto::common::LoadPriority::HIGH);
+        }
         fault();
         auto data = std::make_unique<DataArray>();
         data->set_field_id(field_id.get());
@@ -162,6 +168,7 @@ class ArrowExportBoundaryTest : public testing::Test {
                                              &index,
                                              &offset,
                                              1,
+                                             1048576,
                                              out_schema,
                                              out_array,
                                              nullptr);
@@ -496,12 +503,55 @@ TEST_F(ArrowExportBoundaryTest, EmptyRetrieveHonorsCancellation) {
                                            nullptr,
                                            nullptr,
                                            0,
+                                           1048576,
                                            &out_schema,
                                            &out_array,
                                            &cancellation),
                  FollyCancel);
     EXPECT_EQ(out_schema.release, nullptr);
     EXPECT_EQ(out_array.release, nullptr);
+}
+
+TEST_F(ArrowExportBoundaryTest, RetrieveBudgetChecksAllSegmentsBeforeReads) {
+    auto other = std::make_unique<FaultingSegment>(schema);
+    std::atomic<int> reads{0};
+    segment->fault = [&] { ++reads; };
+    other->fault = [&] { ++reads; };
+    CSegmentInterface segments[] = {segment.get(), other.get()};
+    int32_t indices[] = {0, 1};
+    int64_t offsets[] = {0, 0};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    // Each segment individually fits 12 bytes; their combined 16 bytes do not.
+    CheckFailure(FillRetrieveFieldsOrdered(segments,
+                                           2,
+                                           retrieve_plan.get(),
+                                           indices,
+                                           offsets,
+                                           2,
+                                           12,
+                                           &out_schema,
+                                           &out_array,
+                                           nullptr),
+                 InvalidParameter);
+    EXPECT_EQ(reads.load(), 0);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    auto status = FillRetrieveFieldsOrdered(segments,
+                                            2,
+                                            retrieve_plan.get(),
+                                            indices,
+                                            offsets,
+                                            2,
+                                            16,
+                                            &out_schema,
+                                            &out_array,
+                                            nullptr);
+    ASSERT_EQ(status.error_code, Success);
+    auto imported = arrow::ImportRecordBatch(&out_array, &out_schema);
+    ASSERT_TRUE(imported.ok()) << imported.status().ToString();
+    EXPECT_EQ((*imported)->num_rows(), 2);
+    EXPECT_EQ(reads.load(), 2);
 }
 
 }  // namespace

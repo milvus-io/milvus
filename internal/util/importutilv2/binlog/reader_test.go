@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -161,6 +163,43 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotRowTimestampDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   *internalpb.SnapshotImportSource
+		location string
+	}{
+		{
+			name: "v2",
+			source: &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{
+				SnapshotManifestPath: "snapshot/manifests/source.avro", SegmentId: 200,
+			}},
+			location: "snapshot/manifests/source.avro (segment 200)",
+		},
+		{
+			name:     "v3",
+			source:   &internalpb.SnapshotImportSource{Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/files/source", 7)},
+			location: packed.MarshalManifestPath("snapshot/files/source", 7),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.source.SourceCommitTimestamp = 100
+			frozen := proto.Clone(tc.source)
+			err := validateSnapshotRowTimestamp(tc.source, 101)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.ErrorContains(t, err, fmt.Sprintf("snapshot source manifest %s has raw row timestamp 101 above segment commit timestamp 100", tc.location))
+			require.True(t, proto.Equal(frozen, tc.source))
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, 99))
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, 100))
+			tc.source.SourceCommitTimestamp = 0
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, math.MaxUint64))
+			tc.source.SourceCommitTimestamp = math.MaxUint64
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, math.MaxUint64))
+		})
+	}
+	require.NoError(t, validateSnapshotRowTimestamp(nil, math.MaxUint64))
+}
+
 func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 	budget := &maskBudget{limit: maskBlockWords*8 + 64}
 	mask := &rowDeleteMask{rows: -1}
@@ -209,7 +248,7 @@ func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 }
 
 func TestSnapshotBitmapScanFailures(t *testing.T) {
-	for _, mode := range []string{"empty", "open", "read", "cancel", "cancel_after_open", "commit", "bitmap_budget", "shorter", "longer", "null_ts", "wrong_pk"} {
+	for _, mode := range []string{"empty", "open", "read", "cancel", "cancel_after_open", "commit_v2", "commit_v3", "bitmap_budget", "shorter", "longer", "null_ts", "wrong_pk"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -260,8 +299,16 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				want = openErr
 			case "read":
 				want = merr.ErrIoKeyNotFound
-			case "commit":
+			case "commit_v2", "commit_v3":
 				scan.source.SourceCommitTimestamp = 99
+				scan.source.ManifestPath = packed.MarshalManifestPath("snapshot/files/source", 7)
+				if mode == "commit_v2" {
+					scan.source.ManifestPath = ""
+					scan.source.V2Reference = &internalpb.SnapshotImportV2Reference{SnapshotManifestPath: "snapshot/manifests/source.avro", SegmentId: 200}
+					scan.v2Input = &snapshotV2Input{}
+					openV2 := mockey.Mock(storage.NewBinlogRecordReader).Return(owner, nil).Build()
+					defer openV2.UnPatch()
+				}
 			case "bitmap_budget":
 				budget.limit = 1
 				want = merr.ErrServiceResourceInsufficient
@@ -278,6 +325,12 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				require.Zero(t, scan.mask.rows)
 			} else {
 				require.ErrorIs(t, err, want)
+				switch mode {
+				case "commit_v2":
+					require.ErrorContains(t, err, "snapshot/manifests/source.avro (segment 200)")
+				case "commit_v3":
+					require.ErrorContains(t, err, scan.source.ManifestPath)
+				}
 			}
 		})
 	}
@@ -1418,7 +1471,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	expectInsertData, err := storage.NewInsertData(schema)
 	suite.NoError(err)
 	for _, field := range schema.GetFields() {
-		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldData(field.GetDataType(), field, suite.numRows)
+		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(suite.numRows).Build()
 		suite.NoError(err)
 	}
 OUTER:
@@ -2559,10 +2612,14 @@ func TestStorageV3Reader_SourceTimestampInvariant(t *testing.T) {
 					require.Same(t, err, nextErr, "retry must not skip the invalid source row")
 					return
 				}
-				require.NoError(t, err)
-				require.Equal(t, tc.wantRows, data.GetRowNum())
-				if tc.wantRows > 0 {
-					require.Equal(t, tc.rowTs, data.Data[common.TimeStampField].GetRow(0), "do not rewrite raw timestamps")
+				if tc.wantRows == 0 && errors.Is(err, io.EOF) {
+					require.Nil(t, data)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, tc.wantRows, data.GetRowNum())
+					if tc.wantRows > 0 {
+						require.Equal(t, tc.rowTs, data.Data[common.TimeStampField].GetRow(0), "do not rewrite raw timestamps")
+					}
 				}
 				_, err = r.Read()
 				require.ErrorIs(t, err, io.EOF)
@@ -2623,7 +2680,7 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 		storage.DeserializeReader[*storage.Value]
 	}
 	paramtable.Init()
-	for _, name := range []string{"allocate_batch", "deserialize", "allocate_field", "append_field", "filter_batch", "missing_field", "buffer_boundary"} {
+	for _, name := range []string{"allocate_batch", "deserialize", "allocate_field", "append_field", "missing_field", "buffer_boundary"} {
 		t.Run(name, func(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -2658,26 +2715,28 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer nextPatch.UnPatch()
 
-			data, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+			data, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking().Build()
 			require.NoError(t, err)
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
-			allocations := 0
-			batchPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).To(func(_ *schemapb.CollectionSchema) (*storage.InsertData, error) {
-				allocations++
-				if name == "allocate_batch" || (name == "filter_batch" && allocations == 2) {
+			batchPatch := mockey.Mock((*storage.InsertDataBuilder).Build).To(func(builder *storage.InsertDataBuilder) (*storage.InsertData, error) {
+				expected := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking()
+				require.Equal(t, expected, builder, "reader must include function output fields and enable memory tracking")
+				if name == "allocate_batch" {
 					return nil, cause
 				}
 				return data, nil
 			}).Build()
 			defer batchPatch.UnPatch()
 			if name == "allocate_field" {
-				fieldPatch := mockey.Mock(storage.NewFieldData).Return(nil, cause).Build()
+				fieldPatch := mockey.Mock((*storage.FieldDataBuilder).Build).To(func(builder *storage.FieldDataBuilder) (storage.FieldData, error) {
+					field := schema.Fields[0]
+					expected := storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(1024).WithMemoryTracking()
+					require.Equal(t, expected, builder, "reader must preserve field capacity and enable memory tracking")
+					return nil, cause
+				}).Build()
 				defer fieldPatch.UnPatch()
-			}
-			if name == "filter_batch" {
-				r.filters = []Filter{func(_ map[int64]interface{}) bool { return false }}
 			}
 
 			result, err := r.Read()
@@ -2917,4 +2976,502 @@ func TestMultiReadWithRetry_RetryableError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, [][]byte{[]byte("data")}, result)
 	assert.Equal(t, 3, callCount, "retryable error should be retried until success")
+}
+
+func TestBinlogReaderReadFilterResults(t *testing.T) {
+	const rowCount = 240
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "optional", DataType: schemapb.DataType_Int64, Nullable: true},
+		{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+		},
+	}})
+	for _, tc := range []struct {
+		name       string
+		timeFilter bool
+		start, end uint64
+		deletes    bool
+	}{
+		{name: "no_filters"},
+		{name: "time_only", timeFilter: true, start: 31, end: 180},
+		{name: "delete_only", deletes: true},
+		{name: "combined", timeFilter: true, start: 31, end: 180, deletes: true},
+		{name: "all_filtered", timeFilter: true, start: rowCount + 1, end: rowCount + 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var values []*storage.Value
+			var want []map[int64]any
+			for i := 0; i < rowCount; i++ {
+				ts, pk := int64(i+1), int64(i%5)
+				var optional any
+				if i%3 != 0 {
+					optional = int64(i * 10)
+				}
+				row := map[int64]any{
+					common.RowIDField: int64(i), common.TimeStampField: ts,
+					100: pk, 101: optional, 102: []float32{float32(i + 1), -float32(i + 1)},
+				}
+				values = append(values, &storage.Value{Value: row})
+				if tc.timeFilter && (uint64(ts) < tc.start || uint64(ts) > tc.end) {
+					continue
+				}
+				// The same PK appears at different timestamps. Equality with
+				// the delete timestamp keeps a row; only older rows are removed.
+				if tc.deletes && ((pk == 0 && ts < 41) || (pk == 2 && ts < 143)) {
+					continue
+				}
+				want = append(want, row)
+			}
+			record, err := storage.ValueSerializer(values, schema)
+			require.NoError(t, err)
+			owner := &storageV3DeltaRecordReader{record: record}
+			defer owner.Close()
+			// A small buffer exercises repeated Read calls, including filtered
+			// prefixes/tails. Do not prescribe batch sizes or empty batches.
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV1, 1, "")
+			r.dr = storage.NewDeserializeReader(owner, func(rec storage.Record, dst []*storage.Value) error {
+				return storage.ValueDeserializerWithSchema(rec, dst, schema, true)
+			})
+			defer r.Close()
+			if tc.timeFilter {
+				r.filters = append(r.filters, FilterWithTimeRange(tc.start, tc.end))
+			}
+			if tc.deletes {
+				r.deleteData = map[any]typeutil.Timestamp{int64(0): 41, int64(2): 143}
+				filter, err := FilterWithDelete(r)
+				require.NoError(t, err)
+				r.filters = append(r.filters, filter)
+			}
+			var got []map[int64]any
+			for {
+				data, err := r.Read()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				require.NotNil(t, data)
+				for _, column := range data.Data {
+					require.Equal(t, data.GetRowNum(), column.RowNum())
+				}
+				for i := 0; i < data.GetRowNum(); i++ {
+					got = append(got, data.GetRow(i))
+				}
+			}
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
+	type valueReader struct {
+		storage.DeserializeReader[*storage.Value]
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true},
+		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+	}}
+	rows := make([]map[int64]any, 135)
+	baseline, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
+	require.NoError(t, err)
+	for i := range rows {
+		var text, sparse any
+		if i%3 != 0 {
+			text = strings.Repeat("中", i%7+1)
+		}
+		if i%5 != 0 {
+			sparse = typeutil.CreateSparseFloatRow([]uint32{uint32(126 + i)}, []float32{1})
+		}
+		rows[i] = map[int64]any{100: int64(i), 101: text, 102: sparse}
+		if i < 100 {
+			require.NoError(t, baseline.Append(rows[i]))
+		}
+	}
+	// With three fields per row, the first buffer check is after 100 complete rows.
+	// Compute the limit from untracked field sizes.
+	threshold := baseline.GetMemorySize()
+	for _, tc := range []struct {
+		name      string
+		limit     int
+		batchRows []int
+	}{
+		{"exact threshold", threshold, []int{100, 35}},
+		{"below threshold at check", threshold + 1, []int{135}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			consumed := 0
+			owner := &valueReader{}
+			next := mockey.Mock((*valueReader).NextValue).To(func(*valueReader) (**storage.Value, error) {
+				if consumed == len(rows) {
+					return nil, io.EOF
+				}
+				value := &storage.Value{Value: rows[consumed]}
+				consumed++
+				return &value, nil
+			}).Build()
+			defer next.UnPatch()
+			r := &reader{ctx: context.Background(), schema: schema, storageVersion: storage.StorageV2, bufferSize: tc.limit, dr: owner}
+			offset := 0
+			for _, count := range tc.batchRows {
+				actual, err := r.Read()
+				require.NoError(t, err)
+				require.Equal(t, count, actual.GetRowNum())
+				require.Equal(t, offset+count, consumed)
+				expected, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
+				require.NoError(t, err)
+				for _, row := range rows[offset : offset+count] {
+					require.NoError(t, expected.Append(row))
+				}
+				require.Equal(t, expected.GetMemorySize(), actual.GetMemorySize())
+				for id, field := range actual.Data {
+					require.Equal(t, expected.Data[id].GetMemorySize(), field.GetMemorySize())
+				}
+				for i := 0; i < count; i++ {
+					require.Equal(t, rows[offset+i], actual.GetRow(i))
+				}
+				offset += count
+			}
+			actual, err := r.Read()
+			require.ErrorIs(t, err, io.EOF)
+			require.Nil(t, actual)
+		})
+	}
+}
+
+func TestSnapshotV2PreparationValidation(t *testing.T) {
+	paramtable.Init()
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}})
+	valid := func() *datapb.SegmentDescription {
+		return &datapb.SegmentDescription{Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 7, ChildFields: []int64{100, 0, 1}, Binlogs: []*datapb.Binlog{{LogPath: "root/a"}, {LogPath: "root/b"}}},
+			{FieldID: 8, ChildFields: []int64{101}, Binlogs: []*datapb.Binlog{{LogPath: "root/c"}, {LogPath: "root/d"}}},
+		}}
+	}
+	for _, mode := range []string{"empty", "nil_group", "empty_group", "short_group", "long_group", "duplicate", "nil_log", "empty_path", "boundary", "budget", "footer", "missing_pk", "nil_delta", "empty_delta"} {
+		t.Run(mode, func(t *testing.T) {
+			segment := valid()
+			budget := int64(1 << 20)
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024, "")
+			switch mode {
+			case "empty":
+				segment.Binlogs = nil
+			case "nil_group":
+				segment.Binlogs[0] = nil
+			case "empty_group":
+				segment.Binlogs[0].Binlogs = nil
+			case "short_group":
+				segment.Binlogs[1].Binlogs = segment.Binlogs[1].Binlogs[:1]
+			case "long_group":
+				segment.Binlogs[1].Binlogs = append(segment.Binlogs[1].Binlogs, &datapb.Binlog{LogPath: "root/extra"})
+			case "duplicate":
+				segment.Binlogs[1].FieldID = 7
+			case "nil_log":
+				segment.Binlogs[1].Binlogs[0] = nil
+			case "empty_path":
+				segment.Binlogs[1].Binlogs[0].LogPath = " "
+			case "boundary":
+				r.validatePath = func(string) error { return merr.ErrDataIntegrity }
+			case "budget":
+				budget = 1
+			case "missing_pk":
+				segment.Binlogs[0].ChildFields = []int64{0, 1}
+			case "nil_delta":
+				segment.Deltalogs = []*datapb.FieldBinlog{nil}
+			case "empty_delta":
+				segment.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{}}}}
+			}
+			calls := 0
+			var original func(context.Context, []*datapb.FieldBinlog, *schemapb.CollectionSchema, ...storage.RwOption) (map[int64]struct{}, error)
+			footer := mockey.Mock(storage.PackedBinlogPresentFields).Origin(&original).To(func(ctx context.Context, bins []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, opts ...storage.RwOption) (map[int64]struct{}, error) {
+				calls++
+				if mode == "footer" {
+					return nil, merr.ErrIoPermissionDenied
+				}
+				return original(ctx, bins, schema, opts...)
+			}).Build()
+			defer footer.UnPatch()
+			input, err := r.prepareStorageV2Snapshot(segment, budget)
+			require.Error(t, err)
+			require.Nil(t, input)
+			if mode != "footer" && mode != "missing_pk" {
+				require.Zero(t, calls, "invalid inventory must fail before footer IO")
+			}
+		})
+	}
+	r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024, "")
+	input, err := r.prepareStorageV2Snapshot(valid(), 1<<20)
+	require.NoError(t, err)
+	_, err = r.prepareStorageV2Snapshot(valid(), input.bytes)
+	require.NoError(t, err)
+	_, err = r.prepareStorageV2Snapshot(valid(), input.bytes-1)
+	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+	// Every insufficient reservation must fail, including during incremental
+	// group/path retention rather than only at the final combined check.
+	for budget := int64(0); budget < input.bytes; budget += 32 {
+		_, err := r.prepareStorageV2Snapshot(valid(), budget)
+		require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+	}
+}
+
+func TestSnapshotV2RealFilesAndMixedMasks(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	cm := storage.NewLocalChunkManager()
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}})
+	write := func(id, version int64) ([]*datapb.FieldBinlog, string) {
+		var writer storage.BinlogRecordWriter
+		var manifest string
+		groups := make(map[int64]*datapb.FieldBinlog)
+		for i, rows := range [][][2]int64{{{1, 100}, {2, 100}}, {{1, 300}, {3, 100}, {4, 100}}} {
+			if writer == nil {
+				var err error
+				writer, err = storage.NewBinlogRecordWriter(ctx, 1, 10, id, schema, allocator.NewLocalAllocator(id*100+int64(i*20), id*100+int64(i*20)+19), 1<<20, 100,
+					storage.WithVersion(version), storage.WithStorageConfig(cfg), storage.WithUploader(cm.MultiWrite),
+					storage.WithColumnGroups([]storagecommon.ColumnGroup{{GroupID: 7, Columns: []int{0}, Fields: []int64{100}}, {GroupID: 8, Columns: []int{1, 2}, Fields: []int64{0, 1}}}))
+				require.NoError(t, err)
+			}
+			var values []*storage.Value
+			for j, row := range rows {
+				values = append(values, &storage.Value{Value: map[int64]any{100: row[0], 0: int64(i*10 + j), 1: row[1]}})
+			}
+			record, err := storage.ValueSerializer(values, schema)
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(record))
+			record.Release()
+			if version == storage.StorageV2 || i == 1 {
+				require.NoError(t, writer.Close())
+				logs, _, _, m, _ := writer.GetLogs()
+				manifest = m
+				for id, group := range logs {
+					if previous := groups[id]; previous != nil {
+						previous.Binlogs = append(previous.Binlogs, group.Binlogs...)
+					} else {
+						groups[id] = group
+					}
+				}
+				writer = nil
+			}
+		}
+		return lo.Values(groups), manifest
+	}
+	groups, _ := write(20, storage.StorageV2)
+	_, manifest := write(30, storage.StorageV3)
+	// Unreferenced files in the same namespace must never enter either scan.
+	require.NoError(t, cm.Write(ctx, path.Join(root, "insert_log/1/10/20/extra"), []byte("not a parquet file")))
+	for _, group := range groups {
+		require.Len(t, group.Binlogs, 2)
+		group.ChildFields = nil
+	}
+	deltaPaths := []string{path.Join(root, "own.delta"), path.Join(root, "l0.delta")}
+	for i, version := range []int64{storage.StorageV1, storage.StorageV2} {
+		writer, err := storage.NewDeltalogWriter(ctx, 1, 10, 20, int64(i+1), schemapb.DataType_Int64, deltaPaths[i], storage.WithVersion(version), storage.WithStorageConfig(cfg), storage.WithUploader(cm.MultiWrite))
+		require.NoError(t, err)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64}, {Name: "ts", Type: arrow.PrimitiveTypes.Int64}}, nil))
+		rows := [][][2]int64{{{1, 200}, {2, 100}}, {{3, 200}, {9, 200}, {10, 200}}}[i]
+		for _, row := range rows {
+			builder.Field(0).(*array.Int64Builder).Append(row[0])
+			builder.Field(1).(*array.Int64Builder).Append(row[1])
+		}
+		record := storage.NewSimpleArrowRecord(builder.NewRecord(), map[storage.FieldID]int{0: 0, 1: 1})
+		builder.Release()
+		require.NoError(t, writer.Write(record))
+		record.Release()
+		require.NoError(t, writer.Close())
+	}
+	segment := &datapb.SegmentDescription{Binlogs: groups, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPaths[0]}}}}}
+	source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "snapshot.avro", SnapshotFormatVersion: 6}}
+	readPKs := func(r *reader) []int64 {
+		defer r.Close()
+		var result []int64
+		for {
+			data, err := r.Read()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			result = append(result, data.Data[100].(*storage.Int64FieldData).Data...)
+		}
+		return result
+	}
+	r, err := NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, 1<<20, nil, nil)
+	require.NoError(t, err)
+	inputBytes := r.v2Input.bytes
+	require.Equal(t, []int64{2, 1, 3, 4}, readPKs(r)) // equal timestamp survives; reinsertion survives
+	_, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes, nil, nil)
+	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient, "retained inputs cannot consume the delete merger's entire budget")
+	_, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes+255, nil, nil)
+	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient) // M < B, D < B, but M+D > B
+	r, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes+256, nil, nil)
+	require.NoError(t, err)
+	r.Close()
+	r, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 200, 300, 1024, SourceEncryption{}, source, 1<<20, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, readPKs(r), "the timestamp window must retain the later reinsertion")
+	for _, commit := range []uint64{300, 200} {
+		copy := proto.Clone(source).(*internalpb.SnapshotImportSource)
+		copy.SourceCommitTimestamp = commit
+		r, err := NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, copy, 1<<20, nil, nil)
+		require.NoError(t, err)
+		if commit == 300 {
+			require.Equal(t, []int64{1, 2, 1, 3, 4}, readPKs(r))
+		} else {
+			_, err = r.Read()
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			_, next := r.Read()
+			require.Same(t, err, next)
+			require.Nil(t, r.v2Input)
+		}
+	}
+	for _, mixed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mixed=%t", mixed), func(t *testing.T) {
+			sources := []*internalpb.SnapshotImportSource{source}
+			if mixed {
+				sources = append(sources, &internalpb.SnapshotImportSource{Version: 14, ManifestPath: manifest})
+			}
+			calls := 0
+			var original func(context.Context, []*datapb.FieldBinlog, *schemapb.CollectionSchema, ...storage.RwOption) (map[int64]struct{}, error)
+			footer := mockey.Mock(storage.PackedBinlogPresentFields).Origin(&original).To(func(ctx context.Context, bins []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, opts ...storage.RwOption) (map[int64]struct{}, error) {
+				calls++
+				return original(ctx, bins, schema, opts...)
+			}).Build()
+			defer footer.UnPatch()
+			resolve := func(context.Context, *internalpb.SnapshotImportSource) (*datapb.SegmentDescription, error) {
+				return segment, nil
+			}
+			l0 := &internalpb.SnapshotImportL0Source{LegacyL0Deltalogs: deltaPaths[1:]}
+			budget := int64(len(deltaPaths[1]) + 64 + 128) // Force several delete batches.
+			shared, err := BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, 1<<20, SourceEncryption{}, nil, resolve)
+			require.NoError(t, err)
+			r, err := NewStorageV2SnapshotReader(ctx, cm, schema, cfg, nil, 0, math.MaxUint64, 1024, SourceEncryption{}, source, budget, shared, nil)
+			require.NoError(t, err)
+			other, err := NewStorageV2SnapshotReader(ctx, cm, schema, cfg, nil, 0, math.MaxUint64, 1024, SourceEncryption{}, source, budget, shared, nil)
+			require.NoError(t, err)
+			require.Same(t, r.v2Input, other.v2Input)
+			r.Close()
+			require.Nil(t, r.v2Input)
+			require.Equal(t, []int64{2, 1, 4}, readPKs(other))
+			require.Equal(t, 1, calls, "footer discovery is shared by all bitmap batches and the final read")
+			if mixed {
+				v3source := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}
+				v3, err := NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, v3source, budget, shared, nil)
+				require.NoError(t, err)
+				require.Equal(t, []int64{1, 2, 1, 4}, readPKs(v3))
+			}
+			combined := inputBytes + int64(len(sources))*(256+maskBlockWords*8+64)
+			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, combined-1, SourceEncryption{}, nil, resolve)
+			require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			require.Nil(t, shared)
+			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, combined, SourceEncryption{}, nil, resolve)
+			require.NoError(t, err)
+			require.NotNil(t, shared)
+		})
+	}
+}
+
+func TestSnapshotV2ReaderFailureBoundaries(t *testing.T) {
+	paramtable.Init()
+	for _, mode := range []string{"reference", "budget", "shared", "missing_pk", "delete_read", "data_open", "encrypted_text", "optional_fields"} {
+		t.Run(mode, func(t *testing.T) {
+			schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}})
+			segment := &datapb.SegmentDescription{Binlogs: []*datapb.FieldBinlog{{FieldID: 7, ChildFields: []int64{100, 0, 1}, Binlogs: []*datapb.Binlog{{LogPath: "root/data"}}}}}
+			source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "snapshot.avro", SnapshotFormatVersion: 6}}
+			cfg := &indexpb.StorageConfig{StorageType: "local"}
+			budget := int64(1 << 20)
+			var shared *SnapshotL0Deletes
+			var encryption SourceEncryption
+			switch mode {
+			case "reference":
+				source.V2Reference = nil
+			case "budget":
+				budget = 0
+			case "shared":
+				shared = &SnapshotL0Deletes{}
+			case "missing_pk":
+				schema.Fields[0].IsPrimaryKey = false
+			case "delete_read":
+				segment.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/delete"}}}}
+				read := mockey.Mock(storage.NewDeltalogReader).Return(nil, merr.ErrIoPermissionDenied).Build()
+				defer read.UnPatch()
+			case "data_open":
+				read := mockey.Mock(storage.NewBinlogRecordReader).Return(nil, merr.ErrIoPermissionDenied).Build()
+				defer read.UnPatch()
+			case "encrypted_text":
+				encryption.Encrypted = true
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text})
+				segment.Binlogs[0].ChildFields = append(segment.Binlogs[0].ChildFields, 101)
+			case "optional_fields":
+				schema.Fields = append(schema.Fields,
+					&schemapb.FieldSchema{FieldID: 101, Name: "nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+					&schemapb.FieldSchema{FieldID: 102, Name: "default", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}},
+					&schemapb.FieldSchema{FieldID: 103, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true})
+				before := proto.Clone(schema)
+				r := newReader(context.Background(), nil, schema, cfg, storage.StorageV2, 1024, "")
+				input, err := r.prepareStorageV2Snapshot(segment, budget)
+				require.NoError(t, err)
+				require.Len(t, input.schema.Fields, 3)
+				require.True(t, proto.Equal(before, schema))
+				return
+			}
+			r, err := NewStorageV2SnapshotReader(context.Background(), nil, schema, cfg, segment, 0, math.MaxUint64, 1024, encryption, source, budget, shared, nil)
+			require.Error(t, err)
+			require.Nil(t, r)
+			if mode == "delete_read" || mode == "data_open" {
+				require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+			}
+		})
+	}
+}
+
+func TestSnapshotV2BitmapResolutionFailures(t *testing.T) {
+	paramtable.Init()
+	for _, mode := range []string{"missing_resolver", "avro_read", "invalid_inventory", "input_budget"} {
+		t.Run(mode, func(t *testing.T) {
+			schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}})
+			source := &internalpb.SnapshotImportSource{
+				Version:     14,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "snapshot.avro"},
+			}
+			budget := int64(1 << 20)
+			var want error = merr.ErrDataIntegrity
+			var resolve SnapshotV2Resolver
+			calls := 0
+			if mode == "missing_resolver" {
+				want = merr.ErrServiceInternal
+			} else {
+				resolve = func(_ context.Context, got *internalpb.SnapshotImportSource) (*datapb.SegmentDescription, error) {
+					calls++
+					require.Same(t, source, got)
+					if mode == "avro_read" {
+						return nil, merr.ErrIoPermissionDenied
+					}
+					if mode == "invalid_inventory" {
+						return &datapb.SegmentDescription{}, nil
+					}
+					return &datapb.SegmentDescription{Binlogs: []*datapb.FieldBinlog{{
+						FieldID: 7, ChildFields: []int64{0, 1, 100},
+						Binlogs: []*datapb.Binlog{{LogPath: "root/data"}},
+					}}}, nil
+				}
+				if mode == "avro_read" {
+					want = merr.ErrIoPermissionDenied
+				}
+				if mode == "input_budget" {
+					budget, want = 257, merr.ErrServiceResourceInsufficient
+				}
+			}
+			shared, err := BuildSnapshotDeleteMasksWithV2(context.Background(), nil, schema, nil, []*internalpb.SnapshotImportSource{source},
+				&internalpb.SnapshotImportL0Source{}, 0, math.MaxUint64, 1024, budget, SourceEncryption{}, nil, resolve)
+			require.ErrorIs(t, err, want)
+			require.Nil(t, shared, "failed resolution must never publish partial preparation")
+			if resolve != nil {
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
 }

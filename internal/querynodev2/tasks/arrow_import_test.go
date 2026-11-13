@@ -65,6 +65,8 @@ func TestDataFrameFromArrowRecordBatch_PreservesFieldMetadataAndNullability(t *t
 	fieldType, ok := df.FieldType(groupByCol)
 	require.True(t, ok)
 	assert.Equal(t, schemapb.DataType_Timestamptz, fieldType)
+	assert.False(t, df.IsComputedColumn(groupByCol))
+	assert.True(t, df.FieldNullable(groupByCol))
 
 	fields := df.Schema().Fields()
 	require.Len(t, fields, 1)

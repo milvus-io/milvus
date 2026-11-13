@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import random
 import tempfile
@@ -19,6 +20,7 @@ from common.bulk_insert_data import (
     DataField as df,
 )
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import copy_files_to_minio
 from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
 from utils.util_log import test_log as log
@@ -1041,12 +1043,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         collection schema: [pk, float_vector,
                         float_scalar, int_scalar, string_scalar, bool_scalar]
-        data files: json file that one of entities has int on float scalar
+        data files: json file with integer numbers on float scalar
         Steps:
         1. create collection
         2. import data
         3. verify the data entities
-        4. verify query successfully
+        4. verify query successfully and all converted FLOAT values match the input
+        case: IV3-FN-21 checks FLOAT32 rounding boundaries and PK/value identity in both V2 and V3.
         """
         files = prepare_bulk_insert_json_files(
             minio_endpoint=self.minio_endpoint,
@@ -1059,6 +1062,22 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             err_type=DataErrorType.int_on_float_scalar,
             force=True,
         )
+        with (Path(base_dir) / files[0]).open() as source:
+            source_rows = json.load(source)["rows"]
+        # Replace random integers with reproducible FLOAT32 exact/rounding boundaries.
+        values = [0, 1, -1, 2**24 - 1, 2**24, 2**24 + 1, -(2**24 - 1), -(2**24), -(2**24 + 1), 2**24 + 3]
+        assert len(source_rows) == len(values) == entities
+        for i, (row, value) in enumerate(zip(source_rows, values)):
+            row[df.float_field] = value
+            row[df.string_field] = f"source_row_{i}"
+        # The existing preparation helper uploads immediately; replace that object before import.
+        (Path(base_dir) / files[0]).write_text(json.dumps({"rows": source_rows}), encoding="utf-8")
+        copy_files_to_minio(
+            host=self.minio_endpoint, r_source=base_dir, files=files, bucket_name=self.bucket_name, force=True
+        )
+        identity_field = df.string_field if auto_id else df.pk_field
+        expected = {row[identity_field]: row for row in source_rows}
+        assert len(expected) == entities
 
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -1100,7 +1119,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         uids = res[0].ids
         res, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {uids}", output_fields=[df.float_field])
-        assert isinstance(res[0].get(df.float_field, 1), np.float32)
+        assert isinstance(res[0][df.float_field], (float, np.float32))
+
+        # Explicit PKs retain source identity; AutoID rows match by a unique source tag.
+        rows, _ = self.collection_wrap.query(
+            expr=f"{df.pk_field} >= 0", output_fields=[df.pk_field, df.string_field, df.float_field]
+        )
+        assert len(rows) == entities
+        assert len({row[df.pk_field] for row in rows}) == entities
+        assert {row[identity_field] for row in rows} == set(expected)
+        for row in rows:
+            source = expected[row[identity_field]]
+            assert row[df.string_field] == source[df.string_field], row
+            assert row[df.float_field] == float(np.float32(source[df.float_field])), row
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
@@ -1430,6 +1461,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         1. create collection
         3. import data, but the data file(s) not exists
         4. verify import failed with errors
+        case: IV3-ER-03 adds the V3 missing-key reason alongside the existing V2 size error
         """
         files = ["not_existing.json"]
         self._connect()
@@ -1450,10 +1482,12 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         assert not success
-        failed_reason = f"failed to get file size of '{files[0]}'"
+        v2_reason = f"failed to get file size of '{files[0]}'"
+        v3_reason = f"key not found[key={files[0]}]"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            reason = state.infos.get("failed_reason", "")
+            assert v2_reason in reason or v3_reason in reason, reason
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1728,12 +1762,16 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         else:
             assert not success
             if is_row_based:
-                failed_reason = f"the field '{df.pk_field}' is not defined in collection schema"
+                v2_reason = f"the field '{df.pk_field}' is not defined in collection schema"
             else:
-                failed_reason = f"field {dismatch_pk_field} row count 0 is not equal to other fields row count"
+                v2_reason = f"field {dismatch_pk_field} row count 0 is not equal to other fields row count"
             for state in states.values():
                 assert state.state_name in ["Failed", "Failed and cleaned"]
-                assert failed_reason in state.infos.get("failed_reason", "")
+                # IV3-FN-21: also accept the missing target-field diagnostic for this name mismatch.
+                actual_reason = state.infos.get("failed_reason", "")
+                assert (
+                    v2_reason in actual_reason or f"value of field '{dismatch_pk_field}' is missed" in actual_reason
+                ), actual_reason
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1781,15 +1819,19 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
 
         assert not success
         if is_row_based:
-            failed_reason = f"the field '{df.vec_field}' is not defined in collection schema"
+            v2_reason = f"the field '{df.vec_field}' is not defined in collection schema"
         else:
             if auto_id:
-                failed_reason = "JSON column consumer: row count is 0"
+                v2_reason = "JSON column consumer: row count is 0"
             else:
-                failed_reason = f"field {dismatch_vec_field} row count 0 is not equal to other fields row count"
+                v2_reason = f"field {dismatch_vec_field} row count 0 is not equal to other fields row count"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: also accept the missing target-field diagnostic for this name mismatch.
+            actual_reason = state.infos.get("failed_reason", "")
+            assert v2_reason in actual_reason or f"value of field '{dismatch_vec_field}' is missed" in actual_reason, (
+                actual_reason
+            )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1837,12 +1879,16 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
         if is_row_based:
-            failed_reason = f"field '{df.int_field}' is not defined in collection schema"
+            v2_reason = f"field '{df.int_field}' is not defined in collection schema"
         else:
-            failed_reason = f"field {dismatch_scalar_field} row count 0 is not equal to other fields row count"
+            v2_reason = f"field {dismatch_scalar_field} row count 0 is not equal to other fields row count"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: also accept the missing target-field diagnostic for this name mismatch.
+            actual_reason = state.infos.get("failed_reason", "")
+            assert (
+                v2_reason in actual_reason or f"value of field '{dismatch_scalar_field}' is missed" in actual_reason
+            ), actual_reason
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -1881,10 +1927,15 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field 'vectors'"
+        v2_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field 'vectors'"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: preserve the field, vector type and both dimensions in the alternative.
+            actual_reason = state.infos.get("failed_reason", "")
+            v3_reason = (
+                f"expected dim '{wrong_dim}' for field '{df.vec_field}' with type 'FloatVector', got dim '{dim}'"
+            )
+            assert v2_reason in actual_reason or v3_reason in actual_reason, actual_reason
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True])
@@ -2094,10 +2145,13 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
-        failed_reason = f"illegal dimension {dim} of numpy file"
+        v2_reason = f"illegal dimension {dim} of numpy file"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: accept the explicit expected/actual NumPy vector dimensions as well.
+            actual_reason = state.infos.get("failed_reason", "")
+            v3_reason = f"expected dim '{wrong_dim}' for FloatVector field '{df.vec_field}', got dim '{dim}'"
+            assert v2_reason in actual_reason or v3_reason in actual_reason, actual_reason
         assert self.collection_wrap.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -2146,10 +2200,14 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
-        failed_reason = f"file '{df.vec_field}.npy' has no corresponding field in collection"
+        v2_reason = f"file '{df.vec_field}.npy' has no corresponding field in collection"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: the reader can report the unmatched target field instead of the source file.
+            actual_reason = state.infos.get("failed_reason", "")
+            assert v2_reason in actual_reason or f"no file for field: {wrong_vec_field}, files:" in actual_reason, (
+                actual_reason
+            )
         assert self.collection_wrap.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -2243,10 +2301,13 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = "illegal value"
+        v2_reason = "illegal value"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: additionally accept the precise string-to-INT64 primary-key diagnostic.
+            actual_reason = state.infos.get("failed_reason", "")
+            v3_reason = f"expected type 'Int64' for field '{df.pk_field}', got type 'string'"
+            assert v2_reason in actual_reason or v3_reason in actual_reason, actual_reason
         assert self.collection_wrap.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -2465,10 +2526,13 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_id], timeout=90)
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = "failed to convert row value to entity"
+        v2_reason = "failed to convert row value to entity"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
-            assert failed_reason in state.infos.get("failed_reason", "")
+            # IV3-FN-21: additionally accept the precise string-to-FLOAT scalar diagnostic.
+            actual_reason = state.infos.get("failed_reason", "")
+            v3_reason = f"expected type 'Float' for field '{df.float_field}', got type 'string'"
+            assert v2_reason in actual_reason or v3_reason in actual_reason, actual_reason
         assert self.collection_wrap.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L3)

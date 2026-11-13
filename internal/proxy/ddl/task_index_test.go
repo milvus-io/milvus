@@ -48,9 +48,6 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	// Element-nullable and nested Array fields are gated at the proxy until the
-	// feature is complete; the tests of this package exercise them.
-	paramtable.Get().Save(paramtable.Get().ProxyCfg.EnableElementNullAndNestedArray.Key, "true")
 	gin.SetMode(gin.TestMode)
 	streaming.SetupNoopWALForTest()
 	code := m.Run()
@@ -405,6 +402,30 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 				},
 			}, cit1.newTypeParams)
 	})
+}
+
+// The struct sub-field origin marker stays out of the index type params, so
+// it reaches neither index meta, DescribeIndex nor the index build.
+func Test_parseIndexParamsSkipsStructSubFieldOriginMarker(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	cit := &CreateIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: "MHJACCARD"}},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: DimKey, Value: "128"},
+				{Key: common.StructSubFieldAddedKey, Value: "true"},
+			},
+		},
+	}
+	assert.NoError(t, cit.parseIndexParams(context.TODO()))
+	assert.ElementsMatch(t, []*commonpb.KeyValuePair{{Key: DimKey, Value: "128"}}, cit.newTypeParams)
 }
 
 func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
@@ -823,7 +844,7 @@ func Test_parseIndexParams(t *testing.T) {
 				}
 				err := cit.parseIndexParams(context.TODO())
 				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "TEXT field does not support user-created scalar index")
+				assert.Contains(t, err.Error(), "TEXT fields require an explicit NGRAM index")
 			})
 		}
 	})
@@ -1491,14 +1512,14 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	// support the element vector type, not the EmbeddingList capability.
 	// This means indexes like IVF_PQ that don't have the EMB_LIST flag
 	// should still work with ArrayOfVector + COSINE.
-	t.Run("element-nullable ArrayOfVector temporarily rejects element-level index", func(t *testing.T) {
+	t.Run("element-nullable ArrayOfVector accepts element-level index", func(t *testing.T) {
 		field := &schemapb.FieldSchema{
 			Name: "vec_field", DataType: schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
 			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
 		}
 		params := map[string]string{common.IndexTypeKey: "IVF_FLAT", common.MetricTypeKey: metric.COSINE, "nlist": "128"}
-		require.ErrorContains(t, checkTrain(context.TODO(), field, params, testVecIndexDataTypeCheck), "indexing element-nullable vector array field vec_field is not supported yet")
+		require.NoError(t, checkTrain(context.TODO(), field, params, testVecIndexDataTypeCheck))
 	})
 	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
 		cit := &CreateIndexTask{
@@ -2590,7 +2611,7 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("element-nullable ArrayOfVector autoindex is temporarily rejected", func(t *testing.T) {
+	t.Run("element-nullable ArrayOfVector autoindex keeps an element-level metric", func(t *testing.T) {
 		for _, enabled := range []string{"true", "false"} {
 			paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, enabled)
 			task := &CreateIndexTask{
@@ -2601,8 +2622,10 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 				},
 				req: &milvuspb.CreateIndexRequest{},
 			}
-			require.ErrorContains(t, task.parseIndexParams(context.TODO()),
-				"indexing element-nullable vector array field vectors is not supported yet")
+			require.NoError(t, task.parseIndexParams(context.TODO()))
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, task.newIndexParams)
+			require.NoError(t, err)
+			require.NotContains(t, indexparamcheck.EmbListMetrics, metricType)
 		}
 	})
 

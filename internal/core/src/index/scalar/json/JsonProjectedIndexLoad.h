@@ -23,8 +23,9 @@
 #include <string_view>
 
 #include "common/JsonCastType.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
 #include "common/Types.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/ReaderCaps.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/artifact/FileSource.h"
@@ -43,7 +44,7 @@ enum class JsonProjectionCompleteness {
  * @brief Per-load JSON projection metadata and optional non-exist sidecar
  * targets.
  * @note Owns values and staging resources, never a source or OpContext. This is
- * reader-decoration state prepared during Load, not reusable IndexLoader state.
+ * index-decoration state prepared during Load, not reusable IndexLoader state.
  */
 struct JsonProjectedOpenPlan {
     JsonProjectionCompleteness completeness{
@@ -90,14 +91,20 @@ PreparePackedJsonProjectedOpen(std::string_view family,
                                IndexLoadPlan& targets,
                                std::optional<size_t> row_count = std::nullopt);
 
-/**
- * @brief Decorate the reader using populated non-exist targets and its row
- * bound.
- * @pre Planned reads/writes are complete; this may read local staging files.
- */
-IIndexReaderBasePtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IIndexReaderBasePtr inner);
+/** @brief Derive optional routing metadata without loading storage. */
+std::optional<JsonProjectedIndexSpec>
+JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count);
+
+/** @brief Validate loaded sidecar data before publishing its owning storage cell. */
+std::shared_ptr<const TargetBitmap>
+FinishPackedJsonExists(JsonProjectedOpenPlan plan, int64_t row_count);
+
+/** @brief Load and validate the legacy sidecar as part of its storage transaction. */
+folly::coro::Task<std::shared_ptr<const TargetBitmap>>
+LoadJsonExists(bool use_async,
+               JsonProjectedOpenPlan plan,
+               storage::FileSource& source,
+               int64_t row_count);
 
 /**
  * @brief Whether a JSON path projects multiple values per parent row.
@@ -125,28 +132,5 @@ JsonProjectedOpenPlan
 PrepareJsonProjectedOpen(std::string_view family,
                          storage::FileSource& source,
                          const storage::LoadOptions& opts);
-
-/**
- * @brief Blocking adapter that decorates a legacy reader with JSON projection.
- * @note Incomplete legacy metadata leaves inner unchanged. Complete artifacts
- * stage any native-size_t sidecar locally, validate its size against the
- * reader's row count, then read offsets and construct a JsonPathIndexReader.
- */
-std::unique_ptr<IIndexReaderBase>
-FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                        storage::FileSource& source,
-                        std::unique_ptr<IIndexReaderBase> inner);
-
-/**
- * @brief Complete legacy JSON decoration with selectable source transport.
- * @pre source outlives the task; the caller provides the local I/O executor.
- * @note Only source I/O suspends. Local sidecar reads and reader construction
- * remain synchronous; use_async=false also keeps source reads synchronous.
- */
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-FinishJsonProjectedOpenAsync(bool use_async,
-                             JsonProjectedOpenPlan plan,
-                             storage::FileSource& source,
-                             std::unique_ptr<IIndexReaderBase> inner);
 
 }  // namespace milvus::index

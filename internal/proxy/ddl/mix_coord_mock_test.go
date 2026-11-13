@@ -1963,3 +1963,15 @@ type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredenti
 func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
 	panic("mock FetchFileResources with mockey")
 }
+
+func (*MixCoordMock) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}
+
+func (coord *MixCoordMock) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
+}

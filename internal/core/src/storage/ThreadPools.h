@@ -20,6 +20,7 @@
 #include <atomic>
 
 #include "common/Common.h"
+#include "common/OpContext.h"
 #include "ThreadPool.h"
 namespace milvus {
 
@@ -29,9 +30,6 @@ enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
     LOW = 2,
-    // Isolate search fanout from MIDDLE's field/index loading queue.
-    // TODO: Migrate search fanout to global coroutines.
-    SEARCH_FANOUT = 3,
 };
 
 inline ThreadPoolPriority
@@ -49,12 +47,22 @@ PriorityForLoad(const std::string& priority_str) {
     return milvus::proto::common::LoadPriority::HIGH;
 }
 
+// A query override applies only to this load; warmup retains its configured priority.
+inline milvus::proto::common::LoadPriority
+ResolveLoadPriority(const milvus::OpContext* ctx,
+                    milvus::proto::common::LoadPriority configured_priority) {
+    return ctx == nullptr
+               ? configured_priority
+               : static_cast<milvus::proto::common::LoadPriority>(
+                     ctx->runtime_load_priority.value_or(configured_priority));
+}
+
 class ThreadPools {
  public:
     static ThreadPool&
     GetThreadPool(ThreadPoolPriority priority);
 
-    // MIDDLE and SEARCH_FANOUT share sizing, including before first use.
+    // Each priority keeps its own coefficient, including before first use.
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
@@ -78,8 +86,7 @@ class ThreadPools {
         static std::map<ThreadPoolPriority, std::string> name_map = {
             {HIGH, "HIGH_SEGC_POOL"},
             {MIDDLE, "MIDD_SEGC_POOL"},
-            {LOW, "LOW_SEGC_POOL"},
-            {SEARCH_FANOUT, "SRCH_FAN_POOL"}};
+            {LOW, "LOW_SEGC_POOL"}};
         return name_map;
     }
 
@@ -106,9 +113,6 @@ struct fmt::formatter<milvus::ThreadPoolPriority> : formatter<std::string> {
                 break;
             case milvus::LOW:
                 name = "LOW";
-                break;
-            case milvus::SEARCH_FANOUT:
-                name = "SEARCH_FANOUT";
                 break;
             default:
                 name = "UNKNOWN";

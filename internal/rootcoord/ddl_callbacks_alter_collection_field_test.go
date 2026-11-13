@@ -85,6 +85,24 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "field1", "key1", "value1")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
+	// The struct sub-field origin marker is internal: it can be neither set
+	// nor deleted as a field property.
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.StructSubFieldAddedKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -150,6 +168,72 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	resp, err = core.AlterCollectionField(ctx, req)
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
+}
+
+func TestDDLCallbacksAlterCollectionFieldOnStruct(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+		DbName: dbName, CollectionName: collectionName,
+		StructArrayFieldSchema: newRootAddStructFieldSchema("profile"),
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	alter := func(fieldName string, props []*commonpb.KeyValuePair, deleteKeys ...string) error {
+		resp, err := core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+			DbName: dbName, CollectionName: collectionName, FieldName: fieldName,
+			Properties: props, DeleteKeys: deleteKeys,
+		})
+		return merr.CheckRPCCall(resp, err)
+	}
+	getStruct := func() *schemapb.StructArrayFieldSchema {
+		coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+		require.NoError(t, err)
+		return coll.ToCollectionSchemaPB().GetStructArrayFields()[0]
+	}
+
+	require.NoError(t, alter("profile", []*commonpb.KeyValuePair{
+		{Key: common.MmapEnabledKey, Value: "true"},
+		{Key: common.FieldDescriptionKey, Value: "struct description"},
+	}))
+	structField := getStruct()
+	value, ok := common.GetStringValue(structField.GetTypeParams(), common.MmapEnabledKey)
+	require.True(t, ok)
+	require.Equal(t, "true", value)
+	require.Equal(t, "struct description", structField.GetDescription())
+
+	require.NoError(t, alter("profile[ints]", []*commonpb.KeyValuePair{
+		{Key: common.MmapEnabledKey, Value: "false"},
+		{Key: common.FieldDescriptionKey, Value: "sub-field description"},
+	}))
+	sub := getStruct().GetFields()[0]
+	require.Equal(t, "profile[ints]", sub.GetName())
+	value, ok = common.GetStringValue(sub.GetTypeParams(), common.MmapEnabledKey)
+	require.True(t, ok)
+	require.Equal(t, "false", value)
+	value, ok = common.GetStringValue(sub.GetTypeParams(), common.MaxCapacityKey)
+	require.True(t, ok)
+	require.Equal(t, "16", value)
+	require.Equal(t, "sub-field description", sub.GetDescription())
+
+	require.NoError(t, alter("profile", nil, common.MmapEnabledKey))
+	_, ok = common.GetStringValue(getStruct().GetTypeParams(), common.MmapEnabledKey)
+	require.False(t, ok)
+
+	for _, key := range []string{common.MaxCapacityKey, common.MaxLengthKey, common.EnableAnalyzerKey} {
+		require.ErrorContains(t, alter("profile[ints]", []*commonpb.KeyValuePair{{Key: key, Value: "32"}}),
+			key+" can not be altered on struct sub-field profile[ints]")
+	}
+	require.ErrorContains(t, alter("profile", []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}),
+		"max_capacity can not be altered on struct field profile")
+	// A rejected key is reported even when the value would not change.
+	require.ErrorContains(t, alter("profile[ints]", []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}),
+		"max_capacity can not be altered on struct sub-field profile[ints]")
+	require.ErrorContains(t, alter("profile", nil, common.WarmupScalarFieldKey),
+		"warmup.scalarField can not be altered on struct field profile")
 }
 
 func TestDDLCallbacksRejectTopLevelNestedArray(t *testing.T) {

@@ -139,6 +139,85 @@ BuildRTree(const ReaderBackend& backend, bool nullable) {
     return backend.Build(input.View(), {.row_count = data.values.size()});
 }
 
+TEST(RTreeIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("SpatialRTreeHeap");
+    for (const bool packed : {false, true}) {
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << packed << async);
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "rtree-cache-XXXXXX",
+                "R-Tree cache test");
+            auto artifact = BuildRTree(backend, true);
+            const auto persisted =
+                packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+            auto source = [&]() -> OpenedIndexSource {
+                if (!packed) {
+                    return LegacyIndexSource{
+                        std::make_shared<TestArtifactSource>(
+                            persisted, storage::Generation::V1V2),
+                        async};
+                }
+                auto input = std::make_shared<storage::RemoteInputStream>(
+                    std::make_shared<arrow::io::BufferReader>(
+                        MakePackedArtifactBuffer(persisted)));
+                if (async) {
+                    return PackedIndexSource{
+                        std::shared_ptr<storage::AsyncIndexEntryReader>(
+                            folly::coro::blockingWait(
+                                folly::coro::co_withExecutor(
+                                    storage::ResolveAsyncLoadExecutor(
+                                        {}, proto::common::LoadPriority::HIGH),
+                                    storage::AsyncIndexEntryReader::Open(
+                                        input,
+                                        0,
+                                        proto::common::LoadPriority::HIGH))))};
+                }
+                return PackedIndexSource{
+                    std::shared_ptr<storage::IndexEntryReader>(
+                        storage::IndexEntryReader::Open(input, input->Size()))};
+            }();
+            storage::LoadOptions options;
+            options.params = backend.LoadParams({.row_count = 3});
+            options.mmap_dir_path = staging->Path();
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                                   true},
+                {1024 * 1024, 0},
+                {},
+                4096};
+            auto index = LoaderRegistry::Instance()
+                             .Lookup(backend.Family())
+                             .Load({std::move(source), options, cache});
+            EXPECT_EQ(index->Metadata().count, 3);
+            folly::CancellationSource cancellation;
+            cancellation.requestCancellation();
+            OpContext cancelled(cancellation.getToken());
+            auto reader = index->CreateReader(&cancelled);
+            EXPECT_EQ(reader->Count(), 3);
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ExpectSegcoreError(ErrorCode::FollyCancel,
+                               [&] { (void)nulls->IsNull(); });
+            index->CancelWarmup();
+            OpContext retry;
+            reader = index->CreateReader(&retry);
+            index.reset();
+            nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            const auto result = nulls->IsNull();
+            EXPECT_EQ(result.count(), 1);
+            EXPECT_TRUE(result[1]);
+        }
+    }
+}
+
 TEST(RTreeIndexArtifactTest, V3RoundTripPreservesFileAndNullInventory) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("SpatialRTreeHeap");

@@ -1203,6 +1203,7 @@ def test_orm_waits_for_sorted_stable_inputs_with_call_context(monkeypatch):
         "unassigned",
         "unexpected",
         "missing-pk",
+        "source-index-not-ready",
     ],
 )
 def test_index_compaction_case_preserves_unselected_sources(monkeypatch, topology):
@@ -1211,6 +1212,7 @@ def test_index_compaction_case_preserves_unselected_sources(monkeypatch, topolog
 
     clock = FakeClock()
     events = []
+    source_index_ready = False
     selected = list(range(1, 10 if topology == "all-selected" else 9))
     loaded_ids = [10] if topology == "all-selected" else [9, 10]
     if topology == "selected-source-remains":
@@ -1231,9 +1233,11 @@ def test_index_compaction_case_preserves_unselected_sources(monkeypatch, topolog
             return [SimpleNamespace(segment_id=i, num_rows=case.ct.default_nb) for i in range(1, 10)]
 
         def compact(self, **kwargs):
+            assert source_index_ready, "Compaction triggered before source indexes finished"
             events.append("compact")
 
         def create_index(self, *args, **kwargs):
+            assert kwargs["sync"] is False
             events.append("create-index")
 
         def get_detailed_compaction_state(self, **kwargs):
@@ -1262,10 +1266,24 @@ def test_index_compaction_case_preserves_unselected_sources(monkeypatch, topolog
             return [{case.ct.default_int64_field_name: pk} for pk in range(start, end)], True
 
     def workload(trigger, get_state, operation, **kwargs):
+        assert source_index_ready, "Workload started before source indexes finished"
+        events.append("workload")
         operation(60)
         trigger(60)
         get_state(60)
         return True
+
+    def wait_index(*args, **kwargs):
+        nonlocal source_index_ready
+        events.append("wait-index")
+        if "compact" not in events:
+            assert "create-index" in events
+            # Accepting CreateIndex does not make its source segments eligible.
+            # The readiness barrier must run before either concurrent callback.
+            if topology == "source-index-not-ready":
+                return False, True
+            source_index_ready = True
+        return True, True
 
     def loaded(*args, **kwargs):
         events.append("loaded")
@@ -1288,13 +1306,17 @@ def test_index_compaction_case_preserves_unselected_sources(monkeypatch, topolog
     test = SimpleNamespace(
         collection_insert_multi_segments_one_shard=lambda *args, **kwargs: collection,
         utility_wrap=SimpleNamespace(
-            wait_for_index_building_complete=lambda *args, **kwargs: (True, True),
+            wait_for_index_building_complete=wait_index,
             get_query_segment_info=loaded,
         ),
     )
-    if topology in {"partial-plan", "all-selected"}:
+    if topology == "source-index-not-ready":
+        with pytest.raises(AssertionError, match="Source vector index did not finish"):
+            case.TestCompactionOperation.test_compact_during_index(test)
+        assert events == ["stable-inputs", "create-index", "wait-index"]
+    elif topology in {"partial-plan", "all-selected"}:
         case.TestCompactionOperation.test_compact_during_index(test)
-        assert events[:3] == ["stable-inputs", "create-index", "compact"]
+        assert events[:6] == ["stable-inputs", "create-index", "wait-index", "workload", "create-index", "compact"]
         assert events.count("loaded") == 1
         assert "search" in events
         assert events.count("query") == (9 * case.ct.default_nb + 999) // 1000

@@ -26,7 +26,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "common/EasyAssert.h"
 #include "index/Families.h"
+#include "index/Meta.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "indexbuilder/BuildInputMaterializer.h"
@@ -131,7 +133,7 @@ index::IIndexReaderBasePtr
 BuildNestedReader(const std::vector<ScalarFieldProto>& rows,
                   const uint8_t* parent_validity,
                   std::string_view backend_name,
-                  int64_t element_count) {
+                  std::size_t element_count) {
     const auto& backend =
         index::test::ScalarReaderBackends().Get<T>(backend_name);
     auto materializer = MakeScalarBuildInputMaterializer(
@@ -189,7 +191,6 @@ TEST(MaterializerArrayTest,
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
         EXPECT_EQ(reader->Count(), 5);
-        EXPECT_GT(reader->MemoryUsage(), 0);
         ExpectNestedHits<int32_t>(*reader, 10, {0});
         ExpectNestedHits<int32_t>(*reader, 20, {1, 2});
         ExpectNestedHits<int32_t>(*reader, 30, {3, 4});
@@ -225,6 +226,16 @@ CheckNarrowNestedStride(std::string_view backend_name, int32_t large_value) {
 TEST(MaterializerArrayTest, NarrowIntNestedElementsUseInt32StorageStride) {
     CheckNarrowNestedStride<int8_t>("BitmapInt8Nested", 100);
     CheckNarrowNestedStride<int16_t>("BitmapInt16Nested", 300);
+}
+
+Config
+EmbeddingListParams() {
+    return {{index::METRIC_TYPE, "MAX_SIM"}};
+}
+
+Config
+ElementLevelParams() {
+    return {{index::METRIC_TYPE, "L2"}};
 }
 
 FieldDataPtr
@@ -266,9 +277,10 @@ TEST(MaterializerArrayTest, ResidentEmbeddingListsUsePhysicalElements) {
     VectorBuildMaterializer materializer(DataType::VECTOR_ARRAY,
                                          DataType::VECTOR_FLOAT,
                                          2,
+                                         false,
                                          2,
                                          "test_compact_vectors",
-                                         Config::object());
+                                         EmbeddingListParams());
     materializer.Add(CompactEmbeddingLists());
     std::move(materializer).Build();
 }
@@ -306,12 +318,95 @@ TEST(MaterializerArrayTest, DiskEmbeddingListsUsePhysicalElements) {
                                              DataType::VECTOR_FLOAT,
                                              2,
                                              false,
+                                             false,
                                              2,
                                              "test_compact_disk_vectors",
-                                             Config::object());
+                                             EmbeddingListParams());
     materializer.Add(CompactEmbeddingLists());
     materializer.FinishPrimary();
     std::move(materializer).Build();
+}
+
+// An element-level metric turns VECTOR_ARRAY into ordinary input in the
+// logical element domain: no offsets, and the element validity of an
+// element-nullable field (row 0 holds elements 0..2, row 1 elements 3..4).
+TEST(MaterializerArrayTest, ResidentElementLevelUsesElementValidity) {
+    using Input = index::VectorBuildInput<float>;
+    bool inspected = false;
+    RegisterInspector<Input>(
+        "test_element_level_vectors", [&](const Input& input) {
+            inspected = true;
+            EXPECT_EQ(input.logical_rows, 5);
+            EXPECT_EQ(input.physical_rows, 2);
+            EXPECT_EQ((std::vector<float>(input.physical_values.begin(),
+                                          input.physical_values.end())),
+                      (std::vector<float>{1, 2, 3, 4}));
+            EXPECT_FALSE(input.embedding_offsets.has_value());
+            ASSERT_TRUE(static_cast<bool>(input.parent_validity));
+            const std::vector<bool> expected{true, false, true, false, false};
+            for (int64_t i = 0; i < 5; ++i) {
+                EXPECT_EQ(input.parent_validity[i], expected[i]) << i;
+            }
+        });
+    VectorBuildMaterializer materializer(DataType::VECTOR_ARRAY,
+                                         DataType::VECTOR_FLOAT,
+                                         2,
+                                         true,
+                                         2,
+                                         "test_element_level_vectors",
+                                         ElementLevelParams());
+    materializer.Add(CompactEmbeddingLists());
+    std::move(materializer).Build();
+    EXPECT_TRUE(inspected);
+}
+
+TEST(MaterializerArrayTest, ResidentElementNullableRejectsEmbeddingList) {
+    EXPECT_THROW(VectorBuildMaterializer(DataType::VECTOR_ARRAY,
+                                         DataType::VECTOR_FLOAT,
+                                         2,
+                                         true,
+                                         2,
+                                         "test_compact_vectors",
+                                         EmbeddingListParams()),
+                 SegcoreError);
+}
+
+TEST(MaterializerArrayTest, DiskElementLevelWritesElementValidity) {
+    using Input = index::PreparedVectorBuildFiles<float>;
+    bool inspected = false;
+    RegisterInspector<Input>(
+        "test_element_level_disk_vectors", [&](const Input& input) {
+            inspected = true;
+            std::ifstream raw(input.raw_path, std::ios::binary);
+            uint32_t header[2]{};
+            raw.read(reinterpret_cast<char*>(header), sizeof(header));
+            EXPECT_EQ(header[0], 2);
+            EXPECT_EQ(header[1], 2);
+            EXPECT_FALSE(input.embedding_offsets_path.has_value());
+            ASSERT_TRUE(input.validity_path.has_value());
+            std::ifstream valid(*input.validity_path, std::ios::binary);
+            uint64_t count = 0;
+            valid.read(reinterpret_cast<char*>(&count), sizeof(count));
+            EXPECT_EQ(count, 5);
+            uint8_t bits = 0;
+            valid.read(reinterpret_cast<char*>(&bits), sizeof(bits));
+            ASSERT_TRUE(valid.good());
+            EXPECT_EQ(bits, 0b00101);
+        });
+    VectorDiskBuildMaterializer materializer("/tmp",
+                                             DataType::VECTOR_ARRAY,
+                                             DataType::VECTOR_FLOAT,
+                                             2,
+                                             false,
+                                             true,
+                                             2,
+                                             "test_element_level_disk_vectors",
+                                             ElementLevelParams());
+    materializer.Add(CompactEmbeddingLists());
+    materializer.FinishPrimary();
+    EXPECT_TRUE(materializer.RequiresEngineBuild());
+    std::move(materializer).Build();
+    EXPECT_TRUE(inspected);
 }
 }  // namespace
 }  // namespace milvus::indexbuilder

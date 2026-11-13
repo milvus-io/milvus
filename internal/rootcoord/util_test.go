@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -680,6 +681,39 @@ func TestCheckStructArrayFieldSchema_NullableValidation(t *testing.T) {
 		err := checkStructArrayFieldSchema(schemas)
 		assert.NoError(t, err)
 	})
+}
+
+// checkStructArrayFieldSchema also runs on stored structs, whose sub-fields may
+// carry enable_match or enable_analyzer from an earlier version; the callers
+// check only user input with schemautil.RejectStructSubFieldTextMatch.
+func TestCheckStructArrayFieldSchemaAcceptsStoredTextMatch(t *testing.T) {
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "s", Fields: []*schemapb.FieldSchema{{
+				Name: "s[tag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "4"},
+					{Key: common.MaxLengthKey, Value: "16"},
+					{Key: key, Value: "true"},
+				},
+			}},
+		}}))
+	}
+}
+
+func TestCheckStructArrayFieldSchemaMaxCapacityFollowsProxyConfig(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name: "s[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "5000"}},
+	}
+	schemas := []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{field}}}
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxArrayCapacity.Key, "8192")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxArrayCapacity.Key)
+	require.NoError(t, checkStructArrayFieldSchema(schemas))
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxArrayCapacity.Key, "4096")
+	require.ErrorContains(t, checkStructArrayFieldSchema(schemas), "should be in (0, 4096]")
 }
 
 func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {

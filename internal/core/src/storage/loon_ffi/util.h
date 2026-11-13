@@ -14,7 +14,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
@@ -79,16 +78,38 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config);
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties);
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
+
+struct LoonManifestPath {
+    std::string base_path;
+    int64_t version = 0;
+    // Byte size of the manifest object of this revision as the path records it,
+    // or a non-positive value when unknown. A known size lets the read skip
+    // asking storage for it and must match the object exactly. It is not part
+    // of the revision identity.
+    int64_t size = -1;
+};
 
 /**
- * @brief Parse a manifest path JSON into its base path and version
+ * @brief Parse a manifest path JSON
  *
- * @return (base_path, ver), or std::nullopt when path is not a JSON object
- *         with a string "base_path" and an integer "ver"
+ * @return the revision the path names, or std::nullopt when path is not a JSON
+ *         object with a string "base_path" and an integer "ver". An optional
+ *         "size" that is not an integer is ignored.
  */
-std::optional<std::pair<std::string, int64_t>>
+std::optional<LoonManifestPath>
 ParseLoonManifestPath(const std::string& path);
+
+/**
+ * @brief Read the manifest of the revision a manifest path names
+ *
+ * Opens the revision with the size the path records, so the read can skip
+ * asking storage for it. Error classification is left to the caller.
+ */
+LoonFFIResult
+ReadLoonManifest(const LoonManifestPath& manifest_path,
+                 const LoonProperties* properties,
+                 LoonManifest** out_manifest);
 
 /**
  * @brief Check whether two manifest paths name the same manifest revision
@@ -125,3 +146,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                              int64_t collection_id,
                              const std::string& external_source,
                              const std::string& external_spec);
+
+// Server-owned startup policy. An uninitialized or empty policy denies brokers.
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw);
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json);
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint);

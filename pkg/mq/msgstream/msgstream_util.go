@@ -17,9 +17,7 @@
 package msgstream
 
 import (
-	"context"
 	"fmt"
-	"math/rand"
 	"strconv"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -27,45 +25,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	pcommon "github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	kafkamqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-// unsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()
-// TODO use streamnative pulsarctl
-func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, channels []string) {
-	mlog.Info(ctx, "unsubscribe channel", mlog.String("subname", subName), mlog.Any("channels", channels))
-	err := factory.NewMsgStreamDisposer(ctx)(channels, subName)
-	if err != nil {
-		mlog.Warn(ctx, "failed to unsubscribe channels", mlog.String("subname", subName), mlog.Any("channels", channels), mlog.Err(err))
-		panic(err)
-	}
-}
-
-func GetChannelLatestMsgID(ctx context.Context, factory Factory, channelName string) ([]byte, error) {
-	dmlStream, err := factory.NewMsgStream(ctx)
-	if err != nil {
-		mlog.Warn(ctx, "fail to NewMsgStream", mlog.String("channelName", channelName), mlog.Err(err))
-		return nil, err
-	}
-	defer dmlStream.Close()
-
-	subName := fmt.Sprintf("get-latest_msg_id-%s-%d", channelName, rand.Int())
-	err = dmlStream.AsConsumer(ctx, []string{channelName}, subName, common.SubscriptionPositionUnknown)
-	if err != nil {
-		mlog.Warn(ctx, "fail to AsConsumer", mlog.String("channelName", channelName), mlog.Err(err))
-		return nil, err
-	}
-	id, err := dmlStream.GetLatestMsgID(channelName)
-	if err != nil {
-		mlog.Error(ctx, "fail to GetLatestMsgID", mlog.String("channelName", channelName), mlog.Err(err))
-		return nil, err
-	}
-	return id.Serialize(), nil
-}
 
 // PulsarHealthCheck Perform a health check by retrieving cluster metadata
 func PulsarHealthCheck(clusterStatus *pcommon.MQClusterStatus) {

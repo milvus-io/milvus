@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,7 +19,7 @@ type recordingSegmentScheduler struct {
 	tasks []nodescheduler.Task
 }
 
-func (s *recordingSegmentScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *recordingSegmentScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.tasks = append(s.tasks, task)
 	return recordingSegmentTaskHandle{}
 }
@@ -71,4 +72,30 @@ func TestSegmentViewRequestPersistThrough(t *testing.T) {
 	}
 	view.pendingFlushChunks = nil
 	view.mu.Unlock()
+}
+
+func TestPressurePromotesOnlyRequiredSerialPrefix(t *testing.T) {
+	promoted := make(map[*moduleapi.DataTaskPriority]bool)
+	patch := mockey.Mock((*moduleapi.DataTaskPriority).Promote).To(func(p *moduleapi.DataTaskPriority) { promoted[p] = true }).Build()
+	defer patch.UnPatch()
+	view := &SegmentView{runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}}
+	first := &ensureGrowingSegmentTask{segmentTaskBase: segmentTaskBase{segment: view}, timetick: 10}
+	second := &flushL1BufferTask{segmentTaskBase: segmentTaskBase{segment: view}, timetick: 20}
+	later := &commitL1SegmentTask{segmentTaskBase: segmentTaskBase{segment: view}, timetick: 30}
+	view.pendingTasks = []segmentTask{first, second, later}
+	view.pendingFlushChunks = []writeOnlyInsertBuffer{{fromTimeTick: 15, toTimeTick: 20}}
+	view.maybeSubmitNextLocked()
+	require.False(t, view.RequestPersistThroughUnderPressure(14))
+	require.Empty(t, promoted)
+	require.False(t, view.RequestPersistThroughUnderPressure(20), "already sealed data reuses the queue")
+	require.True(t, promoted[first.taskPriority()])
+	require.True(t, promoted[second.taskPriority()])
+	require.False(t, promoted[later.taskPriority()])
+	clear(promoted)
+	view.RequestPersistThrough(30)
+	require.Empty(t, promoted, "ordinary stall does not promote")
+	view.pendingFinalCommit = later
+	view.createSegmentTimeTick = 10
+	view.RequestPersistThroughUnderPressure(20)
+	require.True(t, promoted[later.taskPriority()], "L0 depends on earlier L1 final publication even beyond the requested boundary")
 }

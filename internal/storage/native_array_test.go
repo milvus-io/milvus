@@ -48,6 +48,122 @@ func testNestedField(dt schemapb.DataType, innerNullable, leafNullable bool) *sc
 	}
 }
 
+func TestGenerateNullElementsArrayFromSibling(t *testing.T) {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 202, Name: "s[scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true},
+		{
+			FieldID: 203, Name: "s[vector]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+		},
+		testNestedField(schemapb.DataType_Int64, true, false),
+	}
+	siblingSchema := &schemapb.FieldSchema{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	for _, format := range []string{"list", "binary"} {
+		t.Run(format, func(t *testing.T) {
+			var sibling arrow.Array
+			if format == "list" {
+				b := array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+				b.Append(true)
+				b.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+				b.Append(true)
+				b.AppendNull()
+				sibling = b.NewArray()
+				b.Release()
+			} else {
+				b := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+				for _, row := range []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+				} {
+					encoded, err := proto.Marshal(row)
+					require.NoError(t, err)
+					b.Append(encoded)
+				}
+				b.AppendNull()
+				sibling = b.NewArray()
+				b.Release()
+			}
+			defer sibling.Release()
+			for _, field := range fields {
+				t.Run(field.GetName(), func(t *testing.T) {
+					out, err := GenerateNullElementsArrayFromSibling(field, sibling, siblingSchema, 3)
+					require.NoError(t, err)
+					defer out.Release()
+					wantType, err := ArrowTypeForField(field)
+					require.NoError(t, err)
+					require.True(t, arrow.TypeEqual(wantType, out.DataType()))
+					rows := out.(*array.List)
+					require.Equal(t, 1, rows.NullN())
+					for i, want := range []int64{2, 0, 0} {
+						start, end := rows.ValueOffsets(i)
+						require.Equal(t, want, end-start)
+					}
+					require.True(t, rows.IsNull(2))
+					for i := 0; i < 2; i++ {
+						require.True(t, rows.ListValues().IsNull(i))
+					}
+				})
+			}
+			required := proto.Clone(fields[0]).(*schemapb.FieldSchema)
+			required.Nullable = false
+			out, err := GenerateNullElementsArrayFromSibling(required, sibling, siblingSchema, 3)
+			require.Nil(t, out)
+			require.ErrorContains(t, err, "null sibling row")
+		})
+	}
+}
+
+func TestGenerateNullElementsArrayFromCompactNestedBinarySibling(t *testing.T) {
+	siblingSchema := testNestedField(schemapb.DataType_Int64, true, false)
+	siblingSchema.Name = "s[nested]"
+	row := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64}},
+		ValidData: []bool{false, false},
+	}
+	encoded, err := proto.Marshal(row)
+	require.NoError(t, err)
+	b := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	b.Append(encoded)
+	b.AppendNull()
+	sibling := b.NewArray()
+	b.Release()
+	defer sibling.Release()
+
+	field := &schemapb.FieldSchema{
+		FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+	}
+	out, err := GenerateNullElementsArrayFromSibling(field, sibling, siblingSchema, 2)
+	require.NoError(t, err)
+	defer out.Release()
+	list := out.(*array.List)
+	start, end := list.ValueOffsets(0)
+	require.Equal(t, int64(2), end-start)
+	require.True(t, list.ListValues().IsNull(0))
+	require.True(t, list.ListValues().IsNull(1))
+	require.True(t, list.IsNull(1))
+}
+
+func TestSerializeCompactNullNativeArrayRow(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, ElementNullable: true,
+	}
+	typ, err := ArrowTypeForField(field)
+	require.NoError(t, err)
+	builder := array.NewBuilder(memory.DefaultAllocator, typ)
+	defer builder.Release()
+	row := emptyNativeScalar(schemapb.DataType_Int64)
+	row.ValidData = []bool{false, false}
+	require.NoError(t, SerializeNativeArrayRow(builder, row, field))
+	result := builder.NewArray().(*array.List)
+	defer result.Release()
+	start, end := result.ValueOffsets(0)
+	require.Equal(t, int64(2), end-start)
+	require.True(t, result.ListValues().IsNull(0))
+	require.True(t, result.ListValues().IsNull(1))
+}
+
 func TestNativeArrayAllLeafTypesAndNullableLayers(t *testing.T) {
 	leaves := []schemapb.DataType{
 		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
@@ -361,4 +477,66 @@ func TestDeserializeNativeArrayRowRejectsOutOfRangeNestedOffsets(t *testing.T) {
 	_, err = DeserializeNativeArrayRow(corrupt, 0, field)
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+}
+
+func TestNullElementsArrayRowSerializes(t *testing.T) {
+	single := &schemapb.FieldSchema{
+		FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, Nullable: true, ElementNullable: true,
+	}
+	nested := testNestedField(schemapb.DataType_Int64, true, true)
+	for _, field := range []*schemapb.FieldSchema{single, nested} {
+		for _, n := range []int{0, 3} {
+			row, err := NullElementsArrayRow(field, n)
+			require.NoError(t, err)
+			require.Equal(t, make([]bool, n), row.ValidData)
+			if field == nested {
+				require.Equal(t, schemapb.DataType_Int64, row.GetArrayData().GetElementType())
+				require.Len(t, row.GetArrayData().GetData(), n)
+			} else {
+				require.Len(t, row.GetStringData().GetData(), n)
+			}
+
+			typ, err := ArrowTypeForField(field)
+			require.NoError(t, err)
+			builder := array.NewBuilder(memory.DefaultAllocator, typ)
+			require.NoError(t, SerializeNativeArrayRow(builder, row, field))
+			result := builder.NewArray().(*array.List)
+			require.True(t, result.IsValid(0))
+			start, end := result.ValueOffsets(0)
+			require.Equal(t, int64(n), end-start)
+			for i := start; i < end; i++ {
+				require.True(t, result.ListValues().IsNull(int(i)))
+			}
+			back, err := DeserializeNativeArrayRow(result, 0, field)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(row, back))
+			result.Release()
+			builder.Release()
+		}
+	}
+
+	_, err := NullElementsArrayRow(&schemapb.FieldSchema{
+		Name: "legacy", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	}, 1)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestNullElementsVectorArrayRow(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID: 203, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	row, err := NullElementsVectorArrayRow(field, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), row.GetDim())
+	require.NotNil(t, row.GetFloatVector())
+	require.Empty(t, row.GetFloatVector().GetData())
+	require.Equal(t, []bool{false, false}, row.ValidData)
+
+	_, err = NullElementsVectorArrayRow(&schemapb.FieldSchema{
+		Name: "legacy", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+	}, 4, 1)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }

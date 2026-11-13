@@ -243,6 +243,12 @@ func DropSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
 }
 
+// SaveSegmentIndex restores a catalog record atomically with the segment
+// manifest revision that relinquishes its artifact metadata to etcd.
+func SaveSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
+}
+
 // AlterSegment returns an UpdateAction that rewrites an existing segment's
 // record using the legacy AlterSegments encoding. For a Dropped segment it
 // additionally persists the GC-compat binlog KVs a pre-binlog-prefix segment
@@ -254,9 +260,10 @@ func AlterSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg, AlterEncoding: true}}
 }
 
-// MarkChannelDropped returns an UpdateAction that marks channel as removed.
-func MarkChannelDropped(channel string) UpdateAction {
-	return UpdateAction{Type: ActionUpdate, Entry: ChannelEntry{Channel: channel}}
+// DropChannelFlag returns an UpdateAction that deletes the removal flag of a
+// dropped channel.
+func DropChannelFlag(channel string) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: ChannelEntry{Channel: channel}}
 }
 
 // SaveDataView returns an UpdateAction that persists a DataView snapshot under

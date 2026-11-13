@@ -14,8 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "folly/coro/BlockingWait.h"
-
 #include "index/scalar/json/JsonProjectedIndexLoad.h"
 
 #include <algorithm>
@@ -38,7 +36,6 @@
 #include "storage/artifact/LocalFileUtils.h"
 #include "index/Families.h"
 #include "index/Meta.h"
-#include "index/scalar/json/JsonPathIndexReader.h"
 #include "nlohmann/json.hpp"
 
 namespace milvus::index {
@@ -565,37 +562,35 @@ PrepareJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-std::unique_ptr<IIndexReaderBase>
-FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                        storage::FileSource& source,
-                        std::unique_ptr<IIndexReaderBase> inner) {
-    return folly::coro::blockingWait(FinishJsonProjectedOpenAsync(
-        false, std::move(plan), source, std::move(inner)));
+std::optional<JsonProjectedIndexSpec>
+JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count) {
+    const auto projected = ParseProjectedParams({}, params);
+    if (!projected ||
+        ReadAnnotation(params) != JsonProjectionCompleteness::Complete) {
+        return std::nullopt;
+    }
+    return JsonProjectedIndexSpec(
+        projected->json_path, projected->cast_type, row_count);
 }
 
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-FinishJsonProjectedOpenAsync(bool use_async,
-                             JsonProjectedOpenPlan plan,
-                             storage::FileSource& source,
-                             std::unique_ptr<IIndexReaderBase> inner) {
-    AssertInfo(inner != nullptr,
-               "typed JSON load requires a non-null inner reader");
+folly::coro::Task<std::shared_ptr<const TargetBitmap>>
+LoadJsonExists(bool use_async,
+               JsonProjectedOpenPlan plan,
+               storage::FileSource& source,
+               int64_t row_count) {
     if (plan.completeness != JsonProjectionCompleteness::Complete) {
-        co_return inner;
+        co_return nullptr;
     }
     AssertInfo(plan.cast_type.has_value(),
                "complete typed JSON load lacks a cast type");
     std::vector<size_t> offsets;
     if (plan.has_non_exist_entry) {
-        offsets = (co_await ReadNonExistOffsets(
-            use_async, plan, source, inner->Count()));
+        offsets =
+            co_await ReadNonExistOffsets(use_async, plan, source, row_count);
     }
-    const auto row_count = inner->Count();
-    co_return std::make_unique<JsonPathIndexReader>(
-        std::move(inner),
-        JsonProjectedIndexSpec(
-            std::move(plan.json_path), *plan.cast_type, row_count),
-        offsets);
+    co_return JsonProjectedIndexSpec(
+        std::move(plan.json_path), *plan.cast_type, row_count)
+        .MakeExists(offsets);
 }
 
 Config
@@ -678,17 +673,13 @@ PreparePackedJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-IIndexReaderBasePtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IIndexReaderBasePtr inner) {
-    AssertInfo(inner != nullptr,
-               "typed JSON requires an initialized inner reader");
+std::shared_ptr<const TargetBitmap>
+FinishPackedJsonExists(JsonProjectedOpenPlan plan, int64_t rows) {
     if (plan.completeness != JsonProjectionCompleteness::Complete) {
-        return inner;
+        return nullptr;
     }
     AssertInfo(plan.cast_type.has_value(),
                "typed JSON projection lacks cast type");
-    const auto rows = inner->Count();
     AssertInfo(rows >= 0, "typed JSON inner reader reported negative count");
     std::vector<size_t> staged_offsets;
     if (plan.packed_non_exist_file) {
@@ -718,11 +709,9 @@ FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
         ThrowInfo(DataFormatBroken,
                   "typed JSON non-exist offsets exceed row count");
     }
-    return std::make_unique<JsonPathIndexReader>(
-        std::move(inner),
-        JsonProjectedIndexSpec(
-            std::move(plan.json_path), *plan.cast_type, rows),
-        offsets);
+    return JsonProjectedIndexSpec(
+               std::move(plan.json_path), *plan.cast_type, rows)
+        .MakeExists(offsets);
 }
 
 }  // namespace milvus::index

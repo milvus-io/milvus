@@ -111,7 +111,7 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		rs.checkpoint = snapshot.Checkpoint.Clone()
 		rs.mu.Unlock()
 		if rs.tailController != nil {
-			rs.tailController.Publish(snapshot.LogicalEndOffset)
+			rs.tailController.Publish(snapshot.LogicalEndOffset, snapshot.LogicalEndMessageCount)
 		}
 		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)

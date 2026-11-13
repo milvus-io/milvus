@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -531,6 +532,31 @@ func TestArrowFieldsToProto_BinaryVector_DimFallback(t *testing.T) {
 	assert.Equal(t, []byte{0xFF, 0x00, 0x0F, 0xF0}, result[0].GetVectors().GetBinaryVector())
 }
 
+// TestArrowFieldsToProto_Int8Vector_DimFallback: an Int8Vector's dim is its
+// byte width (one byte per element) when the schema carries none.
+func TestArrowFieldsToProto_Int8Vector_DimFallback(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	dim := 4
+	rec := buildTestRecordWithFieldIDs(
+		pool,
+		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: dim}}},
+		[]int64{110},
+		func(bs []array.Builder) {
+			b := bs[0].(*array.FixedSizeBinaryBuilder)
+			b.Append([]byte{1, 2, 3, 4})
+		},
+	)
+	defer rec.Release()
+
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 110, Name: "vec", DataType: schemapb.DataType_Int8Vector},
+	))
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
+	assert.Equal(t, []byte{1, 2, 3, 4}, result[0].GetVectors().GetInt8Vector())
+}
+
 // TestArrowFieldsToProto_StringOwnedAfterRelease verifies that converted
 // string data is owned by Go and remains valid after the Arrow record is
 // released. Before the fix, arr.Value() returned a zero-copy view into the
@@ -586,4 +612,42 @@ func TestArrowFieldsToProto_JSONOwnedAfterRelease(t *testing.T) {
 	data := result[0].GetScalars().GetJsonData().GetData()
 	assert.Equal(t, []byte(`{"key":"val"}`), data[0])
 	assert.Equal(t, []byte(`[1,2,3]`), data[1])
+}
+
+func TestEmptyNativeColumnTypesExportWithDeclaredTypes(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{
+		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Timestamptz,
+		schemapb.DataType_Float, schemapb.DataType_Double,
+		schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_JSON,
+		schemapb.DataType_Array, schemapb.DataType_Geometry, schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+		schemapb.DataType_ArrayOfVector,
+	} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{
+				Name: "output", FieldID: 100, DataType: dtype, Nullable: true,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+			}
+			if dtype == schemapb.DataType_ArrayOfVector {
+				schema.ElementType = schemapb.DataType_FloatVector
+			}
+			physical, err := NativeColumnType(schema)
+			require.NoError(t, err)
+			column := arrow.NewChunked(physical, nil)
+			defer column.Release()
+			require.Zero(t, column.Len())
+			require.NotEqual(t, arrow.NULL, column.DataType().ID())
+			field, err := ArrowChunkedColumnToFieldData(column, schema)
+			require.NoError(t, err)
+			require.Equal(t, dtype, field.Type)
+			require.Equal(t, int64(100), field.FieldId)
+			if dtype == schemapb.DataType_Timestamptz {
+				require.NotNil(t, field.GetScalars().GetTimestamptzData())
+				require.Nil(t, field.GetScalars().GetLongData())
+			}
+		})
+	}
 }

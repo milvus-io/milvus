@@ -15,6 +15,7 @@
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -65,7 +66,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/json_stats/BsonInvertedIndexTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
@@ -228,8 +229,9 @@ TEST(JsonStatsTranslatorTest, AggregatesWarmupAndUsesZeroOuterBudget) {
     EXPECT_EQ(explicit_policy.meta()->cache_warmup_policy, sync);
     EXPECT_FALSE(explicit_policy.meta()->support_eviction);
     EXPECT_EQ(explicit_policy.num_cells(), 1);
-    const auto [payload, overhead] =
-        explicit_policy.estimated_byte_size_of_cell(0);
+    const auto [payload, private_overhead, shared_overhead] =
+        explicit_policy.estimated_loading_usage({0});
+    const auto overhead = private_overhead + shared_overhead;
     EXPECT_EQ(payload, cachinglayer::ResourceUsage(0, 0));
     EXPECT_EQ(overhead, cachinglayer::ResourceUsage(0, 0));
     EXPECT_EQ(explicit_policy.cells_storage_bytes({0}), 0);
@@ -2161,7 +2163,7 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
     storage::FileManagerContext context(
         field_meta_, index_meta_, chunk_manager_, fs);
     context.use_async_load = use_async;
-    segcore::storagev1translator::BsonInvertedIndexLoadInfo info{
+    segcore::BsonInvertedIndexLoadInfo info{
         .enable_mmap = enable_mmap,
         .segment_id = segment_id_,
         .field_id = field_id_,
@@ -2175,8 +2177,7 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         for (const auto* policy : {"disable", "sync"}) {
             auto probe_info = info;
             probe_info.warmup_policy = policy;
-            segcore::storagev1translator::BsonInvertedIndexTranslator probe(
-                probe_info, context);
+            segcore::BsonInvertedIndexTranslator probe(probe_info, context);
             const auto before = fs->async_opens.load();
             auto cells = probe.get_cells(nullptr, {0});
             const auto opened = fs->async_opens.load() - before;
@@ -2189,14 +2190,30 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         // Cold indexes reopen metadata; warmup reuses the inspected source.
         EXPECT_GT(cold_opens, warm_opens);
     }
-    segcore::storagev1translator::BsonInvertedIndexTranslator translator(
-        info, context);
+    segcore::BsonInvertedIndexTranslator translator(info, context);
     const auto before_cancel = fs->async_opens.load();
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
     OpContext cancelled_ctx(cancelled.getToken());
-    EXPECT_THROW(translator.get_cells(&cancelled_ctx, {0}), SegcoreError);
+    EXPECT_THROW(folly::coro::blockingWait(
+                     translator.get_cells_async(&cancelled_ctx, {0})),
+                 SegcoreError);
     EXPECT_EQ(fs->async_opens.load(), before_cancel);
+
+    // Coroutine cancellation is independent of the explicit operation context.
+    OpContext active_ctx;
+    for (auto* ctx : {static_cast<OpContext*>(nullptr), &active_ctx}) {
+        const auto before = fs->async_opens.load();
+        try {
+            folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancelled.getToken(), translator.get_cells_async(ctx, {0})));
+            FAIL() << "expected inherited cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(fs->async_opens.load(), before);
+    }
+    EXPECT_FALSE(active_ctx.cancellation_token.isCancellationRequested());
 
     if (use_async) {
         folly::CancellationSource during_open;
@@ -2204,7 +2221,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         fs->on_async_open = [&] { during_open.requestCancellation(); };
         auto clear_hook = folly::makeGuard([&] { fs->on_async_open = {}; });
         try {
-            translator.get_cells(&open_ctx, {0});
+            folly::coro::blockingWait(
+                translator.get_cells_async(&open_ctx, {0}));
             FAIL() << "expected cancellation during remote open";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -2230,7 +2248,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
             resumed.wait();
         };
         auto pending = std::async(std::launch::async, [&] {
-            return translator.get_cells(nullptr, {0});
+            return folly::coro::blockingWait(
+                translator.get_cells_async(nullptr, {0}));
         });
         auto drain = folly::makeGuard([&] {
             release();
@@ -2264,7 +2283,8 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
             [&] { std::filesystem::rename(missing, files.front()); });
         EXPECT_THROW(translator.get_cells(nullptr, {0}), SegcoreError);
     }
-    auto second = translator.get_cells(nullptr, {0});
+    auto second =
+        folly::coro::blockingWait(translator.get_cells_async(nullptr, {0}));
     first.clear();
     std::vector<std::pair<uint32_t, uint32_t>> hits;
     second.front().second->TermQuery(
@@ -2277,8 +2297,9 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
               (std::vector<std::pair<uint32_t, uint32_t>>{{0, 12}, {1, 42}}));
     EXPECT_EQ(fs->async_opens.load() > 0, use_async);
     if (use_async) {
-        const auto [resident, transient] =
-            translator.estimated_byte_size_of_cell(0);
+        const auto [resident, private_overhead, shared_overhead] =
+            translator.estimated_loading_usage({0});
+        const auto transient = private_overhead + shared_overhead;
         EXPECT_GT(transient.memory_bytes, 0);
     }
 }

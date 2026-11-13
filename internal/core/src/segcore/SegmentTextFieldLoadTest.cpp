@@ -81,7 +81,7 @@ TEST(SegmentTextFieldLoadTest, MultipleFieldDataBatchesKeepGlobalNullOffsets) {
               manager);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     EXPECT_EQ(pin.CoveredRowEnd(), 8);
     ExpectNullRows(pin.Reader(),
@@ -107,7 +107,7 @@ TEST(SegmentTextFieldLoadTest, SingleNullableFieldDataBatchPreservesRows) {
         manager);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ExpectNullRows(pin.Reader(), {true, false, true, false});
     ExpectOnlyTextMatchHit(TextReader(pin.Reader()), "alpha", 0, 4);
@@ -144,7 +144,7 @@ CheckLoadedSuffix(const std::vector<std::string>& inserted,
     // LoadFieldData reserves and publishes the complete range. It exercises
     // the raw-column adapter and growing-index feed at the same offset.
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ASSERT_EQ(pin.CoveredRowEnd(), inserted.size() + loaded.size());
     auto all_valid = std::vector<bool>(inserted.size(), true);
@@ -208,7 +208,7 @@ WriteLobReferences(const std::string& path,
     auto properties =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
     AssertInfo(properties != nullptr, "LOB fixture properties missing");
-    config.properties = *properties;
+    config.properties = properties;
     auto manager_result = milvus_storage::lob_column::LobColumnManager::Create(
         GetDefaultArrowFileSystem(), config);
     AssertInfo(manager_result.ok(),
@@ -264,7 +264,7 @@ TEST(SegmentTextFieldLoadTest, SealedTextIndexDecodesRemoteLobReferences) {
     sealed->SetTextLobPathForTesting(FieldId(101), lob_path);
     segment->LoadFieldData(info);
     sealed->CreateTextIndex(FieldId(101));
-    auto pin = PinSealedText(*sealed, FieldId(101));
+    auto pin = CreateSealedTextReader(*sealed, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ExpectOnlyTextMatchHit(TextReader(*pin.get()), term, 1, texts.size());
 }
@@ -299,9 +299,12 @@ WriteLobManifest(const SchemaPtr& schema,
                                   LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
     milvus_storage::api::SetValue(
         properties, PROPERTY_WRITER_SCHEMA_BASE_PATTERNS, "100|101");
+    auto shared_properties =
+        std::make_shared<const milvus_storage::api::Properties>(
+            std::move(properties));
     auto policy_result =
         milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
-            properties, loon_schema);
+            shared_properties, loon_schema);
     AssertInfo(policy_result.ok(),
                "LOB manifest policy failed: {}",
                policy_result.status().ToString());
@@ -309,7 +312,7 @@ WriteLobManifest(const SchemaPtr& schema,
         base_path,
         loon_schema,
         std::move(policy_result).ValueOrDie(),
-        properties);
+        shared_properties);
     auto status = writer->write(batch);
     AssertInfo(status.ok(), "LOB manifest write failed: {}", status.ToString());
     auto closed = writer->close();
@@ -361,7 +364,7 @@ TEST(SegmentTextFieldLoadTest,
     segment->SetLoadInfo(info);
     tracer::TraceContext trace;
     segment->Load(trace, nullptr);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ASSERT_EQ(pin.CoveredRowEnd(), rows);
     const auto& text = TextReader(pin.Reader());

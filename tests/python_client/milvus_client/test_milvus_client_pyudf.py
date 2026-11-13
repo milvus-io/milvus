@@ -3,11 +3,11 @@ import math
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 
 import grpc
 import pytest
-from base.client_v2_base import TestMilvusClientV2Base
+from base.client_v2_pyudf_base import PyUDFClientBase
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
 from google.protobuf.message import DecodeError
@@ -30,7 +30,7 @@ from pymilvus.grpc_gen.common_pb2 import SegmentState
 prefix = "pyudf"
 
 
-class TestMilvusClientPyUDF(TestMilvusClientV2Base):
+class TestMilvusClientPyUDF(PyUDFClientBase):
     """End-to-end tests for PyUDF-backed FunctionChain reranking."""
 
     dim = 2
@@ -38,106 +38,10 @@ class TestMilvusClientPyUDF(TestMilvusClientV2Base):
     scalar_field = "ts"
 
     @staticmethod
-    def _pyudf_management_config(request, key):
-        import requests
-
-        endpoint = request.config.getoption("--pyudf-management-endpoint")
-        assert endpoint, "requires --pyudf-management-endpoint pointing to the coordinator management service"
-        response = requests.get(
-            endpoint.rstrip("/") + "/management/config/get",
-            params={"keys": key},
-            timeout=10,
-        )
-        response.raise_for_status()
-        entry = response.json()["configs"][0]
-        assert entry["key"] == key and "value" in entry, entry
-        return entry["value"]
-
-    @staticmethod
-    def _build_wheel(tmp_path, package_name, module=None, entry_points=None):
-        wheel_path = tmp_path / f"{package_name}-0.0.1-py3-none-any.whl"
-        if module is None:
-            module = """import pyarrow as pa
-
-
-class UDF:
-    def __init__(self, context):
-        self.context = context
-
-    def transform_query(self, params, columns):
-        factor = float(params.get("factor", 1.0))
-        values = [float(value.as_py()) * factor for value in columns[1]]
-        return [pa.array(values, type=pa.float32())]
-
-
-def create_udf(context):
-    return UDF(context)
-"""
-        dist_info = f"{package_name}-0.0.1.dist-info"
-        with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_STORED) as wheel:
-            wheel.writestr(f"{package_name}/__init__.py", module)
-            wheel.writestr(
-                f"{dist_info}/entry_points.txt",
-                f"[milvus.pyudf]\nmain = {package_name}:create_udf\n" if entry_points is None else entry_points,
-            )
-            wheel.writestr(
-                f"{dist_info}/METADATA",
-                f"Metadata-Version: 2.1\nName: {package_name}\nVersion: 0.0.1\n",
-            )
-        return wheel_path
-
-    @staticmethod
-    def _hit_field(hit, field):
-        if field in hit:
-            return hit[field]
-        return hit.get("entity", {}).get(field)
-
-    @staticmethod
     def _assert_intermediate_field_absent(hits, field):
         for hit in hits:
             assert field not in hit, hit
             assert field not in hit.get("entity", {}), hit
-
-    @staticmethod
-    def _remove_file_resource(client, resource_name, timeout=30):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                client.remove_file_resource(name=resource_name)
-                return
-            except Exception as exc:
-                if "not found" in str(exc):
-                    return
-                time.sleep(1)
-        client.remove_file_resource(name=resource_name)
-
-    def _search_with_synced_resource(
-        self, client, collection_name, chain, timeout=30, data=None, limit=3, search_params=None, **kwargs
-    ):
-        deadline = time.time() + timeout
-        queries = [[0.0, 0.0]] if data is None else data
-        while True:
-            try:
-                return client.search(
-                    collection_name=collection_name,
-                    data=queries,
-                    anns_field=self.vector_field,
-                    search_params={"metric_type": "L2"} if search_params is None else search_params,
-                    limit=limit,
-                    output_fields=[self.scalar_field],
-                    function_chains=chain,
-                    **kwargs,
-                )
-            except Exception as exc:
-                message = str(exc)
-                transient = (
-                    "file resource snapshot is not ready" in message
-                    or "file resource" in message
-                    and "not found" in message
-                )
-                if not transient or time.time() >= deadline:
-                    raise
-                time.sleep(1)
 
     def _wait_for_file_resource_absent(self, client, resource_name, timeout=30):
         deadline = time.time() + timeout
@@ -149,192 +53,6 @@ def create_udf(context):
             if time.time() >= deadline:
                 raise AssertionError(f"file resource {resource_name!r} was not removed")
             time.sleep(1)
-
-    def _wait_for_removed_pyudf(self, client, collection_name, chain, resource_name, timeout=30):
-        deadline = time.time() + timeout
-        while True:
-            try:
-                client.search(
-                    collection_name=collection_name,
-                    data=[[0.0, 0.0]],
-                    anns_field=self.vector_field,
-                    search_params={"metric_type": "L2"},
-                    limit=3,
-                    output_fields=[self.scalar_field],
-                    function_chains=chain,
-                )
-            except Exception as exc:
-                message = str(exc)
-                if "py_udf: file resource" in message and resource_name in message and "not found" in message:
-                    return
-                raise
-            if time.time() >= deadline:
-                raise AssertionError(f"removed PyUDF resource {resource_name!r} remains executable")
-            time.sleep(1)
-
-    @contextmanager
-    def _pyudf_test_environment(
-        self,
-        tmp_path,
-        minio_host,
-        minio_bucket,
-        module,
-        entry_points=None,
-        wheel_bytes=None,
-        rows=None,
-        nullable=False,
-        index_type="FLAT",
-    ):
-        from minio import Minio
-
-        client = self._client()
-        package_name = cf.gen_unique_str("pyudf_contract_e2e").lower()
-        resource_name = cf.gen_unique_str("pyudf_contract_resource")
-        collection_name = cf.gen_unique_str(prefix)
-        remote_path = f"pyudf/{resource_name}.whl"
-        wheel_path = self._build_wheel(tmp_path, package_name, module=module, entry_points=entry_points)
-        if wheel_bytes is not None:
-            wheel_path.write_bytes(wheel_bytes)
-        minio_client = Minio(
-            f"{minio_host}:9000",
-            access_key="minioadmin",
-            secret_key="minioadmin",
-            secure=False,
-        )
-        resource_added = False
-        resource_removed = False
-        collection_created = False
-        object_uploaded = False
-
-        try:
-            if not minio_client.bucket_exists(minio_bucket):
-                minio_client.make_bucket(minio_bucket)
-            wheel_data = wheel_path.read_bytes()
-            minio_client.put_object(
-                minio_bucket,
-                remote_path,
-                io.BytesIO(wheel_data),
-                len(wheel_data),
-            )
-            object_uploaded = True
-
-            _, added = self.add_file_resource(client, resource_name, remote_path)
-            assert added
-            resource_added = True
-
-            schema, schema_created = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
-            assert schema_created
-            schema.add_field("id", DataType.INT64, is_primary=True)
-            schema.add_field(self.scalar_field, DataType.INT64, nullable=nullable)
-            schema.add_field(self.vector_field, DataType.FLOAT_VECTOR, dim=self.dim)
-            index_params, index_params_created = self.prepare_index_params(client)
-            assert index_params_created
-            index_params.add_index(
-                field_name=self.vector_field,
-                index_type=index_type,
-                metric_type="L2",
-                params={"M": 8, "efConstruction": 64} if index_type == "HNSW" else {},
-            )
-            _, collection_created = self.create_collection(
-                client,
-                collection_name,
-                schema=schema,
-                index_params=index_params,
-                consistency_level="Strong",
-            )
-            assert collection_created
-            rows = (
-                rows
-                if rows is not None
-                else [
-                    {"id": 1, self.scalar_field: 10, self.vector_field: [0.0, 0.0]},
-                    {"id": 2, self.scalar_field: 20, self.vector_field: [0.01, 0.0]},
-                    {"id": 3, self.scalar_field: 30, self.vector_field: [0.02, 0.0]},
-                ]
-            )
-            _, inserted = self.insert(client, collection_name, rows)
-            assert inserted
-            _, flushed = self.flush(client, collection_name)
-            assert flushed
-            _, loaded = self.load_collection(client, collection_name)
-            assert loaded
-
-            yield client, collection_name, resource_name
-        finally:
-            if client is not None:
-                if collection_created:
-                    try:
-                        self.drop_collection(client, collection_name)
-                    except Exception:
-                        pass
-                if resource_added:
-                    try:
-                        self._remove_file_resource(client, resource_name)
-                        resource_removed = True
-                    except Exception:
-                        pass
-                try:
-                    client.close()
-                except Exception:
-                    pass
-            if object_uploaded and (not resource_added or resource_removed):
-                try:
-                    minio_client.remove_object(minio_bucket, remote_path)
-                except Exception:
-                    pass
-
-    @staticmethod
-    def _pyudf_chain(resource_name, udf_params=None):
-        return (
-            FunctionChain(FunctionChainStage.L2_RERANK)
-            .map(
-                "$score",
-                FunctionChainExpr(
-                    "py_udf",
-                    args=(col("$score"), col("ts")),
-                    params={
-                        "resource_name": resource_name,
-                        "udf_params": {"factor": 2.0} if udf_params is None else udf_params,
-                    },
-                ),
-            )
-            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
-        )
-
-    def _assert_pyudf_recovery(self, client, collection_name, resource_name):
-        baseline, _ = self.search(
-            client,
-            collection_name,
-            data=[[0.0, 0.0]],
-            anns_field=self.vector_field,
-            search_params={"metric_type": "L2"},
-            limit=3,
-            output_fields=[self.scalar_field],
-        )
-        assert [hit["id"] for hit in baseline[0]] == [1, 2, 3]
-        assert [self._hit_field(hit, self.scalar_field) for hit in baseline[0]] == [10, 20, 30]
-        result = self._search_with_synced_resource(client, collection_name, self._pyudf_chain(resource_name))
-        assert [hit["id"] for hit in result[0]] == [3, 2, 1]
-        assert [hit["distance"] for hit in result[0]] == pytest.approx([60.0, 40.0, 20.0], rel=1e-5, abs=1e-5)
-        assert [self._hit_field(hit, self.scalar_field) for hit in result[0]] == [30, 20, 10]
-
-    def _assert_pyudf_error(self, client, collection_name, chain, message, code=1100, **kwargs):
-        # Preserve the suite's error checker instead of accepting any exception.
-        error, _ = self.search(
-            client,
-            collection_name,
-            data=[[0.0, 0.0]],
-            anns_field=self.vector_field,
-            search_params={"metric_type": "L2"},
-            limit=3,
-            output_fields=[self.scalar_field],
-            function_chains=chain,
-            check_task=CheckTasks.err_res,
-            check_items={"err_code": code, "err_msg": message},
-            **kwargs,
-        )
-        # The shared err_res checker currently matches the message only.
-        assert error.code == code, error
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_pyudf_file_resource_reranks_results(self, tmp_path, minio_host, minio_bucket):
@@ -1538,6 +1256,52 @@ def create_udf(context):
             self._assert_pyudf_recovery(client, name, resource)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_pyudf_empty_search_across_sealed_and_growing(self, tmp_path, minio_host, minio_bucket):
+        """
+        target: return an empty PyUDF Search result across sealed and growing data
+        method: seal one row, insert one unflushed row, then filter out both rows
+        expected: empty results without missing primary-field metadata or error 1100
+        """
+        rows = [{"id": 1, "ts": 10, "vector": [0.0, 0.0]}]
+        with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None, rows=rows) as environment:
+            client, name, resource = environment
+            # Reload after flush so the first row is served from a sealed segment.
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+            segments = client.list_loaded_segments(name)
+            assert segments and all(s.state == SegmentState.Sealed for s in segments), segments
+            assert sum(s.num_rows for s in segments) == 1, segments
+            persistent_ids = {s.segment_id for s in client.list_persistent_segments(name)}
+            chain = self._pyudf_chain(resource)
+            control = self._search_with_synced_resource(client, name, chain)
+            assert [h["id"] for h in control[0]] == [1]
+            assert [h["distance"] for h in control[0]] == pytest.approx([20])
+            empty = self._search_with_synced_resource(client, name, chain, filter="ts % 10 == 1")
+            assert len(empty) == 1 and len(empty[0]) == 0
+
+            # Keep the second row growing; no delete, upsert or compaction is needed.
+            self.insert(client, name, [{"id": 2, "ts": 20, "vector": [0.01, 0.0]}])
+            control = self._search_with_synced_resource(client, name, chain)
+            assert [h["id"] for h in control[0]] == [2, 1]
+            assert [h["distance"] for h in control[0]] == pytest.approx([40, 20])
+            assert [self._hit_field(h, "ts") for h in control[0]] == [20, 10]
+            assert {s.segment_id for s in client.list_persistent_segments(name)} == persistent_ids
+            plain, _ = self.search(
+                client,
+                name,
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                search_params={"metric_type": "L2"},
+                limit=3,
+                output_fields=[self.scalar_field],
+                filter="ts % 10 == 1",
+            )
+            assert len(plain) == 1 and len(plain[0]) == 0
+            # Scalar-only output preserves the reduction path that loses PK metadata.
+            empty = self._search_with_synced_resource(client, name, chain, filter="ts % 10 == 1")
+            assert len(empty) == 1 and len(empty[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("output", ["$id", "$group_size"], ids=["id", "group_size"])
     def test_pyudf_readonly_system_outputs_are_rejected(self, tmp_path, minio_host, minio_bucket, output):
         """
@@ -1895,7 +1659,8 @@ def create_udf(context):
             assert [self._hit_field(h, "ts") for h in result[0]] == [ledger[i] for i in expected]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nq", [1, 2, 4, 8])
+    # Eight queries include the full ragged sequence twice; keep the single-query path separately.
+    @pytest.mark.parametrize("nq", [1, 8])
     def test_pyudf_ragged_query_batches(self, tmp_path, minio_host, minio_bucket, nq):
         """target: unequal query chunk sizes; method: independent range ledger; expected: no cross-query leakage."""
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (client, name, resource):
@@ -2012,24 +1777,8 @@ def create_udf(context):
                 assert error.code == 1100, error
             self._assert_pyudf_recovery(client, name, resource)
 
-    @staticmethod
-    def _wait_for_pyudf_permission(operation, denied=False, timeout=30):
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                value = operation()
-                if not denied:
-                    return value
-            except grpc.RpcError as exc:
-                assert exc.code() == grpc.StatusCode.PERMISSION_DENIED, exc
-                assert "permission deny" in exc.details(), exc
-                if denied:
-                    return exc
-            assert time.monotonic() < deadline, "privilege cache did not converge"
-            time.sleep(0.2)
-
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_search_privileges_follow_grant_and_revoke(self, tmp_path, minio_host, minio_bucket):
         """target: Search and resource privileges; method: grant/revoke on same user; expected: isolation and recovery."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -2095,7 +1844,9 @@ def create_udf(context):
                 assert [h["distance"] for h in allowed[0]] == pytest.approx([60, 40, 20])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("depth", [1, 16, 24, 32, 64, 65])
+    # Shallow/deep supported inputs and both protobuf rejection forms. Raw REST
+    # separately covers depth 64/65; SDK depth 65 repeats the depth-64 rejection.
+    @pytest.mark.parametrize("depth", [1, 24, 32, 64])
     def test_pyudf_nested_parameter_serialization_boundary(self, tmp_path, minio_host, minio_bucket, depth):
         """
         target: distinguish protobuf nesting limits from worker validation
@@ -2201,38 +1952,6 @@ def create_udf(context):
                 assert [self._hit_field(h, "ts") for h in recovered[0]] == [40]
             self._assert_pyudf_recovery(client, control, resource)
 
-    @contextmanager
-    def _pyudf_security_actor(self, root):
-        """Own each identity/grant; avoid tracing credential-bearing create calls."""
-        user = cf.gen_unique_str("pyudf_sec_user")
-        role = cf.gen_unique_str("pyudf_sec_role")
-        password = cf.gen_str_by_length(contain_numbers=True)
-        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        grants = set()
-        with ExitStack() as cleanup:
-            root.create_user(user, password)
-            cleanup.callback(root.drop_user, user)
-            root.create_role(role)
-            cleanup.callback(root.drop_role, role)
-            root.grant_role(user, role)
-            cleanup.callback(root.revoke_role, user, role)
-
-            def revoke(privilege, collection="*", db="*"):
-                key = (privilege, collection, db)
-                if key in grants:
-                    root.revoke_privilege_v2(role, privilege, collection, db)
-                    grants.remove(key)
-
-            def grant(privilege, collection="*", db="*"):
-                root.grant_privilege_v2(role, privilege, collection_name=collection, db_name=db)
-                grants.add((privilege, collection, db))
-                cleanup.callback(revoke, privilege, collection, db)
-
-            token = f"{user}:{password}"
-            actor = MilvusClient(uri=uri, token=token)
-            cleanup.callback(actor.close)
-            yield actor, token, grant, revoke
-
     def _pyudf_security_wire_request(self, name, resource):
         from pymilvus.client.prepare import Prepare
 
@@ -2262,7 +1981,7 @@ def create_udf(context):
         assert [TestMilvusClientPyUDF._hit_field(h, "ts") for h in hits] == [30 * scale, 20 * scale, 10 * scale]
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("credential", ["missing", "malformed", "wrong_password"])
     def test_pyudf_security_rpc_authentication(self, tmp_path, minio_host, minio_bucket, credential):
         """target: four public RPC auth gates; method: raw requests; expected: denial and intact assets."""
@@ -2321,7 +2040,7 @@ def create_udf(context):
                     self._assert_pyudf_recovery(root, name, resource)
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("surface", ["sdk", "rest"])
     def test_pyudf_security_collection_scope_and_revocation(self, tmp_path, minio_host, minio_bucket, surface):
         """target: collection-scoped Search; method: A/B and revoke; expected: exact A, denied B, intact peer."""
@@ -2439,7 +2158,7 @@ def create_udf(context):
                     )
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_resource_manager_has_no_search_privilege(self, tmp_path, minio_host, minio_bucket):
         """target: management/execution separation; method: grant only resources; expected: Search denied."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -2541,7 +2260,7 @@ def create_udf(context):
             self._assert_pyudf_security_hits(result[0])
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_exception_disclosure_characterization(
         self, tmp_path, minio_host, minio_bucket, record_property
     ):
@@ -2583,15 +2302,15 @@ def create_udf(context):
                 record_property("security_verdict", "EXPOSURE_OBSERVATION_NOT_SECURITY_PASS")
                 self._assert_pyudf_recovery(root, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_worker_endpoint_not_peer_accessible(self, record_property):
         """target: supplied endpoint exposure; method: bounded peer TCP probes; expected: API reachable, worker closed."""
         # Preconditions: enabled PyUDF on 127.0.0.1:19090 and a runner outside its Pod;
         # point --uri at the actual Proxy/standalone Pod IP, with public port 19530 reachable.
         # A Service address alone does not establish the worker network boundary.
+        import errno
+        import socket
         from urllib.parse import urlparse
-
-        from common.pyudf_helpers import probe_endpoint
 
         client = self._client()
         try:
@@ -2600,14 +2319,26 @@ def create_udf(context):
             client.close()
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
         target = urlparse(uri)
-        result = probe_endpoint(target.hostname, public_port=target.port or 19530)
+        observed = {}
+        for label, port in (("public_api", target.port or 19530), ("worker_rpc", 19090)):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                connection.settimeout(2)
+                observed[label] = connection.connect_ex((target.hostname, port))
+        assert observed["public_api"] == 0, observed
+        assert observed["worker_rpc"] in {
+            errno.ECONNREFUSED,
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EAGAIN,
+        }, observed
         record_property("peer_target", target.hostname)
-        record_property("public_tcp_code", result["observation"]["public_api"]["tcp_connect_code"])
-        record_property("worker_tcp_code", result["observation"]["worker_rpc"]["tcp_connect_code"])
+        record_property("public_tcp_code", observed["public_api"])
+        record_property("worker_tcp_code", observed["worker_rpc"])
         record_property("scope", "supplied endpoint; bind it to a recorded Pod IP to certify the Pod boundary")
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_database_scope_with_colliding_names(self, tmp_path, minio_host, minio_bucket):
         """target: database-scoped Search; method: identical names and separate grants; expected: exact scoped data."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -2663,7 +2394,7 @@ def create_udf(context):
                 observed = self.query(owner, name, filter="id >= 0", output_fields=["id", "ts"])[0]
                 assert sorted(observed, key=lambda row: row["id"]) == [{"id": i, "ts": i * 100} for i in (1, 2, 3)]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_mixed_segment_states_preserve_results(
         self, tmp_path, minio_host, minio_bucket, record_property, request
     ):
@@ -3013,7 +2744,7 @@ def create_udf(context):
                 finally:
                     self._remove_file_resource(client, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_package_collision_preserves_original(self, tmp_path, minio_host, minio_bucket, request):
         """target: package ownership; method: same package in two wheel paths; expected: rejection and intact control."""
         # Preconditions: one standalone instance with PyUDF enabled, Proxy resource
@@ -3044,7 +2775,8 @@ def create_udf(context):
     @pytest.mark.tags(CaseLabel.L2)
     def test_pyudf_concurrent_first_load_creates_one_instance(self, tmp_path, minio_host, minio_bucket):
         """target: concurrent initialization; method: cold fan-in and factory guard; expected: exact results per call."""
-        module = """import time
+        module = """import os
+import time
 import pyarrow as pa
 FACTORY_CALLS = 0
 class UDF:
@@ -3056,6 +2788,7 @@ class UDF:
 def create_udf(context):
     global FACTORY_CALLS
     FACTORY_CALLS += 1
+    context.logger.warning("PYUDF_FACTORY_QA pid=%s resource=%s calls=%s", os.getpid(), context.resource_name, FACTORY_CALLS)
     time.sleep(0.2)
     return UDF()
 """

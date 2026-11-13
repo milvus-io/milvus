@@ -93,8 +93,7 @@ are encoded into the reference binlog. The C struct exposed to segcore is
 
 - The V3 column-group manifest / `Transaction<ColumnGroups>` API in
   `milvus-storage`.
-- `flushcommon` `SyncPolicy`, `SyncManager`, `MetaWriter`,
-  `ChannelCheckpointUpdater`.
+- `flushcommon` `SyncPolicy`, `SyncManager`, `MetaWriter`.
 - `DataCoord.SaveBinlogPaths`.
 
 ## Design Details
@@ -285,8 +284,9 @@ description below follows from it.
    No per-row data crosses the CGO boundary.
 5. **Metadata update.** Go updates the segment manifest via the existing
    `MetaWriter` (`SaveBinlogPaths` with `Flushed=false`,
-   `WithFullBinlogs=false`). Checkpoint propagation reuses
-   `ChannelCheckpointUpdater`. After `SaveBinlogPaths` succeeds, the
+   `WithFullBinlogs=false`). Periodic DataCoord channel-checkpoint reporting
+   has been removed; WAL recovery progress is published by RecoveryStorage.
+   After `SaveBinlogPaths` succeeds, the
    `CheckpointTracker` updates the flushed offset and acknowledged
    manifest version.
 

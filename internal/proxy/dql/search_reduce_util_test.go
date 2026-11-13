@@ -2,9 +2,11 @@ package dql
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -12,8 +14,74 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestProxyScoreDistanceRestoration(t *testing.T) {
+	for _, metricType := range []string{"L2", "HAMMING", "JACCARD", "IP", "COSINE"} {
+		distance := metricType == "L2" || metricType == "HAMMING" || metricType == "JACCARD"
+		require.Equal(t, distance, shouldRestoreDistance(metricType, false))
+		require.False(t, shouldRestoreDistance(metricType, true))
+	}
+}
+
+func TestProxyScoreSemantics(t *testing.T) {
+	paramtable.Init()
+	for _, rewritten := range []bool{false, true} {
+		for _, inputOrder := range [][]int{{0}, {0, 1}, {1, 0}} {
+			for _, mode := range []string{"plain", "group", "hybrid_group"} {
+				t.Run(fmt.Sprintf("rewritten=%v/input_order=%v/%s", rewritten, inputOrder, mode), func(t *testing.T) {
+					inputs := make([]*schemapb.SearchResultData, len(inputOrder))
+					for index, source := range inputOrder {
+						inputs[index] = &schemapb.SearchResultData{
+							NumQueries: 1, TopK: 2, Topks: []int64{2},
+							Ids:                &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{int64(source + 1), int64(source + 3)}}}},
+							Scores:             []float32{-float32(source + 1), -float32(source + 3)},
+							GroupByFieldValues: []*schemapb.FieldData{multiGroupByTestStringField(101, []string{fmt.Sprint(source + 1), fmt.Sprint(source + 3)})},
+						}
+					}
+					info := reduce.NewReduceSearchResultInfo(1, 2).WithPkType(schemapb.DataType_Int64).
+						WithMetricType("L2")
+					if mode != "plain" {
+						info.WithGroupByFieldIds([]int64{101}).WithGroupSize(1).WithAdvance(mode == "hybrid_group")
+					}
+					result, err := reduceSearchResult(t.Context(), inputs, info, rewritten)
+					require.NoError(t, err)
+					expectedIDs := []int64{1, 3}
+					if len(inputOrder) == 2 {
+						if mode == "hybrid_group" {
+							expectedIDs = []int64{1, 2, 3, 4}
+						} else {
+							expectedIDs = []int64{1, 2}
+						}
+					}
+					ids := result.GetResults().GetIds().GetIntId().GetData()
+					if mode == "hybrid_group" {
+						require.ElementsMatch(t, expectedIDs, ids)
+					} else {
+						require.Equal(t, expectedIDs, ids)
+					}
+					expectedScores := make([]float32, len(expectedIDs))
+					expectedGroups := make([]string, len(expectedIDs))
+					for index, id := range ids {
+						expectedScores[index] = float32(id)
+						expectedGroups[index] = fmt.Sprint(id)
+						if rewritten {
+							expectedScores[index] = -expectedScores[index]
+						}
+					}
+					require.Equal(t, expectedScores, result.GetResults().GetScores())
+					require.Equal(t, []int64{int64(len(expectedIDs))}, result.GetResults().GetTopks())
+					if mode != "plain" {
+						require.Len(t, result.GetResults().GetGroupByFieldValues(), 1)
+						require.Equal(t, expectedGroups, result.GetResults().GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+					}
+				})
+			}
+		}
+	}
+}
 
 type SearchReduceUtilTestSuite struct {
 	suite.Suite
@@ -61,7 +129,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult() {
 	data := genTestDataSearchResultsData()
 
 	{
-		results, err := reduceSearchResultDataNoGroupBy(context.Background(), []*schemapb.SearchResultData{data[0]}, 0, 0, "L2", schemapb.DataType_Int64, 0)
+		results, err := reduceSearchResultDataNoGroupBy(context.Background(), []*schemapb.SearchResultData{data[0]}, 0, 0, "L2", schemapb.DataType_Int64, 0, false)
 		struts.NoError(err)
 		struts.Equal([]string{"7", "5", "4", "2", "3", "6", "1", "9", "8"}, results.Results.GetIds().GetStrId().Data)
 	}
@@ -92,7 +160,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithGroupByPreser
 	}
 
 	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB},
-		1, 2, metric.IP, schemapb.DataType_Int64, 0, 1, []int64{101}, false)
+		1, 2, metric.IP, schemapb.DataType_Int64, 0, 1, []int64{101}, false, false)
 
 	struts.Require().NoError(err)
 	struts.Equal(int64(24), results.GetResults().GetAllSearchCount())
@@ -115,7 +183,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithEmptyGroupDat
 		PrimaryFieldName: "",
 	}
 	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{emptyData},
-		nq, topk, "L2", schemapb.DataType_Int64, 0, 1, []int64{101}, false)
+		nq, topk, "L2", schemapb.DataType_Int64, 0, 1, []int64{101}, false, false)
 	struts.Require().NoError(err)
 	struts.Equal([]int64{0}, results.GetResults().GetTopks())
 	struts.Empty(results.Results.GetGroupByFieldValues(),
@@ -162,7 +230,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithEmptyFieldsData() {
 
 	// Test reduceSearchResultDataNoGroupBy with empty FieldsData
 	{
-		results, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset)
+		results, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, false)
 		struts.NoError(err)
 		struts.NotNil(results)
 		// Should have merged results without panic
@@ -203,7 +271,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithEmptyFieldsData() {
 			},
 		}
 
-		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2), []int64{101}, false)
+		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2), []int64{101}, false, false)
 		struts.NoError(err)
 		struts.NotNil(results)
 		// FieldsData should be empty since all inputs were empty
@@ -212,7 +280,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithEmptyFieldsData() {
 
 	// Test reduceAdvanceGroupBy with empty FieldsData
 	{
-		results, err := reduceAdvanceGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, schemapb.DataType_Int64, "L2", []int64{101})
+		results, err := reduceAdvanceGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, schemapb.DataType_Int64, "L2", []int64{101}, false)
 		struts.NoError(err)
 		struts.NotNil(results)
 		// FieldsData should be empty since all inputs were empty
@@ -275,7 +343,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithPartialEmptyFieldsData() 
 	}
 
 	// Test: Should use the non-empty FieldsData from second result
-	results, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset)
+	results, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, false)
 	struts.NoError(err)
 	struts.NotNil(results)
 	// Should have initialized FieldsData from second result
@@ -332,7 +400,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 	ctx := context.Background()
 
 	s.Run("no group by", func() {
-		ret, err := reduceSearchResultDataNoGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0)
+		ret, err := reduceSearchResultDataNoGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, false)
 		s.Require().NoError(err)
 		s.Equal([]int64{1, 3, 2, 4}, ret.GetResults().GetIds().GetIntId().GetData())
 		s.Equal(4, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
@@ -341,7 +409,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 	})
 
 	s.Run("group by", func() {
-		ret, err := reduceSearchResultDataWithGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false, false)
 		s.Require().NoError(err)
 		s.Equal([]int64{1, 3, 2, 4}, ret.GetResults().GetIds().GetIntId().GetData())
 		s.Equal(4, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
@@ -375,7 +443,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 	s.Run("group by without hits keeps typed columns", func() {
 		empty := presizeShardResult(topk, nil, nil, nil)
 		empty.Topks = []int64{0}
-		ret, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{empty, empty}, 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{empty, empty}, 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false, false)
 		s.Require().NoError(err)
 		s.Require().Len(ret.GetResults().GetFieldsData(), 2)
 		s.NotNil(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector())
@@ -517,7 +585,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 	for _, metricType := range positiveMetrics {
 		results, err := reduceSearchResultDataNoGroupBy(ctx,
 			[]*schemapb.SearchResultData{positiveSegment1, positiveSegment2},
-			nq, topK, metricType, schemapb.DataType_Int64, offset)
+			nq, topK, metricType, schemapb.DataType_Int64, offset, false)
 
 		s.NoError(err, "metric: %s", metricType)
 		s.Equal([]int64{1, 3, 2, 4}, results.Results.GetIds().GetIntId().GetData(),
@@ -563,7 +631,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 	for _, metricType := range negativeMetrics {
 		results, err := reduceSearchResultDataNoGroupBy(ctx,
 			[]*schemapb.SearchResultData{negativeSegment1, negativeSegment2},
-			nq, topK, metricType, schemapb.DataType_Int64, offset)
+			nq, topK, metricType, schemapb.DataType_Int64, offset, false)
 
 		s.NoError(err, "metric: %s", metricType)
 		s.Equal([]int64{1, 3, 2, 4}, results.Results.GetIds().GetIntId().GetData(),
@@ -692,7 +760,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardSco
 			}
 
 			result, err := reduceAdvanceGroupBy(context.Background(),
-				[]*schemapb.SearchResultData{data}, 1, n, schemapb.DataType_Int64, tc.metric, []int64{101})
+				[]*schemapb.SearchResultData{data}, 1, n, schemapb.DataType_Int64, tc.metric, []int64{101}, false)
 			struts.NoError(err)
 			struts.NotNil(result)
 			struts.Equal(tc.expectedScores, result.Results.GetScores(),
@@ -742,7 +810,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardMat
 
 	singleShardResult, err := reduceAdvanceGroupBy(context.Background(),
 		[]*schemapb.SearchResultData{makeShard(ids, scores, groups)},
-		1, 3, schemapb.DataType_Int64, "L2", []int64{101})
+		1, 3, schemapb.DataType_Int64, "L2", []int64{101}, false)
 	struts.Require().NoError(err)
 
 	// Force the multi-shard path by passing two identical shards.
@@ -752,7 +820,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardMat
 			makeShard(ids, scores, groups),
 			makeShard([]int64{4, 5, 6}, []float32{-0.2, -0.4, -0.8}, []string{"A", "B", "A"}),
 		},
-		1, 3, schemapb.DataType_Int64, "L2", []int64{101})
+		1, 3, schemapb.DataType_Int64, "L2", []int64{101}, false)
 	struts.Require().NoError(err)
 
 	// Both paths must produce strictly positive scores (i.e., negation
@@ -812,7 +880,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult_MultiGroupBy_Off
 			WithOffset(offset).
 			WithGroupSize(2).
 			WithGroupByFieldIds([]int64{101, 102})
-		ret, err := reduceSearchResult(context.Background(), buildShards(), info)
+		ret, err := reduceSearchResult(context.Background(), buildShards(), info, false)
 		struts.Require().NoError(err)
 		struts.Require().NotNil(ret)
 		return ret.GetResults()
@@ -856,7 +924,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult_MultiGroupByEmpt
 		WithGroupByFieldIds([]int64{101, 102}).
 		WithGroupSize(1)
 
-	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info)
+	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -892,7 +960,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult_SingleGroupBy_Fi
 		WithGroupByFieldIdsFromProto(requestedFieldId, nil).
 		WithGroupSize(1)
 	ret, err := reduceSearchResult(context.Background(),
-		[]*schemapb.SearchResultData{shard}, info)
+		[]*schemapb.SearchResultData{shard}, info, false)
 
 	struts.Require().NoError(err)
 	struts.Require().NotNil(ret)
@@ -963,7 +1031,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult_MultiGroupBy_Two
 		WithGroupSize(2).
 		WithGroupByFieldIds([]int64{101, 102})
 	ret, err := reduceSearchResult(context.Background(),
-		[]*schemapb.SearchResultData{shardA, shardB}, info)
+		[]*schemapb.SearchResultData{shardA, shardB}, info, false)
 	struts.Require().NoError(err)
 	struts.Require().NotNil(ret)
 
@@ -1013,7 +1081,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_ReturnsSetupId
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard, shard}, 1, 1, schemapb.DataType_None, metric.IP, []int64{101})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard, shard}, 1, 1, schemapb.DataType_None, metric.IP, []int64{101}, false)
 
 	struts.Error(err)
 	struts.NotNil(ret)
@@ -1038,7 +1106,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_UsesFirstShard
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{emptyShard, dataShard}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{emptyShard, dataShard}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101}, false)
 
 	struts.Require().NoError(err)
 	struts.Require().NotNil(ret)
@@ -1077,7 +1145,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult_MultiGroupByMiss
 		WithPkType(schemapb.DataType_Int64).
 		WithGroupSize(1).
 		WithGroupByFieldIds([]int64{101, 102})
-	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info)
+	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info, false)
 
 	struts.Require().Error(err)
 	struts.NotNil(ret)
@@ -1111,7 +1179,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_PluralOnlyGrou
 		WithPkType(schemapb.DataType_Int64).
 		WithGroupByFieldIds([]int64{101}).
 		WithAdvance(true)
-	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info)
+	ret, err := reduceSearchResult(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, info, false)
 
 	struts.Require().NoError(err)
 	struts.Require().NotNil(ret)
@@ -1137,7 +1205,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldSing
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 3, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 3, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -1174,7 +1242,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldMult
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 2, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 2, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -1210,7 +1278,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldMiss
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().Error(err)
 	struts.NotNil(ret)
@@ -1233,7 +1301,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleFieldLeg
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -1263,7 +1331,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiFieldNull
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 3, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shard}, 1, 3, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -1291,7 +1359,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardEmpt
 		Scores:     []float32{},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
@@ -1340,7 +1408,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardNull
 		},
 	}
 
-	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102})
+	ret, err := reduceAdvanceGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB}, 1, 2, schemapb.DataType_Int64, metric.IP, []int64{101, 102}, false)
 
 	struts.Require().NoError(err)
 	res := ret.GetResults()
