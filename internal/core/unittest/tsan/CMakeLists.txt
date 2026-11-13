@@ -31,7 +31,8 @@ endforeach()
 add_executable(tsan_openmp_probe openmp.cpp)
 target_compile_features(tsan_openmp_probe PRIVATE cxx_std_11)
 target_link_libraries(tsan_openmp_probe PRIVATE OpenMP::OpenMP_CXX)
-foreach(mode omp-clean-lock omp-clean-barrier omp-clean-task omp-race)
+foreach(mode omp-clean-lock omp-clean-barrier omp-clean-task omp-race
+             omp-race-distinct-locks omp-race-memcpy)
     add_test(NAME tsan-${mode}
         COMMAND "${CMAKE_COMMAND}"
             "-DPROBE=$<TARGET_FILE:tsan_openmp_probe>"

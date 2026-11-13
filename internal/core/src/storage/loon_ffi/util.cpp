@@ -544,9 +544,8 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         if (r.rfind("usgov", 0) == 0 || r.rfind("usdod", 0) == 0) {
             return "core.usgovcloudapi.net";
         }
-        if (r.rfind("germany", 0) == 0) {
-            return "core.cloudapi.de";
-        }
+        // Microsoft Cloud Germany (core.cloudapi.de) closed in October 2021;
+        // germanywestcentral and germanynorth are public Azure regions.
         return "core.windows.net";
     }
     return "";
@@ -565,6 +564,19 @@ StripURIScheme(const std::string& addr) {
 // family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
 // region) equals the host string. Keep list in sync with Go
 // externalspec.IsCloudEndpointHost.
+// IsAzureStorageAuthority returns true for the bare Azure Storage
+// authorities that azure://<authority>/<container>/<blob> names. An Azure
+// container name cannot contain a dot, so such a host is never a container.
+static bool
+IsAzureStorageAuthority(const std::string& host) {
+    std::string h = host;
+    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return h == "core.windows.net" || h == "core.chinacloudapi.cn" ||
+           h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
+}
+
 static bool
 IsCloudEndpointHost(const std::string& host) {
     std::string h = host;
@@ -949,7 +961,16 @@ InjectExternalSpecProperties(
         // regardless of whether DeriveEndpoint string-matches. This prevents
         // misclassifying `s3://s3.amazonaws.com/bucket/key` as AWS-form when
         // spec.region is a regional value.
-        bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
+        // A bare Azure Storage authority is the endpoint the source names, so
+        // it also wins over the region-derived authority.
+        std::string spec_cp = spec_cloud_provider;
+        std::transform(spec_cp.begin(),
+                       spec_cp.end(),
+                       spec_cp.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        bool uri_host_is_cloud_endpoint =
+            IsCloudEndpointHost(host) ||
+            (spec_cp == "azure" && IsAzureStorageAuthority(host));
         if (!uri_host_is_cloud_endpoint && !derived.empty() &&
             StripURIScheme(derived) != host) {
             milvus_storage::api::SetValue(
@@ -1014,7 +1035,7 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
+    // Iceberg and Paimon use reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
         return arrow::Status::OK();
@@ -1027,7 +1048,7 @@ InjectExternalSpecProperties(
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
+            if (format == "iceberg-table" || format == "paimon-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
@@ -1042,8 +1063,9 @@ InjectExternalSpecProperties(
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
-                                "iceberg snapshot_id parse failed "
+                                "{} parse failed "
                                 "(collection_id={}): {}",
+                                PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                                 collection_id,
                                 e.what());
                         }
@@ -1059,6 +1081,29 @@ InjectExternalSpecProperties(
                         return arrow::Status::Invalid(
                             PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
                     }
+                }
+            }
+            if (format == "paimon-table") {
+                auto scan_mode = doc.find_field_unordered("scan_mode");
+                if (scan_mode.error() == simdjson::NO_SUCH_FIELD) {
+                    return arrow::Status::OK();
+                }
+                bool is_null = false;
+                std::string_view mode;
+                if (scan_mode.is_null().get(is_null) != simdjson::SUCCESS ||
+                    (!is_null &&
+                     scan_mode.get_string().get(mode) != simdjson::SUCCESS)) {
+                    return arrow::Status::Invalid(
+                        "Paimon scan_mode must be a string");
+                }
+                // Missing leaves reader defaults intact; null/empty means auto.
+                const auto error = milvus_storage::api::SetValue(
+                    properties,
+                    PROPERTY_PAIMON_SCAN_MODE,
+                    mode.empty() ? "auto" : std::string(mode).c_str());
+                if (error.has_value()) {
+                    return arrow::Status::Invalid(
+                        PROPERTY_PAIMON_SCAN_MODE, ": ", *error);
                 }
             }
         }
@@ -1172,7 +1217,7 @@ ReadLoonManifest(const LoonManifestPath& manifest_path,
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
     auto manifest_path = ParseLoonManifestPath(path);
     if (!manifest_path.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,

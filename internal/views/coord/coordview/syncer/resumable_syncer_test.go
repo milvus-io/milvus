@@ -35,7 +35,7 @@ func newResumableTestSetup(t *testing.T) (
 		return s, nil
 	}
 
-	rs = newResumableSyncer(ctx, node, client)
+	rs = newResumableSyncer(ctx, node, client, nil)
 	return rs, streamReady, cancel
 }
 
@@ -262,7 +262,7 @@ func TestResumable_OpenStreamError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	rs := newResumableSyncer(ctx, node, client)
+	rs := newResumableSyncer(ctx, node, client, nil)
 	defer rs.Close()
 
 	// Sync a view — it should eventually be sent after retries.
@@ -297,7 +297,7 @@ func TestResumable_RePushFailureClosesAndCancelsAttempt(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := newResumableSyncer(ctx, node, client)
+	rs := newResumableSyncer(ctx, node, client, nil)
 	defer rs.Close()
 	<-openStarted
 	rs.Sync([]SyncView{newTestSyncView(1, 1, nil, nil)})
@@ -326,7 +326,7 @@ func TestResumable_SendFailureCancelsBlockedRecv(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rs := newResumableSyncer(ctx, node, client)
+	rs := newResumableSyncer(ctx, node, client, nil)
 	defer rs.Close()
 	first := waitStream(t, streamReady)
 	rs.Sync([]SyncView{newTestSyncView(1, 1, nil, nil)})
@@ -380,7 +380,7 @@ func TestResumable_RapidBreaksUseReconnectBackoff(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	rs := newResumableSyncer(ctx, node, client)
+	rs := newResumableSyncer(ctx, node, client, nil)
 	first := <-attemptTimes
 	second := <-attemptTimes
 	cancel()
@@ -420,7 +420,7 @@ func TestResumable_SlowOpenDoesNotResetReconnectBackoff(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	rs := newResumableSyncer(ctx, node, client)
+	rs := newResumableSyncer(ctx, node, client, nil)
 	defer rs.Close()
 	defer cancel()
 

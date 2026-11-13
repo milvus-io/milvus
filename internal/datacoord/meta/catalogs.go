@@ -43,8 +43,8 @@ type SegmentIndexCatalog interface {
 	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
 	// after removing duplicates, so overlapping callers cannot deadlock.
-	// Callers must not hold segMu. Lock order: segment manifest lock, then
-	// build-ID locks, then segMu.
+	// Callers must not hold a segment writer lock. Lock order: segment manifest
+	// lock, then build-ID locks, then segment writer locks.
 	LockBuildIDs(buildIDs []int64)
 	// UnlockBuildIDs releases the locks taken by LockBuildIDs. buildIDs must
 	// not contain duplicates.
@@ -55,21 +55,21 @@ type SegmentIndexCatalog interface {
 	UpdateSegmentIndex(segIdx *model.SegmentIndex)
 	// PublishStoredIndexSizes writes the stored index size of every collection
 	// whose size changed to the gauge. A write can wait for a Prometheus scrape,
-	// so callers must not hold segMu or fieldIndexLock.
+	// so callers must not hold a segment writer lock or fieldIndexLock.
 	PublishStoredIndexSizes()
 	// StageSegmentIndexMutation projects mut against the SegmentIndex record
 	// for mut.BuildID, and returns the catalog action to compose into the
 	// caller's transaction. The caller must hold LockBuildIDs for mut.BuildID
 	// from this call until the metric closure has run. The returned install
 	// updates memory only and takes no fieldIndexLock, so the caller runs it
-	// after the catalog write succeeds, inside its segMu critical section.
+	// after the catalog write succeeds, under the segment writer lock.
 	// install returns an observability closure that can wait for a Prometheus
-	// scrape; the caller runs it after releasing segMu and before releasing the
-	// build-ID lock.
+	// scrape; the caller runs it after releasing the writer lock and before
+	// releasing the build-ID lock.
 	StageSegmentIndexMutation(mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
 
 	// RLockFieldIndexes takes the read side of fieldIndexLock, whose write side
-	// index DDL holds. Callers must not hold segMu.
+	// index DDL holds. Callers must not hold a segment writer lock.
 	RLockFieldIndexes()
 	// RUnlockFieldIndexes releases the read side taken by RLockFieldIndexes.
 	RUnlockFieldIndexes()

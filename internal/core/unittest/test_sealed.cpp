@@ -5498,6 +5498,10 @@ TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
     auto old_pin = CreateTestTextReader(*sealed, text);
     ASSERT_NE(old_pin.get(), nullptr);
 
+    // The completed translator transfers once; subsequent pins reuse its cell.
+    auto second_pin = CreateTestTextReader(*sealed, text);
+    ASSERT_NE(second_pin.get(), nullptr);
+
     auto new_schema = std::make_shared<Schema>();
     auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
     new_schema->set_primary_field_id(new_pk);

@@ -11,7 +11,9 @@
 
 #include <gtest/gtest.h>
 
+#include <barrier>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -119,17 +121,57 @@ TEST_F(SealedIndexLoaderTest,
             config["nested"] = true;
             std::unique_ptr<SealedIndexLoader> translator;
             {
+                auto construction_info = info;
                 folly::CancellationSource cancel;
                 OpContext creation(cancel.getToken());
                 creation.runtime_load_priority = 1;
-                translator = std::make_unique<SealedIndexLoader>(
-                    &info, tracer::TraceContext{}, context_, config, &creation);
+                translator =
+                    std::make_unique<SealedIndexLoader>(&construction_info,
+                                                        tracer::TraceContext{},
+                                                        context_,
+                                                        config,
+                                                        &creation);
                 cancel.requestCancellation();
             }
             EXPECT_EQ(translator->Family(), index::families::kSort);
             EXPECT_EQ(translator->ValueType(), DataType::VARCHAR);
             OpContext load;
             auto owner = translator->CreateIndex(&load);
+            // Readers share the Index after both construction inputs and the
+            // loader are gone, including concurrent first use of the Index.
+            // Each request owns its context and reader.
+            translator.reset();
+            constexpr int kReaders = 8;
+            std::barrier start(kReaders);
+            std::vector<std::future<void>> queries;
+            for (int reader_id = 0; reader_id < kReaders; ++reader_id) {
+                queries.push_back(
+                    std::async(std::launch::async, [&, reader_id] {
+                        start.arrive_and_wait();
+                        for (int iteration = 0; iteration < 32; ++iteration) {
+                            OpContext query;
+                            auto reader = owner->CreateReader(&query);
+                            const auto* predicate = dynamic_cast<
+                                const index::IScalarPredicateReader<
+                                    std::string_view>*>(reader.get());
+                            ASSERT_NE(predicate, nullptr);
+                            const bool beta = (reader_id + iteration) % 2 == 0;
+                            const std::string_view key =
+                                beta ? "beta" : "gamma";
+                            const auto hits = predicate->In(1, &key);
+                            ASSERT_EQ(hits.size(), 4);
+                            EXPECT_EQ(hits.count(), beta ? 2 : 1);
+                            EXPECT_FALSE(hits[0]);
+                            EXPECT_EQ(hits[1], beta);
+                            EXPECT_EQ(hits[2], beta);
+                            EXPECT_EQ(hits[3], !beta);
+                        }
+                    }));
+            }
+            for (auto& query : queries) {
+                query.get();
+            }
+
             auto request_reader = owner->CreateReader(&load);
             const auto* reader = request_reader.get();
             ASSERT_NE(reader, nullptr);
@@ -145,6 +187,17 @@ TEST_F(SealedIndexLoaderTest,
             EXPECT_TRUE(hits[1]);
             EXPECT_TRUE(hits[2]);
             EXPECT_FALSE(hits[3]);
+
+            // A later reader also needs no data from the destroyed input.
+            request_reader.reset();
+            auto later_reader = owner->CreateReader(&load);
+            const auto* later_predicate = dynamic_cast<
+                const index::IScalarPredicateReader<std::string_view>*>(
+                later_reader.get());
+            ASSERT_NE(later_predicate, nullptr);
+            const auto later_hits = later_predicate->In(1, &key);
+            ASSERT_EQ(later_hits.size(), 4);
+            EXPECT_EQ(later_hits.count(), 2);
         }
     }
 }

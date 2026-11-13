@@ -500,13 +500,13 @@ TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
                 translator.EstimatedResources();
             const auto transient = private_overhead + shared_overhead;
             EXPECT_EQ(resident,
-                      (cachinglayer::ResourceUsage{expected.final_memory_cost,
-                                                   expected.final_disk_cost}));
+                      (cachinglayer::ResourceUsage(expected.final_memory_cost,
+                                                   expected.final_disk_cost)));
             EXPECT_EQ(
                 transient,
-                (cachinglayer::ResourceUsage{
+                (cachinglayer::ResourceUsage(
                     expected.max_memory_cost - expected.final_memory_cost,
-                    2 * expected.max_disk_cost - expected.final_disk_cost}));
+                    2 * expected.max_disk_cost - expected.final_disk_cost)));
         }
     }
 }

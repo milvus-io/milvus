@@ -35,13 +35,14 @@ func captureUnlockedManifestNotifications(t *testing.T, m *meta.Meta) *[]string 
 	var original func(*meta.Meta, context.Context, []*meta.SegmentInfo)
 	patch := mockey.Mock((*meta.Meta).NotifyQueryViewSegmentUpdates).Origin(&original).To(func(current *meta.Meta, ctx context.Context, segments []*meta.SegmentInfo) {
 		if current == m && len(segments) > 0 {
-			unlocked := m.SegMu.TryLock()
-			if unlocked {
-				m.SegMu.Unlock()
-			}
-			require.True(t, unlocked, "notification must run outside segMu")
 			for _, segment := range segments {
-				locks := m.GetSegmentManifestLocks()
+				locks := m.GetSegmentLocks()
+				unlocked := locks.TryLock(segment.GetID())
+				if unlocked {
+					locks.Unlock(segment.GetID())
+				}
+				require.True(t, unlocked, "notification must run outside the segment writer lock")
+				locks = m.GetSegmentManifestLocks()
 				unlocked = locks.TryLock(segment.GetID())
 				if unlocked {
 					locks.Unlock(segment.GetID())

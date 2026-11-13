@@ -598,6 +598,58 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.False(sealed.HasRawData(101))
 }
 
+func (suite *SegmentSuite) TestSealedNilPKCandidateLifecycle() {
+	ctx := context.Background()
+	sealed := suite.sealed.(*LocalSegment)
+	suite.Nil(sealed.pkCandidate)
+	suite.False(sealed.PkCandidateExist())
+	suite.NotPanics(func() {
+		sealed.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+		sealed.Charge()
+		sealed.Refund()
+	})
+	suite.Nil(sealed.pkCandidate)
+	suite.Nil(sealed.Stats())
+	suite.True(sealed.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))))
+	suite.Equal([]bool{true}, sealed.BatchPkExist(storage.NewBatchLocationsCache(
+		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})))
+
+	suite.NotPanics(func() { sealed.Release(ctx, WithReleaseScope(ReleaseScopeData)) })
+	suite.Nil(sealed.pkCandidate)
+	suite.NotPanics(func() { sealed.Release(ctx) })
+	suite.False(sealed.ptrLock.PinIfNotReleased())
+	suite.NotPanics(func() { sealed.Release(ctx) })
+}
+
+func (suite *SegmentSuite) TestGrowingPKCandidateLifecycle() {
+	growing := suite.growing.(*LocalSegment)
+	bfs, ok := growing.pkCandidate.(*pkoracle.BloomFilterSet)
+	suite.Require().True(ok)
+	growing.skipGrowingBF = true
+	growing.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.False(growing.PkCandidateExist())
+	suite.False(bfs.IsResourceCharged())
+	growing.skipGrowingBF = false
+	growing.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.True(growing.PkCandidateExist())
+	suite.True(growing.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))))
+	suite.True(bfs.IsResourceCharged())
+	growing.Release(context.Background())
+	suite.False(bfs.IsResourceCharged())
+}
+
+func (suite *SegmentSuite) TestSealedExplicitPKCandidateLifecycle() {
+	sealed := suite.sealed.(*LocalSegment)
+	suite.Nil(sealed.pkCandidate)
+	bfs := pkoracle.NewBloomFilterSet(sealed.ID(), sealed.Partition(), SegmentTypeSealed)
+	sealed.SetPKCandidate(bfs)
+	sealed.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.True(sealed.PkCandidateExist())
+	suite.True(bfs.IsResourceCharged())
+	sealed.Release(context.Background())
+	suite.False(bfs.IsResourceCharged())
+}
+
 func (suite *SegmentSuite) TestFlushData() {
 	ctx := context.Background()
 

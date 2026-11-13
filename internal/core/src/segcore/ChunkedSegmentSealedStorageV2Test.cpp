@@ -3002,18 +3002,20 @@ TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
         EXPECT_FALSE(text_column->IsMaterialized());
         auto expected =
             DataGen(source_schema, rows, 42).get_col<std::string>(text);
-        size_t seen = 0;
-        text_column->BulkRawStringAt(
-            nullptr,
-            [&](std::string_view value, size_t i, bool valid) {
-                ASSERT_LT(i, 4);
-                EXPECT_TRUE(valid);
-                EXPECT_EQ(value, expected[offsets[i]]);
-                ++seen;
-            },
-            offsets,
-            4);
-        EXPECT_EQ(seen, 4);
+        auto text_take = text_column->Take(nullptr,
+                                           {OffsetView::From(offsets, 4),
+                                            TargetType::StringView,
+                                            nullptr,
+                                            TakePinPolicy::Batch});
+        ASSERT_NE(text_take, nullptr);
+        ASSERT_EQ(text_take->Size(), 4);
+        const auto items = text_take->Access<std::string_view>();
+        for (size_t i = 0; i < 4; ++i) {
+            const auto item = items[i];
+            EXPECT_TRUE(item.is_valid);
+            ASSERT_TRUE(item.value);
+            EXPECT_EQ(*item.value, expected[offsets[i]]);
+        }
         EXPECT_TRUE(text_column->IsMaterialized());
     }
 }

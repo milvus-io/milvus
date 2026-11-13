@@ -19,6 +19,7 @@ package externalspec
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// Azure account names are interpolated into Blob/DFS hostnames.
+var azureAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
+
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
 const (
@@ -37,6 +41,7 @@ const (
 	FormatLanceTable   = specutil.FormatLanceTable
 	FormatVortex       = specutil.FormatVortex
 	FormatIcebergTable = specutil.FormatIcebergTable
+	FormatPaimonTable  = specutil.FormatPaimonTable
 	FormatMilvusTable  = specutil.FormatMilvusTable
 )
 
@@ -159,6 +164,21 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 		return nil, merr.Wrap(err, "parse external spec")
 	}
 	return spec, nil
+}
+
+// MarshalCollectionSchema normalizes external_spec before sending a schema to
+// native readers. It also handles historical schemas without mutating the
+// caller's shared schema or rewriting persisted metadata.
+func MarshalCollectionSchema(schema *schemapb.CollectionSchema) ([]byte, error) {
+	normalized, err := specutil.NormalizeExternalSpec(schema.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	if normalized != schema.GetExternalSpec() {
+		schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+		schema.ExternalSpec = normalized
+	}
+	return proto.Marshal(schema)
 }
 
 func sortedKeys(m map[string]bool) []string {
@@ -445,8 +465,15 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 	}
 
+	// Azure uses access_key_id as the storage account name even when the
+	// pod's workload identity supplies credentials instead of a shared key.
+	hasAzureIAM := cp == CloudProviderAzure && extfs[ExtfsKeyUseIAM] == "true"
+	if hasAzureIAM && extfs[ExtfsKeyAccessKeyID] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.access_key_id is required as the storage account name for Azure workload identity")
+	}
+
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
-	hasAKOnly := !hasAzureBroker &&
+	hasAKOnly := !hasAzureBroker && !hasAzureIAM &&
 		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
 	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
@@ -492,6 +519,10 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 	if cp == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
 		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
+	}
+
+	if account := extfs[ExtfsKeyAccessKeyID]; cp == CloudProviderAzure && account != "" && !azureAccountNamePattern.MatchString(account) {
+		return merr.WrapErrParameterInvalidMsg("extfs.access_key_id must be an Azure storage account name containing 3-24 lowercase letters or digits")
 	}
 
 	// Two-form URI contract: Milvus-form (scheme://endpoint/bucket/key) has
@@ -599,9 +630,8 @@ func DeriveEndpoint(cloudProvider, region string) string {
 		if strings.HasPrefix(r, "usgov") || strings.HasPrefix(r, "usdod") {
 			return "core.usgovcloudapi.net"
 		}
-		if strings.HasPrefix(r, "germany") {
-			return "core.cloudapi.de"
-		}
+		// Microsoft Cloud Germany (core.cloudapi.de) closed in October 2021;
+		// germanywestcentral and germanynorth are public Azure regions.
 		return "core.windows.net"
 	}
 	return ""

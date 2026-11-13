@@ -17,18 +17,22 @@
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <barrier>
 #include <chrono>
 #include <thread>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <folly/ScopeGuard.h>
 
 #include "aws/core/client/ClientConfiguration.h"
 #include "azure/storage/common/storage_exception.hpp"
@@ -1214,6 +1218,20 @@ TEST_F(StorageTest, InitArrowReaderConfig) {
 
     status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto updated_properties =
+        LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    EXPECT_NE(properties, updated_properties);
+    EXPECT_EQ(updated_properties,
+              LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+    auto old_hole = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(old_hole.ok()) << old_hole.status();
+    EXPECT_EQ(old_hole.ValueOrDie(), hole_size_limit.ValueOrDie());
+    auto old_range = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(old_range.ok()) << old_range.status();
+    EXPECT_EQ(old_range.ValueOrDie(), range_size_limit.ValueOrDie());
+
     cache_options = GetArrowReaderProperties().cache_options();
     EXPECT_EQ(cache_options.hole_size_limit,
               default_cache_options.hole_size_limit);
@@ -1405,6 +1423,78 @@ TEST_F(StorageTest, ArrowReaderConfigSnapshotIsAtomicUnderHotReload) {
     // Restore the unset state for the tests that follow.
     auto status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
+}
+
+TEST_F(StorageTest, SharedPropertiesStayImmutableDuringConcurrentReloads) {
+    auto& singleton = LoonFFIPropertiesSingleton::GetInstance();
+    const auto previous = singleton.GetArrowReaderLimits();
+    auto restore = folly::makeGuard([&] {
+        singleton.SetArrowReaderConfig(previous.hole_size_limit_bytes,
+                                       previous.range_size_limit_bytes);
+    });
+    constexpr int64_t kHoleA = 1LL << 20, kRangeA = 4LL << 20;
+    constexpr int64_t kHoleB = 8LL << 20, kRangeB = 16LL << 20;
+    singleton.SetArrowReaderConfig(kHoleA, kRangeA);
+    const auto initial = singleton.GetProperties();
+    ASSERT_NE(initial, nullptr);
+
+    constexpr int kReaders = 4;
+    std::barrier start(kReaders + 2);
+    std::vector<std::future<void>> workers;
+    for (int writer = 0; writer < 2; ++writer) {
+        workers.push_back(std::async(std::launch::async, [&, writer] {
+            start.arrive_and_wait();
+            for (int iteration = 0; iteration < 128; ++iteration) {
+                const bool first = (writer + iteration) % 2 == 0;
+                singleton.SetArrowReaderConfig(first ? kHoleA : kHoleB,
+                                               first ? kRangeA : kRangeB);
+            }
+        }));
+    }
+    for (int reader = 0; reader < kReaders; ++reader) {
+        workers.push_back(std::async(std::launch::async, [&] {
+            start.arrive_and_wait();
+            auto held = initial;
+            int64_t held_hole = kHoleA, held_range = kRangeA;
+            for (int iteration = 0; iteration < 256; ++iteration) {
+                auto current = singleton.GetProperties();
+                const auto hole = milvus_storage::api::GetValue<int64_t>(
+                    current, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+                const auto range = milvus_storage::api::GetValue<int64_t>(
+                    current,
+                    PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+                ASSERT_TRUE(hole.ok()) << hole.status();
+                ASSERT_TRUE(range.ok()) << range.status();
+                EXPECT_TRUE((hole.ValueOrDie() == kHoleA &&
+                             range.ValueOrDie() == kRangeA) ||
+                            (hole.ValueOrDie() == kHoleB &&
+                             range.ValueOrDie() == kRangeB));
+                const auto old_hole = milvus_storage::api::GetValue<int64_t>(
+                    held, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+                const auto old_range = milvus_storage::api::GetValue<int64_t>(
+                    held, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+                ASSERT_TRUE(old_hole.ok()) << old_hole.status();
+                ASSERT_TRUE(old_range.ok()) << old_range.status();
+                EXPECT_EQ(old_hole.ValueOrDie(), held_hole);
+                EXPECT_EQ(old_range.ValueOrDie(), held_range);
+                held = std::move(current);
+                held_hole = hole.ValueOrDie();
+                held_range = range.ValueOrDie();
+            }
+        }));
+    }
+    for (auto& worker : workers) {
+        worker.get();
+    }
+    EXPECT_NE(initial, singleton.GetProperties());
+    EXPECT_EQ(milvus_storage::api::GetValue<int64_t>(
+                  initial, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT)
+                  .ValueOrDie(),
+              kHoleA);
+    EXPECT_EQ(milvus_storage::api::GetValue<int64_t>(
+                  initial, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT)
+                  .ValueOrDie(),
+              kRangeA);
 }
 
 class StorageUtilTest : public testing::Test {

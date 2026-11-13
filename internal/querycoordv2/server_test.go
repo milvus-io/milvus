@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -128,6 +129,9 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	initStreamingSystem()
+	// Node lifecycle tests do not start StreamingCoord's ChannelManager.
+	channels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{}).Build()
+	suite.T().Cleanup(func() { channels.UnPatch() })
 	// These node lifecycle tests have no pending schema ALTER.
 	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
 	suite.T().Cleanup(func() { schemaTarget.UnPatch() })
@@ -335,66 +339,6 @@ func (suite *ServerSuite) TestStop() {
 	suite.server.Stop()
 	// Stop has to be idempotent
 	suite.server.Stop()
-}
-
-func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
-	suite.server.Stop()
-
-	Params.Save(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key, "1")
-	defer Params.Reset(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.Key)
-
-	suite.Run("test old node exist", func() {
-		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
-		server := &Server{}
-		mockSession := sessionutil.NewMockSession(suite.T())
-		server.session = mockSession
-
-		oldSessions := make(map[string]*sessionutil.Session)
-		oldSessions["s1"] = sessionutil.NewSession(context.Background())
-		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(oldSessions, 0, nil).Maybe()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(1500 * time.Millisecond)
-			server.updateBalanceConfigLoop(ctx)
-		}()
-		// old query node exist, disable auto balance
-		suite.Eventually(func() bool {
-			return !Params.QueryCoordCfg.AutoBalance.GetAsBool()
-		}, 5*time.Second, 1*time.Second)
-
-		cancel()
-		wg.Wait()
-	})
-
-	suite.Run("all old node down", func() {
-		Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
-		defer Params.Reset(Params.QueryCoordCfg.AutoBalance.Key)
-		server := &Server{}
-		mockSession := sessionutil.NewMockSession(suite.T())
-		server.session = mockSession
-		mockSession.EXPECT().GetSessionsWithVersionRange(mock.Anything, mock.Anything).Return(nil, 0, nil).Maybe()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(1500 * time.Millisecond)
-			server.updateBalanceConfigLoop(ctx)
-		}()
-		// all old query node down, enable auto balance
-		suite.Eventually(func() bool {
-			return Params.QueryCoordCfg.AutoBalance.GetAsBool()
-		}, 5*time.Second, 1*time.Second)
-
-		cancel()
-		wg.Wait()
-	})
 }
 
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {

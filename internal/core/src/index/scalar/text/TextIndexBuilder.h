@@ -18,7 +18,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -65,17 +64,6 @@ struct TextIndexBuildParams {
     std::string local_dir;
 };
 
-// Family-private streaming source for sealed in-place builds. `produce` is
-// synchronous: every borrowed string_view and validity buffer only needs to
-// remain valid until the matching ConsumeBatch call returns.
-struct TextIndexBuildSource {
-    using ConsumeBatch =
-        std::function<void(const ScalarBuildBatch<std::string_view>&)>;
-
-    size_t row_count{0};
-    std::function<void(const ConsumeBatch&)> produce;
-};
-
 class TextIndexBuilder final
     : public IArtifactBuilder<ScalarBuildInput<std::string_view>> {
  public:
@@ -87,16 +75,15 @@ class TextIndexBuilder final
         Build(const ScalarBuildInput<std::string_view>& input) &&
         override;
 
-    std::unique_ptr<TextIndexArtifact>
-    Build(const TextIndexBuildSource& source) &&;
-
- private:
+    // Consumes borrowed values and validity synchronously; the caller may
+    // advance its source cursor as soon as AddBatch returns.
     void
     AddBatch(const ScalarBuildBatch<std::string_view>& batch);
 
     std::unique_ptr<TextIndexArtifact>
-    FinishArtifact();
+    Finish(size_t expected_rows) &&;
 
+ private:
     TextIndexBuildParams params_;
 
     // Declared before engine_ so the writer is destroyed before its owned

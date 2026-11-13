@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(milvus_grep OBJECT Grep.cpp SegmentGrep.cpp)
+add_library(milvus_grep OBJECT Grep.cpp IndexCondition.cpp SegmentGrep.cpp)
 target_compile_features(milvus_grep PUBLIC cxx_std_17)
 set_target_properties(milvus_grep PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(milvus_grep PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

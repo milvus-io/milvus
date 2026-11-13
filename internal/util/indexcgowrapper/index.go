@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,7 +65,7 @@ func CreateIndexBuilder(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 }
 
 func createIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo, build bool) (*CgoIndex, error) {
-	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	buildIndexInfoBlob, err := marshalBuildIndexInfo(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
 			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
@@ -129,7 +130,7 @@ type JSONKeyStatsResult struct {
 }
 
 func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (*JSONKeyStatsResult, error) {
-	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	buildIndexInfoBlob, err := marshalBuildIndexInfo(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
 			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
@@ -160,6 +161,18 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 		MemSize: indexStats.GetMemSize(),
 		Files:   files,
 	}, nil
+}
+
+func marshalBuildIndexInfo(info *indexcgopb.BuildIndexInfo) ([]byte, error) {
+	normalized, err := specutil.NormalizeExternalSpec(info.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	if normalized != info.GetExternalSpec() {
+		info = proto.Clone(info).(*indexcgopb.BuildIndexInfo)
+		info.ExternalSpec = normalized
+	}
+	return proto.Marshal(info)
 }
 
 func (index *CgoIndex) Delete() error {

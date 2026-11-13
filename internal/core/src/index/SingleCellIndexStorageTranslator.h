@@ -30,6 +30,9 @@ namespace milvus::index {
 template <typename Storage>
 class SingleCellIndexStorageTranslator final
     : public cachinglayer::Translator<Storage> {
+    using CellResults =
+        std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Storage>>>;
+
  public:
     using LoadFn =
         std::function<folly::coro::Task<std::unique_ptr<Storage>>(OpContext*)>;
@@ -73,28 +76,40 @@ class SingleCellIndexStorageTranslator final
         const std::vector<cachinglayer::cid_t>&) const override {
         return config_.storage_bytes;
     }
-    std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Storage>>>
+    CellResults
     get_cells(OpContext* parent,
               const std::vector<cachinglayer::cid_t>& cids) override {
+        return folly::coro::blockingWait(get_cells_async(parent, cids));
+    }
+
+    folly::coro::Task<CellResults>
+    get_cells_async(OpContext* parent,
+                    const std::vector<cachinglayer::cid_t>& cids) override {
         AssertInfo(cids.size() == 1 && cids.front() == 0,
                    "single-cell index received invalid cell ids");
         IndexLoadContext context(parent, config_.load_priority);
+        context.ctx.cancellation_token = folly::cancellation_token_merge(
+            context.ctx.cancellation_token,
+            co_await folly::coro::co_current_cancellation_token);
         auto task = load_(&context.ctx);
-        auto storage =
-            use_async_
-                ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                      storage::ResolveAsyncLoadExecutor(
-                          {},
-                          context.ctx.runtime_load_priority.value_or(0) != 0
-                              ? proto::common::LoadPriority::LOW
-                              : proto::common::LoadPriority::HIGH),
-                      std::move(task)))
-                : folly::coro::blockingWait(std::move(task));
+        std::unique_ptr<Storage> storage;
+        // Separate awaits avoid GCC coroutine temporary lifetime bugs in ?:.
+        if (use_async_) {
+            storage = co_await folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor(
+                    {},
+                    context.ctx.runtime_load_priority.value_or(0) != 0
+                        ? proto::common::LoadPriority::LOW
+                        : proto::common::LoadPriority::HIGH),
+                std::move(task));
+        } else {
+            storage = co_await std::move(task);
+        }
         AssertInfo(storage != nullptr, "index storage loader returned null");
         std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Storage>>>
             result;
         result.emplace_back(0, std::move(storage));
-        return result;
+        co_return result;
     }
 
  private:

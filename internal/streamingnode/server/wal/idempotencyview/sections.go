@@ -45,27 +45,24 @@ func RecordsFromSections(
 	}
 	records := make([]*Record, 0, len(inserts))
 	for i, insert := range inserts {
-		record := &Record{
-			SourceMessageID:        insert.GetSourceMessageId(),
-			SourceTimeTick:         insert.GetSourceTimetick(),
-			LastConfirmedMessageID: insert.GetLastConfirmedMessageId(),
-		}
-		var rowOffsets []uint32
+		var key *streamingpb.VChannelSummaryIdempotencyRecord
 		if len(keys) != 0 {
-			record.IdempotencyKey = keys[i].GetKey()
-			rowOffsets = keys[i].GetRowOffsets()
+			key = keys[i]
 		}
-		// A record with neither keys nor offsets carries no result to replay:
-		// it is a write the view remembers the position of but has nothing to
-		// answer a duplicate with, so the result stays nil rather than becoming
-		// an empty message that reads as an answer.
-		if insert.GetIds() != nil || len(rowOffsets) > 0 {
-			record.InsertResult = &messagespb.IdempotentInsertResult{
-				RowOffsets: rowOffsets,
-				Ids:        insert.GetIds(),
-			}
-		}
-		records = append(records, record)
+		records = append(records, RecordFromSections(key, insert))
 	}
 	return records, nil
+}
+
+// RecordFromSections joins an already aligned pair without copying its
+// immutable result payload. A keyless fact without a result keeps a nil result.
+func RecordFromSections(key *streamingpb.VChannelSummaryIdempotencyRecord, insert *streamingpb.VChannelSummaryInsertRecord) *Record {
+	record := &Record{
+		SourceMessageID: insert.GetSourceMessageId(), SourceTimeTick: insert.GetSourceTimetick(),
+		LastConfirmedMessageID: insert.GetLastConfirmedMessageId(), IdempotencyKey: key.GetKey(),
+	}
+	if insert.GetIds() != nil || len(key.GetRowOffsets()) > 0 {
+		record.InsertResult = &messagespb.IdempotentInsertResult{RowOffsets: key.GetRowOffsets(), Ids: insert.GetIds()}
+	}
+	return record
 }

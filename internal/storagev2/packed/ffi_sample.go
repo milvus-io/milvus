@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -78,9 +79,9 @@ func SampleExternalFieldSizes(
 			schemaForSample = proto.Clone(schemaForSample).(*schemapb.CollectionSchema)
 			schemaForSample.ExternalSpec = externalSpec
 		}
-		schemaBytes, err = proto.Marshal(schemaForSample)
+		schemaBytes, err = externalspec.MarshalCollectionSchema(schemaForSample)
 		if err != nil {
-			return nil, merr.WrapErrStorage(err, "failed to marshal collection schema")
+			return nil, merr.Wrap(err, "failed to marshal collection schema")
 		}
 		if len(schemaBytes) > 0 {
 			cSchema.proto_blob = unsafe.Pointer(&schemaBytes[0])

@@ -133,6 +133,10 @@ struct BitmapPostingStorage {
     BitmapPostingMap<T, Posting> postings;
     BitmapStorageOptions options;
     std::vector<const T*> offset_cache;
+    // Keys in map order and range_prefix[i] = rows in the first i postings,
+    // for complement range evaluation. Empty unless that path is allowed.
+    std::vector<const T*> range_keys;
+    std::vector<uint64_t> range_prefix;
     std::shared_ptr<const TargetBitmap> json_exists;
 };
 

@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -77,7 +78,7 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 	task := &summaryGCTask{manager: m}
 	m.gcTask = task
 	m.mu.Unlock()
-	m.cfg.Runtime.Scheduler.Submit(task)
+	m.cfg.Runtime.Scheduler.Submit(task, nodescheduler.WithPriority(moduleapi.PriorityData))
 	return nil
 }
 

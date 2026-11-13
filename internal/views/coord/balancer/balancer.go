@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // Balancer is the scheduling controller that reconciles dirty shards into
@@ -107,6 +108,12 @@ func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 	b.queue.add(scopes...)
 }
 
+// TriggerWithCompletion enqueues scoped work and returns the pending batch's
+// result. The caller owns cancellation and runtime shutdown while waiting.
+func (b *DefaultBalancer) TriggerWithCompletion(scopes ...TriggerScope) *syncutil.Future[error] {
+	return b.queue.addWithCompletion(scopes...)
+}
+
 func (b *DefaultBalancer) loop(ctx context.Context) {
 	defer b.wg.Done()
 
@@ -168,7 +175,7 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 // call does not drain a full scan. It is exported primarily for tests and for
 // callers that want a synchronous controller pass during startup.
 // It waits for cache readiness before consuming queued work; ctx cancels that wait.
-func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
+func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
@@ -176,11 +183,17 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 		return err
 	}
 	b.reconcileMu.Lock()
-	defer b.reconcileMu.Unlock()
+	var pending triggerBatch
+	defer func() {
+		b.reconcileMu.Unlock()
+		if pending.completion != nil {
+			pending.completion.Set(retErr)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	pending := b.queue.takePending()
+	pending = b.queue.takePending()
 	b.scanRequested = b.scanRequested || pending.scan
 	if !pending.hasScopes() && !b.scanning && !b.scanRequested {
 		return nil

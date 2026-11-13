@@ -186,7 +186,7 @@ func TestCancelQueuedTaskCompletesWhileWorkerIsBusy(t *testing.T) {
 	require.NoError(t, h.Wait(ctx))
 	require.False(t, ran.Load())
 	s.mu.Lock()
-	queued := s.queue.Len()
+	queued := len(s.ready)
 	s.mu.Unlock()
 	require.Zero(t, queued)
 }
@@ -269,7 +269,7 @@ func TestCancelHeapMinimumAndIgnoreStaleTimerCallback(t *testing.T) {
 	// Simulate the old minimum's callback already waiting on mu during Cancel.
 	s.promoteDelayed()
 	s.mu.Lock()
-	delayed, queued, currentTimer := len(s.delayed), s.queue.Len(), s.timer
+	delayed, queued, currentTimer := len(s.delayed), len(s.ready), s.timer
 	s.mu.Unlock()
 	require.Equal(t, 1, delayed)
 	require.Zero(t, queued)
@@ -324,7 +324,7 @@ func TestConcurrentCancelCloseAndTimerCallback(t *testing.T) {
 		require.NoError(t, handle.Wait(ctx))
 	}
 	s.mu.Lock()
-	delayed, queued := len(s.delayed), s.queue.Len()
+	delayed, queued := len(s.delayed), len(s.ready)
 	s.mu.Unlock()
 	require.Zero(t, delayed)
 	require.Zero(t, queued)

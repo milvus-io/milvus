@@ -681,6 +681,7 @@ queryNode:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
+    searchFanoutPoolSizeRatio: 2 # Thread-to-core ratio for the search fanout pool; independent of the search executor and not limited by common.threadCoreCoefficient.maxThreadsSize. Invalid, non-positive, non-finite or overflowing values use the default ratio of 2.
     chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
     interimIndex:
       # Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
@@ -874,31 +875,15 @@ dataCoord:
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
-    assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
-    allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
     # minSizeFromIdleToSealed, Milvus will automatically seal it.
     # The max idle time of segment in seconds, 10*60.
     maxIdleTime: 600
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
-    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
-    # the segment will be sealed if the number of binlog file reaches to max value.
-    maxBinlogFileNumber: 32
     smallProportion: 0.5 # Deprecated: unused since two-tier compaction. Replaced by middleSize (idealSize/4) × fillRate.
     compactableProportion: 0.85 # Deprecated: fill rate is now a hardcoded constant (0.85) in the two-tier compaction algorithm.
     expansionRate: 1.25 # Deprecated: no longer used by the mix compaction planner. Still read by v2 trigger and import paths.
-  sealPolicy:
-    channel:
-      # The size threshold in MB, if the total size of growing segments of each shard
-      # exceeds this threshold, the largest growing segment will be sealed.
-      growingSegmentsMemSize: 4096
-      # If the total entry number of l0 logs of each shard
-      # exceeds this threshold, the earliest growing segments will be sealed.
-      blockingL0EntryNum: 5000000
-      # The size threshold in MB, if the total entry number of l0 logs of each shard
-      # exceeds this threshold, the earliest growing segments will be sealed.
-      blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   forceRebuildSegmentIndex: false # force rebuild segment index to specify index engine's version
   # if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
@@ -912,6 +897,14 @@ dataCoord:
   targetScalarIndexVersion: -1
   enableArraySortIndex: auto # Whether ordinary ARRAY HYBRID may select STL_SORT, ordinary ARRAY may use explicit STL_SORT, and typed JSON ARRAY paths may use HYBRID or STL_SORT. auto: enable once all registered online components reach 3.1.0 and the stability window elapses; false: keep ordinary ARRAY HYBRID high cardinality on INVERTED, downgrade affected AUTOINDEX requests to INVERTED, and reject explicit ARRAY STL_SORT or JSON ARRAY HYBRID/STL_SORT; true: force enable and bypass the software-version gate.
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
+  sealPolicy:
+    channel:
+      # If the total entry number of l0 logs of each shard
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0EntryNum: 5000000
+      # The size threshold in MB, if the total entry number of l0 logs of each shard
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0SizeInMB: 64
   manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
@@ -1283,7 +1276,7 @@ grpc:
     compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
-    keepAliveTimeout: 20000
+    keepAliveTimeout: 2000
     maxMaxAttempts: 10
     initialBackoff: 0.2
     maxBackoff: 10
@@ -1311,9 +1304,9 @@ common:
   indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
-    middlePriority: 5 # Thread-to-core ratio for each of the independent middle priority and search fanout pools; both follow maxThreadsSize.
+    middlePriority: 5 # Thread-to-core ratio for the middle priority pool; follows maxThreadsSize.
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
-    maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
+    maxThreadsSize: 16 # Maximum thread count for the high, middle and low priority pools; only effective when greater than 0. Does not limit the search fanout pool.
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
@@ -1338,7 +1331,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: false
+    useLoonFFI: true
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
@@ -1440,6 +1433,8 @@ common:
     varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
     dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
     sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
+  metrics:
+    collectionLevelMode: full # controls collection/VChannel-scoped Prometheus metrics: full keeps collection and VChannel values, aggregate replaces them with all and suppresses gauges without a truthful aggregate
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks
@@ -1874,8 +1869,17 @@ streaming:
     gracefulCloseTimeout: 3s
     tail:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
-      softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
+      softWatermark: 8g # RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+    flush:
+      sizeThreshold: 6g # Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      messageThreshold: 6144 # Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleMinSize: 512MB # Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleTimeout: 10m # Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+  idempotency:
+    ttlPerPChannel: 1h # Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.
+    maxSizePerPChannel: 256MB # PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.
+    bestEffortMinCountPerVChannel: 16 # Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.
   transformLog:
     catchupConcurrencyRatioPerPChannel: 0.25 # TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   replication:

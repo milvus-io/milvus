@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -771,6 +772,21 @@ func (r *oracleRuntime) Close() {
 	})
 }
 
+// sameSealedResource reports whether two descriptors name the same sealed
+// statistics. Manifest paths compare by revision: DataCoord spells a revision
+// with its recorded manifest size only while it is the segment's current one.
+func sameSealedResource(a, b *datapb.StreamingNodeBM25Resource) bool {
+	if a == nil || b == nil || a.GetManifestPath() == b.GetManifestPath() {
+		return proto.Equal(a, b)
+	}
+	if !packed.SameManifestPath(a.GetManifestPath(), b.GetManifestPath()) {
+		return false
+	}
+	respelled := proto.Clone(b).(*datapb.StreamingNodeBM25Resource)
+	respelled.ManifestPath = a.GetManifestPath()
+	return proto.Equal(a, respelled)
+}
+
 func (r *oracleRuntime) computeDiff(ctx context.Context, target qviews.DataVersion) (*idfDiff, error) {
 	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
 	if err != nil {
@@ -785,12 +801,12 @@ func (r *oracleRuntime) computeDiff(ctx context.Context, target qviews.DataVersi
 	r.mu.RUnlock()
 	added, removed := make(map[int64]*datapb.StreamingNodeBM25Resource), make(map[int64]*datapb.StreamingNodeBM25Resource)
 	for id, resource := range current {
-		if !proto.Equal(resource, next[id]) {
+		if !sameSealedResource(resource, next[id]) {
 			removed[id] = resource
 		}
 	}
 	for id, resource := range next {
-		if !proto.Equal(resource, current[id]) {
+		if !sameSealedResource(resource, current[id]) {
 			added[id] = resource
 		}
 	}

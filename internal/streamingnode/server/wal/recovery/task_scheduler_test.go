@@ -77,8 +77,8 @@ func TestScopedTaskSchedulerTracksDelayedTaskUntilSuccess(t *testing.T) {
 }
 
 func TestScopedTaskSchedulerUsesNodeConcurrency(t *testing.T) {
-	// One WAL can use all available workers, including more than the former
-	// per-PChannel default of 16.
+	// One WAL can use all available workers for the highest-priority band,
+	// including more than the former per-PChannel default of 16.
 	const concurrency = 20
 	inner := nodescheduler.New(concurrency)
 	defer inner.Close()
@@ -90,7 +90,7 @@ func TestScopedTaskSchedulerUsesNodeConcurrency(t *testing.T) {
 			started <- struct{}{}
 			<-ctx.Done()
 			return ctx.Err()
-		}))
+		}), nodescheduler.WithPriority(nodescheduler.MaxPriority))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -252,4 +252,106 @@ func TestScopedTaskSchedulerSubmitAfterClose(t *testing.T) {
 	require.NoError(t, handle.Wait(ctx))
 	require.NoError(t, scheduler.WaitIdle(ctx))
 	require.False(t, ran.Load())
+}
+
+func TestScopedTaskSchedulerPriority(t *testing.T) {
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner)
+	defer scheduler.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	started, release := make(chan struct{}), make(chan struct{})
+	running := scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})).(nodescheduler.PriorityTaskHandle)
+	<-started
+	order := make(chan int, 3)
+	submit := func(id int, priority int32) nodescheduler.PriorityTaskHandle {
+		return scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+			order <- id
+			return nil
+		}), nodescheduler.WithPriority(priority)).(nodescheduler.PriorityTaskHandle)
+	}
+	low, high, canceled := submit(1, -10), submit(2, 10), submit(3, 20)
+	require.True(t, low.SetPriority(20))
+	require.True(t, running.SetPriority(-20))
+	canceled.Cancel()
+	require.NoError(t, canceled.Wait(ctx))
+	require.False(t, canceled.SetPriority(20))
+	require.Empty(t, order)
+	close(release)
+	for _, h := range []nodescheduler.TaskHandle{running, low, high} {
+		require.NoError(t, h.Wait(ctx))
+	}
+	require.Equal(t, 1, <-order)
+	require.Equal(t, 2, <-order)
+	require.False(t, low.SetPriority(20))
+	require.NoError(t, scheduler.WaitIdle(ctx))
+	scheduler.Close()
+	require.False(t, submit(4, 10).SetPriority(20))
+	// The scoped owner still does not own or shut down the shared workers.
+	require.NoError(t, inner.Submit(nodeschedulerTaskFunc(func(context.Context) error { return nil })).Wait(ctx))
+}
+
+func TestScopedTaskHandlePriorityWithoutInnerSupport(t *testing.T) {
+	// An open scoped entry may wrap a legacy TaskHandle implementation. The
+	// optional extension must reject the update without affecting its lifecycle.
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	legacy := struct{ nodescheduler.TaskHandle }{
+		inner.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+			<-ctx.Done()
+			return nil
+		})),
+	}
+	handle := scopedTaskHandle{entry: &scopedTaskEntry{inner: legacy, done: make(chan struct{})}}
+	require.False(t, handle.SetPriority(10))
+	legacy.Cancel()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, legacy.Wait(ctx))
+}
+
+func TestScopedTaskSchedulerPriorityRetry(t *testing.T) {
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner)
+	defer scheduler.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	started, release := make(chan struct{}), make(chan struct{})
+	order := make(chan string, 2)
+	var attempts int
+	retry := scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		attempts++
+		if attempts == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return nodescheduler.DelayUntil(time.Now().Add(-time.Second))
+		}
+		order <- "retry"
+		return nil
+	}), nodescheduler.WithPriority(-10)).(nodescheduler.PriorityTaskHandle)
+	<-started
+	other := scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+		order <- "other"
+		return nil
+	}))
+	require.True(t, retry.SetPriority(10))
+	close(release)
+	require.NoError(t, retry.Wait(ctx))
+	require.NoError(t, other.Wait(ctx))
+	require.NoError(t, scheduler.WaitIdle(ctx))
+	require.Equal(t, "retry", <-order)
+	require.Equal(t, "other", <-order)
+	require.Equal(t, 2, attempts)
 }

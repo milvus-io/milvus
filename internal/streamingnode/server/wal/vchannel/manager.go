@@ -227,6 +227,15 @@ func (m *PChannelRecoveryManager) Module(vchannel string) *VChannelRecoveryModul
 // RequestPersistThrough schedules persistence for buffered data of one
 // VChannel through targetTimeTick.
 func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetTimeTick uint64) {
+	m.requestPersistThrough(vchannel, targetTimeTick, false)
+}
+
+// RequestPersistThroughUnderPressure promotes persistence needed by the recovery tail.
+func (m *PChannelRecoveryManager) RequestPersistThroughUnderPressure(vchannel string, targetTimeTick uint64) {
+	m.requestPersistThrough(vchannel, targetTimeTick, true)
+}
+
+func (m *PChannelRecoveryManager) requestPersistThrough(vchannel string, targetTimeTick uint64, underPressure bool) {
 	if m == nil || vchannel == "" {
 		return
 	}
@@ -234,7 +243,7 @@ func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetT
 	if module == nil {
 		return
 	}
-	module.RequestPersistThrough(targetTimeTick)
+	module.requestPersistThrough(targetTimeTick, underPressure)
 }
 
 // Start runs one shared L0 age check.
