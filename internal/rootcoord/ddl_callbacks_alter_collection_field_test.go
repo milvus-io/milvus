@@ -175,7 +175,7 @@ func TestDDLCallbacksAlterCollectionFieldOnStruct(t *testing.T) {
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName: dbName, CollectionName: collectionName,
 		StructArrayFieldSchema: newRootAddStructFieldSchema("profile"),

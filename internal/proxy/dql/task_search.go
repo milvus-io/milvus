@@ -328,6 +328,9 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	}
 	t.schema = collectionInfo.Schema
 	t.SchemaVersion = t.schema.GetVersion()
+	if !typeutil.HasVectorField(t.schema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", collectionName)
+	}
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}

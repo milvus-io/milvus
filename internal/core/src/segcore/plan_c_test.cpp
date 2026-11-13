@@ -80,3 +80,38 @@ TEST(CApiTest, CPlan) {
     Test_CPlan<milvus::BFloat16Vector>(knowhere::metric::L2);
     Test_CPlan<milvus::Int8Vector>(knowhere::metric::L2);
 }
+
+// A collection loaded while it had no vector field and no index carries no
+// index meta. A search on a vector field added afterwards is reported as a
+// field whose index is not loaded, not as a failed assertion.
+TEST(CApiTest, CPlanWithoutIndexMeta) {
+    std::string schema_string = generate_collection_schema<milvus::FloatVector>(
+        knowhere::metric::L2, DIM);
+    auto collection = NewCollection(schema_string.c_str());
+    auto col = static_cast<Collection*>(collection);
+    col->set_index_meta(nullptr);
+    ASSERT_EQ(col->get_index_meta(), nullptr);
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(milvus::FloatVector::vector_type);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
+
+    void* plan = reinterpret_cast<void*>(0x1);
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
+    ASSERT_EQ(status.error_code, milvus::FieldNotLoaded);
+    ASSERT_EQ(plan, nullptr);
+    ASSERT_NE(std::string(status.error_msg).find("is not loaded"),
+              std::string::npos);
+    free(const_cast<char*>(status.error_msg));
+
+    DeleteCollection(collection);
+}

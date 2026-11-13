@@ -142,6 +142,12 @@ func (t *mixCompactionTask) preCompact() error {
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
+	if maxSegmentRows := t.plan.GetMaxSegmentRows(); maxSegmentRows > 0 {
+		// The writer also cuts an output segment on rows, so one input can
+		// split into several outputs while its bytes stay under targetSize.
+		t.estimatedOutputSegmentCount = max(t.estimatedOutputSegmentCount,
+			int64(math.Ceil(float64(t.maxRows)/float64(maxSegmentRows))))
+	}
 	mlog.Info(context.TODO(), "preCompaction analyze",
 		mlog.Int64("planID", t.GetPlanID()),
 		mlog.Int64("inputSize", currSize),
@@ -224,6 +230,7 @@ func (t *mixCompactionTask) mergeSplit(
 	if err != nil {
 		return nil, err
 	}
+	mWriter.SetSegmentMaxRows(t.plan.GetMaxSegmentRows())
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)

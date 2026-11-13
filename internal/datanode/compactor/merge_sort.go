@@ -51,6 +51,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	writer.SetSegmentMaxRows(plan.GetMaxSegmentRows())
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	if err != nil {

@@ -108,10 +108,15 @@ func (s *Server) prepareAutoLoadRequest(ctx context.Context, coll *milvuspb.Desc
 	}
 	indexes, err := s.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: coll.GetCollectionID()})
 	if err = merr.CheckRPCCall(indexes, err); err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return nil, err
+		}
+		// A collection with no vector field needs no index to be loaded, as in
+		// the Proxy LoadCollection task.
+		if typeutil.HasVectorField(schema) {
 			return nil, merr.WrapErrIndexNotFoundForCollection(coll.GetCollectionName())
 		}
-		return nil, err
+		indexes = &indexpb.DescribeIndexResponse{}
 	}
 	fieldIndexes := make(map[int64]int64)
 	for _, index := range indexes.GetIndexInfos() {

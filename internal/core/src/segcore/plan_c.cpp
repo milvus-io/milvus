@@ -47,9 +47,12 @@ CreateSearchPlanByExpr(CCollection c_col,
             schema, serialized_expr_plan, size);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
-        AssertInfo(col_index_meta != nullptr, "index meta not exist");
-
-        if (!col_index_meta->HasField(milvus::FieldId(field_id))) {
+        // A collection loaded while it had no vector field and no index
+        // carries no index meta at all. Once a vector field is added to it,
+        // a search on that field is in the same state as a search on any
+        // vector field whose index is not loaded.
+        if (col_index_meta == nullptr ||
+            !col_index_meta->HasField(milvus::FieldId(field_id))) {
             auto status = CStatus();
             status.error_code = milvus::FieldNotLoaded;
             auto field_name =

@@ -1099,6 +1099,12 @@ func TestAddCollectionStructFieldTaskPreExecute(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 				IsPrimaryKey: true,
 			},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
 		},
 	}
 	structField := newAddStructFieldSchema("profile")
@@ -1141,12 +1147,25 @@ func TestValidateAddStructFieldRequest(t *testing.T) {
 				Name:     "pk",
 				DataType: schemapb.DataType_Int64,
 			},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+			},
 		},
 	}
 
 	t.Run("valid", func(t *testing.T) {
 		err := validateAddStructFieldRequest(proto.Clone(baseSchema).(*schemapb.CollectionSchema), newAddStructFieldSchema("profile"))
 		require.NoError(t, err)
+	})
+
+	t.Run("vector sub-field on a collection without vector field", func(t *testing.T) {
+		schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+		schema.Fields = schema.Fields[:1]
+		// A collection without a vector field may gain one through a struct sub-field.
+		require.NoError(t, validateAddStructFieldRequest(schema, newAddStructFieldSchema("profile")))
 	})
 
 	t.Run("struct must be nullable", func(t *testing.T) {
@@ -1423,8 +1442,13 @@ func TestCreateCollectionTask(t *testing.T) {
 		noVectorSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		task.Schema = noVectorSchema
+		paramtable.Get().Save(paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key, "false")
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "schema does not contain vector field")
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key)
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 
 		task.CreateCollectionRequest = reqBackup
 
@@ -3516,6 +3540,96 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 		err := lct.Execute(ctx)
 		assert.Error(t, err)
+	})
+}
+
+// A collection with no vector field has nothing that needs an index, so
+// DescribeIndex reporting no index must not fail the load. A collection with a
+// vector field keeps failing in that case.
+func Test_loadCollectionTask_NoVectorField(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
+	ctx := context.Background()
+	rc := NewMixCoordMock()
+	cache, err := initMetaCache(ctx, rc)
+	assert.NoError(t, err)
+
+	schemaWithoutVector := &schemapb.CollectionSchema{
+		Name: "no_vector",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+		},
+	}
+	schemaWithVector := &schemapb.CollectionSchema{
+		Name: "with_vector",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
+	schemas := map[string]*schemapb.CollectionSchema{"no_vector": schemaWithoutVector, "with_vector": schemaWithVector}
+	rc.SetDescribeCollectionFunc(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			Schema:         schemas[request.GetCollectionName()],
+			CollectionID:   UniqueID(len(request.GetCollectionName())),
+			CollectionName: request.GetCollectionName(),
+		}, nil
+	})
+	rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{Status: merr.Status(merr.WrapErrIndexNotFound("none"))}, nil
+	}
+	rc.showPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+		return &milvuspb.ShowPartitionsResponse{
+			Status:               merr.Success(),
+			PartitionNames:       []string{"_default"},
+			PartitionIDs:         []int64{1},
+			CreatedTimestamps:    []uint64{1},
+			CreatedUtcTimestamps: []uint64{1},
+		}, nil
+	}
+
+	newLoadTask := func(collectionName string) *LoadCollectionTask {
+		return &LoadCollectionTask{
+			LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_LoadCollection},
+				CollectionName: collectionName,
+				ReplicaNumber:  1,
+			},
+			ctx:      ctx,
+			mixCoord: rc,
+			baseTask: baseTask{MetaCache: cache},
+		}
+	}
+	newLoadPartitionsTask := func(collectionName string) *LoadPartitionsTask {
+		return &LoadPartitionsTask{
+			LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_LoadPartitions},
+				CollectionName: collectionName,
+				PartitionNames: []string{"_default"},
+				ReplicaNumber:  1,
+			},
+			ctx:      ctx,
+			mixCoord: rc,
+			baseTask: baseTask{MetaCache: cache},
+		}
+	}
+
+	t.Run("load collection without vector needs no index", func(t *testing.T) {
+		assert.NoError(t, newLoadTask("no_vector").Execute(ctx))
+	})
+	t.Run("load collection with vector still needs an index", func(t *testing.T) {
+		err := newLoadTask("with_vector").Execute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIndexNotFound)
+	})
+	t.Run("load partitions without vector needs no index", func(t *testing.T) {
+		assert.NoError(t, newLoadPartitionsTask("no_vector").Execute(ctx))
+	})
+	t.Run("load partitions with vector still needs an index", func(t *testing.T) {
+		err := newLoadPartitionsTask("with_vector").Execute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIndexNotFound)
 	})
 }
 
@@ -6624,6 +6738,31 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("scalar field on a collection without vector field", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields = schema.Fields[:1]
+		newField := &schemapb.FieldSchema{
+			Name:     "new_field",
+			DataType: schemapb.DataType_Int64,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
+	t.Run("vector field on a collection without vector field", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields = schema.Fields[:1]
+		newField := &schemapb.FieldSchema{
+			Name:       "vec",
+			DataType:   schemapb.DataType_FloatVector,
+			Nullable:   true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+		}
+		// A collection without a vector field may gain one.
+		assert.NoError(t, validateAddFieldRequest(schema, newField))
+	})
+
 	t.Run("text field requires storage v3", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 		t.Cleanup(func() {
@@ -6962,11 +7101,14 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 						{Key: "max_length", Value: "65535"},
 					},
 				},
+				{FieldID: 102, DataType: schemapb.DataType_FloatVector, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 			},
 		},
 	}
 
-	// oldSchema matches the collection: has a varchar field "text" used as BM25 input.
+	// oldSchema matches the collection: has a varchar field "text" used as BM25 input,
+	// and a vector field, since a collection created without one cannot gain a
+	// vector-output function.
 	oldSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, DataType: schemapb.DataType_Int64, AutoID: true, Name: "ID", IsPrimaryKey: true},
@@ -6977,6 +7119,7 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 					{Key: "enable_analyzer", Value: "true"},
 				},
 			},
+			{FieldID: 102, DataType: schemapb.DataType_FloatVector, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 		},
 	}
 
@@ -7663,10 +7806,17 @@ func TestValidateDropField(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot drop primary key field")
 	})
 
-	t.Run("cannot drop the last vector field", func(t *testing.T) {
-		err := validateDropField(baseSchema, "vector")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot drop the last vector field")
+	t.Run("the last vector field may be dropped while collections without vector are enabled", func(t *testing.T) {
+		// "vector" is also a function output here, which is a separate rule; the
+		// last-vector rule itself no longer rejects the drop.
+		if err := validateDropField(baseSchema, "vector"); err != nil {
+			assert.NotContains(t, err.Error(), "cannot drop the last vector field")
+		}
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropField(baseSchema, "vector")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot drop the last vector field")
+		})
 	})
 
 	t.Run("can drop vector field when multiple exist", func(t *testing.T) {
@@ -7801,6 +7951,26 @@ func TestValidateDropField(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("drop struct array field on a collection without vector field", func(t *testing.T) {
+		// No vector anywhere: removedVectors is 0 and the guard must not fire.
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 101, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 102, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.NoError(t, err)
+	})
+
 	t.Run("reject drop struct array field when it holds the only vector", func(t *testing.T) {
 		// The struct contains the only vector in the collection (an ArrayOfVector
 		// sub-field); dropping it would leave no vector field.
@@ -7819,9 +7989,12 @@ func TestValidateDropField(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropField(schema, "paragraphs")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "would leave no vector field")
+		assert.NoError(t, validateDropField(schema, "paragraphs"))
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropField(schema, "paragraphs")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "would leave no vector field")
+		})
 	})
 
 	t.Run("reject drop struct array field with protected sub-field", func(t *testing.T) {
@@ -8393,7 +8566,10 @@ func TestValidateDropStructSubField(t *testing.T) {
 	vector := proto.Clone(schema).(*schemapb.CollectionSchema)
 	vector.Fields = vector.Fields[:1]
 	vector.StructArrayFields[0].Fields[1].DataType = schemapb.DataType_ArrayOfVector
-	require.ErrorContains(t, validateDropField(vector, "profile[b]"), "cannot drop the last vector field")
+	require.NoError(t, validateDropField(vector, "profile[b]"))
+	withCollectionWithoutVectorDisabled(func() {
+		require.ErrorContains(t, validateDropField(vector, "profile[b]"), "cannot drop the last vector field")
+	})
 
 	used := proto.Clone(schema).(*schemapb.CollectionSchema)
 	used.Functions = []*schemapb.FunctionSchema{{Name: "f", InputFieldNames: []string{"profile[b]"}}}
@@ -8556,6 +8732,25 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("drop function on a collection without vector field", func(t *testing.T) {
+		// removedVectors is 0 here; the guard must not fire because 0 >= 0.
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "label", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "label_func", Type: schemapb.FunctionType_Unknown,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"label"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "label_func", true)
+		assert.NoError(t, err)
+	})
+
 	t.Run("drop function field would leave no vector field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -8570,9 +8765,12 @@ func TestValidateDropFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropFunction(schema, "bm25_func", true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "would leave no vector field")
+		assert.NoError(t, validateDropFunction(schema, "bm25_func", true))
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropFunction(schema, "bm25_func", true)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "would leave no vector field")
+		})
 	})
 
 	t.Run("drop function field preserves vector in struct array field", func(t *testing.T) {
@@ -8600,4 +8798,14 @@ func TestValidateDropFunction(t *testing.T) {
 		err := validateDropFunction(schema, "bm25_func", true)
 		assert.NoError(t, err)
 	})
+}
+
+// withCollectionWithoutVectorDisabled runs fn with
+// common.enableCollectionWithoutVector turned off: a schema change that would
+// leave a collection with no vector field is rejected then.
+func withCollectionWithoutVectorDisabled(fn func()) {
+	key := paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+	fn()
 }

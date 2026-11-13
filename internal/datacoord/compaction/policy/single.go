@@ -301,7 +301,7 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.Segments = index.FilterInIndexedSegments(ctx, policy.handler, policy.IndexMeta, false, group.Segments...)
+			group.Segments = index.FilterInCompactionInputReadySegments(ctx, policy.handler, policy.IndexMeta, false, group.Segments...)
 		}
 
 		for _, segment := range group.Segments {

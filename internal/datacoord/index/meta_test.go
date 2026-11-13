@@ -2865,9 +2865,11 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 		want    bool
 	}{
 		{
+			// A collection without a vector field has no DiskANN index and keeps
+			// the default segment size; 0 == 0 must not select the DiskANN size.
 			name:   "no vector field",
 			schema: newSchema(false, scalar),
-			want:   true,
+			want:   false,
 		},
 		{
 			name:    "top-level DISKANN",

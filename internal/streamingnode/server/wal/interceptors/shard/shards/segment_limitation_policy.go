@@ -24,7 +24,9 @@ type segmentLimitation struct {
 
 // SegmentLimitationPolicy is the interface to generate the limitation of the segment.
 type SegmentLimitationPolicy interface {
-	// GenerateLimitation generates the limitation of the segment.
+	// GenerateLimitation generates the limitation of the segment. An L1
+	// segment is sealed on bytes and on dataCoord.segment.maxRows rows,
+	// whichever comes first.
 	GenerateLimitation(lv datapb.SegmentLevel) segmentLimitation
 }
 
@@ -74,7 +76,16 @@ func (p jitterSegmentLimitationPolicy) generateL0Limitation() segmentLimitation 
 	}
 }
 
-// generateL1Limitation generates the limitation of the L1 segment.
+// generateL1Limitation generates the limitation of the L1 segment: the seal
+// proportion of the segment size, and dataCoord.segment.maxRows rows, both
+// with the same jitter. The row limit applies to every collection and does not
+// read the schema; wide rows reach the byte limit first. maxRows 0 leaves the
+// segment sealed on bytes only.
+//
+// The seal proportion is not applied to the row limit. It exists to keep a
+// growing segment, which is held in memory, well below maxSize bytes; a
+// segment of narrow rows is small in bytes at maxRows rows, and sealing it
+// earlier would only produce segments that compaction has to merge back.
 func (p jitterSegmentLimitationPolicy) generateL1Limitation() segmentLimitation {
 	// TODO: It's weird to set such a parameter into datacoord configuration.
 	// Refactor it in the future
@@ -82,9 +93,13 @@ func (p jitterSegmentLimitationPolicy) generateL1Limitation() segmentLimitation 
 	maxSegmentSize := uint64(paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
 	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
+	segmentRows := uint64(math.MaxUint64)
+	if maxRows := paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64(); maxRows > 0 {
+		segmentRows = max(uint64(jitterRatio*float64(maxRows)), 1)
+	}
 	return segmentLimitation{
 		PolicyName:  "jitter_segment_limitation",
-		SegmentRows: math.MaxUint64,
+		SegmentRows: segmentRows,
 		SegmentSize: segmentSize,
 	}
 }

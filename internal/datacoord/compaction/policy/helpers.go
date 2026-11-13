@@ -105,6 +105,58 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
+// GetSegmentMaxRows returns the number of rows a segment is capped at,
+// dataCoord.segment.maxRows, or 0 when no cap applies.
+//
+// Segments are sized in bytes. A segment of maxSize bytes of narrow rows holds
+// tens of millions of rows, and the per-segment serial work (scalar index
+// build, delete replay at load) grows with the row count. So a segment is full
+// at maxSize bytes or at this many rows, whichever comes first, for every
+// collection. The cap counts rows; it does not depend on the schema or on any
+// estimate of the row size, so it does not change when a vector field or a
+// function field is added or dropped: wide rows reach the byte limit first and
+// are not affected by it.
+//
+// The cap is an absolute number of rows and does not follow the byte limit.
+// With maxSize S a collection is affected when maxRows of its rows take less
+// than S, so a deployment that raises maxSize should raise maxRows with it.
+func GetSegmentMaxRows() int64 {
+	return max(Params.DataCoordCfg.SegmentMaxRows.GetAsInt64(), 0)
+}
+
+// MinRowSize converts the row cap into the minimum number of bytes one row is
+// charged when a segment is sized for compaction: expectedSize / maxRows, or 0
+// when no cap applies. Charging max(bytes, rows x MinRowSize) makes a segment
+// reach expectedSize exactly when it holds expectedSize bytes or maxRows rows,
+// whichever comes first, so the byte based planners apply the row cap without
+// a second dimension.
+func MinRowSize(expectedSize, maxRows int64) float64 {
+	if expectedSize <= 0 || maxRows <= 0 {
+		return 0
+	}
+	return float64(expectedSize) / float64(maxRows)
+}
+
+// RowCappedSize is the size a group of segments holding size bytes and rows
+// rows is charged under the row cap: max(size, rows x MinRowSize).
+func RowCappedSize(size float64, rows int64, expectedSize, maxRows int64) float64 {
+	return max(size, float64(rows)*MinRowSize(expectedSize, maxRows))
+}
+
+// PlanMaxSegmentRows is the row count a compaction writer cuts an output
+// segment at for a plan whose byte target is planMaxSize: the row cap scaled
+// by planMaxSize / expectedSize, so that the writer and the planner agree on
+// which outputs are full. 0 means the writer cuts on bytes only.
+func PlanMaxSegmentRows(planMaxSize, expectedSize, maxRows int64) int64 {
+	if planMaxSize <= 0 || expectedSize <= 0 || maxRows <= 0 {
+		return 0
+	}
+	if planMaxSize >= expectedSize {
+		return maxRows
+	}
+	return max(int64(float64(maxRows)*float64(planMaxSize)/float64(expectedSize)), 1)
+}
+
 func IsNormalManualCompactionCandidate(mt *meta.Meta, segment *meta.SegmentInfo) bool {
 	return IsNormalManualCompactionSegment(segment) &&
 		IsSharedCompactionSelectable(mt, segment) &&

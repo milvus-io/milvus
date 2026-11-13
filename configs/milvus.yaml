@@ -873,6 +873,15 @@ dataCoord:
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
+    # The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+    # segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+    # scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+    # imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+    # take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+    # collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+    # deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+    # 0 disables the row limit.
+    maxRows: 4000000
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
@@ -1442,6 +1451,15 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
+  # Whether a collection may have no vector field: CreateCollection accepts such a schema, and the last
+  # vector field of a collection may be dropped. Such a collection supports every operation except search;
+  # a nullable vector field can be added to it later, which makes it a vector collection.
+  # Turning it off rejects new requests to create such a collection, or to drop the last vector field of one,
+  # on this cluster. Collections that already exist keep working, and collections received through
+  # replication are not affected.
+  # It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
+  # is still running cannot be loaded or compacted until every role is upgraded.
+  enableCollectionWithoutVector: true
   traceLogMode: 0 # trace request info
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size

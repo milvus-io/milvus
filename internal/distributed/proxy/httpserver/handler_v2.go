@@ -2025,6 +2025,21 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
+// abortSearchWithoutVectorField returns the error the Proxy returns for a search on a
+// collection without a vector field. The search handlers resolve a vector field to decode
+// the request body, so without this check such a request failed as a malformed body.
+func abortSearchWithoutVectorField(c *gin.Context, collSchema *schemapb.CollectionSchema, collectionName string) error {
+	if typeutil.HasVectorField(collSchema) {
+		return nil
+	}
+	err := merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", collectionName)
+	HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPReturnCode:    merr.Code(err),
+		HTTPReturnMessage: err.Error(),
+	})
+	return err
+}
+
 func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
 	var err error
 	var vectorField *schemapb.FieldSchema
@@ -2164,6 +2179,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
+		return nil, err
+	}
+	if err := abortSearchWithoutVectorField(c, collSchema, httpReq.CollectionName); err != nil {
 		return nil, err
 	}
 
@@ -2514,6 +2532,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
+		return nil, err
+	}
+	if err := abortSearchWithoutVectorField(c, collSchema, httpReq.CollectionName); err != nil {
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)

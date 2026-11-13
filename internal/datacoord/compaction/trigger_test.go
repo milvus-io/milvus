@@ -3185,7 +3185,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize, 0)
 			require.Len(t, got, len(tt.want))
 			for i, bucket := range got {
 				gotIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })
@@ -3485,7 +3485,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize, 0)
 			require.Len(t, got, len(tt.want))
 			for i, bucket := range got {
 				gotIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })

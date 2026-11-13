@@ -1008,6 +1008,77 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
             check_items={"exp_res": []},
         )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("file_format", ["json", "csv", "parquet"])
+    def test_import_collection_without_vector_preserves_rows(self, file_format, upload_import_file, tmp_path):
+        """
+        target: bulk import into a collection that has no vector field
+        method: import scalar rows, load with no index, then count and query
+        expected: the job completes and every imported row is returned unchanged
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("import_without_vector")
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("age", DataType.INT32)
+        schema.add_field("name", DataType.VARCHAR, max_length=64)
+        self.create_collection(client, collection_name, schema=schema)
+        rows = [{"id": i, "age": i % 100, "name": f"name_{i}"} for i in range(200)]
+        path = tmp_path / f"without_vector.{file_format}"
+        self._write_rows(path, rows, pa.schema([("id", pa.int64()), ("age", pa.int32()), ("name", pa.string())]))
+        self._import_and_wait(
+            collection_name, [[upload_import_file(path)]], {"sep": "|"} if file_format == "csv" else {}
+        )
+
+        # No index of any kind is needed to load.
+        self.load_collection(client, collection_name)
+        self.query(
+            client,
+            collection_name,
+            filter="id >= 0",
+            output_fields=["id", "age", "name"],
+            consistency_level="Strong",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows, "pk_name": "id"},
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("file_format", ["json", "csv", "parquet"])
+    def test_import_collection_without_vector_rejects_file_with_no_field(
+        self, file_format, upload_import_file, tmp_path
+    ):
+        """
+        target: an import file that provides none of the fields of a collection without a vector field
+        method: every field is optional for import (autoID primary key, nullable scalar); import a file
+                whose only column is not in the schema
+        expected: the job fails instead of running forever, and no row becomes visible
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("import_without_vector_no_field")
+        schema = self.create_schema(client, auto_id=True, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("name", DataType.VARCHAR, max_length=64, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+        path = tmp_path / f"no_field.{file_format}"
+        self._write_rows(path, [{"unrelated": i} for i in range(10)], pa.schema([("unrelated", pa.int64())]))
+        progress = self._import_and_wait(
+            collection_name,
+            [[upload_import_file(path)]],
+            {"sep": "|"} if file_format == "csv" else {},
+            expected_state="Failed",
+        )
+        assert "no field of the collection" in progress.get("reason", ""), progress
+        self.load_collection(client, collection_name)
+        self.query(
+            client,
+            collection_name,
+            filter="id >= 0",
+            output_fields=["id"],
+            consistency_level="Strong",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": []},
+        )
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("file_format", ["parquet", "numpy"])
     @pytest.mark.parametrize("vector_type", [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR], ids=["fp16", "bf16"])

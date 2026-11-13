@@ -672,7 +672,7 @@ func (s *Server) queryServingSegments(ctx context.Context, segments map[int64]*i
 				flushedIDs.Insert(info.GetID())
 			}
 		}
-		indexedInfos := index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, infos...)
+		indexedInfos := index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, infos...)
 		indexed := typeutil.NewUniqueSet(lo.Map(indexedInfos, func(info *meta.SegmentInfo, _ int) int64 { return info.GetID() })...)
 		frontier, _ := retrieveQuerySegments(validInfos, flushedIDs, droppedIDs, indexed)
 		hasKnownCycle := newQueryLineageCycleChecker(validInfos)

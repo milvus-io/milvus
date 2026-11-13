@@ -435,6 +435,7 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
+	EnableCollectionWithoutVector        ParamItem `refreshable:"true"`
 
 	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
 	credentialBrokerPolicy              *specutil.BrokerPolicy
@@ -1495,6 +1496,22 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableGrowingSourceFlush.Init(base.mgr)
+
+	p.EnableCollectionWithoutVector = ParamItem{
+		Key:          "common.enableCollectionWithoutVector",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether a collection may have no vector field: CreateCollection accepts such a schema, and the last
+vector field of a collection may be dropped. Such a collection supports every operation except search;
+a nullable vector field can be added to it later, which makes it a vector collection.
+Turning it off rejects new requests to create such a collection, or to drop the last vector field of one,
+on this cluster. Collections that already exist keep working, and collections received through
+replication are not affected.
+It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
+is still running cannot be loaded or compacted until every role is upgraded.`,
+		Export: true,
+	}
+	p.EnableCollectionWithoutVector.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -6578,6 +6595,7 @@ type dataCoordConfig struct {
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxRows                 ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
@@ -6892,6 +6910,22 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
+
+	p.SegmentMaxRows = ParamItem{
+		Key:          "dataCoord.segment.maxRows",
+		Version:      "3.0.0",
+		DefaultValue: "4000000",
+		Doc: `The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+0 disables the row limit.`,
+		Export: true,
+	}
+	p.SegmentMaxRows.Init(base.mgr)
 
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",

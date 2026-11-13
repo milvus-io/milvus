@@ -85,11 +85,6 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 		minRowsToEnableIndex: Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(),
 	}
 
-	vectorFields := typeutil.GetVectorFieldSchemas(collection.Schema)
-	vectorFieldIDs := make([]UniqueID, 0, len(vectorFields))
-	for _, field := range vectorFields {
-		vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
-	}
 	// Text and JSON key stats are only built on top-level fields.
 	for _, field := range collection.Schema.GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -103,22 +98,41 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 	r.RequireTextStats = len(r.textStatsFieldIDs) > 0
 	r.RequireJSONKeyStats = len(r.jsonKeyStatsFieldIDs) > 0
 
-	// Index term: all vector fields, struct vector sub-fields included, must be
-	// indexed; when DVForceAllIndexReady every scalar-indexed field must be too
-	// (the same target set as FilterInIndexedSegments). A pure-scalar
-	// collection, with no top-level or sub-field vector, leaves the vector set
-	// empty: the term would otherwise be vacuously satisfied, so degrade to
-	// "every scalar index on the collection is Finished" (design §5.3, O3).
+	// Index term: the handoff target set, shared with the read-time path
+	// (index.FilterInHandoffReadySegments).
 	if m.IndexCatalog != nil && m.IndexCatalog.HasIndex(collection.ID) {
 		r.HasIndex = true
-		r.TargetFieldIDs = append(r.TargetFieldIDs, vectorFieldIDs...)
-		if len(vectorFieldIDs) == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			for _, index := range m.IndexCatalog.GetIndexesForCollection(collection.ID, "") {
-				r.TargetFieldIDs = append(r.TargetFieldIDs, index.FieldID)
-			}
-		}
+		r.TargetFieldIDs = HandoffIndexTargetFields(m.IndexCatalog, collection)
 	}
 	return r
+}
+
+// HandoffIndexTargetFields is the set of fields whose index must be Finished on
+// a segment before it may replace its parents in the query view. It is shared
+// by the write-time predicate (PrepareReadiness) and the read-time filter
+// (index.FilterInHandoffReadySegments) so both paths answer the same way:
+//
+//   - every vector field, struct vector sub-fields included;
+//   - a collection with no vector field has no vector index to wait for, and
+//     the set would be empty and vacuously satisfied; it degrades to every
+//     field with an index defined, so a compaction output waits for its scalar
+//     indexes (design §5.3, O3);
+//   - with dataCoord.dataview.forceAllIndexReady every indexed field is
+//     included for any collection.
+//
+// The caller decides what an empty set means; PrepareReadiness only calls it
+// for a collection with an index defined.
+func HandoffIndexTargetFields(catalog SegmentIndexCatalog, collection *CollectionInfo) []int64 {
+	fieldIDs := typeutil.NewUniqueSet()
+	for _, field := range typeutil.GetVectorFieldSchemas(collection.Schema) {
+		fieldIDs.Insert(field.GetFieldID())
+	}
+	if fieldIDs.Len() == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
+		for _, index := range catalog.GetIndexesForCollection(collection.ID, "") {
+			fieldIDs.Insert(index.FieldID)
+		}
+	}
+	return fieldIDs.Collect()
 }
 
 // Ready reports whether the segment satisfies every readiness term. A nil
