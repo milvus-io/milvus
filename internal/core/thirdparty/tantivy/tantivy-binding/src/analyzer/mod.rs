@@ -2,6 +2,8 @@ mod analyzer;
 mod build_in_analyzer;
 mod dict;
 mod filter;
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+pub(crate) mod tls_openssl;
 
 pub mod options;
 pub mod tokenizers;

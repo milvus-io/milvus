@@ -1,6 +1,8 @@
 mod cc_cedict;
 mod common;
 mod fetch;
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+mod fetch_openssl;
 mod ipadic;
 mod ipadic_neologd;
 mod ko_dic;

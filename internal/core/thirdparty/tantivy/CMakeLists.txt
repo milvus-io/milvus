@@ -1,6 +1,7 @@
 set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
 option(TANTIVY_ANALYZER_REMOTE_TLS "Enable Lindera HTTPS dictionary fetch and gRPC tokenizer TLS (rustls/ring). Disable for FIPS builds." ON)
+option(TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL "Enable Lindera HTTPS dictionary fetch and gRPC tokenizer TLS through OpenSSL, without rustls/ring. Requires TANTIVY_ANALYZER_REMOTE_TLS=OFF." OFF)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CARGO_CMD cargo +1.89 build --verbose)
@@ -14,11 +15,35 @@ if (NOT TANTIVY_ANALYZER_REMOTE_TLS)
     set(CARGO_CMD ${CARGO_CMD} --no-default-features)
 endif ()
 
+set(TANTIVY_CARGO_ENV)
+if (TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL)
+    if (TANTIVY_ANALYZER_REMOTE_TLS)
+        message(FATAL_ERROR "TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=ON requires TANTIVY_ANALYZER_REMOTE_TLS=OFF")
+    endif ()
+    set(CARGO_CMD ${CARGO_CMD} --features analyzer-remote-tls-openssl)
+    # Point openssl-sys at the Conan OpenSSL that milvus_core links. Left alone,
+    # it finds the system OpenSSL through pkg-config and compiles against the
+    # wrong headers, so fail here instead of falling back to that.
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" TANTIVY_BUILD_TYPE_UPPER)
+    set(TANTIVY_OPENSSL_PREFIX "${openssl_PACKAGE_FOLDER_${TANTIVY_BUILD_TYPE_UPPER}}")
+    if (NOT TANTIVY_OPENSSL_PREFIX)
+        set(TANTIVY_OPENSSL_PREFIX "${openssl_PACKAGE_FOLDER_RELEASE}")
+    endif ()
+    if (NOT EXISTS "${TANTIVY_OPENSSL_PREFIX}/include/openssl/ssl.h")
+        message(FATAL_ERROR "TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=ON: Conan OpenSSL not found (prefix: '${TANTIVY_OPENSSL_PREFIX}')")
+    endif ()
+    set(TANTIVY_CARGO_ENV
+        "OPENSSL_NO_VENDOR=1"
+        "OPENSSL_INCLUDE_DIR=${TANTIVY_OPENSSL_PREFIX}/include"
+        "OPENSSL_LIB_DIR=${TANTIVY_OPENSSL_PREFIX}/lib")
+endif ()
+
 if (TANTIVY_FEATURES)
     set(CARGO_CMD ${CARGO_CMD} --features ${TANTIVY_FEATURES})
 endif ()
 message("Cargo command: ${CARGO_CMD}")
 message(STATUS "TANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS}")
+message(STATUS "TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=${TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL}")
 
 set(TOKENIZER_PROTO ${CMAKE_BINARY_DIR}/thirdparty/milvus-proto/proto/tokenizer.proto)
 
@@ -51,6 +76,7 @@ add_custom_target(tantivy_build
                 "PATH=${HOME_VAR}/.cargo/bin:${PATH_VAR}"
                 "TOKENIZER_PROTO=${TOKENIZER_PROTO}"
                 "CARGO_TARGET_DIR=${TANTIVY_CARGO_TARGET_DIR}"
+                ${TANTIVY_CARGO_ENV}
                 ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
         BYPRODUCTS ${LIB_FILE}
