@@ -354,6 +354,12 @@ func TestCompactionTargetWaitsForDropAndRetainsRecoveredHistory(t *testing.T) {
 	require.NotZero(t, resp.GetTarget().GetStoppedAt())
 
 	stored := records[record.GetTargetID()]
+	dropped, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{
+		TargetId: record.GetTargetID(), Collection: req.GetCollection(),
+	})
+	require.NoError(t, merr.CheckRPCCall(dropped, err))
+	require.True(t, proto.Equal(stored, records[record.GetTargetID()]))
+
 	catalog.EXPECT().DropCompactionTarget(mock.Anything, stored).Return(nil).Once()
 	s.compactionTargetMeta.CollectExpired(ctx, tsoutil.PhysicalTime(stored.GetInactivatedAtTS()).Add(8*24*time.Hour))
 	resp, err = s.DescribeCompactionTarget(ctx, req)
