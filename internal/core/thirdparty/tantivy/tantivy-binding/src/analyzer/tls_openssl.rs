@@ -1,7 +1,8 @@
-//! OpenSSL TLS client settings for gRPC tokenizers.
+//! OpenSSL TLS client settings shared by gRPC tokenizers and Lindera
+//! dictionary downloads.
 //!
-//! Compiled only with the `analyzer-remote-tls-openssl` feature. Callers get
-//! these protocol settings:
+//! Compiled only with the `analyzer-remote-tls-openssl` feature. Both callers
+//! get the same protocol settings:
 //!
 //! - TLS 1.2 or later, with ECDHE and AEAD cipher suites.
 //! - Key exchange limited to P-256 and P-384, so a server that only offers
@@ -26,6 +27,7 @@ use tokio_openssl::SslStream;
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub(crate) const ALPN_H2: &[u8] = b"h2";
+pub(crate) const ALPN_HTTP11: &[u8] = b"http/1.1";
 
 // TLS 1.2 suites matching what the rustls path can negotiate. TLS 1.3 suites
 // are left at the OpenSSL default, which is also AEAD only.
