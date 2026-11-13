@@ -2414,6 +2414,100 @@ TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
     }
 }
 
+TEST_P(TestLazyManifest, LazyManifestReopenInvalidatesExpressionCache) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    const auto base_a = UniqueManifestTestPath("expr_cache_manifest_a");
+    const auto base_b = UniqueManifestTestPath("expr_cache_manifest_b");
+    auto fs = GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_a(fs, base_a);
+    StorageV2TempDirGuard dir_b(fs, base_b);
+    milvus::test::V3SegmentTestData data_a(
+        schema_,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_a,
+        LazyManifestTestGroupPattern(schema_));
+    milvus::test::V3SegmentTestData data_b(
+        schema_,
+        2,
+        32,
+        128,
+        TestLocalPath,
+        base_b,
+        LazyManifestTestGroupPattern(schema_));
+    auto& cache = exec::ExprResCacheManager::Instance();
+    const auto cache_path = UniqueManifestTestPath("expr_cache_files");
+    auto cleanup = folly::makeGuard([&] {
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+        EXPECT_TRUE(cache.SetConfig(exec::CacheConfig{}));
+        boost::filesystem::remove_all(cache_path);
+    });
+    for (auto mode : {exec::CacheMode::Memory, exec::CacheMode::Disk}) {
+        exec::CacheConfig config;
+        config.mode = mode;
+        config.disk_base_path = cache_path;
+        config.disk_max_file_size = 1 << 20;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = config.disk_min_eval_duration_us = 0;
+        ASSERT_TRUE(cache.SetConfig(config));
+        exec::ExprResCacheManager::SetEnabled(true);
+        auto segment = CreateV3ManifestSegment(data_a, 73999);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        proto::plan::GenericValue value;
+        value.set_int64_val(31);
+        auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(fields.at("int64"), DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            value);
+        auto filter = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, predicate);
+        auto evaluate = [&] {
+            auto lease = sealed->AcquireReadLease(folly::CancellationToken());
+            auto context = std::make_shared<exec::QueryContext>(
+                "manifest-cache", sealed, 64, MAX_TIMESTAMP);
+            context->set_read_snapshot(sealed->CaptureReadSnapshot());
+            context->set_enable_expr_cache(true);
+            context->set_enable_sub_expr_cache_write(false);
+            auto fragment = plan::PlanFragment(filter);
+            auto result =
+                query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+            return TargetBitmapView(column->GetRawData(), column->size())
+                .count();
+        };
+        // DataGen marks only even rows valid. Of values 0..63, only the
+        // 16 even values above 31 match, leaving 48 excluded rows.
+        ASSERT_EQ(evaluate(), 48);
+        ASSERT_EQ(cache.GetEntryCount(), 1);
+        ASSERT_EQ(evaluate(), 48);
+        auto generation =
+            sealed->CaptureReadSnapshot()->GetExprCacheGeneration();
+        OpContext context;
+        folly::CancellationSource source;
+        source.requestCancellation();
+        context.cancellation_token = source.getToken();
+        EXPECT_ANY_THROW(
+            sealed->Reopen(&context, MakeV3ManifestLoadInfo(data_b, 73999)));
+        EXPECT_EQ(sealed->CaptureReadSnapshot()->GetExprCacheGeneration(),
+                  generation);
+        EXPECT_EQ(cache.GetEntryCount(), 1);
+        EXPECT_EQ(evaluate(), 48);
+        OpContext active_context;
+        sealed->Reopen(&active_context, MakeV3ManifestLoadInfo(data_b, 73999));
+        EXPECT_NE(sealed->CaptureReadSnapshot()->GetExprCacheGeneration(),
+                  generation);
+        EXPECT_EQ(cache.GetEntryCount(), 0);
+        EXPECT_EQ(evaluate(), 64);
+        EXPECT_EQ(cache.GetEntryCount(), 1);
+        EXPECT_EQ(evaluate(), 64);
+    }
+}
+
 TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto warmup_policies =

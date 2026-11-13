@@ -53,6 +53,7 @@ EvalExprInBatches(const expr::TypedExprPtr& logical_expr,
                   int64_t active_count) {
     auto query_context = std::make_shared<exec::QueryContext>(
         DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
     exec::ExecContext exec_context(query_context.get());
     auto compiled =
         exec::CompileExpressions({logical_expr}, &exec_context, {}, false);

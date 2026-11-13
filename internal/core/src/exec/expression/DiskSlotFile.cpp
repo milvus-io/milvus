@@ -397,6 +397,14 @@ DiskSlotFile::RebuildClockKeys() {
 }
 
 void
+DiskSlotFile::Remove() noexcept {
+    Close();
+    // Deletion is best effort; a leftover file has no lookup metadata and is
+    // removed by the existing cache-directory cleanup on backend rebuild.
+    ::unlink(path_.c_str());
+}
+
+void
 DiskSlotFile::Close() {
     std::unique_lock lock(mutex_);
     if (fd_ >= 0) {

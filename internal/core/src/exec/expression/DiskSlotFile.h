@@ -109,6 +109,10 @@ class DiskSlotFile {
     void
     Close();
 
+    // Remove this exact file, even after a newer generation is installed.
+    void
+    Remove() noexcept;
+
     uint32_t
     GetUsedCount() const;
 

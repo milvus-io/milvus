@@ -934,10 +934,16 @@ class MatchExpr : public ITypeFilterExpr {
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
-                           struct_name_,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        const auto predicate = inputs_[0]->ToString();
+        return fmt::format(
+            "MatchExpr(struct_name_length={}, struct_name={}, match_type={}, "
+            "count={}, predicate_length={}, predicate={})",
+            struct_name_.size(),
+            struct_name_,
+            proto::plan::MatchType_Name(match_type_),
+            count_,
+            predicate.size(),
+            predicate);
     }
 
     const std::string&

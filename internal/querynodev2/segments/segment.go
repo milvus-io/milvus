@@ -1404,9 +1404,10 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
-	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
-		// erase expr-cache for this segment before deleting C segment
-		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
+	if s.Type() == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// Clear growing segments' generation-zero entries. Sealed instances retire their own
+		// generation in DeleteSegment without touching other live read states.
+		C.ExprResCacheEraseLegacySegment(C.int64_t(s.ID()))
 	}
 
 	GetDynamicPool().Submit(func() (any, error) {

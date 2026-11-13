@@ -535,6 +535,8 @@ TEST_F(JsonFlatExpressionTest, ReusesValidityAcrossLiteralsAndOperators) {
                     "path=/a:family={}",
                     json_fid_.get(),
                     static_cast<unsigned int>(DataType::DOUBLE))};
+    artifact_key.generation =
+        segment_->CaptureReadSnapshot()->GetExprCacheGeneration();
     exec::ExprResCacheManager::Value artifact;
     artifact.active_count = json_data_.size();
     ASSERT_TRUE(cache.Get(artifact_key, artifact));
@@ -562,7 +564,9 @@ TEST_F(JsonFlatExpressionTest, ReusesValidityAcrossLiteralsAndOperators) {
               1);
     EXPECT_EQ(cache.GetEntryCount(), 8);
 
-    EXPECT_EQ(cache.EraseSegment(segment_->get_segment_id()), 8);
+    auto retired = cache.RetireGeneration(segment_->get_segment_id(),
+                                          artifact_key.generation);
+    EXPECT_EQ(retired.memory.count, 8);
     EXPECT_EQ(cache.GetEntryCount(), 0);
 }
 
