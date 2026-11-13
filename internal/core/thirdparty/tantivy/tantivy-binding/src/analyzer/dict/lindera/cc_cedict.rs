@@ -1,14 +1,27 @@
 use super::fetch;
 use crate::error::Result;
-#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-cc-cedict"))]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl",
+    feature = "lindera-cc-cedict"
+))]
 use crate::error::TantivyBindingError;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::cc_cedict::CcCedictBuilder;
 
 #[cfg(feature = "lindera-cc-cedict")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-cc-cedict")))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    not(feature = "lindera-cc-cedict")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, CcCedictBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -21,7 +34,10 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
 // Online download is compiled out; only a dictionary already built under
 // `build_dir` can be used.
 #[cfg(all(
-    not(feature = "analyzer-remote-tls"),
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
     not(feature = "lindera-cc-cedict")
 ))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
@@ -44,6 +60,7 @@ pub fn load_cc_cedict(
                 "https://lindera.dev/CC-CEDICT-MeCab-0.1.0-20200409.tar.gz".to_string(),
             ],
             md5_hash: "aba9748b70f37feede97b70c5d37f8a0".to_string(),
+            sha256_hash: "ed3cf9e3ec8a80647f0ec783dc09dad43b8ccad2e994f5eab6ff13a41d0916c8".to_string(),
     };
     if download_url.len() > 0 {
         params.download_urls = download_url
@@ -67,7 +84,11 @@ pub fn load_cc_cedict(
 
 #[cfg(all(
     test,
-    any(feature = "lindera-cc-cedict", feature = "analyzer-remote-tls")
+    any(
+        feature = "lindera-cc-cedict",
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )
 ))]
 mod tests {
     use super::load_cc_cedict;
@@ -82,6 +103,7 @@ mod tests {
         assert!(result.is_ok(), "err: {}", result.err().unwrap())
     }
 
+    // lindera_dictionary::assets is the rustls downloader behind build_rs.
     #[cfg(feature = "analyzer-remote-tls")]
     #[test]
     fn test_fetch_cc_cedict() {

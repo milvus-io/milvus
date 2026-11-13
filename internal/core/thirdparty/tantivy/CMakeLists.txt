@@ -1,7 +1,7 @@
 set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
 option(TANTIVY_ANALYZER_REMOTE_TLS "Enable Lindera HTTPS dictionary fetch and gRPC tokenizer TLS (rustls/ring). Disable for FIPS builds." ON)
-option(TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL "Enable gRPC tokenizer TLS through OpenSSL, without rustls/ring. Requires TANTIVY_ANALYZER_REMOTE_TLS=OFF. Lindera HTTPS dictionary fetch stays off." OFF)
+option(TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL "Enable Lindera HTTPS dictionary fetch and gRPC tokenizer TLS through OpenSSL, without rustls/ring. Requires TANTIVY_ANALYZER_REMOTE_TLS=OFF." OFF)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CARGO_CMD cargo +1.89 build --locked --verbose)

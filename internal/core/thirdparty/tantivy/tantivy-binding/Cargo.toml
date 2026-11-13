@@ -21,14 +21,19 @@ analyzer-remote-tls = [
     "tonic/_tls-any",
     "tonic/tls-ring",
 ]
-# analyzer-remote-tls-openssl encrypts gRPC tokenizer https:// endpoints through
-# OpenSSL, so neither rustls nor ring is linked. Off by default. It excludes
-# analyzer-remote-tls, so build it with --no-default-features. It does not enable
-# Lindera HTTPS dictionary fetch.
+# analyzer-remote-tls-openssl encrypts gRPC tokenizer https:// endpoints and
+# Lindera dictionary downloads through OpenSSL, so neither rustls nor ring is
+# linked. Downloads are checked with SHA-256 instead of MD5. Off by default. It
+# excludes analyzer-remote-tls, so build it with --no-default-features.
 # (see TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL in CMakeLists.txt).
 analyzer-remote-tls-openssl = [
+    "dep:flate2",
+    "dep:http-body-util",
+    "dep:hyper",
     "dep:hyper-util",
     "dep:openssl",
+    "dep:openssl-probe",
+    "dep:tar",
     "dep:tokio-openssl",
     "dep:tower",
     "tokio/net",
@@ -103,6 +108,12 @@ hyper-util = { version = "0.1", default-features = false, features = [
 ], optional = true }
 openssl = { version = "0.10", optional = true }
 tokio-openssl = { version = "0.6", optional = true }
+hyper = { version = "1", default-features = false, features = [
+    "client",
+    "http1",
+], optional = true }
+http-body-util = { version = "0.1", optional = true }
+openssl-probe = { version = "0.1", optional = true }
 tower = { version = "0.5", default-features = false, features = [
     "util",
 ], optional = true }

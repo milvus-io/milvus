@@ -1,14 +1,27 @@
 use super::fetch;
 use crate::error::Result;
-#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-unidic"))]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl",
+    feature = "lindera-unidic"
+))]
 use crate::error::TantivyBindingError;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::unidic::UnidicBuilder;
 
 #[cfg(feature = "lindera-unidic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-unidic")))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    not(feature = "lindera-unidic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, UnidicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -20,7 +33,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
 
 // Online download is compiled out; only a dictionary already built under
 // `build_dir` can be used.
-#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-unidic")))]
+#[cfg(all(
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
+    not(feature = "lindera-unidic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::ensure_prebuilt(params, "unidic")
 }
@@ -41,6 +60,7 @@ pub fn load_unidic(
             "https://Lindera.dev/unidic-mecab-2.1.2.tar.gz".to_string(),
         ],
         md5_hash: "f4502a563e1da44747f61dcd2b269e35".to_string(),
+        sha256_hash: "24ac75fe4e44d973b55e65847c35fa4aec2db7a41a07b49ca125146db9fc1189".to_string(),
     };
     if download_url.len() > 0 {
         params.download_urls = download_url
@@ -62,7 +82,14 @@ pub fn load_unidic(
     })
 }
 
-#[cfg(all(test, any(feature = "lindera-unidic", feature = "analyzer-remote-tls")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "lindera-unidic",
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )
+))]
 mod tests {
     use super::load_unidic;
     use env_logger;
