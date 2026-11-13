@@ -91,6 +91,8 @@ class UpdatesRecord {
         uint64_t updated_cells = 0, update_versions = 0, base_index_rows = 0;
         uint64_t value_rows = 0, base_rows = 0, correction_rows = 0;
         uint64_t old_index_reads = 0, index_postings = 0;
+        uint64_t all_valid_reads = 0, latest_validity_reads = 0;
+        uint64_t history_validity_reads = 0, latest_validity_bytes = 0;
     };
     Stats
     GetStats() const;
@@ -168,6 +170,11 @@ class UpdatesRecord {
                  uint64_t query_ts) const;
     TargetBitmap
     NullBitmap(int64_t field_id, uint64_t query_ts) const;
+    // Independent snapshot: all-valid for non-nullable fields, a clone of the
+    // latest NULL state when applicable, otherwise reconstructed from history.
+    // The same caller-owned apply-frontier contract as CreateReaders applies.
+    TargetBitmap
+    ValidityBitmap(int64_t field_id, uint64_t query_ts) const;
 
     bool
     HasField(int64_t field_id) const;

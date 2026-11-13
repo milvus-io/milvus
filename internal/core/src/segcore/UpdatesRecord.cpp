@@ -159,6 +159,10 @@ struct Field {
     UpdatesRecord::BaseReader base_reader;
     uint64_t base_index_rows = 0, updated_cells = 0;
     std::unique_ptr<AllDataVersionedIndex> index;
+    // Only indexed nullable fields need this bitmap. Reads clone it under the
+    // store lock; returned snapshots never alias subsequent writer changes.
+    TargetBitmap latest_validity;
+    uint64_t latest_validity_since = 0;
 
     void
     Validate(const UpdateValue& value) const {
@@ -261,6 +265,8 @@ class UpdatesRecord::Impl {
     std::atomic<uint64_t> index_reads{0}, value_reads{0};
     std::atomic<uint64_t> value_rows{0}, base_rows{0}, correction_rows{0};
     std::atomic<uint64_t> old_index_reads{0}, index_postings{0};
+    std::atomic<uint64_t> all_valid_reads{0}, latest_validity_reads{0},
+        history_validity_reads{0};
 };
 
 UpdatesRecord::UpdatesRecord(size_t row_count, bool enable_temp_index)
@@ -322,6 +328,8 @@ UpdatesRecord::RegisterField(int64_t field_id,
     if (impl_->enable_temp_index) {
         field->index = std::make_unique<AllDataVersionedIndex>();
         field->current_postings.reserve(impl_->row_count);
+        if (nullable)
+            field->latest_validity = TargetBitmap(impl_->row_count, true);
     }
     impl_->fields.emplace(field_id, std::move(field));
 }
@@ -344,6 +352,9 @@ UpdatesRecord::IndexBaseBatch(int64_t field_id,
         position.block->last_begin[position.slot] = 0;
         position.block->last_end[position.slot] = kInfinity;
         field.current_postings.push_back(position);
+        if (field.nullable)
+            field.latest_validity.set(
+                start + i, !std::holds_alternative<std::monostate>(values[i]));
     }
     field.base_index_rows += values.size();
 }
@@ -372,12 +383,16 @@ UpdatesRecord::GetStats() const {
         stats.updated_cells += field->updated_cells;
         stats.update_versions += field->versions.size();
         stats.base_index_rows += field->base_index_rows;
+        stats.latest_validity_bytes += field->latest_validity.size_in_bytes();
     }
     stats.value_rows = impl_->value_rows.load();
     stats.base_rows = impl_->base_rows.load();
     stats.correction_rows = impl_->correction_rows.load();
     stats.old_index_reads = impl_->old_index_reads.load();
     stats.index_postings = impl_->index_postings.load();
+    stats.all_valid_reads = impl_->all_valid_reads.load();
+    stats.latest_validity_reads = impl_->latest_validity_reads.load();
+    stats.history_validity_reads = impl_->history_validity_reads.load();
     return stats;
 }
 void
@@ -525,6 +540,15 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
             item.block->last_begin[item.slot] = mutation_ts;
             item.block->last_end[item.slot] = kInfinity;
             item.field->current_postings[item.offset] = {item.block, item.slot};
+            if (item.field->nullable) {
+                const bool valid = !std::holds_alternative<std::monostate>(
+                    *item.version->value);
+                auto& bitmap = item.field->latest_validity;
+                if (bitmap[item.offset] != valid) {
+                    bitmap.set(item.offset, valid);
+                    item.field->latest_validity_since = mutation_ts;
+                }
+            }
         }
     }
     impl_->last_mutation_ts = mutation_ts;
@@ -674,8 +698,27 @@ UpdatesRecord::PrefixBitmap(int64_t field_id,
 
 TargetBitmap
 UpdatesRecord::NullBitmap(int64_t field_id, uint64_t query_ts) const {
+    auto result = ValidityBitmap(field_id, query_ts);
+    result.flip();
+    return result;
+}
+
+TargetBitmap
+UpdatesRecord::ValidityBitmap(int64_t field_id, uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);
     const auto& field = impl_->IndexedField(field_id);
+    if (!field.nullable) {
+        impl_->all_valid_reads.fetch_add(1, std::memory_order_relaxed);
+        return TargetBitmap(impl_->row_count, true);
+    }
+    if (field.base_index_rows == impl_->row_count &&
+        query_ts >= field.latest_validity_since) {
+        // The caller's existing apply-frontier contract covers query_ts. Later
+        // non-NULL-to-non-NULL updates do not shorten this bitmap's interval.
+        impl_->latest_validity_reads.fetch_add(1, std::memory_order_relaxed);
+        return field.latest_validity.clone();
+    }
+    impl_->history_validity_reads.fetch_add(1, std::memory_order_relaxed);
     const auto& tree = *field.index;
     TargetBitmap result(impl_->row_count, false);
     auto it = tree.find(UpdateValue{std::monostate{}});
@@ -684,6 +727,7 @@ UpdatesRecord::NullBitmap(int64_t field_id, uint64_t query_ts) const {
                                         std::memory_order_relaxed);
         Collect(*it->second, query_ts, result);
     }
+    result.flip();
     return result;
 }
 

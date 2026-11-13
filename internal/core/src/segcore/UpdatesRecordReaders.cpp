@@ -486,9 +486,9 @@ TempIndexReader::IsNull() const {
 
 TargetBitmap
 TempIndexReader::IsNotNull() const {
-    auto result = IsNull();
-    result.flip();
-    return result;
+    binding_->records->RecordRead(true);
+    return binding_->records->ValidityBitmap(binding_->field_id,
+                                             binding_->query_ts);
 }
 
 std::unique_ptr<index::IIndexReaderBase>

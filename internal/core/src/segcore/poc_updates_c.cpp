@@ -136,14 +136,19 @@ GetPOCStats(void* session, CSegmentInterface segment, char** output) {
                     : owned.get();
         AssertInfo(records, "POC records are not attached");
         auto s = records->GetStats();
-        nlohmann::json json{{"updated_cells", s.updated_cells},
-                            {"update_versions", s.update_versions},
-                            {"base_index_rows", s.base_index_rows},
-                            {"value_rows", s.value_rows},
-                            {"base_rows", s.base_rows},
-                            {"correction_rows", s.correction_rows},
-                            {"old_index_reads", s.old_index_reads},
-                            {"index_postings", s.index_postings}};
+        nlohmann::json json{
+            {"updated_cells", s.updated_cells},
+            {"update_versions", s.update_versions},
+            {"base_index_rows", s.base_index_rows},
+            {"value_rows", s.value_rows},
+            {"base_rows", s.base_rows},
+            {"correction_rows", s.correction_rows},
+            {"old_index_reads", s.old_index_reads},
+            {"index_postings", s.index_postings},
+            {"all_valid_reads", s.all_valid_reads},
+            {"latest_validity_reads", s.latest_validity_reads},
+            {"history_validity_reads", s.history_validity_reads},
+            {"latest_validity_bytes", s.latest_validity_bytes}};
         *output = strdup(json.dump().c_str());
         AssertInfo(*output, "Failed to allocate POC statistics");
         return SuccessCStatus();
