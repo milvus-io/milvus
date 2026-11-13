@@ -4160,15 +4160,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.AutoReleaseConcurrency = ParamItem{
 		Key:          "queryCoord.autoRelease.releaseConcurrency",
 		Version:      "3.0.0",
-		DefaultValue: "16",
+		DefaultValue: "64",
 		PanicIfEmpty: true,
-		Doc:          "maximum concurrent automatic collection releases in one scan; changes apply to the next release batch",
+		Doc:          "maximum concurrent automatic collection releases; changes apply to releases that start afterwards",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) <= 0 {
 				mlog.Warn(context.TODO(), "queryCoord.autoRelease.releaseConcurrency must be positive, using default",
 					mlog.String("configured", v))
-				return "16"
+				return "64"
 			}
 			return v
 		},

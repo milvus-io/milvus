@@ -629,7 +629,7 @@ queryCoord:
     enabled: false # whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true
     idleTTLSeconds: 600
     checkIntervalSeconds: 30
-    releaseConcurrency: 16 # maximum concurrent automatic collection releases in one scan; changes apply to the next release batch
+    releaseConcurrency: 64 # maximum concurrent automatic collection releases; changes apply to releases that start afterwards
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
