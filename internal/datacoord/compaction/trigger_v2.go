@@ -302,6 +302,11 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		events[policy.TriggerTypeLevelZeroViewManual] = views
 	} else if isClustering {
 		views, triggerID, err = m.clusteringPolicy.TriggerOneCollection(ctx, collectionID, true)
+		if err == nil && m.targetReconciler != nil {
+			if err := m.checkManualClusteringScope(ctx, collectionID, views); err != nil {
+				return 0, err
+			}
+		}
 		events[policy.TriggerTypeClustering] = views
 	}
 	if err != nil {
@@ -317,6 +322,23 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		}
 	}
 	return triggerID, nil
+}
+
+func (m *CompactionTriggerManager) checkManualClusteringScope(ctx context.Context, collectionID int64, views []view.CompactionView) error {
+	targetMeta := m.targetReconciler.CompactionTargetMeta
+	defer targetMeta.LockCollectionAdmission(collectionID)()
+	record, _, err := targetMeta.ActiveOptimize(ctx, collectionID)
+	if err != nil || record == nil {
+		return err
+	}
+	for _, candidate := range views {
+		for _, input := range candidate.GetSegmentsView() {
+			if targets.OptimizeScopeContains(record, m.meta.GetSegment(ctx, input.ID)) {
+				return clusteringOverlapsOptimize(record.GetTargetID())
+			}
+		}
+	}
+	return nil
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType policy.CompactionTriggerType,

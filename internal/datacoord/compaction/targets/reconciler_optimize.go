@@ -34,6 +34,7 @@ type optimizeInput struct {
 	residual int64
 	expected int64
 	match    bool
+	valid    bool
 }
 
 func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record *datapb.CompactionTarget, inputs map[int64]optimizeInput) {
@@ -57,17 +58,16 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 	}
 	if err != nil {
 		mlog.RatedWarn(ctx, rate.Limit(1), "could not reconcile OPTIMIZE target", mlog.Int64("targetID", record.GetTargetID()), mlog.Err(err))
-		return
 	}
 	if finished {
 		return
 	}
 	expected := record.GetOptimize().GetActualTargetSizeBytes()
 	for _, segment := range observation.Scope {
-		size := observation.sizes[segment.GetID()]
+		size, valid := observation.sizes[segment.GetID()]
 		inputs[segment.GetID()] = optimizeInput{
-			segment: segment, residual: size, expected: expected,
-			match: !observation.Satisfied && view.ClassifyOptimizeSize(size, expected) != 0,
+			segment: segment, residual: size, expected: expected, valid: valid,
+			match: valid && !observation.Satisfied && view.ClassifyOptimizeSize(size, expected) != 0,
 		}
 	}
 }
@@ -75,24 +75,27 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 func (r *CompactionTargetReconciler) mixViews(
 	ctx context.Context, rewrites []*meta.SegmentInfo, optimizeInputs map[int64]optimizeInput,
 	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts, size SizeCondition,
+	segments []*meta.SegmentInfo,
 ) []view.TargetView {
 	requiredRewrites := make(map[int64]*meta.SegmentInfo, len(rewrites))
 	for _, segment := range rewrites {
 		requiredRewrites[segment.GetID()] = segment
 	}
-	sizeInputs := r.selectSizeInputs(ctx, size, optimizeInputs, allocated, eligible)
+	sizeInputs := r.selectSizeInputs(ctx, size, optimizeInputs, allocated, eligible, segments)
 
 	var optimizeSelectable []*meta.SegmentInfo
 	for id, input := range optimizeInputs {
 		_, sorting := allocated[id]
-		if !sorting && r.selectable(ctx, input.segment, eligible) {
+		if input.valid && !sorting && r.selectable(ctx, input.segment, eligible) {
 			optimizeSelectable = append(optimizeSelectable, input.segment)
 		}
 	}
 	optimizeSelectable = r.filterMixCompactionSelectable(ctx, optimizeSelectable)
+	optimizeCandidates := make(map[int64]bool, len(optimizeSelectable))
 	selected := make(map[int64]*meta.SegmentInfo, len(optimizeSelectable)+len(rewrites)+len(sizeInputs))
 	for _, segment := range optimizeSelectable {
 		selected[segment.GetID()] = segment
+		optimizeCandidates[segment.GetID()] = true
 	}
 	for id, segment := range requiredRewrites {
 		selected[id] = segment
@@ -116,11 +119,11 @@ func (r *CompactionTargetReconciler) mixViews(
 		opt, inOptimize := optimizeInputs[segment.GetID()]
 		sizeInput, sizeEligible := sizeInputs[segment.GetID()]
 		_, required := requiredRewrites[segment.GetID()]
-		if inOptimize {
+		if inOptimize && opt.valid {
 			segment = opt.segment
 		}
 		input := view.GetTargetSegmentView(segment)
-		if inOptimize {
+		if inOptimize && opt.valid {
 			input.ResidualSize = opt.residual
 		}
 		if sizeEligible {
@@ -139,6 +142,9 @@ func (r *CompactionTargetReconciler) mixViews(
 			views = append(views, pool)
 		}
 		pool.Segments = append(pool.Segments, input)
+		if optimizeCandidates[input.ID] {
+			pool.OptimizeInputs = append(pool.OptimizeInputs, input)
+		}
 		if sizeEligible {
 			pool.SizeExpected = sizeInput.expected
 			pool.SizeInputs = append(pool.SizeInputs, input)
@@ -149,7 +155,7 @@ func (r *CompactionTargetReconciler) mixViews(
 			}
 			pool.RewriteRequired[input.ID] = struct{}{}
 		}
-		if opt.match {
+		if opt.match && optimizeCandidates[input.ID] {
 			if pool.OptimizeMatch == nil {
 				pool.OptimizeMatch = make(map[int64]struct{})
 			}
@@ -162,6 +168,7 @@ func (r *CompactionTargetReconciler) mixViews(
 func (r *CompactionTargetReconciler) selectSizeInputs(
 	ctx context.Context, condition SizeCondition, optimizeInputs map[int64]optimizeInput,
 	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts,
+	segments []*meta.SegmentInfo,
 ) map[int64]sizeInput {
 	if !condition.Enabled {
 		return nil
@@ -169,7 +176,7 @@ func (r *CompactionTargetReconciler) selectSizeInputs(
 	var candidates []*meta.SegmentInfo
 	inputs := make(map[int64]sizeInput)
 	auto := make(map[int64]bool)
-	err := visitSizeMatches(ctx, r.meta, r.IndexMeta, condition, standingSegments(ctx, r.meta), func(input sizeInput) error {
+	err := visitSizeMatches(ctx, r.meta, r.IndexMeta, condition, segments, func(input sizeInput) error {
 		segment := input.segment
 		id := segment.GetID()
 		_, assigned := allocated[id]

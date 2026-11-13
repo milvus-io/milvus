@@ -68,7 +68,9 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	sortMatches := reconciler.observeStandingSort(ctx)
-	indexRewrites := reconciler.selectableIndexRewrites(ctx, Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil)
+	auto := Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+	segments := standingSegments(ctx, reconciler.meta)
+	standingRewrites := reconciler.selectableIndexRewrites(ctx, auto, segments)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	var size SizeCondition
@@ -76,7 +78,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	if _, err := manager.SyncSize(ctx, reconciler.allocator); err != nil {
 		sizeErr = err
 	} else {
-		size, sizeErr = ReadSizeCondition()
+		size, sizeErr = readSizeCondition(auto)
 	}
 	if sizeErr != nil {
 		mlog.RatedWarn(ctx, rate.Limit(1), "could not synchronize Standing SIZE compaction target", mlog.Err(sizeErr))
@@ -110,10 +112,6 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			matches[segment.GetID()] = segment
 		}
 	}
-	for _, segment := range indexRewrites {
-		matches[segment.GetID()] = segment
-	}
-
 	// Pick the physical path for each segment before constructing any View.
 	// An independently selectable SORT takes precedence over a matching REWRITE.
 	eligible := make(map[int64]collectionPlanningFacts)
@@ -132,6 +130,11 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 	}
 	rewriteSelectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	for _, segment := range standingRewrites {
+		if _, assigned := allocated[segment.GetID()]; !assigned && reconciler.selectable(ctx, segment, eligible) {
+			rewriteSelectable = append(rewriteSelectable, segment)
+		}
+	}
 	if len(sortMatches) > len(sortSelectable) || len(matches) > len(rewriteSelectable) {
 		mlog.RatedInfo(ctx, rate.Limit(1), "compaction target inputs awaiting selection",
 			mlog.Int("sortMatches", len(sortMatches)), mlog.Int("sortSelectable", len(sortSelectable)),
@@ -146,9 +149,8 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 		return compareSegment(a, b)
 	})
-	slices.SortFunc(rewriteSelectable, compareSegment)
 	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
-	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible, size)
+	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible, size, segments)
 	return events, ctx.Err()
 }
 

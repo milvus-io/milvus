@@ -64,6 +64,7 @@ func (v *RewriteView) Plan() ([]*datapb.CompactionTask, error) {
 type MixView struct {
 	RewriteInputs
 	OptimizeSize    int64
+	OptimizeInputs  []*SegmentView
 	OptimizeMatch   map[int64]struct{}
 	RewriteRequired map[int64]struct{}
 	SizeExpected    int64
@@ -75,7 +76,7 @@ func (v *MixView) Plan() ([]*datapb.CompactionTask, error) {
 	covered := make(map[int64]bool)
 	var plans []*datapb.CompactionTask
 	if v.OptimizeSize > 0 && (len(v.OptimizeMatch) > 0 || len(v.RewriteRequired) > 0) {
-		groups := groupForceMergeInputs(v.Segments, v.OptimizeSize)
+		groups := groupForceMergeInputs(v.OptimizeInputs, v.OptimizeSize)
 		for _, group := range groups {
 			if !v.shouldOptimizeGroup(group) {
 				continue

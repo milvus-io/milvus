@@ -37,8 +37,12 @@ type SizeCondition struct {
 }
 
 func ReadSizeCondition() (SizeCondition, error) {
+	return readSizeCondition(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool())
+}
+
+func readSizeCondition(auto bool) (SizeCondition, error) {
 	cfg := &Params.DataCoordCfg
-	condition := SizeCondition{Enabled: cfg.EnableAutoCompaction.GetAsBool(), MaxFragments: -1}
+	condition := SizeCondition{Enabled: auto, MaxFragments: -1}
 	var invalid []string
 	for _, setting := range []struct {
 		key, value string

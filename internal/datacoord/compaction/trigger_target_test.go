@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"testing"
 
+	prometheusdto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -40,6 +41,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -193,4 +195,148 @@ func TestTargetSubmissionRotatesIndependentPlansAfterFailure(t *testing.T) {
 		}).Times(5)
 	manager.submitTargetViews(t.Context(), views)
 	require.Equal(t, []int64{11, 21, 14, 22, 13}, attempted)
+}
+
+func TestStandingSizeAdmitsOneCompletePackageAcrossGroups(t *testing.T) {
+	const mib = 1024 * 1024
+	cfg := &Params.DataCoordCfg
+	for _, setting := range []struct{ key, value string }{
+		{cfg.EnableAutoCompaction.Key, "true"}, {cfg.EnableSortCompaction.Key, "false"},
+		{cfg.SegmentMaxSize.Key, "1"}, {cfg.MaxFragmentsPerGroup.Key, "8"},
+		{cfg.IndexBasedCompaction.Key, "false"}, {cfg.CompactionRateLimitTokens.Key, "1"},
+		{cfg.CompactionRateLimitInterval.Key, "3600"}, {cfg.CompactionPreAllocateIDExpansionFactor.Key, "1"},
+		{cfg.TwoTierCompaction.Key, "false"},
+	} {
+		require.NoError(t, Params.Save(setting.key, setting.value))
+		t.Cleanup(func() { Params.Reset(setting.key) })
+	}
+	ctx := t.Context()
+	config := embed.NewConfig()
+	config.Dir, config.LogLevel = t.TempDir(), "error"
+	addr := url.URL{Scheme: "http", Host: "127.0.0.1:0"}
+	config.ListenClientUrls, config.AdvertiseClientUrls = []url.URL{addr}, []url.URL{addr}
+	config.ListenPeerUrls, config.AdvertisePeerUrls = []url.URL{addr}, []url.URL{addr}
+	config.InitialCluster = config.InitialClusterFromName(config.Name)
+	backend, err := etcdkv.NewEmbededEtcdKV(config, "test")
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	catalog := kvdatacoord.NewCatalog(backend, "", "")
+	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
+	require.NoError(t, err)
+	targetMeta, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	require.NoError(t, err)
+	segmentMeta := meta.NewEmptyTestMeta()
+	segmentMeta.Catalog, segmentMeta.Ctx = catalog, ctx
+	segmentMeta.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+		Version: 1, Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_FloatVector}},
+	}})
+	add := func(id, part, residual int64, level datapb.SegmentLevel) {
+		stats := &datapb.Statistics{InsertBinlogSize: residual, TimestampFrom: 99}
+		insertLogs := meta.GetFieldBinlogIDs(0, 10*id)
+		insertLogs.Binlogs[0].EntriesNum = 10
+		segmentMeta.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: part, InsertChannel: "ch", Level: level,
+			State: commonpb.SegmentState_Flushed, IsSorted: true, NumOfRows: 10, Stats: stats,
+			Binlogs:   []*datapb.FieldBinlog{insertLogs},
+			Statslogs: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(0, 10*id+1)},
+		}))
+	}
+	for _, id := range []int64{100, 101, 102, 103} {
+		add(id, 1+(id-100)/2, 480_000, datapb.SegmentLevel_L1)
+	}
+	add(104, 3, 475_000, datapb.SegmentLevel_L1) // isolated tail
+	add(105, 3, 475_000, datapb.SegmentLevel_L2) // cannot fill that tail
+	for i := int64(0); i < 16; i++ {
+		add(106+i, 4+i/8, 25_000, datapb.SegmentLevel_L1)
+	}
+	// Groups 4 and 5 have exactly eight fragments. Put the extra fragment
+	// into group 5, leaving the others at their original boundary.
+	add(122, 5, 25_000, datapb.SegmentLevel_L1)
+	alloc := meta.NewMockAllocator(t)
+	handler := meta.NewMockHandlerWithMeta(segmentMeta)
+	inspector := NewCompactionInspector(segmentMeta, taskMeta, &index.IndexMeta{}, nil, nil, targetMeta, nil, alloc, handler, nil, nil, nil)
+	require.NoError(t, inspector.InitAdmission())
+	triggers := NewCompactionTriggerManager(alloc, handler, inspector, segmentMeta, &index.IndexMeta{}, taskMeta, nil, targetMeta, nil)
+	planned := metrics.DataCoordCompactionAdmission.WithLabelValues(ProducerTBC.String(), admissionTaskType(datapb.CompactionType_MixCompaction), "plan", "")
+	var before prometheusdto.Metric
+	require.NoError(t, planned.Write(&before))
+	triggers.handleTicker(ctx, TargetTicker)
+	var after prometheusdto.Metric
+	require.NoError(t, planned.Write(&after))
+	require.Equal(t, float64(3), after.GetCounter().GetValue()-before.GetCounter().GetValue())
+	stored, err := catalog.ListCompactionTask(ctx)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	task := stored[0]
+	require.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+	require.Equal(t, []int64{100, 101}, task.GetInputSegments())
+	require.Equal(t, int64(mib), task.GetMaxSize())
+	require.Equal(t, int64(1), task.GetPreAllocatedSegmentIDs().GetEnd()-task.GetPreAllocatedSegmentIDs().GetBegin())
+	require.False(t, task.GetSizeCompactionHint())
+	require.False(t, segmentMeta.IsSegmentCompacting(102))
+	insertLogs := meta.GetFieldBinlogIDs(0, 10_000)
+	insertLogs.Binlogs[0].EntriesNum = 20
+	output, err := segmentMeta.CompleteCompactionMutation(ctx, task, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+		SegmentID: task.GetPreAllocatedSegmentIDs().GetBegin(), NumOfRows: 20, IsSorted: true,
+		Stats:               &datapb.Statistics{InsertBinlogSize: 960_000, TimestampFrom: 99},
+		InsertLogs:          []*datapb.FieldBinlog{insertLogs},
+		Field2StatslogPaths: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(0, 10_001)},
+	}}})
+	require.NoError(t, err)
+	require.Len(t, output, 1)
+	require.Equal(t, []int64{100, 101}, output[0].GetCompactionFrom())
+	require.Equal(t, int64(960_000), output[0].GetResidualSegmentSize())
+	for _, record := range targetMeta.GetCompactionTargets() {
+		if targets.IsStandingSize(record) {
+			require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+			return
+		}
+	}
+	t.Fatal("missing Standing SIZE target")
+}
+
+func TestOptimizeAndSizeRevalidateScopeAtAdmission(t *testing.T) {
+	ctx := t.Context()
+	const mib = 1024 * 1024
+	const id int64 = 400
+	optimize := &datapb.CompactionTarget{
+		TargetID: 42, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ActivatedAtTS: 100, ExpectedTS: 100, TailLimit: 1,
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: mib, ActualTargetSizeBytes: mib},
+	}
+	catalog, _ := targets.NewCompactionTargetTestCatalog(t, optimize)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	targetMeta, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	require.NoError(t, err)
+	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
+	require.NoError(t, err)
+	segmentMeta := meta.NewEmptyTestMeta()
+	addSegment := func(ts uint64) {
+		segmentMeta.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "ch", State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L1, IsSorted: true, NumOfRows: 1,
+			Stats: &datapb.Statistics{InsertBinlogSize: mib, TimestampFrom: ts},
+		}))
+	}
+	// A late Flush joins the active OPTIMIZE even with a conforming size.
+	addSegment(99)
+	alloc := meta.NewMockAllocator(t)
+	inspector := NewCompactionInspector(segmentMeta, taskMeta, nil, nil, nil, targetMeta, nil, alloc, nil, nil, nil, nil)
+	plan := &datapb.CompactionTask{
+		PlanID: 10, TriggerID: 20, CollectionID: 1, PartitionID: 2, Channel: "ch", InputSegments: []int64{id},
+		Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_pipelining,
+	}
+	err = inspector.EnqueueCompaction(ctx, plan, AdmissionOptions{Producer: ProducerTriggerManager})
+	require.ErrorIs(t, err, merr.ErrCompactionPlanConflict)
+	require.Equal(t, int32(2302), merr.Status(err).GetCode())
+	require.ErrorContains(t, err, "42")
+	plan.Type = datapb.CompactionType_MixCompaction
+	err = inspector.EnqueueCompaction(ctx, plan, AdmissionOptions{Producer: ProducerTBC, SizeCompaction: true})
+	require.ErrorIs(t, err, merr.ErrCompactionPlanConflict)
+	require.False(t, segmentMeta.IsSegmentCompacting(id))
+
+	addSegment(100)
+	require.NoError(t, inspector.EnqueueCompaction(ctx, plan, AdmissionOptions{Producer: ProducerTBC, SizeCompaction: true}))
+	require.True(t, segmentMeta.IsSegmentCompacting(id))
 }

@@ -18,7 +18,6 @@ package targets
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -79,7 +78,7 @@ func (m *CompactionTargetMeta) CheckOptimizeConflict(ctx context.Context, collec
 		return merr.Wrapf(merr.ErrCompactionTargetCreateOutcomeUnknown,
 			"previous OPTIMIZE candidate %d for collection %d is still unconfirmed", record.GetTargetID(), collectionID)
 	}
-	return merr.WrapErrCompactionPlanConflict(fmt.Sprintf("collection %d already has active OPTIMIZE target %d; this Create was not admitted", collectionID, record.GetTargetID()))
+	return merr.Wrapf(merr.ErrCompactionPlanConflict, "collection %d already has active OPTIMIZE target %d; this Create was not admitted", collectionID, record.GetTargetID())
 }
 
 // OptimizeScopeContains compares the dynamic finite range against current
@@ -178,6 +177,7 @@ func observeOptimizeScope(ctx context.Context, record *datapb.CompactionTarget, 
 	observation := OptimizeObservation{Scope: scope, Satisfied: true, sizes: make(map[int64]int64, len(scope))}
 	tails := make(map[view.CompactionGroupLabel]int32)
 	expected := record.GetOptimize().GetActualTargetSizeBytes()
+	var firstError error
 	for _, segment := range scope {
 		if err := ctx.Err(); err != nil {
 			return OptimizeObservation{}, err
@@ -185,7 +185,11 @@ func observeOptimizeScope(ctx context.Context, record *datapb.CompactionTarget, 
 		rows := segment.GetNumOfRows()
 		size := segment.GetResidualSegmentSize()
 		if rows < 0 || size < 0 {
-			return OptimizeObservation{}, merr.WrapErrDataIntegrityMsg("invalid OPTIMIZE observation at segment %d", segment.GetID())
+			observation.Satisfied = false
+			if firstError == nil {
+				firstError = merr.WrapErrDataIntegrityMsg("invalid OPTIMIZE observation at segment %d", segment.GetID())
+			}
+			continue
 		}
 		observation.sizes[segment.GetID()] = size
 		position := view.ClassifyOptimizeSize(size, expected)
@@ -202,12 +206,19 @@ func observeOptimizeScope(ctx context.Context, record *datapb.CompactionTarget, 
 			}
 		}
 		if rows > math.MaxInt64-observation.Rows {
-			return OptimizeObservation{}, merr.WrapErrDataIntegrityMsg("overflowing OPTIMIZE Match row count at segment %d", segment.GetID())
+			observation.Satisfied = false
+			if firstError == nil {
+				firstError = merr.WrapErrDataIntegrityMsg("overflowing OPTIMIZE Match row count at segment %d", segment.GetID())
+			}
+		} else {
+			observation.Rows += rows
 		}
-		observation.Rows += rows
 		observation.Match = append(observation.Match, segment)
 	}
-	return observation, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return OptimizeObservation{}, err
+	}
+	return observation, firstError
 }
 
 // CheckClusteringConflict runs under collection admission and checks all

@@ -64,6 +64,27 @@ active Targets against collection metadata. The configurable
 `dataCoord.compaction.target.retentionSeconds` window defaults to seven days.
 After the Target record is collected, Describe and Drop return TargetNotFound.
 
+### Manual OPTIMIZE and Standing SIZE
+
+Create takes a positive byte size for OPTIMIZE. It computes one actual size
+using the existing Force Merge sizing rules and persists both values. Each
+physical group uses that size, including groups that first flush while the
+Target is active. A group is satisfied when it has no segments above the 5%
+tolerance and at most one small tail. DataCoord rechecks published segment
+sizes and related in-flight work before recording satisfaction.
+
+An active OPTIMIZE excludes new SIZE packages with overlapping inputs and
+overlapping Clustering work. The final check uses current segment facts under
+the collection admission lock. A collection has at most one active OPTIMIZE.
+Its active slot and Target record are written atomically, so a delayed write
+from a previous coordinator cannot admit a second Target.
+
+Standing SIZE keeps one cluster-wide ID. Describe, List, and reconciliation
+derive its settings from the current configuration. Reconciliation uses
+TwoTier with the existing normal and disk size profiles. Eligible segments
+with an independent rewrite requirement can share a size package. Any
+remaining independent rewrites can run individually.
+
 ### Standing SORT and task admission
 
 Standing SORT keeps one cluster-wide ID and persists its enabled condition.

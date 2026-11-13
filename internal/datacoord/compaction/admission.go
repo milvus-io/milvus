@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	cockroacherrors "github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -38,6 +39,11 @@ var ErrAdmissionLimited = errors.New("compaction task admission limited")
 // errClusteringOverlapsOptimize distinguishes the manual RPC conflict from
 // a local input conflict. The wrapped error keeps the existing wire code.
 var errClusteringOverlapsOptimize = errors.New("clustering overlaps an OPTIMIZE target")
+
+func clusteringOverlapsOptimize(targetID int64) error {
+	return cockroacherrors.Mark(merr.Wrapf(merr.ErrCompactionPlanConflict,
+		"Clustering overlaps OPTIMIZE target %d; this Clustering work was not admitted", targetID), errClusteringOverlapsOptimize)
+}
 
 type (
 	Producer         = meta.CompactionProducer

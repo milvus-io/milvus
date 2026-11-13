@@ -592,6 +592,8 @@ func (c *Inspector) EnqueueCompaction(ctx context.Context, task *datapb.Compacti
 	if c.compactionTargetMeta != nil {
 		defer c.compactionTargetMeta.LockCollectionAdmission(task.GetCollectionID())()
 		if task.GetType() == datapb.CompactionType_ClusteringCompaction || options.SizeCompaction {
+			// A Target may have been created after the round took its snapshot.
+			// Defer the whole package when it now crosses an active scope.
 			if err := c.validateSizeAndClusteringAdmission(ctx, task, options.SizeCompaction); err != nil {
 				return err
 			}
@@ -654,8 +656,7 @@ func (c *Inspector) validateSizeAndClusteringAdmission(ctx context.Context, task
 		if sizeCompaction {
 			return merr.Wrapf(merr.ErrCompactionPlanConflict, "SIZE overlaps OPTIMIZE target %d", record.GetTargetID())
 		}
-		return errors.Mark(merr.Wrapf(merr.ErrCompactionPlanConflict,
-			"Clustering overlaps OPTIMIZE target %d; this Clustering request was not admitted", record.GetTargetID()), errClusteringOverlapsOptimize)
+		return clusteringOverlapsOptimize(record.GetTargetID())
 	}
 	return nil
 }
