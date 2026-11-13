@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -2792,6 +2793,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	mlog.Debug(ctx, rpcReceived(method))
 
 	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
+		if admission, ok := ctx.Value(multiSearchDQLAdmissionKey{}).(*multiSearchDQLAdmission); ok && scheduler.IsAdmissionQueueFull(err) {
+			admission.rejected = true
+		}
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3181,6 +3185,8 @@ func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.Sear
 		Highlighter:           request.GetHighlighter(),
 		SearchAggregation:     request.GetSearchAggregation(),
 		FunctionChains:        request.GetFunctionChains(),
+		RlsPrincipal:          request.GetRlsPrincipal(),
+		SkipRls:               request.GetSkipRls(),
 	}
 	for _, subRequest := range request.GetSubReqs() {
 		if subRequest == nil {

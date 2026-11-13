@@ -48,6 +48,7 @@ type config struct {
 	sleep        time.Duration
 	maxSleepTime time.Duration
 	isRetryErr   func(err error) bool
+	onBackoff    func()
 }
 
 func newDefaultConfig() *config {
@@ -100,5 +101,12 @@ func MaxSleepTime(maxSleepTime time.Duration) Option {
 func RetryErr(isRetryErr func(err error) bool) Option {
 	return func(c *config) {
 		c.isRetryErr = isRetryErr
+	}
+}
+
+// OnBackoff calls observe immediately before a backoff wait starts.
+func OnBackoff(observe func()) Option {
+	return func(c *config) {
+		c.onBackoff = observe
 	}
 }

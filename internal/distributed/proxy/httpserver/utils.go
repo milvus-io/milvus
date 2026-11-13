@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -5026,6 +5027,10 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	if err != nil {
 		return nil, err
 	}
+	return checkQuota(ctx, req, pxy, dbID, collectionIDToPartIDs, rt, n)
+}
+
+func checkQuota(ctx context.Context, req any, pxy types.ProxyComponent, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) (any, error) {
 	if n == 0 {
 		return nil, nil
 	}

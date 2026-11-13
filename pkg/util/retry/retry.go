@@ -115,6 +115,9 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				break
 			}
 
+			if c.onBackoff != nil {
+				c.onBackoff()
+			}
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
@@ -221,6 +224,9 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 				break
 			}
 
+			if c.onBackoff != nil {
+				c.onBackoff()
+			}
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
