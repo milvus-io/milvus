@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -45,9 +46,10 @@ type CompactionTargetMeta struct {
 	targets map[int64]*datapb.CompactionTarget
 	// A failed stop may already have reached storage. Refresh the durable
 	// record before making another decision about this Target.
-	unconfirmedStops map[int64]struct{}
-	writes           *lock.KeyLock[int64]
-	admission        *lock.KeyLock[int64]
+	unconfirmedStops   map[int64]struct{}
+	unconfirmedCreates map[int64]*datapb.CompactionTarget
+	writes             *lock.KeyLock[int64]
+	admission          *lock.KeyLock[int64]
 }
 
 func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
@@ -56,11 +58,12 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 		return nil, err
 	}
 	m := &CompactionTargetMeta{
-		catalog:          catalog,
-		targets:          make(map[int64]*datapb.CompactionTarget, len(records)),
-		unconfirmedStops: make(map[int64]struct{}),
-		writes:           lock.NewKeyLock[int64](),
-		admission:        lock.NewKeyLock[int64](),
+		catalog:            catalog,
+		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
+		unconfirmedStops:   make(map[int64]struct{}),
+		unconfirmedCreates: make(map[int64]*datapb.CompactionTarget),
+		writes:             lock.NewKeyLock[int64](),
+		admission:          lock.NewKeyLock[int64](),
 	}
 	for _, record := range records {
 		m.targets[record.GetTargetID()] = record
@@ -96,8 +99,11 @@ func (m *CompactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 // ambiguous writes before taking it so no item carries an obsolete outcome.
 func (m *CompactionTargetMeta) List(ctx context.Context) (map[int64]*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	ids := make([]int64, 0, len(m.unconfirmedStops))
+	ids := make([]int64, 0, len(m.unconfirmedStops)+len(m.unconfirmedCreates))
 	for id := range m.unconfirmedStops {
+		ids = append(ids, id)
+	}
+	for id := range m.unconfirmedCreates {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
@@ -134,6 +140,7 @@ func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) 
 		m.targets[id] = proto.CloneOf(record)
 	}
 	delete(m.unconfirmedStops, id)
+	delete(m.unconfirmedCreates, id)
 }
 
 func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.CompactionTarget, validate func() error) (*datapb.CompactionTarget, error) {
@@ -161,6 +168,9 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 		m.store(stored, id)
 		return stored, nil
 	}
+	m.mu.Lock()
+	m.unconfirmedCreates[id] = proto.CloneOf(candidate)
+	m.mu.Unlock()
 	mlog.Warn(ctx, "could not confirm compaction target creation",
 		mlog.Int64("targetID", id), mlog.FieldCollectionID(candidate.GetCollectionID()),
 		mlog.Err(err), mlog.NamedError("confirmationError", readErr))
@@ -178,11 +188,11 @@ func sameCreation(stored, candidate *datapb.CompactionTarget) bool {
 	return proto.Equal(creation, candidate)
 }
 
-// Read refreshes a Target whose previous stop write returned an error.
+// Read refreshes a Target whose previous write returned an ambiguous result.
 func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
 	_, refresh := m.unconfirmedStops[id]
-	if !refresh {
+	if !refresh && m.unconfirmedCreates[id] == nil {
 		record := proto.CloneOf(m.targets[id])
 		m.mu.RUnlock()
 		return record, nil
@@ -196,14 +206,25 @@ func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.Comp
 func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
 	_, refresh := m.unconfirmedStops[id]
+	candidate := m.unconfirmedCreates[id]
 	record := proto.CloneOf(m.targets[id])
 	m.mu.RUnlock()
-	if !refresh {
+	if !refresh && candidate == nil {
 		return record, nil
 	}
 	stored, err := m.catalog.LoadCompactionTarget(ctx, id)
 	if err != nil {
-		return nil, merr.Wrapf(err, "read compaction target %d after stop failure", id)
+		return nil, merr.Wrapf(err, "read compaction target %d after ambiguous write", id)
+	}
+	if candidate != nil {
+		if stored == nil {
+			return nil, nil
+		}
+		if !sameCreation(stored, candidate) {
+			return nil, merr.WrapErrDataIntegrityMsg("persisted compaction target %d differs from its candidate", id)
+		}
+		m.store(stored, id)
+		return stored, nil
 	}
 	// A read of an active value cannot exclude a late commit of a previous
 	// stop. Keep checking until a terminal value is durable.
@@ -212,6 +233,24 @@ func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datap
 		observeSatisfaction(stored)
 	}
 	return stored, nil
+}
+
+func (m *CompactionTargetMeta) refreshUnconfirmedCreates(ctx context.Context) {
+	m.mu.RLock()
+	ids := make([]int64, 0, len(m.unconfirmedCreates))
+	for id := range m.unconfirmedCreates {
+		ids = append(ids, id)
+	}
+	m.mu.RUnlock()
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := m.Read(ctx, id); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "could not refresh compaction target creation",
+				mlog.Int64("targetID", id), mlog.Err(err))
+		}
+	}
 }
 
 // Stop revalidates the current record before the first transition. A satisfied

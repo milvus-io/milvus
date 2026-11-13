@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	tikverr "github.com/tikv/client-go/v2/error"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -1262,11 +1263,20 @@ func targetCreateMayHaveCommitted(err error) bool {
 	if merr.IsCanceledOrTimeout(err) || tikverr.IsErrorUndetermined(err) {
 		return true
 	}
-	// etcd preserves the original RPC error underneath the IO classification.
-	switch status.Code(err) {
+	// etcd normalizes known server errors before its KV wrapper attaches the
+	// IO classification. Transport errors still expose their gRPC status.
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		return ambiguousTxnCode(etcdErr.Code())
+	}
+	rpc, ok := status.FromError(err)
+	return ok && ambiguousTxnCode(rpc.Code())
+}
+
+func ambiguousTxnCode(code codes.Code) bool {
+	switch code {
 	case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.Internal, codes.Unknown:
-		_, isRPCError := status.FromError(err)
-		return isRPCError
+		return true
 	default:
 		return false
 	}

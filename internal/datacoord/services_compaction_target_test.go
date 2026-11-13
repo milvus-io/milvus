@@ -112,13 +112,15 @@ func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {
 
 func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		committed bool
-		ambiguous bool
-		want      error
+		name        string
+		committed   bool
+		commitsLate bool
+		ambiguous   bool
+		want        error
 	}{
 		{name: "commit with lost acknowledgment", committed: true, ambiguous: true},
 		{name: "could not confirm candidate", ambiguous: true, want: merr.ErrCompactionTargetCreateOutcomeUnknown},
+		{name: "commit visible after confirmation", commitsLate: true, ambiguous: true, want: merr.ErrCompactionTargetCreateOutcomeUnknown},
 		{name: "definitely not committed", want: merr.ErrIoFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,6 +154,13 @@ func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) 
 			if tc.want != nil {
 				require.ErrorIs(t, merr.Error(resp.GetStatus()), tc.want)
 				require.Zero(t, resp.GetTargetId())
+				if tc.commitsLate {
+					catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(candidate, nil).Once()
+					listed, err := s.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+					require.NoError(t, merr.CheckRPCCall(listed, err))
+					require.Len(t, listed.GetTargets(), 1)
+					require.Equal(t, int64(101), listed.GetTargets()[0].GetTargetId())
+				}
 				return
 			}
 			require.NoError(t, merr.Error(resp.GetStatus()))

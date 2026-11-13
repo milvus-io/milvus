@@ -21,7 +21,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
@@ -164,4 +168,38 @@ func (m *catalogCompactionTargetMemoryKV) MultiSaveAndRemove(ctx context.Context
 		}
 	}
 	return m.MemoryKV.MultiSaveAndRemove(ctx, saves, removals)
+}
+
+func TestCompactionTargetCreateClassifiesBackendWriteOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		err       error
+		ambiguous bool
+	}{
+		{"local deadline", context.DeadlineExceeded, true},
+		{"lost server acknowledgment", rpctypes.ErrTimeoutDueToConnectionLost, true},
+		{"leader timeout", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"transport unavailable", status.Error(codes.Unavailable, "connection closed"), true},
+		{"server permission denied", rpctypes.ErrPermissionDenied, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := &targetWriteErrorKV{
+				catalogCompactionTargetMemoryKV: newCatalogCompactionTargetMemoryKV(),
+				err:                             merr.WrapErrIoFailedErr(test.err, "execute etcd txn"),
+			}
+			catalog := NewCatalog(backend, rootPath, "")
+			unknown, err := catalog.CreateCompactionTarget(t.Context(), &datapb.CompactionTarget{TargetID: 100})
+			require.ErrorIs(t, err, merr.ErrIoFailed)
+			require.Equal(t, test.ambiguous, unknown)
+		})
+	}
+}
+
+type targetWriteErrorKV struct {
+	*catalogCompactionTargetMemoryKV
+	err error
+}
+
+func (m *targetWriteErrorKV) MultiSaveAndRemove(context.Context, map[string]string, []string, ...predicates.Predicate) error {
+	return m.err
 }

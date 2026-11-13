@@ -63,6 +63,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	manager := reconciler.CompactionTargetMeta
+	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
 	matches := make(map[int64]*meta.SegmentInfo)
 	for _, record := range records {
