@@ -955,6 +955,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	recoveredMeta.DataViewManager = manager
 	s.meta = recoveredMeta
 	s.domainMetas = recoveredDomainMetas
+	if s.compactionTargetMeta != nil {
+		s.compactionTargetMeta.SetCollectionScopeGuard(s.tryLockCompactionTargetScope)
+	}
 	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	s.watchCollectionMetrics()

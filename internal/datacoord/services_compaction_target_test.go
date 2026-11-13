@@ -36,8 +36,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -213,6 +216,46 @@ func TestCompactionTargetRecoveryClosesOnlyConfirmedDeletedScopes(t *testing.T) 
 	require.Greater(t, resp.GetTarget().GetStoppedAt(), history.GetInactivatedAtTS())
 	require.Equal(t, []int64{11}, resp.GetTarget().GetRewrite().GetRootSegmentIds())
 	require.Equal(t, int64(50), resp.GetTarget().GetTotalRows())
+}
+
+func TestCompactionTargetWithEmptyMatchWaitsForCollectionDropAck(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	record := &datapb.CompactionTarget{
+		TargetID: 1, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Rewrite: &datapb.CompactionTargetRewrite{}, ExpectedTS: 10, ActivatedAtTS: 10,
+	}
+	catalog, _ := targets.NewCompactionTargetTestCatalog(t, record)
+	s, resource := newTargetRPCServer(t, catalog, nil)
+	s.compactionTargetMeta.SetCollectionScopeGuard(s.tryLockCompactionTargetScope)
+	// A collection may still be Created while its DropCollection message
+	// retires all the candidate segments on the business channels.
+	b := mock_broadcaster.NewMockBroadcaster(t)
+	b.EXPECT().TryLockResourceKeys(mock.Anything,
+		message.NewSharedDBNameResourceKey("default"),
+		message.NewSharedCollectionNameResourceKey("default", "records")).
+		Return(nil, nil).Once()
+	broadcast.ResetBroadcaster()
+	t.Cleanup(broadcast.ResetBroadcaster)
+	broadcast.Register(b)
+
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, nil, s.compactionTargetMeta, nil)
+	_, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	req := &datapb.DescribeCompactionTargetRequest{TargetId: record.GetTargetID(), Collection: resource}
+	resp, err := s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, resp.GetTarget().GetState())
+	require.Zero(t, resp.GetTarget().GetRemainingRows())
+	require.NotZero(t, resp.GetTarget().GetCheckedAt())
+
+	s.meta.DropCollection(record.GetCollectionID())
+	s.SetCollectionDroppedChecker(func(context.Context, int64) (bool, error) { return true, nil })
+	require.NoError(t, s.DropCollectionCompactionTargets(ctx, record.GetCollectionID()))
+	req.Collection = &datapb.CompactionTargetResource{CollectionId: record.GetCollectionID(), Deleted: true}
+	resp, err = s.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, targets.StopScopeDropped, resp.GetTarget().GetStopReason())
 }
 
 func TestCompactionTargetGCConfirmsDeletionAndKeepsQueryableHistory(t *testing.T) {

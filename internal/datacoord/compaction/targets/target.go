@@ -53,6 +53,7 @@ type CompactionTargetMeta struct {
 	writes             *lock.KeyLock[int64]
 	admission          *lock.KeyLock[int64]
 	collectionWrites   *lock.KeyLock[int64]
+	tryLockScope       func(context.Context, int64) (func(), error)
 }
 
 func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
@@ -82,6 +83,11 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 func (m *CompactionTargetMeta) LockCollectionAdmission(collectionID int64) func() {
 	m.admission.Lock(collectionID)
 	return func() { m.admission.Unlock(collectionID) }
+}
+
+// SetCollectionScopeGuard installs the DDL guard before starting reconciliation.
+func (m *CompactionTargetMeta) SetCollectionScopeGuard(guard func(context.Context, int64) (func(), error)) {
+	m.tryLockScope = guard
 }
 
 // ActiveCollectionIDs lists the stable collection IDs whose scope needs to
@@ -356,6 +362,13 @@ func (m *CompactionTargetMeta) stop(ctx context.Context, id int64, reason string
 	}
 	if record.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE && record.GetState() != datapb.TargetState_TARGET_STATE_INACTIVE {
 		return true, merr.WrapErrDataIntegrityMsg("compaction target %d has invalid state %d", id, record.GetState())
+	}
+	if reason == StopSatisfied && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && m.tryLockScope != nil {
+		release, err := m.tryLockScope(ctx, record.GetCollectionID())
+		if err != nil || release == nil {
+			return true, err
+		}
+		defer release()
 	}
 	if ok, err := validate(record); err != nil || !ok {
 		return true, err

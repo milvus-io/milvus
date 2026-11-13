@@ -31,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -96,6 +98,34 @@ func (s *Server) recoverCompactionTargetScopes(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *Server) tryLockCompactionTargetScope(ctx context.Context, id int64) (func(), error) {
+	collection := s.meta.GetCollection(id)
+	if !collection.IsCreated() {
+		return nil, nil
+	}
+	dbName, name := collection.DatabaseName, collection.Schema.GetName()
+	if dbName == "" || name == "" {
+		return nil, merr.WrapErrServiceUnavailableMsg("compaction target collection identity is unavailable")
+	}
+	// A DropCollection can retire channel data before its control ACK
+	// persists the collection tombstone. Order the final satisfaction
+	// observation against the existing DDL resource lock.
+	release, err := broadcast.TryLockResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewSharedCollectionNameResourceKey(dbName, name))
+	if err != nil || release == nil {
+		return nil, err
+	}
+	// Rename takes database locks. Revalidate the stable ID after the
+	// acquisition in case the name changed before those locks were held.
+	current := s.meta.GetCollection(id)
+	if !current.IsCreated() || current.DatabaseName != dbName || current.Schema.GetName() != name {
+		release()
+		return nil, nil
+	}
+	return release, nil
 }
 
 func (s *Server) CreateCompactionTarget(ctx context.Context, req *datapb.CreateCompactionTargetRequest) (*datapb.CreateCompactionTargetResponse, error) {

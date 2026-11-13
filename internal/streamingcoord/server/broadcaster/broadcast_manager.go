@@ -141,6 +141,24 @@ func (bm *broadcastTaskManager) WithUnreplicableResourceKeys(ctx context.Context
 	return bm.withResourceKeys(ctx, func(ctx context.Context) error { return ctx.Err() }, true, resourceKeys...)
 }
 
+func (bm *broadcastTaskManager) TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("broadcaster is closing")
+	}
+	guards, err := bm.resourceKeyLocker.FastLock(bm.appendSharedClusterRK(resourceKeys...)...)
+	if err != nil {
+		bm.lifetime.Done()
+		return nil, nil
+	}
+	return func() {
+		guards.Unlock()
+		bm.lifetime.Done()
+	}, nil
+}
+
 // withResourceKeys acquires the resource keys, then checks the cluster with checkCluster.
 func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkCluster func(context.Context) error, unreplicable bool, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
 	// Resolved before any lock is taken: it blocks until the first assignment
