@@ -301,6 +301,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingSort(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
 		observation, err := targets.ObserveSort(ctx, s.meta, s.handler)
 		rows, observed, observationErr = observation.Rows, true, err
+	case targets.IsStandingStorage(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		rows, observationErr = targets.ObserveStorage(ctx, s.meta, s.handler, record)
+		observed = true
 	}
 	if observed && observationErr == nil {
 		target.RemainingRows = proto.Int64(rows)

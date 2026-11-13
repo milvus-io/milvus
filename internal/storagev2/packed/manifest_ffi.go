@@ -39,6 +39,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -476,6 +477,48 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 	}
 	defer C.loon_manifest_destroy(manifest)
 	return manifestFieldIDsFromColumnGroups(manifestPath, &manifest.column_groups)
+}
+
+// ReadManifestInsertFormats returns the formats of the insert data groups in
+// one published manifest revision.
+func ReadManifestInsertFormats(ctx context.Context, manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	basePath, revision, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, merr.Wrap(err, "decode published manifest revision")
+	}
+	if basePath == "" || revision <= ManifestEarliest {
+		return nil, merr.WrapErrDataIntegrityMsg("segment has no published manifest revision")
+	}
+
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "read published manifest revision")
+	}
+	if manifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("manifest has no contents")
+	}
+	defer C.loon_manifest_destroy(manifest)
+	groups := &manifest.column_groups
+	if groups.column_group_array == nil && groups.num_of_column_groups > 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("manifest is missing its column groups")
+	}
+	var formats []string
+	for _, group := range unsafe.Slice(groups.column_group_array, int(groups.num_of_column_groups)) {
+		if group.num_of_files == 0 {
+			continue
+		}
+		if group.files == nil || group.format == nil || *group.format == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest insert group is missing its files or format")
+		}
+		format := C.GoString(group.format)
+		if !slices.Contains(formats, format) {
+			formats = append(formats, format)
+		}
+	}
+	return formats, ctx.Err()
 }
 
 func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {

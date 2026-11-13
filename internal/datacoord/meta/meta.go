@@ -93,6 +93,7 @@ type Meta struct {
 	IndexCatalog         SegmentIndexCatalog
 	CompactionProtection CompactionProtection
 	Broker               broker.Broker
+	manifestFormats      manifestFormatReader
 
 	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
 	// groupID and guarded by segMu (the group record composes into the same
@@ -657,6 +658,7 @@ func (m *Meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(segment)...).Dec()
 
 	m.Segments.DropSegment(segmentID)
+	m.manifestFormats.cache.Delete(segmentID)
 	mlog.Info(context.TODO(), "meta update: dropping segment - complete",
 		mlog.Int64("segmentID", segmentID))
 	return nil
