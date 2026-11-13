@@ -137,17 +137,17 @@ func SortCompaction(segmentSize int64) taskcommon.Resource {
 	return Stats(segmentSize)
 }
 
-// MixCompaction: a mix (or schema bump) compaction streams its
-// input through MultiSegmentWriter, which flushes at binlogMaxSize, so it never
-// holds more than its input and never needs more than one output segment of
-// segment.maxSize. min of the two; an unknown input size gets the upper bound.
+// MixCompaction budgets the streaming writer at min(input, segment.maxSize).
+// mergeSplit reads one segment at a time. MergeSort instead keeps a reader
+// window for every input alive beside the writer; readerBytes sums those
+// windows and must not be capped at one output segment.
 //
 // The delete maps are not streamed and come on top: each input's deltalogs
 // are loaded into a pk -> ts map (compaction.ComposeDeleteFromDeltalogs) that
 // lives while that input is read, and on the merge-sort path the maps of all
 // inputs live until the merge ends. deleteMapBytes is what the caller worked
 // out the worker holds at once (DeleteMapBytes per input, summed or maxed).
-func MixCompaction(inputSize, deleteMapBytes int64) taskcommon.Resource {
+func MixCompaction(inputSize, readerBytes, deleteMapBytes int64) taskcommon.Resource {
 	bound := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	memory := bound
 	if inputSize > 0 {
@@ -155,8 +155,39 @@ func MixCompaction(inputSize, deleteMapBytes int64) taskcommon.Resource {
 	}
 	return taskcommon.Resource{
 		CPU:    DefaultCPU(),
-		Memory: ClampMemory(memory + max(deleteMapBytes, 0)),
+		Memory: ClampMemory(memory + max(readerBytes, 0) + max(deleteMapBytes, 0)),
 	}
+}
+
+// CompactionReaderMemory estimates one live merge-sort reader. A V1 reader
+// retains its downloaded binlog bytes while decoding records. It opens one
+// binlog per field at a time, so sum each field's largest encoded+decoded
+// chunk. Missing chunk sizes, packed storage and manifest readers fall back
+// to twice the whole input instead of assuming a configured read window also
+// bounds decoded records. This is deliberately conservative for those paths.
+func CompactionReaderMemory(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema) int64 {
+	if segment == nil {
+		return 0
+	}
+	fallback := 2 * EstimateSegmentSize(segment, schema)
+	if segment.GetStorageVersion() != storage.StorageV1 || segment.GetManifestPath() != "" || len(segment.GetBinlogs()) == 0 {
+		return fallback
+	}
+	var memory int64
+	for _, field := range segment.GetBinlogs() {
+		if len(field.GetBinlogs()) == 0 {
+			return fallback
+		}
+		var window int64
+		for _, binlog := range field.GetBinlogs() {
+			if binlog.GetMemorySize() <= 0 || binlog.GetLogSize() <= 0 {
+				return fallback
+			}
+			window = max(window, binlog.GetMemorySize()+binlog.GetLogSize())
+		}
+		memory += window
+	}
+	return memory
 }
 
 // deleteMapEntryBytes is the in-memory cost of one entry of a compaction's

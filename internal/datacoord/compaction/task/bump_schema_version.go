@@ -87,11 +87,11 @@ func (t *BumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 func (t *BumpSchemaVersionTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return t.resource.Get(func() (taskcommon.Resource, bool) {
 		// The bump rewrites its one segment with that segment's delete map.
-		inputSize, deleteMapBytes, ok := mixCompactionInputs(t.meta, t.GetTaskProto())
+		inputSize, readerBytes, deleteMapBytes, ok := mixCompactionInputs(t.meta, t.GetTaskProto())
 		if !ok {
 			return taskresource.Default(), false
 		}
-		return taskresource.MixCompaction(inputSize, deleteMapBytes), true
+		return taskresource.MixCompaction(inputSize, readerBytes, deleteMapBytes), true
 	})
 }
 

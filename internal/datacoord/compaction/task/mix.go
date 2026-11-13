@@ -58,17 +58,17 @@ func (t *MixCompactionTask) GetTaskState() taskcommon.State {
 }
 
 // GetTaskResource prices a sort compaction by the segment it sorts (it reads
-// and rewrites all of it) and a mix compaction by its streamed input, bounded
-// by one output segment, plus the delete maps it holds (mixCompactionInputs).
+// and rewrites all of it) and a mix compaction by its writer, simultaneously
+// resident merge-sort readers, and delete maps (mixCompactionInputs).
 func (t *MixCompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return t.resource.Get(func() (taskcommon.Resource, bool) {
 		taskProto := t.GetTaskProto()
 		if taskProto.GetType() != datapb.CompactionType_SortCompaction {
-			inputSize, deleteMapBytes, ok := mixCompactionInputs(t.Meta, taskProto)
+			inputSize, readerBytes, deleteMapBytes, ok := mixCompactionInputs(t.Meta, taskProto)
 			if !ok {
 				return taskresource.Default(), false
 			}
-			return taskresource.MixCompaction(inputSize, deleteMapBytes), true
+			return taskresource.MixCompaction(inputSize, readerBytes, deleteMapBytes), true
 		}
 		inputs := taskProto.GetInputSegments()
 		if len(inputs) == 0 {
@@ -503,7 +503,7 @@ func compactionInputSize(compactionMeta meta.CompactionMeta, taskProto *datapb.C
 }
 
 // mixCompactionInputs walks a mix compaction's inputs once and returns their
-// streamed size (as compactionInputSize) and the delete-map memory the worker
+// streamed size (as compactionInputSize), reader windows and delete-map memory the worker
 // holds at once. mergeSplit reads one input at a time and drops its map before
 // the next, so the largest input's map is what it holds. storage.MergeSort
 // keeps the map of every input until the merge ends, so on that path they add
@@ -511,7 +511,7 @@ func compactionInputSize(compactionMeta meta.CompactionMeta, taskProto *datapb.C
 // flags, the input count and the compaction params, which DataCoord generates
 // for the plan from the same dataNode.compaction keys (compaction.GenParams),
 // so the same rule is applied here. ok=false when an input is not in meta.
-func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (inputSize, deleteMapBytes int64, ok bool) {
+func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (inputSize, readerBytes, deleteMapBytes int64, ok bool) {
 	schema := taskProto.GetSchema()
 	pkType := schemapb.DataType_Int64
 	if pk, err := typeutil.GetPrimaryFieldSchema(schema); err == nil {
@@ -524,9 +524,10 @@ func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.C
 	for _, segID := range inputs {
 		segment := compactionMeta.GetHealthySegment(context.TODO(), segID)
 		if segment == nil {
-			return 0, 0, false
+			return 0, 0, 0, false
 		}
 		inputSize += taskresource.EstimateSegmentSize(segment, schema)
+		readerBytes += taskresource.CompactionReaderMemory(segment, schema)
 		sorted := segment.GetIsSorted()
 		if schema.GetEnableNamespace() {
 			sorted = segment.GetIsSortedByNamespace()
@@ -537,7 +538,7 @@ func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.C
 		largest = max(largest, bytes)
 	}
 	if mergeSort {
-		return inputSize, sum, true
+		return inputSize, readerBytes, sum, true
 	}
-	return inputSize, largest, true
+	return inputSize, 0, largest, true
 }
