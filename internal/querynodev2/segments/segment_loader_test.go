@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -55,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -2531,14 +2533,10 @@ func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithGpuLimit() {
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceReleasesTieredReservationOnGpuLimit() {
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithTieredGpuLimit() {
 	ctx := context.Background()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "true")
-	suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
-	defer func() {
-		paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
-		suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
-	}()
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
 
 	patchGpu := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
 		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
@@ -3672,4 +3670,222 @@ func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// No manager, background disk fetcher, or object store is needed for admission.
+func newResourceTestLoader(t *testing.T, tiered bool, usage *ResourceUsage) *segmentLoader {
+	t.Helper()
+	paramtable.InitWithBaseTable(paramtable.NewBaseTable(
+		paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files([]string{})))
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		params.QueryNodeCfg.TieredEvictionEnabled.Key:               strconv.FormatBool(tiered),
+		params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key: "90",
+		params.QueryNodeCfg.DiskCapacityLimit.Key:                   "1",
+	} {
+		original, err := paramtable.GetBaseTable().Load(key)
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() {
+			if err != nil {
+				require.NoError(t, params.Reset(key))
+			} else {
+				require.NoError(t, params.Save(key, original))
+			}
+		})
+	}
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(100)).Build(),
+		mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build(),
+		mockey.Mock(hardware.GetAllGPUMemoryInfo).Return([]hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil).Build(),
+		mockey.Mock((*segmentLoader).estimateSegmentLoadingResourceUsageWithSchema).To(
+			func(_ *segmentLoader, _ context.Context, _ *schemapb.CollectionSchema, _ ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
+				return usage, usage.MemorySize, nil
+			}).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	return &segmentLoader{
+		duf:                       &diskUsageFetcher{usage: atomic.NewInt64(0), err: atomic.NewError(nil)},
+		committedResourceNotifier: syncutil.NewVersionedNotifier(),
+	}
+}
+
+func TestLoadingResourceReturnUnlocksAccounting(t *testing.T) {
+	loader := newResourceTestLoader(t, true, &ResourceUsage{MemorySize: 10})
+	previous := LoadResource{MemorySize: 20}
+	loader.committedResource = previous
+	entered := make(chan LoadResource, 1)
+	resume := make(chan struct{})
+	releasePatch := mockey.Mock(releaseLoadingResource).To(func(resource LoadResource) {
+		entered <- resource
+		<-resume
+	}).Build()
+	defer releasePatch.UnPatch()
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	defer close(resume)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		loader.freeRequestResource(requestResourceResult{Resource: previous})
+	}()
+	require.Equal(t, previous, <-entered)
+	workers.Add(1)
+	done := make(chan LoadResource, 1)
+	go func() {
+		defer workers.Done()
+		loader.mut.Lock()
+		committed := loader.committedResource
+		loader.mut.Unlock()
+		done <- committed
+	}()
+	select {
+	case committed := <-done:
+		require.Zero(t, committed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("native release held the Go accounting lock")
+	}
+}
+
+func TestLoadingResourceValidationDoesNotCommit(t *testing.T) {
+	for _, reason := range []string{"memory_limit", "disk_limit", "gpu_limit"} {
+		t.Run(reason, func(t *testing.T) {
+			usage := &ResourceUsage{MemorySize: 10, DiskSize: 2}
+			loader := newResourceTestLoader(t, false, usage)
+			initial := LoadResource{MemorySize: 20, DiskSize: 4}
+			switch reason {
+			case "memory_limit":
+				initial.MemorySize = 1000
+			case "disk_limit":
+				initial.DiskSize = paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+			case "gpu_limit":
+				usage.FieldGpuMemorySize = []uint64{100}
+			}
+			loader.committedResource = initial
+			result, err := loader.requestResourceWithSchema(context.Background(), nil, &querypb.SegmentLoadInfo{SegmentID: 1})
+			require.Error(t, err)
+			require.Zero(t, result.Resource)
+			require.Equal(t, initial, loader.committedResource)
+			switch reason {
+			case "memory_limit":
+				require.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
+			case "disk_limit":
+				require.ErrorIs(t, err, merr.ErrServiceDiskLimitExceeded)
+			default:
+				require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+			}
+		})
+	}
+}
+
+func TestLoadingResourceTieredReservationRollback(t *testing.T) {
+	for _, reason := range []string{"memory_limit", "disk_limit", "gpu_limit", "disk_usage_error"} {
+		t.Run(reason, func(t *testing.T) {
+			usage := &ResourceUsage{MemorySize: 10, DiskSize: 2}
+			loader := newResourceTestLoader(t, true, usage)
+			initial := LoadResource{MemorySize: 20, DiskSize: 4}
+			diskErr := merr.WrapErrServiceInternalMsg("disk usage unavailable")
+			switch reason {
+			case "memory_limit":
+				initial.MemorySize = 1000
+			case "disk_limit":
+				initial.DiskSize = paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+			case "gpu_limit":
+				usage.FieldGpuMemorySize = []uint64{100}
+			case "disk_usage_error":
+				loader.duf.err.Store(diskErr)
+			}
+			loader.committedResource = initial
+
+			reserveCalls := 0
+			reservePatch := mockey.Mock(tryReserveLoadingResource).To(func(resource LoadResource) bool {
+				reserveCalls++
+				require.Equal(t, LoadResource{MemorySize: 10, DiskSize: 2}, resource)
+				return true
+			}).Build()
+			defer reservePatch.UnPatch()
+			var released []LoadResource
+			unlocked := false
+			releasePatch := mockey.Mock(releaseLoadingResource).To(func(resource LoadResource) {
+				released = append(released, resource)
+				unlocked = loader.mut.TryLock()
+				if unlocked {
+					loader.mut.Unlock()
+				}
+			}).Build()
+			defer releasePatch.UnPatch()
+
+			result, err := loader.requestResourceWithSchema(context.Background(), nil, &querypb.SegmentLoadInfo{SegmentID: 1})
+			require.Error(t, err)
+			require.Zero(t, result.Resource)
+			require.Equal(t, initial, loader.committedResource)
+			require.Equal(t, 1, reserveCalls)
+			require.Equal(t, []LoadResource{{MemorySize: 10, DiskSize: 2}}, released)
+			require.True(t, unlocked)
+			switch reason {
+			case "memory_limit":
+				require.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
+			case "disk_limit":
+				require.ErrorIs(t, err, merr.ErrServiceDiskLimitExceeded)
+			case "gpu_limit":
+				require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+			case "disk_usage_error":
+				require.ErrorIs(t, err, diskErr)
+			}
+		})
+	}
+}
+
+func TestLoadingResourceTieredReservationFailure(t *testing.T) {
+	loader := newResourceTestLoader(t, true, &ResourceUsage{MemorySize: 10, DiskSize: 2})
+	initial := LoadResource{MemorySize: 20, DiskSize: 4}
+	loader.committedResource = initial
+	reservePatch := mockey.Mock(tryReserveLoadingResource).Return(false).Build()
+	defer reservePatch.UnPatch()
+	releaseCalls := 0
+	releasePatch := mockey.Mock(releaseLoadingResource).To(func(LoadResource) { releaseCalls++ }).Build()
+	defer releasePatch.UnPatch()
+
+	result, err := loader.requestResourceWithSchema(context.Background(), nil, &querypb.SegmentLoadInfo{SegmentID: 1})
+	require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+	require.Zero(t, result.Resource)
+	require.Equal(t, initial, loader.committedResource)
+	require.Zero(t, releaseCalls)
+}
+
+func TestLoadingResourceConcurrentCommit(t *testing.T) {
+	loader := newResourceTestLoader(t, false, &ResourceUsage{MemorySize: 400})
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	results := make(chan requestResourceResult, 8)
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			result, err := loader.requestResourceWithSchema(context.Background(), nil, &querypb.SegmentLoadInfo{SegmentID: 1})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	close(errs)
+	require.Len(t, results, 2)
+	require.Len(t, errs, 6)
+	require.Equal(t, uint64(800), loader.committedResource.MemorySize)
+	for err := range errs {
+		require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+	}
+	for result := range results {
+		reservation := &loadResourceReservation{loader: loader, result: result}
+		reservation.Release()
+		reservation.Release()
+	}
+	require.Zero(t, loader.committedResource)
 }
