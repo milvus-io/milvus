@@ -88,11 +88,15 @@ func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
 }
 
 func CanTriggerSortCompaction(segment *meta.SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed &&
+	return MatchesSortCompaction(segment) && !segment.IsCompacting
+}
+
+func MatchesSortCompaction(segment *meta.SegmentInfo) bool {
+	return meta.IsSegmentHealthy(segment) &&
+		segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
-		!segment.GetIsImporting() &&
-		!segment.IsCompacting
+		!segment.GetIsSorted() && !segment.GetIsSortedByNamespace() &&
+		!segment.GetIsImporting()
 }
 
 func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) int64 {

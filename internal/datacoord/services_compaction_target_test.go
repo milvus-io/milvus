@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -280,4 +281,94 @@ func TestCompactionTargetCreateRechecksAuthorizedCollection(t *testing.T) {
 	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
 	require.Zero(t, resp.GetTargetId())
 	require.Empty(t, persisted)
+}
+
+func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
+	enableTestCompactionTargets(t)
+	params := paramtable.Get()
+	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+	t.Cleanup(func() { params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key) })
+
+	ctx := t.Context()
+	catalog, records := targets.NewCompactionTargetTestCatalog(t)
+	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
+	reconciler := func() *targets.CompactionTargetReconciler {
+		return targets.NewCompactionTargetReconciler(s.meta, &index.IndexMeta{}, s.compactionTargetMeta, meta.NewMockHandlerWithMeta(s.meta), s.allocator)
+	}
+	runRound := func() int {
+		t.Helper()
+		events, err := reconciler().Reconcile(ctx)
+		require.NoError(t, err)
+		n := 0
+		for _, pools := range events {
+			for _, pool := range pools {
+				plans, err := pool.Plan()
+				require.NoError(t, err)
+				n += len(plans)
+			}
+		}
+		return n
+	}
+	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L2,
+		State: commonpb.SegmentState_Flushed, IsInvisible: true, NumOfRows: 7,
+	}))
+	s.meta.SetSegmentCompacting(10, true)
+	require.Zero(t, runRound())
+
+	list := func(req *datapb.ListCompactionTargetsRequest) []*datapb.CompactionTargetReadModel {
+		t.Helper()
+		resp, err := s.ListCompactionTargets(ctx, req)
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		return resp.GetTargets()
+	}
+	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{}))
+	require.Empty(t, list(&datapb.ListCompactionTargetsRequest{IncludeSystem: true, DbName: "default"}))
+	active := &datapb.ListCompactionTargetsRequest{IncludeSystem: true, States: []datapb.TargetState{datapb.TargetState_TARGET_STATE_ACTIVE}}
+	standing := list(active)
+	require.Len(t, standing, 1)
+	id := standing[0].GetTargetId()
+	require.NotZero(t, id)
+	require.True(t, standing[0].GetEnabled())
+	require.Nil(t, standing[0].RemainingRows)
+	require.Equal(t, datapb.TargetIntent_INTENT_SORT, standing[0].GetIntent())
+	require.Zero(t, standing[0].GetResource().GetCollectionId())
+
+	describe := func() *datapb.CompactionTargetReadModel {
+		t.Helper()
+		resp, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{
+			TargetId: id, Collection: &datapb.CompactionTargetResource{},
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		return resp.GetTarget()
+	}
+	require.Equal(t, int64(7), describe().GetRemainingRows())
+	dropped, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{
+		TargetId: id, Collection: &datapb.CompactionTargetResource{},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(dropped, err), merr.ErrOperationNotSupported)
+
+	restart := func() {
+		t.Helper()
+		var err error
+		s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+		require.NoError(t, err)
+	}
+	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+	restart()
+	require.Zero(t, runRound())
+	require.Len(t, records, 1)
+	disabled := describe()
+	require.False(t, disabled.GetEnabled())
+	require.NotNil(t, disabled.Enabled)
+	require.Nil(t, disabled.RemainingRows)
+	require.Zero(t, disabled.GetCheckedAt())
+	require.Equal(t, id, list(active)[0].GetTargetId())
+
+	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+	restart()
+	s.meta.SetSegmentCompacting(10, false)
+	require.Equal(t, 1, runRound())
+	require.Len(t, records, 1)
+	require.True(t, describe().GetEnabled())
 }

@@ -68,6 +68,16 @@ func NewCompactionTargetTestCatalog(
 			defer mu.Unlock()
 			return proto.CloneOf(stored[id]), nil
 		}).Maybe()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, previous, next *datapb.CompactionTarget) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if !proto.Equal(previous, stored[previous.GetTargetID()]) {
+				return merr.ErrCompactionPlanConflict
+			}
+			stored[next.GetTargetID()] = proto.CloneOf(next)
+			return nil
+		}).Maybe()
 	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, record *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
 			mu.Lock()

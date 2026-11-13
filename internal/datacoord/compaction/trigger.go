@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -61,6 +62,7 @@ type CompactionSignal struct {
 	pos          *msgpb.MsgPosition
 	resultCh     chan error
 	waitResult   bool
+	ctx          context.Context
 }
 
 func NewCompactionSignal() *CompactionSignal {
@@ -268,6 +270,10 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *Compa
 	}
 
 	signal.WithID(id)
+	signal.ctx = ctx
+	if !signal.waitResult {
+		signal.ctx = context.WithoutCancel(ctx)
+	}
 
 	signalCh := t.Signals
 	// use force signal channel to skip non-force signal queue
@@ -312,6 +318,10 @@ func (t *compactionTrigger) allocSignalID(ctx context.Context) (UniqueID, error)
 
 // handleSignal is the internal logic to convert compactionSignal into compaction tasks.
 func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
+	ctx := signal.ctx
+	if ctx == nil {
+		ctx = context.TODO()
+	}
 	log := mlog.With(mlog.Int64("compactionID", signal.id),
 		mlog.Int64("signal.collectionID", signal.CollectionID),
 		mlog.Int64("signal.partitionID", signal.partitionID),
@@ -324,7 +334,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		if signal.IsForce || !t.inspector.isFull() {
 			return false
 		}
-		log.RatedInfo(context.TODO(), rate.Limit(1), "stop generating compaction plans since inspector is full")
+		log.RatedInfo(ctx, rate.Limit(1), "stop generating compaction plans since inspector is full")
 		return true
 	}
 
@@ -332,15 +342,15 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		return nil
 	}
 
-	log.Info(context.TODO(), "handleSignal receive")
+	log.Info(ctx, "handleSignal receive")
 	groups, err := t.getCandidates(signal)
 	if err != nil {
-		log.Warn(context.TODO(), "handle signal failed, get candidates return error", mlog.Err(err))
+		log.Warn(ctx, "handle signal failed, get candidates return error", mlog.Err(err))
 		return err
 	}
 
 	if len(groups) == 0 {
-		log.Info(context.TODO(), "the length of candidate group is 0, skip to handle signal")
+		log.Info(ctx, "the length of candidate group is 0, skip to handle signal")
 		return nil
 	}
 
@@ -355,12 +365,12 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.Segments = index.FilterInIndexedSegments(context.Background(), t.handler, t.indexMeta, signal.IsForce, group.Segments...)
+			group.Segments = index.FilterInIndexedSegments(ctx, t.handler, t.indexMeta, signal.IsForce, group.Segments...)
 		}
 
 		coll, err := t.getCollection(group.CollectionID)
 		if err != nil {
-			log.Warn(context.TODO(), "get collection info failed, skip handling compaction", mlog.Err(err))
+			log.Warn(ctx, "get collection info failed, skip handling compaction", mlog.Err(err))
 			if signal.CollectionID != 0 {
 				return err
 			}
@@ -368,7 +378,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		}
 
 		if !signal.IsForce && !policy.IsCollectionAutoCompactionEnabled(coll) {
-			log.RatedInfo(context.TODO(), rate.Limit(20), "collection auto compaction disabled")
+			log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
 			if signal.CollectionID != 0 {
 				return nil
 			}
@@ -379,7 +389,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 
 		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now()), coll)
 		if err != nil {
-			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction", mlog.Err(err))
+			log.Warn(ctx, "get compact time failed, skip to handle compaction", mlog.Err(err))
 			if signal.CollectionID != 0 {
 				return err
 			}
@@ -403,7 +413,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 			})
 			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
-				log.Warn(context.TODO(), "fail to allocate id", mlog.Err(err))
+				log.Warn(ctx, "fail to allocate id", mlog.Err(err))
 				return err
 			}
 			start := time.Now()
@@ -425,16 +435,22 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 				MaxSize:                bucket.maxSize,
 				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
-			err = t.inspector.EnqueueCompaction(task)
+			err = t.inspector.EnqueueCompaction(ctx, task, AdmissionOptions{Producer: ProducerLegacyTrigger})
+			if errors.Is(err, ErrAdmissionLimited) {
+				if signal.IsForce && t.inspector.GetCompactionTasksNumBySignalID(signal.id) == 0 {
+					return merr.WrapErrServiceUnavailableMsg("compaction task admission is temporarily limited")
+				}
+				return nil
+			}
 			if err != nil {
-				log.Warn(context.TODO(), "failed to execute compaction task",
+				log.Warn(ctx, "failed to execute compaction task",
 					mlog.Int64("planID", task.GetPlanID()),
 					mlog.Int64s("inputSegments", inputSegmentIDs),
 					mlog.Err(err))
 				continue
 			}
 
-			log.Info(context.TODO(), "time cost of generating compaction",
+			log.Info(ctx, "time cost of generating compaction",
 				mlog.Int64("planID", task.GetPlanID()),
 				mlog.Int64("time cost", time.Since(start).Milliseconds()),
 				mlog.Int64("target size", task.GetMaxSize()),

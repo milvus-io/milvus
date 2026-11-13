@@ -493,7 +493,7 @@ func (t *ClusteringCompactionTask) processStats() error {
 			to, ok := t.meta.(*meta.Meta).GetCompactionTo(segmentID)
 			if !ok || to == nil {
 				select {
-				case meta.GetStatsTaskChSingleton() <- segmentID:
+				case meta.GetClusteringSortCh() <- segmentID:
 				default:
 				}
 				existNonStats = true

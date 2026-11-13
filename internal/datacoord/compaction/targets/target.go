@@ -50,6 +50,10 @@ type CompactionTargetMeta struct {
 	unconfirmedCreates map[int64]*datapb.CompactionTarget
 	writes             *lock.KeyLock[int64]
 	admission          *lock.KeyLock[int64]
+
+	standingMu            sync.Mutex
+	pendingSort           *datapb.CompactionTarget
+	unconfirmedSortUpdate bool
 }
 
 func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {

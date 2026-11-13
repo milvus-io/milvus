@@ -81,7 +81,11 @@ var _ CompactionInspector = (*spyCompactionInspector)(nil)
 func (h *spyCompactionInspector) RemoveTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
-func (h *spyCompactionInspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+func (h *spyCompactionInspector) attemptLimit(_ context.Context, _ Producer, plans int) (int, string) {
+	return plans, ""
+}
+
+func (h *spyCompactionInspector) EnqueueCompaction(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 	t := ctask.NewMixCompactionTask(task, nil, h.meta, nil, index.NewTestVersionManager())
 	alloc := newMock0Allocator(h.t)
 	t.Allocator = alloc
@@ -2337,7 +2341,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 				},
 			},
 		}, nil)
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil)
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		tr.handleSignal(&CompactionSignal{
 			CollectionID: s.collectionID,
 			partitionID:  s.partitionID,
@@ -2378,13 +2382,13 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			endID   = int64(20004)
 		)
 		s.allocator.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
 			s.EqualValues(planID, task.GetPlanID())
 			s.ElementsMatch([]int64{1}, task.GetInputSegments())
 			s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
 			s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
 			return true
-		})).Return(nil).Once()
+		}), mock.Anything).Return(nil).Once()
 
 		err := tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -2721,7 +2725,7 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 		// The inspector is full once one task is submitted.
 		submitted := 0
 		s.inspector.EXPECT().isFull().RunAndReturn(func() bool { return submitted >= 1 })
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).RunAndReturn(func(*datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(context.Context, *datapb.CompactionTask, AdmissionOptions) error {
 			submitted++
 			return nil
 		})
@@ -2732,7 +2736,7 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 	s.Run("force signal does not check the inspector", func() {
 		setup()
 		// No isFull expectation is set, so a call would fail the test.
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil).Times(4)
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(4)
 		s.NoError(s.tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
 			WithPartitionID(s.partitionID).

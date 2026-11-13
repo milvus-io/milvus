@@ -223,16 +223,24 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	if err != nil {
 		return nil, err
 	}
-	if !resource.GetDeleted() && targets.IsRewrite(record) {
+	var rows int64
+	var observed bool
+	var observationErr error
+	switch {
+	case !resource.GetDeleted() && targets.IsRewrite(record):
 		observation, err := targets.ObserveRewrite(ctx, s.meta, record, false)
-		if err == nil {
-			target.RemainingRows = proto.Int64(observation.Rows)
-			target.CheckedAt = tsoutil.ComposeTSByTime(time.Now())
-		} else if ctx.Err() == nil {
-			target.Message = "remaining rows could not be observed"
-			mlog.RatedWarn(ctx, rate.Limit(1), "describe compaction target observation failed",
-				mlog.Int64("targetID", record.GetTargetID()), mlog.Err(err))
-		}
+		rows, observed, observationErr = observation.Rows, true, err
+	case targets.IsStandingSort(record) && record.GetEnabled():
+		observation, err := targets.ObserveSort(ctx, s.meta)
+		rows, observed, observationErr = observation.Rows, true, err
+	}
+	if observed && observationErr == nil {
+		target.RemainingRows = proto.Int64(rows)
+		target.CheckedAt = tsoutil.ComposeTSByTime(time.Now())
+	} else if observationErr != nil && ctx.Err() == nil {
+		target.Message = "remaining rows could not be observed"
+		mlog.RatedWarn(ctx, rate.Limit(1), "describe compaction target observation failed",
+			mlog.Int64("targetID", record.GetTargetID()), mlog.Err(observationErr))
 	}
 	return target, nil
 }
@@ -243,6 +251,9 @@ func compactionTargetReadModel(record *datapb.CompactionTarget, resource *datapb
 		State: record.GetState(), CreatedAt: record.GetActivatedAtTS(),
 		StoppedAt: record.GetInactivatedAtTS(), StopReason: record.GetStopReason(),
 		TotalRows: record.TotalRows, Rewrite: record.GetRewrite(), Optimize: record.GetOptimize(),
+	}
+	if targets.IsStandingSort(record) {
+		target.Enabled = record.Enabled
 	}
 	switch target.GetState() {
 	case datapb.TargetState_TARGET_STATE_ACTIVE:

@@ -425,6 +425,12 @@ func publicCompactionTarget(target *datapb.CompactionTargetReadModel) *milvuspb.
 		public.Target = &milvuspb.CompactionTargetInfo_Optimize{Optimize: &milvuspb.OptimizeTargetInfo{
 			InputTargetSizeBytes: target.GetOptimize().GetInputTargetSizeBytes(), ActualTargetSizeBytes: target.GetOptimize().GetActualTargetSizeBytes(),
 		}}
+	case target.GetIntent() == datapb.TargetIntent_INTENT_SORT && target.Enabled != nil:
+		public.Target = &milvuspb.CompactionTargetInfo_Other{Other: &milvuspb.OtherTargetSpec{
+			Condition: "SORT", ClusterWide: true, Parameters: []*commonpb.KeyValuePair{
+				{Key: "enabled", Value: strconv.FormatBool(target.GetEnabled())},
+			},
+		}}
 	default:
 		public.Target = &milvuspb.CompactionTargetInfo_Other{Other: &milvuspb.OtherTargetSpec{
 			Condition: target.GetIntent().String(), ClusterWide: resource.GetCollectionId() == 0,

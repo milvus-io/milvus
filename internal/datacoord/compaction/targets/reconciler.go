@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
@@ -28,40 +31,32 @@ type CompactionTargetReconciler struct {
 	IndexMeta            *index.IndexMeta
 	CompactionTargetMeta *CompactionTargetMeta
 	handler              meta.Handler
+	allocator            allocator.Allocator
 }
 
-var _ policy.CompactionPolicy = (*CompactionTargetReconciler)(nil)
-
-func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler) *CompactionTargetReconciler {
+func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, alloc allocator.Allocator) *CompactionTargetReconciler {
 	return &CompactionTargetReconciler{
 		meta:                 mt,
 		IndexMeta:            indexMeta,
 		CompactionTargetMeta: compactionTargetMeta,
 		handler:              handler,
+		allocator:            alloc,
 	}
 }
 
 func (reconciler *CompactionTargetReconciler) Enable() bool {
 	return reconciler != nil &&
 		reconciler.meta != nil &&
-		reconciler.CompactionTargetMeta != nil &&
-		paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+		reconciler.CompactionTargetMeta != nil
 }
 
-func (reconciler *CompactionTargetReconciler) Name() string {
-	return "CompactionTargetReconciler"
-}
-
-func (reconciler *CompactionTargetReconciler) Trigger(ctx context.Context) (map[policy.CompactionTriggerType][]view.CompactionView, error) {
-	return reconciler.Reconcile(ctx)
-}
-
-func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (map[policy.CompactionTriggerType][]view.CompactionView, error) {
-	events := map[policy.CompactionTriggerType][]view.CompactionView{}
+func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (map[policy.CompactionTriggerType][]view.TargetView, error) {
+	events := map[policy.CompactionTriggerType][]view.TargetView{}
 	if !reconciler.Enable() {
 		return events, nil
 	}
 
+	sortMatches := reconciler.observeStandingSort(ctx)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
@@ -88,57 +83,148 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 	}
 
-	// Duplicate targets contribute one physical input per round. Keep the
-	// Target out of the Task's TriggerID so the Task survives independently.
-	sharedSelectable := make([]*meta.SegmentInfo, 0, len(matches))
-	blocked := make(map[int64]bool)
-	ttls := make(map[int64]time.Duration)
-	for _, segment := range matches {
-		collectionID := segment.GetCollectionID()
-		collectionBlocked, checked := blocked[collectionID]
-		if !checked {
-			collection := reconciler.meta.GetCollection(collectionID)
-			collectionBlocked = !collection.IsCreated() || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(collectionID)
-			if !collectionBlocked {
-				ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
-				if err != nil {
-					mlog.RatedWarn(ctx, rate.Limit(1), "could not determine collection TTL for compaction target",
-						mlog.FieldCollectionID(collectionID), mlog.Err(err))
-					collectionBlocked = true
-				}
-				ttls[collectionID] = ttl
-			}
-			blocked[collectionID] = collectionBlocked
+	// Pick the physical path for each segment before constructing any View.
+	// An independently selectable SORT takes precedence over a matching REWRITE.
+	eligible := make(map[int64]collectionPlanningFacts)
+	sortSelectable := make([]*meta.SegmentInfo, 0, len(sortMatches))
+	allocated := make(map[int64]struct{}, len(sortMatches))
+	for _, segment := range sortMatches {
+		if reconciler.selectable(ctx, segment, eligible) {
+			allocated[segment.GetID()] = struct{}{}
+			sortSelectable = append(sortSelectable, segment)
 		}
-		if !collectionBlocked && policy.IsSharedCompactionSelectable(reconciler.meta, segment) {
-			// Reoffer eligible Sort work for a matched segment if its
-			// reactive notification was missed, including with auto off.
-			if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() && policy.CanTriggerSortCompaction(segment) {
-				views := view.GetViewsByInfo(segment)
-				events[policy.TriggerTypeSort] = append(events[policy.TriggerTypeSort], &policy.MixSegmentView{
-					Label: views[0].Label, Segments: views, CollectionTTL: ttls[collectionID],
-				})
-				continue
-			}
+	}
+	sharedSelectable := make([]*meta.SegmentInfo, 0, len(matches))
+	for id, segment := range matches {
+		if _, assigned := allocated[id]; !assigned && reconciler.selectable(ctx, segment, eligible) {
 			sharedSelectable = append(sharedSelectable, segment)
 		}
 	}
-	selectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
-	slices.SortFunc(selectable, func(a, b *meta.SegmentInfo) int {
-		if a.GetCollectionID() != b.GetCollectionID() {
-			return cmp.Compare(a.GetCollectionID(), b.GetCollectionID())
-		}
-		return cmp.Compare(a.GetID(), b.GetID())
-	})
-	for _, segment := range selectable {
-		views := view.GetViewsByInfo(segment)
-		events[policy.TriggerTypeSingle] = append(events[policy.TriggerTypeSingle], &policy.MixSegmentView{
-			Label:         views[0].Label,
-			Segments:      views,
-			CollectionTTL: ttls[segment.GetCollectionID()],
-		})
+	rewriteSelectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	if len(sortMatches) > len(sortSelectable) || len(matches) > len(rewriteSelectable) {
+		mlog.RatedInfo(ctx, rate.Limit(1), "compaction target inputs awaiting selection",
+			mlog.Int("sortMatches", len(sortMatches)), mlog.Int("sortSelectable", len(sortSelectable)),
+			mlog.Int("rewriteMatches", len(matches)), mlog.Int("rewriteSelectable", len(rewriteSelectable)))
 	}
+	slices.SortFunc(sortSelectable, func(a, b *meta.SegmentInfo) int {
+		if a.GetIsInvisible() != b.GetIsInvisible() {
+			if a.GetIsInvisible() {
+				return -1
+			}
+			return 1
+		}
+		return compareSegment(a, b)
+	})
+	slices.SortFunc(rewriteSelectable, compareSegment)
+	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
+	events[policy.TriggerTypeSingle] = targetViews(rewriteSelectable, eligible, false)
 	return events, ctx.Err()
+}
+
+func compareSegment(a, b *meta.SegmentInfo) int {
+	if a.GetCollectionID() != b.GetCollectionID() {
+		return cmp.Compare(a.GetCollectionID(), b.GetCollectionID())
+	}
+	return cmp.Compare(a.GetID(), b.GetID())
+}
+
+type collectionPlanningFacts struct {
+	blocked      bool
+	ttl          time.Duration
+	schema       *schemapb.CollectionSchema
+	expectedSize int64
+}
+
+func (reconciler *CompactionTargetReconciler) selectable(
+	ctx context.Context,
+	segment *meta.SegmentInfo,
+	collections map[int64]collectionPlanningFacts,
+) bool {
+	id := segment.GetCollectionID()
+	facts, checked := collections[id]
+	if !checked {
+		collection := reconciler.meta.GetCollection(id)
+		facts.blocked = !collection.IsCreated() || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(id)
+		if !facts.blocked {
+			ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
+			if err != nil {
+				mlog.RatedWarn(ctx, rate.Limit(1), "could not determine collection TTL for compaction target",
+					mlog.FieldCollectionID(id), mlog.Err(err))
+				facts.blocked = true
+			} else {
+				facts.ttl = ttl
+				facts.schema = proto.CloneOf(collection.Schema)
+				facts.expectedSize = policy.GetExpectedSegmentSize(reconciler.IndexMeta, id, facts.schema)
+			}
+		}
+		collections[id] = facts
+	}
+	return !facts.blocked && policy.IsSharedCompactionSelectable(reconciler.meta, segment)
+}
+
+func targetViews(segments []*meta.SegmentInfo, collections map[int64]collectionPlanningFacts, sorting bool) []view.TargetView {
+	groups := make(map[view.CompactionGroupLabel]*view.RewriteInputs)
+	var order []view.CompactionGroupLabel
+	for _, segment := range segments {
+		input := view.GetTargetSegmentView(segment)
+		label := *input.Label
+		pool := groups[label]
+		if pool == nil {
+			facts := collections[label.CollectionID]
+			pool = &view.RewriteInputs{
+				Group: input.Label, TTL: facts.ttl, Schema: facts.schema, ExpectedSize: facts.expectedSize,
+			}
+			groups[label] = pool
+			order = append(order, label)
+		}
+		pool.Segments = append(pool.Segments, input)
+	}
+	views := make([]view.TargetView, 0, len(order))
+	for _, label := range order {
+		pool := groups[label]
+		if sorting {
+			views = append(views, &view.SortView{RewriteInputs: *pool})
+		} else {
+			views = append(views, &view.RewriteView{RewriteInputs: *pool})
+		}
+	}
+	return views
+}
+
+func (reconciler *CompactionTargetReconciler) observeStandingSort(ctx context.Context) []*meta.SegmentInfo {
+	record, err := reconciler.SyncSort(ctx)
+	if err != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not synchronize Standing SORT compaction target", mlog.Err(err))
+		return nil
+	}
+	if !record.GetEnabled() {
+		return nil
+	}
+	observation, err := ObserveSort(ctx, reconciler.meta)
+	if err != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not observe Standing SORT compaction target", mlog.Err(err))
+		return nil
+	}
+	return observation.Match
+}
+
+func (reconciler *CompactionTargetReconciler) SyncSort(ctx context.Context) (*datapb.CompactionTarget, error) {
+	return reconciler.CompactionTargetMeta.SyncSort(ctx, reconciler.allocator, Params.DataCoordCfg.EnableSortCompaction.GetAsBool())
+}
+
+// SelectSort handles the ordinary post-flush notification using the same
+// confirmed source condition and input rules as the periodic sweep.
+func (reconciler *CompactionTargetReconciler) SelectSort(ctx context.Context, segmentID int64) (view.TargetView, error) {
+	record, err := reconciler.SyncSort(ctx)
+	if err != nil || !record.GetEnabled() {
+		return nil, err
+	}
+	segment := reconciler.meta.GetSegment(ctx, segmentID)
+	collections := make(map[int64]collectionPlanningFacts)
+	if !policy.MatchesSortCompaction(segment) || !reconciler.selectable(ctx, segment, collections) {
+		return nil, nil
+	}
+	return targetViews([]*meta.SegmentInfo{segment}, collections, true)[0], nil
 }
 
 func (reconciler *CompactionTargetReconciler) finishRewrite(ctx context.Context, record *datapb.CompactionTarget, observation *RewriteObservation) error {

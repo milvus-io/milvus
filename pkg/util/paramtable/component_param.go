@@ -6600,6 +6600,8 @@ type dataCoordConfig struct {
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
 	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
+	CompactionRateLimitTokens              ParamItem `refreshable:"true"`
+	CompactionRateLimitInterval            ParamItem `refreshable:"true"`
 	TargetCompactionMaxEvents              ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
@@ -6998,11 +7000,29 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 	}
 	p.EnableTargetBasedCompaction.Init(base.mgr)
 
+	p.CompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.rateLimitTokens",
+		Version:      "3.1.0",
+		DefaultValue: "256",
+		Doc:          "Shared compaction task token bucket capacity and number of tokens replenished per refill interval",
+		Export:       true,
+	}
+	p.CompactionRateLimitTokens.Init(base.mgr)
+
+	p.CompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.rateLimitInterval",
+		Version:      "3.1.0",
+		DefaultValue: "60",
+		Doc:          "Refill interval in seconds for the shared compaction task token bucket",
+		Export:       true,
+	}
+	p.CompactionRateLimitInterval.Init(base.mgr)
+
 	p.TargetCompactionMaxEvents = ParamItem{
 		Key:          "dataCoord.compaction.target.maxEventsPerReconcile",
 		Version:      "3.0.0",
 		DefaultValue: "100",
-		Doc:          "Maximum number of compaction events emitted by one target reconciliation.",
+		Doc:          "Deprecated. Target reconciliation plans all matches and uses the shared admission limit.",
 		Export:       true,
 		Formatter: func(value string) string {
 			if getAsInt(value) <= 0 {
@@ -7049,10 +7069,9 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.compaction.maxTaskNum",
 		Version:      "3.0.1",
 		DefaultValue: "0",
-		Doc: `Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
-target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
-Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
-segments while automatic compaction is disabled. 0 or a negative value means unlimited.`,
+		Doc: `Soft cap on pending and running compaction tasks. Concurrent submissions can briefly exceed it.
+Sort tasks required by an admitted clustering task may pass this cap while still using the shared bucket and queue.
+0 or a negative value means unlimited.`,
 		Export: true,
 	}
 	p.CompactionMaxTaskNum.Init(base.mgr)

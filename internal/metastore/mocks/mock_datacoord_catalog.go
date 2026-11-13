@@ -3909,6 +3909,54 @@ func (_c *DataCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, .
 	return _c
 }
 
+// UpdateStandingCompactionTarget provides a mock function with given fields: ctx, previous, next
+func (_m *DataCoordCatalog) UpdateStandingCompactionTarget(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget) error {
+	ret := _m.Called(ctx, previous, next)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateStandingCompactionTarget")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget) error); ok {
+		r0 = rf(ctx, previous, next)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_UpdateStandingCompactionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateStandingCompactionTarget'
+type DataCoordCatalog_UpdateStandingCompactionTarget_Call struct {
+	*mock.Call
+}
+
+// UpdateStandingCompactionTarget is a helper method to define mock.On call
+//   - ctx context.Context
+//   - previous *datapb.CompactionTarget
+//   - next *datapb.CompactionTarget
+func (_e *DataCoordCatalog_Expecter) UpdateStandingCompactionTarget(ctx interface{}, previous interface{}, next interface{}) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+	return &DataCoordCatalog_UpdateStandingCompactionTarget_Call{Call: _e.mock.On("UpdateStandingCompactionTarget", ctx, previous, next)}
+}
+
+func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) Run(run func(ctx context.Context, previous *datapb.CompactionTarget, next *datapb.CompactionTarget)) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*datapb.CompactionTarget))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) Return(_a0 error) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_UpdateStandingCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *datapb.CompactionTarget) error) *DataCoordCatalog_UpdateStandingCompactionTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewDataCoordCatalog creates a new instance of DataCoordCatalog. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewDataCoordCatalog(t interface {

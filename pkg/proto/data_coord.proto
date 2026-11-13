@@ -1889,6 +1889,7 @@ message CompactionTargetReadModel {
   optional int64 remaining_rows = 11;
   uint64 checked_at = 12;
   string message = 13;
+  optional bool enabled = 14;
 }
 
 message DescribeCompactionTargetRequest {
@@ -1942,6 +1943,9 @@ message CompactionTarget {
   optional int64 total_rows = 11;
   CompactionTargetRewrite rewrite = 12;
   CompactionTargetOptimize optimize = 13;
+  optional bool enabled = 14;
+  // Fences delayed conditional Standing updates when a condition is reverted.
+  uint64 condition_revision = 15;
 }
 
 message CompactionTask{
@@ -1978,6 +1982,8 @@ message CompactionTask{
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
+  // Planning-time estimate used to allocate output IDs. Cleared before save.
+  int64 output_segment_count_hint = 32;
 }
 
 message PartitionStatsInfo {

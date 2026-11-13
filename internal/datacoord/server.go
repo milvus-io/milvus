@@ -404,7 +404,9 @@ func (s *Server) initDataCoord() (initErr error) {
 		return err
 	}
 
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -1049,9 +1051,21 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
+func (s *Server) initCompaction() error {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, s.compactionTargetMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		if err := cph.InitAdmission(); err != nil {
+			return err
+		}
+	}
+	if s.compactionTargetMeta != nil {
+		item := &Params.DataCoordCfg.TargetCompactionMaxEvents
+		if item.IsSetByUser() {
+			mlog.Warn(s.ctx, "deprecated configuration has no effect on target reconciliation",
+				mlog.String("key", item.Key))
+		}
+	}
 	cph.LookupRestoreJob = func(ctx context.Context, id int64) *datapb.CopySegmentJob {
 		job := s.copySegmentMeta.GetJob(ctx, id)
 		if job == nil {
@@ -1064,6 +1078,7 @@ func (s *Server) initCompaction() {
 	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.compactionTargetMeta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {
