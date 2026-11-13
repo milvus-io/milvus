@@ -131,8 +131,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
 
     // fn: (bool is_valid, size_t offset) -> void
     // If offsets is nullptr, this function will iterate over all rows.
-    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
-    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
     virtual void
     BulkIsValid(milvus::OpContext* ctx,
                 std::function<void(bool, size_t)> fn,
@@ -444,20 +442,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) = 0;
-
-    // fn: (std::string_view value, size_t offset, bool is_valid) -> void
-    // If offsets is nullptr, this function will iterate over all rows.
-    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
-    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
-    virtual void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkRawStringAt only supported for ChunkColumnInterface of "
-                  "variable length type");
-    }
 
     virtual void
     BulkRawBsonAt(milvus::OpContext* op_ctx,

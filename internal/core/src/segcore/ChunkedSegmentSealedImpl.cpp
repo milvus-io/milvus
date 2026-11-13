@@ -5894,12 +5894,30 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                "text index field {} has negative row count",
                field_id.get());
     const auto declared_row_count = static_cast<size_t>(row_count);
-    auto produce_text_batches = [&](const index::TextIndexBuildSource::
-                                        ConsumeBatch& consume) {
+    index::TextIndexBuildParams params{
+        .field_name = unique_id,
+        .value_type = field_meta.get_data_type(),
+        .analyzer_name = "milvus_tokenizer",
+        .analyzer_params = field_meta.get_analyzer_params(),
+        .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
+        .unique_id = unique_id,
+        .local_dir =
+            cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
+    index::TextIndexBuilder builder(std::move(params));
+    // Release source cursors and pins before finalizing the index.
+    {
         auto it = target_runtime->fields.find(field_id);
         std::shared_ptr<ChunkedColumnInterface> column =
             it != target_runtime->fields.end() ? it->second : nullptr;
         if (column) {
+            // Preserve V1's former bulk pin set; grouped Raw and Vortex keep
+            // their current-source pins. Neither policy retains old batches.
+            const auto scan_options = ScanOptions::ForData(
+                0,
+                TargetType::StringView,
+                dynamic_cast<const ChunkedColumnBase*>(column.get()) != nullptr
+                    ? ScanPinPolicy::AllCells
+                    : ScanPinPolicy::CursorOwned);
             // Check for cancellation before bulk operation
             CheckCancellation(op_ctx,
                               id_,
@@ -5962,7 +5980,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         views[i] = texts[entry.text_index];
                         validity[i] = true;
                     }
-                    consume(index::ScalarBuildBatch<std::string_view>{
+                    builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
                         views,
                         field_meta.is_nullable()
                             ? ValidityView::FromExpanded(validity.data())
@@ -5976,26 +5994,35 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         field_id.get(),
                         "ChunkedSegmentSealedImpl::CreateTextIndex()");
                 };
-                column->BulkRawStringAt(
-                    op_ctx,
-                    [&](std::string_view value, size_t offset, bool is_valid) {
-                        AssertInfo(offset == expected_offset &&
-                                       offset < declared_row_count,
-                                   "text column for field {} produced row {} "
-                                   "while row {} was expected",
-                                   field_id.get(),
-                                   offset,
-                                   expected_offset);
-                        ++expected_offset;
+                auto cursor = column->Scan(op_ctx, scan_options);
+                AssertInfo(cursor != nullptr,
+                           "text column scan is unsupported");
+                ScanBatch batch;
+                while (cursor->Next(kTextLobIndexBuildBatchSize,
+                                    ScanReadMode::DataAndValidity,
+                                    &batch)) {
+                    AssertInfo(
+                        batch.row_id_start == expected_offset &&
+                            batch.size > 0 &&
+                            batch.size <= declared_row_count - expected_offset,
+                        "invalid text scan batch at row {} for field {}",
+                        expected_offset,
+                        field_id.get());
+                    const auto* values =
+                        batch.values.data_as<std::string_view>();
+                    for (int64_t i = 0; i < batch.size; ++i) {
+                        const auto offset = expected_offset++;
+                        const auto is_valid =
+                            !batch.validity || batch.validity[i];
                         if (!is_valid) {
                             entries.push_back({offset, false, 0});
                             if (entries.size() >= kTextLobIndexBuildBatchSize) {
                                 flush_text_entries();
                             }
-                            return;
+                            continue;
                         }
                         entries.push_back({offset, true, encoded_refs.size()});
-                        encoded_ref_storage.emplace_back(value);
+                        encoded_ref_storage.emplace_back(values[i]);
                         encoded_refs.push_back(MakeTextLobEncodedRef(
                             encoded_ref_storage.back().data(),
                             encoded_ref_storage.back().size()));
@@ -6004,7 +6031,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                             entries.size() >= kTextLobIndexBuildBatchSize) {
                             flush_text_entries();
                         }
-                    });
+                    }
+                }
                 flush_text_entries();
                 AssertInfo(expected_offset == declared_row_count,
                            "text column for field {} declared {} rows but "
@@ -6014,30 +6042,36 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                            expected_offset);
             } else {
                 size_t expected_offset = 0;
-                column->BulkRawStringAt(
-                    op_ctx,
-                    [&](std::string_view value, size_t offset, bool is_valid) {
-                        AssertInfo(offset == expected_offset &&
-                                       offset < declared_row_count,
-                                   "text column for field {} produced row {} "
-                                   "while row {} was expected",
-                                   field_id.get(),
-                                   offset,
-                                   expected_offset);
-                        ++expected_offset;
-                        AssertInfo(is_valid || field_meta.is_nullable(),
-                                   "non-nullable text field {} produced a "
-                                   "null row at offset {}",
-                                   field_id.get(),
-                                   offset);
-                        const std::array<std::string_view, 1> values{value};
-                        const std::array<bool, 1> validity{is_valid};
-                        consume(index::ScalarBuildBatch<std::string_view>{
-                            values,
-                            field_meta.is_nullable()
-                                ? ValidityView::FromExpanded(validity.data())
-                                : ValidityView{}});
-                    });
+                auto cursor = column->Scan(op_ctx, scan_options);
+                AssertInfo(cursor != nullptr,
+                           "text column scan is unsupported");
+                ScanBatch batch;
+                while (cursor->Next(kTextLobIndexBuildBatchSize,
+                                    ScanReadMode::DataAndValidity,
+                                    &batch)) {
+                    AssertInfo(
+                        batch.row_id_start == expected_offset &&
+                            batch.size > 0 &&
+                            batch.size <= declared_row_count - expected_offset,
+                        "invalid text scan batch at row {} for field {}",
+                        expected_offset,
+                        field_id.get());
+                    if (!field_meta.is_nullable() && batch.validity) {
+                        for (int64_t i = 0; i < batch.size; ++i) {
+                            AssertInfo(batch.validity[i],
+                                       "non-nullable text field {} produced a "
+                                       "null row at offset {}",
+                                       field_id.get(),
+                                       expected_offset + i);
+                        }
+                    }
+                    builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
+                        {batch.values.data_as<std::string_view>(),
+                         static_cast<size_t>(batch.size)},
+                        field_meta.is_nullable() ? batch.validity
+                                                 : ValidityView{}});
+                    expected_offset += batch.size;
+                }
                 AssertInfo(expected_offset == declared_row_count,
                            "text column for field {} declared {} rows but "
                            "produced {}",
@@ -6130,7 +6164,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         views[i] = values[i];
                     }
                 }
-                consume(index::ScalarBuildBatch<std::string_view>{
+                builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
                     std::span<const std::string_view>(views.data(), batch_size),
                     field_meta.is_nullable()
                         ? ValidityView::FromExpanded(validity.data())
@@ -6142,10 +6176,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     "ChunkedSegmentSealedImpl::CreateTextIndex()");
             }
         }
-    };
-    index::TextIndexBuildSource source{
-        .row_count = declared_row_count,
-        .produce = std::move(produce_text_batches)};
+    }
 
     // Check for cancellation before finalizing
     CheckCancellation(op_ctx,
@@ -6153,17 +6184,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    index::TextIndexBuildParams params{
-        .field_name = unique_id,
-        .value_type = field_meta.get_data_type(),
-        .analyzer_name = "milvus_tokenizer",
-        .analyzer_params = field_meta.get_analyzer_params(),
-        .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
-        .unique_id = unique_id,
-        .local_dir =
-            cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
-    auto artifact =
-        std::move(index::TextIndexBuilder(std::move(params))).Build(source);
+    auto artifact = std::move(builder).Finish(declared_row_count);
     auto storage = std::move(*artifact).IntoStorage();
     const index::IndexMetadata metadata{index::ReaderCaps{.text_match = true},
                                         index::Domain::Row,
@@ -9185,17 +9206,26 @@ ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
 
         // Rows are written at their absolute segment offsets (see
         // SimpleGeometryCache::AppendDataAt).
-        auto num_chunks = column->num_chunks();
+        auto cursor = column->Scan(
+            op_ctx,
+            ScanOptions::ForData(
+                0, TargetType::StringView, ScanPinPolicy::CursorOwned));
+        AssertInfo(cursor != nullptr, "geometry column scan is unsupported");
+        const auto num_rows = column->NumRows();
         size_t absolute_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-            // Get all string views from this chunk
-            auto pw = column->StringViews(op_ctx, chunk_id);
-            auto [string_views, valid_data] = pw.get();
-
-            // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size();
-                 ++i, ++absolute_offset) {
-                if (!valid_data || valid_data[i]) {
+        ScanBatch batch;
+        while (cursor->Next(num_rows - absolute_offset,
+                            ScanReadMode::DataAndValidity,
+                            &batch)) {
+            AssertInfo(batch.row_id_start == absolute_offset &&
+                           batch.size > 0 &&
+                           batch.size <= num_rows - absolute_offset,
+                       "invalid geometry scan batch at row {} for field {}",
+                       absolute_offset,
+                       field_id.get());
+            const auto* string_views = batch.values.data_as<std::string_view>();
+            for (int64_t i = 0; i < batch.size; ++i, ++absolute_offset) {
+                if (!batch.validity || batch.validity[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
                     geometry_cache->AppendDataAt(
@@ -9206,6 +9236,10 @@ ChunkedSegmentSealedImpl::BuildGeometryCacheDetached(
                 }
             }
         }
+        AssertInfo(absolute_offset == num_rows,
+                   "geometry scan returned {} rows, expected {}",
+                   absolute_offset,
+                   num_rows);
 
         LOG_INFO(
             "Successfully built geometry cache for segment {} field {} "
