@@ -3760,7 +3760,7 @@ func TestHasTooManyDeletions(t *testing.T) {
 			segment := &meta.SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: tc.numRows, Stats: tc.stats},
 			}
-			assert.Equal(t, tc.want, policy.HasTooManyDeletions(segment))
+			assert.Equal(t, tc.want, policy.HasTooManyDeletions(t.Context(), segment))
 		})
 	}
 }
