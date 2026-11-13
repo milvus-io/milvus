@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
@@ -242,12 +243,20 @@ func newRuntimeDataViewProvider(t *testing.T) *fakeRuntimeDataViewProvider {
 }
 
 type fakeRuntimeBalancer struct {
-	started  bool
-	stopped  bool
-	triggers []balancer.TriggerScope
+	started    bool
+	stopped    bool
+	triggers   []balancer.TriggerScope
+	completion *syncutil.Future[error]
 }
 
-func (b *fakeRuntimeBalancer) Reconcile(context.Context) error { return nil }
+func (b *fakeRuntimeBalancer) TriggerWithCompletion(...balancer.TriggerScope) *syncutil.Future[error] {
+	if b.completion != nil {
+		return b.completion
+	}
+	completion := syncutil.NewFuture[error]()
+	completion.Set(nil)
+	return completion
+}
 
 func (b *fakeRuntimeBalancer) Start(context.Context) {
 	b.started = true
