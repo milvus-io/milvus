@@ -167,9 +167,15 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Must use git config --global because git's ownership check runs before
-# both -c options and GIT_CONFIG_COUNT env vars are processed.
-$(shell git config --global --add safe.directory '*' 2>/dev/null)
+# Must use git config --global: git without 2.38's protected config reads
+# safe.directory only from system/global config, ignoring -c and
+# GIT_CONFIG_COUNT. That includes Ubuntu focal's git and jammy's before
+# 2.34.1-1ubuntu1.16; #47916 hit it in the CI build container.
+# Every make run parses this line, so write only when `git rev-parse` fails and
+# '*' is not in the global config yet. An unconditional --add appended a
+# duplicate entry to ~/.gitconfig on each run and disabled git's ownership
+# check for all repos on developer machines that never needed it.
+$(shell git rev-parse --git-dir >/dev/null 2>&1 || git config --global --get-all safe.directory 2>/dev/null | grep -qxF '*' || git config --global --add safe.directory '*' 2>/dev/null)
 
 export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
