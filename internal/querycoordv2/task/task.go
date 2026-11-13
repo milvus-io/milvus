@@ -160,8 +160,10 @@ type baseTask struct {
 	priority Priority
 	err      error
 	actions  []Action
-	step     int
-	reason   string
+	// The scheduler advances step under the collection lock; monitoring reads
+	// it independently when serializing task statistics.
+	step   atomic.Int32
+	reason string
 
 	// span for tracing
 	span trace.Span
@@ -390,12 +392,11 @@ func (task *baseTask) Actions() []Action {
 }
 
 func (task *baseTask) Step() int {
-	return task.step
+	return int(task.step.Load())
 }
 
 func (task *baseTask) StepUp() int {
-	task.step++
-	return task.step
+	return int(task.step.Inc())
 }
 
 func (task *baseTask) IsFinished(distMgr *meta.DistributionManager) bool {

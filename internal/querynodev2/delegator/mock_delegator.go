@@ -1473,6 +1473,52 @@ func (_c *MockShardDelegator_UpdateTSafe_Call) RunAndReturn(run func(uint64)) *M
 	return _c
 }
 
+// UpdateVersion provides a mock function with given fields: version
+func (_m *MockShardDelegator) UpdateVersion(version int64) bool {
+	ret := _m.Called(version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateVersion")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(version)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_UpdateVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateVersion'
+type MockShardDelegator_UpdateVersion_Call struct {
+	*mock.Call
+}
+
+// UpdateVersion is a helper method to define mock.On call
+//   - version int64
+func (_e *MockShardDelegator_Expecter) UpdateVersion(version interface{}) *MockShardDelegator_UpdateVersion_Call {
+	return &MockShardDelegator_UpdateVersion_Call{Call: _e.mock.On("UpdateVersion", version)}
+}
+
+func (_c *MockShardDelegator_UpdateVersion_Call) Run(run func(version int64)) *MockShardDelegator_UpdateVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateVersion_Call) Return(_a0 bool) *MockShardDelegator_UpdateVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateVersion_Call) RunAndReturn(run func(int64) bool) *MockShardDelegator_UpdateVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // VerifyExcludedSegments provides a mock function with given fields: segmentID, ts
 func (_m *MockShardDelegator) VerifyExcludedSegments(segmentID int64, ts uint64) bool {
 	ret := _m.Called(segmentID, ts)
