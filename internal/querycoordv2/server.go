@@ -983,7 +983,12 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 // Embedded QueryNodes are excluded from that manager, so their RGs are resolved
 // from the caller's complete StreamingNode snapshot, including frozen nodes.
 // Nodes absent from both mappings are attributed to the empty RG (global).
+// QueryView mode instead counts retained shard/node references outside the
+// desired replica/RG configuration, through final durable view removal.
 func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64, streamingNodeRGs map[int64]string) map[string]int {
+	if s.qviewsRuntime != nil {
+		return s.qviewsLeakedResourcesByCollectionPerRG(collectionID)
+	}
 	replicas := s.GetInternalReplicasByCollection(ctx, collectionID)
 	validNodes := typeutil.NewUniqueSet()
 	for _, r := range replicas {

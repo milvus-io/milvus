@@ -1228,6 +1228,8 @@ func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
 	manager.mu.Unlock()
 
 	assert.True(t, retainedBeforePersist)
+	require.Equal(t, 1, manager.Stats().ResidentViews)
+	require.Equal(t, []int64{1}, manager.Stats().ResidentNodes)
 	require.Len(t, event.afterPersist, 1)
 	event.afterPersist[0]()
 
@@ -1235,6 +1237,8 @@ func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
 	_, retainedAfterPersist := manager.views[sm.Version()]
 	manager.mu.Unlock()
 	assert.False(t, retainedAfterPersist)
+	require.Zero(t, manager.Stats().ResidentViews)
+	require.Empty(t, manager.Stats().ResidentNodes)
 }
 
 func TestShardViewManagerDoesNotPublishReleaseWithoutRequestRelease(t *testing.T) {

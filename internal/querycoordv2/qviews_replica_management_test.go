@@ -62,6 +62,8 @@ func TestQueryViewReplicaManagementWithoutLegacyManager(t *testing.T) {
 	errors := s.CheckReplicasServiceable(t.Context(), 1)
 	require.Len(t, errors, 1)
 	require.Contains(t, errors, int64(12), "a missing expected shard is not serving")
+	stats[qviews.ShardID{ReplicaID: 12, VChannel: "v1"}] = &coordview.ShardStats{PreparingVersion: v}
+	require.Contains(t, s.CheckReplicasServiceable(t.Context(), 1), int64(12), "preparing without Up is not ready")
 	stats[qviews.ShardID{ReplicaID: 12, VChannel: "v1"}] = &coordview.ShardStats{UpVersion: v, UpLoadInfoVersion: version - 1}
 	require.Contains(t, s.CheckReplicasServiceable(t.Context(), 1), int64(12), "old load version is not ready")
 	stats[qviews.ShardID{ReplicaID: 12, VChannel: "v1"}].UpLoadInfoVersion = version
@@ -73,4 +75,54 @@ func TestQueryViewReplicaManagementWithoutLegacyManager(t *testing.T) {
 	value, err := s.qviewsReplicasJSON(t.Context())
 	require.NoError(t, err)
 	require.Contains(t, value, "a")
+}
+
+func TestQueryViewComplianceCleanup(t *testing.T) {
+	s, _ := newHandoffServer(t)
+	s.meta = &meta.Meta{ResourceManager: &meta.ResourceManager{}}
+	// No legacy distribution or ReplicaManager: QV cleanup must stand on its own.
+	s.dist = nil
+	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(1).Clone()
+	cfg.Replicas = []*loadmgr.ReplicaAssignment{{ReplicaID: 11, ResourceGroup: "green"}}
+	require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(t.Context(), cfg))
+	rgPatch := mockey.Mock((*meta.ResourceManager).GetResourceGroupByNodeID).To(func(_ *meta.ResourceManager, node int64) string {
+		return map[int64]string{1: "blue", 2: "green", 3: "green"}[node]
+	}).Build()
+	t.Cleanup(func() { rgPatch.UnPatch() })
+	var stats map[qviews.ShardID]*coordview.ShardStats
+	patch := mockey.Mock((*coordview.ShardViewRegistry).SnapshotForCollection).To(func(_ *coordview.ShardViewRegistry, collection int64) *coordview.ShardViewSnapshot {
+		require.EqualValues(t, 1, collection)
+		return coordview.NewShardViewSnapshot(1, stats)
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	for _, tc := range []struct {
+		name    string
+		replica int64
+		nodes   []int64
+		views   int
+		want    map[string]int
+	}{
+		{"retired replica", 12, []int64{1}, 1, map[string]int{"blue": 1}},
+		{"retired replica sharing target node", 12, []int64{2}, 1, map[string]int{"green": 1}},
+		{"RG migration", 11, []int64{1, 2}, 2, map[string]int{"blue": 1}},
+		{"ordinary same RG handoff", 11, []int64{2, 3}, 2, map[string]int{}},
+		{"unknown node RG", 11, []int64{99}, 1, map[string]int{"": 1}},
+		{"retired growing only view", 12, nil, 1, map[string]int{"": 1}},
+		{"current growing only view", 11, nil, 1, map[string]int{}},
+		{"empty manager", 12, nil, 0, map[string]int{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stats = map[qviews.ShardID]*coordview.ShardStats{
+				{ReplicaID: tc.replica, VChannel: "v0"}: {ResidentNodes: tc.nodes, ResidentViews: tc.views},
+			}
+			require.Equal(t, tc.want, s.GetLeakedResourcesByCollectionPerRG(t.Context(), 1, map[int64]string{99: "unrelated WAL RG"}))
+		})
+	}
+	s.qviewsRuntime.loadConfigStore.StopPlanning(1)
+	stats = map[qviews.ShardID]*coordview.ShardStats{
+		{ReplicaID: 11, VChannel: "v0"}: {ResidentNodes: []int64{2}, ResidentViews: 1},
+	}
+	require.Equal(t, map[string]int{"green": 1}, s.GetLeakedResourcesByCollectionPerRG(t.Context(), 1, nil))
+	stats = nil
+	require.Empty(t, s.GetLeakedResourcesByCollectionPerRG(t.Context(), 1, nil))
 }

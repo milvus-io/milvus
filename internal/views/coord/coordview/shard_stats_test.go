@@ -18,6 +18,7 @@ func TestStats_Empty(t *testing.T) {
 	require.NotNil(t, stats)
 	assert.Nil(t, stats.UpVersion)
 	assert.Zero(t, stats.UpLoadInfoVersion)
+	assert.Zero(t, stats.ResidentViews)
 	assert.Empty(t, stats.Segments)
 	assert.Nil(t, stats.PreparingVersion)
 }
@@ -54,6 +55,8 @@ func TestStats_EmptyPreparingView(t *testing.T) {
 	require.NoError(t, mgr.AddPreparing(context.Background(), b))
 
 	stats := mgr.Stats()
+	require.Equal(t, 1, stats.ResidentViews)
+	require.Empty(t, stats.ResidentNodes)
 	assert.Nil(t, stats.UpVersion)
 	require.NotNil(t, stats.PreparingVersion)
 	assert.Equal(t, testVersion(1, 1, 1), *stats.PreparingVersion)
