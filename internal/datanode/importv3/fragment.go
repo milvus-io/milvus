@@ -40,14 +40,17 @@ func SourceFromFragment(
 		ID:   ref.GetPath(),
 		Rows: ref.GetRows(),
 		Open: func(ctx context.Context) (storage.RecordReader, error) {
-			return storage.NewImportFragmentRecordReader(ctx, storage.ImportFragmentReaderSpec{
-				Path: ref.GetPath(),
-				Rows: ref.GetRows(),
-			}, temporarySchema,
-				storage.WithBufferSize(bufferSize),
-				storage.WithStorageConfig(storageConfig),
-				storage.WithPluginContext(pluginContext),
-			)
+			open := func(ctx context.Context) (storage.RecordReader, error) {
+				return storage.NewImportFragmentRecordReader(ctx, storage.ImportFragmentReaderSpec{
+					Path: ref.GetPath(),
+					Rows: ref.GetRows(),
+				}, temporarySchema,
+					storage.WithBufferSize(bufferSize),
+					storage.WithStorageConfig(storageConfig),
+					storage.WithPluginContext(pluginContext),
+				)
+			}
+			return storage.NewRetryableRecordReader(ctx, open, storage.DefaultRetryableRecordReaderAttempts)
 		},
 	}, nil
 }
