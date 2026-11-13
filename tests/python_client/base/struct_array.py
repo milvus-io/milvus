@@ -35,6 +35,7 @@ from common.struct_array_data import (
     normalized_vector,
     nullable_children,
     vector_score,
+    vector_score_tolerance,
 )
 from pymilvus import DataType
 
@@ -235,6 +236,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
         second=False,
         dim=DIM,
         extra_fields=(),
+        clips_index_name="clips[emb]",
     ):
         name = cf.gen_unique_str("struct_contract")
         schema = cf.gen_collection_schema(
@@ -268,6 +270,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
             for field in ("clips", "other") if second else ("clips",):
                 indexes.add_index(
                     f"{field}[emb]",
+                    index_name=clips_index_name if field == "clips" else f"{field}[emb]",
                     index_type=vector_index,
                     metric_type=metric,
                     params={"M": 16, "efConstruction": 200} if vector_index == "HNSW" else {},
@@ -352,7 +355,15 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
             expected = {pk for pk, row in model.items() if oracle(row) is True}
             assert len(rows) == len(expected) and {row["id"] for row in rows} == expected, expression
 
-    def assert_element_search(self, client, name, model, metric, index_type, field="clips"):
+    def assert_element_search(
+        self, client, name, model, metric, index_type, field="clips", *, indexed=False, raw_ids=()
+    ):
+        names, _ = self.list_indexes(client, name, field_name=f"{field}[emb]")
+        assert len(names) == 1, (name, field, names)
+        index, _ = self.describe_index(client, name, names[0])
+        assert index is not None, (name, names[0])
+        tolerance = vector_score_tolerance(index, indexed=indexed)
+        raw_tolerance = vector_score_tolerance(index)
         available = [
             (pk, offset, element) for pk, row in model.items() for offset, element in enumerate(row[field] or [])
         ]
@@ -391,7 +402,14 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
                 assert len(keys) == len(set(keys)) and len(keys) == len(expected)
                 for hit, key in zip(result, keys):
                     assert key in candidates, (expression, key)
-                    assert hit["distance"] == pytest.approx(candidates[key], abs=2e-4, rel=2e-4)
+                    budget = raw_tolerance if key[0] in raw_ids else tolerance
+                    assert hit["distance"] == pytest.approx(candidates[key], **budget), {
+                        "coordinate": key,
+                        "metric": metric,
+                        "tolerance": budget,
+                        "actual": hit["distance"],
+                        "expected": candidates[key],
+                    }
                 distances = [hit["distance"] for hit in result]
                 assert distances == sorted(distances, reverse=metric != "L2")
                 if index_type == "FLAT":
@@ -459,7 +477,12 @@ class TypedStructArrayTestBase(StructArrayTestBase):
         for row in rows:
             assert_values_equal(normalize_vector_row(row, dtype), normalize_vector_row(model[row["id"]], dtype))
 
-    def assert_typed_search(self, client, name, model, dtype, kind, metric, score_deviations=None):
+    def assert_typed_search(
+        self, client, name, model, dtype, kind, metric, score_deviations=None, *, indexed=False, raw_ids=()
+    ):
+        index, _ = self.describe_index(client, name, "clips[emb]")
+        tolerance = vector_score_tolerance(index, dtype, indexed=indexed)
+        raw_tolerance = vector_score_tolerance(index, dtype)
         query = make_typed_vector(dtype, 900001)
         a = decode_vector(query, dtype)
         for filtered in (False, True):
@@ -536,9 +559,18 @@ class TypedStructArrayTestBase(StructArrayTestBase):
             distances = [hit["distance"] for hit in hits]
             assert distances == sorted(distances, reverse=reverse)
             for hit, coordinate in zip(hits, coordinates):
-                expected_score = pytest.approx(scores[coordinate], abs=2e-4, rel=2e-4)
-                if score_deviations is None:
-                    assert hit["distance"] == expected_score
+                # Retain the strict oracle for the existing typed DISKANN issue.
+                raw = not indexed or coordinate[0] in raw_ids
+                budget = raw_tolerance if raw or score_deviations is not None else tolerance
+                expected_score = pytest.approx(scores[coordinate], **budget)
+                if score_deviations is None or raw:
+                    assert hit["distance"] == expected_score, {
+                        "coordinate": coordinate,
+                        "metric": metric,
+                        "tolerance": budget,
+                        "actual": hit["distance"],
+                        "expected": scores[coordinate],
+                    }
                 elif hit["distance"] != expected_score:
                     # Defer only the score assertion so mutation/reload and all
                     # structural checks still run before the issue is classified.

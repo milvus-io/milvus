@@ -23,6 +23,7 @@ from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrappe
 from bm25s.tokenization import Tokenizer
 from common import common_type as ct
 from common.common_params import DefaultIndexSearchParams, Expr, ExprCheckParams
+from common.vector_data import DEFAULT_VECTOR_PROFILE, clustered_vector_groups, clustered_vectors
 from customize.milvus_operator import MilvusOperator
 from dateutil import parser
 from faker import Faker
@@ -30,7 +31,6 @@ from minio import Minio
 from ml_dtypes import bfloat16
 from npy_append_array import NpyAppendArray
 from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType, MilvusClient, MilvusException
-from sklearn import preprocessing
 from utils.util_log import test_log as log
 
 fake = Faker()
@@ -588,9 +588,7 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
         "equals": pd.Series([x["equals"] for x in dataset]),
         "array_length_field": pd.Series([x["array_length_field"] for x in dataset]),
         "array_access": pd.Series([x["array_access"] for x in dataset]),
-        "emb": pd.Series(
-            [np.array([random.random() for j in range(dim)], dtype=np.dtype("float32")) for _ in range(size)]
-        ),
+        "emb": pd.Series([np.asarray(vector, dtype=np.float32) for vector in gen_vectors(size, dim, normalize=False)]),
     }
     # Define testing conditions
     contains_value = target_values["contains"]
@@ -1497,11 +1495,12 @@ def gen_string(nb):
     return string_values
 
 
-def gen_binary_vectors(num, dim):
+def gen_binary_vectors(num, dim, *, seed=None):
+    rng = random if seed is None else random.Random(seed)
     raw_vectors = []
     binary_vectors = []
     for _ in range(num):
-        raw_vector = [random.randint(0, 1) for _ in range(dim)]
+        raw_vector = [rng.randint(0, 1) for _ in range(dim)]
         raw_vectors.append(raw_vector)
         # packs a binary-valued array into bits in a unit8 array, and bytes array_of_ints
         binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
@@ -3346,7 +3345,7 @@ def gen_json_files_for_bulk_insert(data, schema, data_dir):
             entity_value = [None for _ in range(len(fields_name))]
             for j in range(len(data)):
                 if j == vec_field_index:
-                    entity_value[j] = [random.random() for _ in range(dim)]
+                    entity_value[j] = gen_vectors(1, dim, normalize=False)[0]
                 else:
                     entity_value[j] = data[j][i]
             entity = dict(zip(fields_name, entity_value))
@@ -3380,7 +3379,7 @@ def gen_npy_files_for_bulk_insert(data, schema, data_dir):
             log.info(f"generate {nb} vectors with dim {dim} for {data_source}")
             with NpyAppendArray(data_source, "wb") as npaa:
                 for j in range(nb):
-                    vector = np.array([[random.random() for _ in range(dim)]])
+                    vector = np.array(gen_vectors(1, dim, normalize=False))
                     npaa.append(vector)
 
         elif isinstance(data[i][0], dict):
@@ -5186,40 +5185,16 @@ def get_hybrid_search_base_results(search_res_dict_array, weights, metric_types,
     return ids_answer, score_answer
 
 
-def gen_bf16_vectors(num, dim):
-    """
-    generate brain float16 vector data
-    raw_vectors : the vectors
-    bf16_vectors: the bytes used for insert
-    return: raw_vectors and bf16_vectors
-    """
-    raw_vectors = []
-    bf16_vectors = []
-    for _ in range(num):
-        raw_vector = [random.random() for _ in range(dim)]
-        raw_vectors.append(raw_vector)
-        bf16_vector = np.array(raw_vector, dtype=bfloat16)
-        bf16_vectors.append(bf16_vector)
-
-    return raw_vectors, bf16_vectors
+def gen_bf16_vectors(num, dim, *, seed=None):
+    """Return shared clustered samples and their BF16 representations."""
+    values = clustered_vectors(num, dim, seed=seed)
+    return values.tolist(), list(values.astype(bfloat16))
 
 
-def gen_fp16_vectors(num, dim):
-    """
-    generate float16 vector data
-    raw_vectors : the vectors
-    fp16_vectors: the bytes used for insert
-    return: raw_vectors and fp16_vectors
-    """
-    raw_vectors = []
-    fp16_vectors = []
-    for _ in range(num):
-        raw_vector = [random.random() for _ in range(dim)]
-        raw_vectors.append(raw_vector)
-        fp16_vector = np.array(raw_vector, dtype=np.float16)
-        fp16_vectors.append(fp16_vector)
-
-    return raw_vectors, fp16_vectors
+def gen_fp16_vectors(num, dim, *, seed=None):
+    """Return shared clustered samples and their FP16 representations."""
+    values = clustered_vectors(num, dim, seed=seed)
+    return values.tolist(), list(values.astype(np.float16))
 
 
 def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
@@ -5241,37 +5216,52 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
     return vectors
 
 
-def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
-    vectors = []
-    if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.uniform(-1, 1) for _ in range(dim)] for _ in range(nb)]
-    elif vector_data_type == DataType.FLOAT16_VECTOR:
-        vectors = gen_fp16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BFLOAT16_VECTOR:
-        vectors = gen_bf16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-        vectors = gen_sparse_vectors(nb, dim)
-    elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(nb)  # for Full Text Search
-    elif vector_data_type == DataType.BINARY_VECTOR:
-        vectors = gen_binary_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.INT8_VECTOR:
-        vectors = gen_int8_vectors(nb, dim)[1]
-    else:
-        log.error(f"Invalid vector data type: {vector_data_type}")
-        raise Exception(f"Invalid vector data type: {vector_data_type}")
-    if dim > 1:
+def gen_vectors(
+    nb, dim, vector_data_type=DataType.FLOAT_VECTOR, *, seed=None, normalize=None, profile=DEFAULT_VECTOR_PROFILE
+):
+    """Generate shared synthetic data while preserving the existing type/normalization defaults.
+
+    FLOAT_VECTOR is normalized for dim > 1; FP16/BF16 retain magnitude unless
+    explicitly requested. Binary, sparse and integer fields keep their own domains.
+    """
+    if vector_data_type in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+        if normalize is None:
+            normalize = vector_data_type == DataType.FLOAT_VECTOR and dim > 1
+        values = clustered_vectors(nb, dim, seed=seed, normalize=normalize, profile=profile)
         if vector_data_type == DataType.FLOAT_VECTOR:
-            vectors = preprocessing.normalize(vectors, axis=1, norm="l2")
-            vectors = vectors.tolist()
-    return vectors
+            return values.tolist()
+        return list(values.astype(np.float16 if vector_data_type == DataType.FLOAT16_VECTOR else bfloat16))
+    if vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
+        return gen_sparse_vectors(nb, dim)
+    if vector_data_type == ct.text_sparse_vector:
+        return gen_text_vectors(nb)
+    if vector_data_type == DataType.BINARY_VECTOR:
+        return gen_binary_vectors(nb, dim, seed=seed)[1]
+    if vector_data_type == DataType.INT8_VECTOR:
+        return gen_int8_vectors(nb, dim, seed=seed)[1]
+    raise ValueError(f"Invalid vector data type: {vector_data_type}")
 
 
-def gen_int8_vectors(num, dim):
+def gen_embedding_vectors(
+    nb, dim, vector_data_type=DataType.FLOAT_VECTOR, *, seed=None, normalize=None, profile=DEFAULT_VECTOR_PROFILE
+):
+    """Generate one correlated multi-vector document or query with the shared profile."""
+    if vector_data_type not in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+        return gen_vectors(nb, dim, vector_data_type, seed=seed)
+    if normalize is None:
+        normalize = vector_data_type == DataType.FLOAT_VECTOR and dim > 1
+    values = clustered_vector_groups([nb], dim, seed=seed, normalize=normalize, profile=profile)[0]
+    if vector_data_type == DataType.FLOAT_VECTOR:
+        return values.tolist()
+    return list(values.astype(np.float16 if vector_data_type == DataType.FLOAT16_VECTOR else bfloat16))
+
+
+def gen_int8_vectors(num, dim, *, seed=None):
+    rng = random if seed is None else random.Random(seed)
     raw_vectors = []
     int8_vectors = []
     for _ in range(num):
-        raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+        raw_vector = [rng.randint(-128, 127) for _ in range(dim)]
         raw_vectors.append(raw_vector)
         int8_vector = np.array(raw_vector, dtype=np.int8)
         int8_vectors.append(int8_vector)
