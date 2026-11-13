@@ -202,6 +202,7 @@ FileWriter::PositionedWriteWithCheck(const void* data,
                                      nbyte,
                                      file_offset);
     } catch (...) {
+        write_failed_ = true;
         Cleanup();
         throw;
     }
@@ -220,6 +221,7 @@ FileWriter::SyncFileData() {
 #endif
     if (ret != 0) {
         auto saved_errno = errno;
+        write_failed_ = true;
         Cleanup();
         ThrowInfo(ErrorCode::FileWriteFailed,
                   "Failed to sync file data: {}, error: {}",
@@ -284,6 +286,11 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
 
 void
 FileWriter::Write(const void* data, size_t nbyte) {
+    // a failed write (or a finished writer) has closed the file and freed
+    // aligned_buf_ but keeps capacity_/offset_, so the fast path below would
+    // copy into freed memory
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+
     // if the data can fit in the aligned buffer, we can just copy it to the
     // aligned buffer
     if (nbyte <= capacity_ - offset_) {
@@ -311,6 +318,7 @@ FileWriter::FlushWithDirectIO() {
     // truncate the file to the actual size since the file written by the aligned
     // buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
+        write_failed_ = true;
         Cleanup();
         ThrowInfo(ErrorCode::FileWriteFailed,
                   "Failed to truncate file: {}, error: {}",
@@ -332,6 +340,14 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
+    // after a failed write the data is lost, so neither flushing the buffered
+    // tail nor returning file_size_ as the finished size is valid. A writer
+    // whose close failed is still allowed through: its data was written and
+    // Finish() stays idempotent for it.
+    AssertInfo(!write_failed_,
+               "Cannot finish file {}: an earlier write to it failed",
+               filename_);
+
     const bool needs_finish_io =
         offset_ != 0 ||
         (fdatasync_on_finish_ && !use_direct_io_ && file_size_ != 0);
