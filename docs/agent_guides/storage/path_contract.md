@@ -80,6 +80,21 @@ directory from the output manifest base.
 
 ## Necessary checks, at clear boundaries
 
+Snapshot restore fingerprints include segment path spelling. When a self-contained
+snapshot moves between storage identities with the same key prefix, the snapshot
+reader rewrites only URIs that still identify the original storage. References
+already pointing to the destination retain their spelling so persisted restore
+jobs can resume. This is a compatibility exception for persisted path spelling,
+not a general storage-routing rule. A prefix change retains the existing prefix
+replacement behavior. Restore admission still validates storage identity.
+
+For V2 data references in a self-contained snapshot Avro, DataNode reads object
+keys from the actual import storage; a bucket in an embedded URI does not select
+another storage.
+Root confinement still applies. Referenced snapshots retain source identity
+validation. Worker-side conversion to object keys does not define the restore
+fingerprint.
+
 - Configuration initialization requires an absolute local root and freezes it
   against runtime configuration updates.
 - Metadata loading resolves recognized legacy paths and checks their identity.
