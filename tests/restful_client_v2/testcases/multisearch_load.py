@@ -7,27 +7,39 @@ mode. Result-buffer allocations have no separate measurement.
 The fan-out deadline starts before client dispatch and covers HTTP I/O.
 MultiSearch starts its execution budget on receipt and allows response delivery
 within the separate transport timeout.
+
+Mixed phases use the same paced schedule and check actual first-attempt
+arrivals before comparing ordinary Search throughput and latency.
 """
 
 import json
 import math
+import multiprocessing
 import os
 import random
+import re
 import resource
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from itertools import count
 from urllib.parse import urlsplit
 
+import pytest
 import requests
 from api.milvus import CollectionClient, VectorClient
 from urllib3.util import Timeout
 from utils.utils import gen_unique_str
 
 BATCH_SIZE = 8
-RESIDENT_WORKERS = 12
+DRIVER_PROCESSES = 4
+GROUP_WORKERS = 8
+RESIDENT_WORKERS = 24
 PHASE_SECONDS = 8
+MIXED_GROUPED_SHARE = 0.30
+ARRIVAL_TOLERANCE = 0.02
 EXECUTION_BUDGET_MS = 5000
 TRANSPORT_TIMEOUT_SECONDS = 30
 MAX_ATTEMPTS = 10
@@ -38,34 +50,51 @@ ENTITIES_PATH = "/v2/vectordb/entities"
 RATE_LIMIT_CODE = 8
 QUEUE_FULL_CODE = 4
 REST_RATE_LIMIT_CODE = 1807
+PROXY_DQL_QUEUE_FULL = re.compile(r"too many concurrent requests, queue is full\[limit=\d+\]")
 
 
 @dataclass(frozen=True)
 class RoundOutcome:
-    succeeded: bool
+    offered_items: int
+    successful_items: int
     response_body_bytes: int
     client_http_attempts: int
-    client_http_retries: int = 0
+    client_retries: Counter = field(default_factory=Counter)
 
 
 @dataclass
 class Measurements:
     latency_ms: list = field(default_factory=list)
     failures: int = 0
+    offered_items: int = 0
+    successful_items: int = 0
     max_round_http_response_body_bytes: int = 0
     client_http_attempts: int = 0
-    client_http_retries: int = 0
+    client_retries: Counter = field(default_factory=Counter)
 
-    def add(self, started, outcome):
+    def add(self, started, outcome, items_per_round):
         self.latency_ms.append((time.perf_counter() - started) * 1000)
-        self.failures += not outcome.succeeded
+        self.failures += outcome.successful_items != items_per_round
+        self.offered_items += outcome.offered_items
+        self.successful_items += outcome.successful_items
         self.max_round_http_response_body_bytes = max(
             self.max_round_http_response_body_bytes, outcome.response_body_bytes
         )
         self.client_http_attempts += outcome.client_http_attempts
-        self.client_http_retries += outcome.client_http_retries
+        self.client_retries.update(outcome.client_retries)
 
-    def summary(self, seconds, items_per_round=1):
+    def merge(self, other):
+        self.latency_ms.extend(other.latency_ms)
+        self.failures += other.failures
+        self.offered_items += other.offered_items
+        self.successful_items += other.successful_items
+        self.max_round_http_response_body_bytes = max(
+            self.max_round_http_response_body_bytes, other.max_round_http_response_body_bytes
+        )
+        self.client_http_attempts += other.client_http_attempts
+        self.client_retries.update(other.client_retries)
+
+    def summary(self, arrival_seconds, elapsed):
         ordered = sorted(self.latency_ms)
 
         def percentile(p):
@@ -75,13 +104,17 @@ class Measurements:
             "rounds": len(ordered),
             "successful_rounds": len(ordered) - self.failures,
             "failures": self.failures,
-            "offered_items_per_second": round(len(ordered) * items_per_round / seconds, 1),
+            "offered_items": self.offered_items,
+            "offered_items_per_second": round(self.offered_items / arrival_seconds, 1),
+            "successful_items": self.successful_items,
+            "successful_items_per_second": round(self.successful_items / elapsed, 1),
             "p50_ms": percentile(0.50),
             "p95_ms": percentile(0.95),
             "p99_ms": percentile(0.99),
             "max_round_http_response_body_bytes": self.max_round_http_response_body_bytes,
             "client_http_attempts": self.client_http_attempts,
-            "client_http_retries": self.client_http_retries,
+            "client_http_retries": self.client_retries.total(),
+            "client_retries_by_reason": dict(self.client_retries),
         }
 
 
@@ -132,6 +165,18 @@ def prepare_collections(endpoint, token, request):
     ]
 
 
+def search_retry_reason(http_status, code, message):
+    if code == QUEUE_FULL_CODE:
+        # Proxy returns 429 before decode or its bare queue error when the
+        # queue fills before enqueue. QueryNode refusals carry downstream
+        # context even when they use the same Milvus code.
+        if http_status == 429 or (http_status == 200 and PROXY_DQL_QUEUE_FULL.fullmatch(message)):
+            return "queue_full"
+    if code == RATE_LIMIT_CODE or (code == REST_RATE_LIMIT_CODE and "rate limit exceeded" in message):
+        return "rate_limit"
+    return None
+
+
 def make_requests(endpoint, token):
     clients = threading.local()
 
@@ -151,49 +196,53 @@ def make_requests(endpoint, token):
             body_bytes = len(response.content)
             body = response.json()
             if not isinstance(body, dict):
-                return False, body_bytes, False
+                return 0, body_bytes, None
             code = body.get("code")
             if response.status_code != 200 or code != 0:
-                # REST wraps ordinary quota rejections in code 1807. The
-                # inner message distinguishes a rate limit from force-deny.
-                retryable = code in (QUEUE_FULL_CODE, RATE_LIMIT_CODE) or (
-                    code == REST_RATE_LIMIT_CODE and "rate limit exceeded" in body.get("message", "")
-                )
-                return False, body_bytes, retryable
+                reason = None
+                if operation == "search":
+                    reason = search_retry_reason(response.status_code, code, body.get("message") or "")
+                return 0, body_bytes, reason
             results = body.get("data")
             if not isinstance(results, list):
-                return False, body_bytes, False
+                return 0, body_bytes, None
             if operation == "multi_search":
-                succeeded = len(results) == len(payload["requests"]) and all(
-                    item["search"].get("code") == 0 for item in results
-                )
-                return succeeded, body_bytes, False
-            return True, body_bytes, False
+                if len(results) != len(payload["requests"]):
+                    return 0, body_bytes, None
+                return sum(item["search"].get("code") == 0 for item in results), body_bytes, None
+            return 1, body_bytes, None
         except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
-            return False, body_bytes, False
+            return 0, body_bytes, None
 
     return call
 
 
-def run_search(call, search, deadline, max_attempts=MAX_ATTEMPTS):
-    attempts, body_bytes, succeeded = 0, 0, False
+def run_search(call, search, deadline, stop_at, max_attempts=MAX_ATTEMPTS):
+    offered_items, successful_items, attempts, body_bytes = 0, 0, 0, 0
+    retries = Counter()
+    reason = None
     backoff = INITIAL_BACKOFF_SECONDS
     while attempts < max_attempts:
-        remaining = deadline - time.perf_counter()
+        now = time.perf_counter()
+        remaining = deadline - now
         if remaining <= 0:
             break
         # Request-Timeout accepts whole seconds. The client uses the
         # remaining budget for I/O, including queue time in this round.
-        succeeded, received_bytes, retryable = call(
+        if reason:
+            retries[reason] += 1
+        else:
+            offered_items = int(now < stop_at)
+        successful_items, received_bytes, reason = call(
             "search", search, remaining, {"Request-Timeout": str(math.ceil(remaining))}
         )
         attempts += 1
         body_bytes += received_bytes
-        if succeeded or not retryable or attempts == max_attempts or deadline - time.perf_counter() <= backoff:
+        if successful_items or not reason or attempts == max_attempts or deadline - time.perf_counter() <= backoff:
             break
         time.sleep(backoff)
         backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
-    return RoundOutcome(succeeded, body_bytes, attempts, max(0, attempts - 1))
+    return RoundOutcome(offered_items, successful_items, body_bytes, attempts, retries)
 
 
 def batch_payload(searches, concurrency=None):
@@ -201,6 +250,26 @@ def batch_payload(searches, concurrency=None):
     if concurrency is not None:
         payload["maxConcurrency"] = concurrency
     return payload
+
+
+def run_group(call, searches, payload, fanout, started, stop_at):
+    if fanout is None:
+        successful_items, body_bytes, _ = call("multi_search", payload, TRANSPORT_TIMEOUT_SECONDS)
+        return RoundOutcome(len(searches), successful_items, body_bytes, 1)
+
+    # Both the queued and running Search calls use the group's deadline.
+    deadline = started + EXECUTION_BUDGET_MS / 1000
+    outcomes = list(fanout.map(lambda search: run_search(call, search, deadline, stop_at), searches))
+    retries = Counter()
+    for outcome in outcomes:
+        retries.update(outcome.client_retries)
+    return RoundOutcome(
+        sum(outcome.offered_items for outcome in outcomes),
+        sum(outcome.successful_items for outcome in outcomes),
+        sum(outcome.response_body_bytes for outcome in outcomes),
+        sum(outcome.client_http_attempts for outcome in outcomes),
+        retries,
+    )
 
 
 COUNTER_KEYS = (
@@ -256,13 +325,77 @@ def metric_deltas(before, after):
     return deltas
 
 
-def phase(metrics_url, call, searches, mode, concurrency, offered_rate=None, mixed=False):
-    resident_stop = threading.Event()
-    sampler_stop = threading.Event()
-    group_measurements = Measurements()
-    metrics_before = checked_metrics(metrics_url)
+def drive(worker_id, endpoint, token, searches, mode, concurrency, scheduled_groups, barrier, start_time):
+    mixed = scheduled_groups is not None or mode == "resident"
+    group_count = 0 if mode == "resident" else GROUP_WORKERS // DRIVER_PROCESSES
+    resident_count = RESIDENT_WORKERS // DRIVER_PROCESSES if mixed else 0
+    call = make_requests(endpoint, token)
+    next_slot = count(worker_id, DRIVER_PROCESSES)
+
+    def resident(i):
+        measurements = Measurements()
+        while True:
+            started = time.perf_counter()
+            if started >= stop_at:
+                break
+            deadline = started + EXECUTION_BUDGET_MS / 1000
+            outcome = run_search(call, searches[i % BATCH_SIZE], deadline, stop_at, max_attempts=1)
+            measurements.add(started, outcome, 1)
+        return measurements
+
+    def grouped():
+        measurements = Measurements()
+        payload = batch_payload(searches, concurrency)
+        fanout = ThreadPoolExecutor(max_workers=concurrency) if mode == "fanout" else None
+        try:
+            while time.perf_counter() < stop_at:
+                if scheduled_groups is not None:
+                    slot = next(next_slot)
+                    if slot >= scheduled_groups:
+                        break
+                    interval = PHASE_SECONDS / scheduled_groups
+                    launch_at = start + slot * interval
+                    wait = launch_at - time.perf_counter()
+                    if wait > 0:
+                        time.sleep(wait)
+                started = time.perf_counter()
+                if started >= stop_at:
+                    break
+                if scheduled_groups is not None and started >= launch_at + interval * DRIVER_PROCESSES:
+                    # Skip missed slots instead of sending a catch-up burst.
+                    continue
+                outcome = run_group(call, searches, payload, fanout, started, stop_at)
+                measurements.add(started, outcome, BATCH_SIZE)
+        finally:
+            if fanout is not None:
+                fanout.shutdown()
+        return measurements
+
+    group_measurements, resident_measurements = Measurements(), Measurements()
+    # All drivers wait for the same start timestamp, including after spawn.
+    barrier.wait(timeout=30)
+    barrier.wait(timeout=30)
+    start = start_time.value
+    stop_at = start + PHASE_SECONDS
+    cpu_before = time.process_time()
+    with ThreadPoolExecutor(max_workers=group_count + resident_count) as workers:
+        group_jobs = [workers.submit(grouped) for _ in range(group_count)]
+        resident_jobs = [workers.submit(resident, worker_id * resident_count + i) for i in range(resident_count)]
+        for job in group_jobs:
+            group_measurements.merge(job.result())
+        for job in resident_jobs:
+            resident_measurements.merge(job.result())
+    return (
+        group_measurements,
+        resident_measurements,
+        time.process_time() - cpu_before,
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+    )
+
+
+def phase(metrics_url, endpoint, token, searches, mode, concurrency, scheduled_groups=None):
     samples = []
-    payload = batch_payload(searches, concurrency)
+    sampler_stop = threading.Event()
 
     def sample_process():
         while not sampler_stop.wait(METRICS_SAMPLE_SECONDS):
@@ -270,67 +403,42 @@ def phase(metrics_url, call, searches, mode, concurrency, offered_rate=None, mix
             if sample.get("process_start_time_seconds") == metrics_before["process_start_time_seconds"]:
                 samples.append(sample)
 
-    def resident(i):
-        measurements = Measurements()
-        while not resident_stop.is_set():
-            started = time.perf_counter()
-            deadline = started + EXECUTION_BUDGET_MS / 1000
-            measurements.add(started, run_search(call, searches[i % BATCH_SIZE], deadline, max_attempts=1))
-        return measurements
-
-    sampler = threading.Thread(target=sample_process)
-    sampler.start()
-    try:
-        cpu_before = time.process_time()
-        start = time.perf_counter()
-        with (
-            ThreadPoolExecutor(max_workers=concurrency) as fanout,
-            ThreadPoolExecutor(max_workers=RESIDENT_WORKERS) as residents,
-        ):
-            resident_jobs = [residents.submit(resident, i) for i in range(RESIDENT_WORKERS)] if mixed else []
-            try:
-                while time.perf_counter() - start < PHASE_SECONDS:
-                    started = time.perf_counter()
-                    if mode == "batch":
-                        ok, body_bytes, _ = call("multi_search", payload, TRANSPORT_TIMEOUT_SECONDS)
-                        outcome = RoundOutcome(ok, body_bytes, 1)
-                    elif mode == "fanout":
-                        # One deadline covers both queued and running items.
-                        deadline = started + EXECUTION_BUDGET_MS / 1000
-                        results = list(fanout.map(lambda search: run_search(call, search, deadline), searches))
-                        outcome = RoundOutcome(
-                            all(item.succeeded for item in results),
-                            sum(item.response_body_bytes for item in results),
-                            sum(item.client_http_attempts for item in results),
-                            sum(item.client_http_retries for item in results),
-                        )
-                    else:
-                        resident_stop.wait(PHASE_SECONDS)
-                        break
-                    group_measurements.add(started, outcome)
-                    if offered_rate:
-                        next_round = start + len(group_measurements.latency_ms) / offered_rate
-                        resident_stop.wait(max(0, min(next_round, start + PHASE_SECONDS) - time.perf_counter()))
-            finally:
-                resident_stop.set()
-            resident_measurements = [job.result() for job in resident_jobs]
-        elapsed = time.perf_counter() - start
-        runner_cpu_seconds = time.process_time() - cpu_before
-    finally:
-        sampler_stop.set()
-        sampler.join()
-
-    resident_combined = Measurements()
-    for measurement in resident_measurements:
-        resident_combined.latency_ms.extend(measurement.latency_ms)
-        resident_combined.failures += measurement.failures
-        resident_combined.client_http_attempts += measurement.client_http_attempts
-        resident_combined.client_http_retries += measurement.client_http_retries
-        resident_combined.max_round_http_response_body_bytes = max(
-            resident_combined.max_round_http_response_body_bytes, measurement.max_round_http_response_body_bytes
-        )
-    metrics_after = checked_metrics(metrics_url)
+    # Independent Python interpreters keep one GIL from limiting the
+    # fan-out driver before the Proxy reaches its CPU limit.
+    processes = multiprocessing.get_context("spawn")
+    with processes.Manager() as control, ProcessPoolExecutor(DRIVER_PROCESSES, mp_context=processes) as drivers:
+        barrier = control.Barrier(DRIVER_PROCESSES + 1)
+        start_time = control.Value("d", 0)
+        jobs = [
+            drivers.submit(
+                drive, i, endpoint, token, searches, mode, concurrency, scheduled_groups, barrier, start_time
+            )
+            for i in range(DRIVER_PROCESSES)
+        ]
+        barrier.wait(timeout=30)
+        metrics_before = checked_metrics(metrics_url)
+        sampler = threading.Thread(target=sample_process)
+        sampler.start()
+        group_measurements, resident_measurements = Measurements(), Measurements()
+        runner_cpu_seconds, peak_rss_kib = 0, 0
+        try:
+            # Process startup is outside the arrival window.
+            start_time.value = start = time.perf_counter()
+            barrier.wait(timeout=30)
+            for job in jobs:
+                group, resident, cpu_seconds, rss_kib = job.result()
+                group_measurements.merge(group)
+                resident_measurements.merge(resident)
+                runner_cpu_seconds += cpu_seconds
+                peak_rss_kib = max(peak_rss_kib, rss_kib)
+            elapsed = time.perf_counter() - start
+            metrics_after = checked_metrics(metrics_url)
+        finally:
+            sampler_stop.set()
+            sampler.join()
     samples = [metrics_before, *samples, metrics_after]
+    proxy_cpu_seconds = metrics_after["process_cpu_seconds_total"] - metrics_before["process_cpu_seconds_total"]
+    mixed = scheduled_groups is not None or mode == "resident"
     result = {
         "mode": mode,
         "concurrency": concurrency,
@@ -341,19 +449,22 @@ def phase(metrics_url, call, searches, mode, concurrency, offered_rate=None, mix
             "max_backoff_seconds": MAX_BACKOFF_SECONDS,
         },
         "mixed": mixed,
-        "target_rounds_per_second": offered_rate,
+        "driver_processes": DRIVER_PROCESSES,
+        "group_workers": 0 if mode == "resident" else GROUP_WORKERS,
+        "resident_workers": RESIDENT_WORKERS if mixed else 0,
+        "scheduled_groups": scheduled_groups,
+        "arrival_seconds": PHASE_SECONDS,
         "seconds": round(elapsed, 2),
-        "group": group_measurements.summary(elapsed, BATCH_SIZE),
-        "resident": resident_combined.summary(elapsed),
+        "group": group_measurements.summary(PHASE_SECONDS, elapsed),
+        "resident": resident_measurements.summary(PHASE_SECONDS, elapsed),
         "runner_cpu_seconds": round(runner_cpu_seconds, 3),
-        "runner_process_peak_rss_to_date_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "max_driver_process_peak_rss_to_date_kib": peak_rss_kib,
         "server_counter_deltas": metric_deltas(metrics_before, metrics_after),
         "milvus_process": {
             "scope": "process serving Proxy, including all Milvus roles in standalone",
             "samples": len(samples),
-            "cpu_seconds": round(
-                metrics_after["process_cpu_seconds_total"] - metrics_before["process_cpu_seconds_total"], 3
-            ),
+            "cpu_seconds": round(proxy_cpu_seconds, 3),
+            "cpu_cores": round(proxy_cpu_seconds / elapsed, 2),
             "sampled_memory_bytes": {
                 key: {
                     "start": int(metrics_before[key]),
@@ -409,6 +520,45 @@ def measure_batch_admission(endpoint, metrics_url, token, searches, concurrent_b
     )
 
 
+def mixed_phases_are_comparable(samples, scheduled_items):
+    offered = [sample["group"]["offered_items"] for sample in samples]
+    if min(offered) < scheduled_items * (1 - ARRIVAL_TOLERANCE):
+        return False
+    if max(offered) - min(offered) > scheduled_items * ARRIVAL_TOLERANCE:
+        return False
+    return all(
+        sample["resident"]["offered_items"] > 0
+        and sample["server_counter_deltas"]["search_http_requests"]
+        == sample["resident"]["client_http_attempts"]
+        + (sample["group"]["client_http_attempts"] if sample["mode"] == "fanout" else 0)
+        and sample["server_counter_deltas"]["multisearch_http_requests"]
+        == (sample["group"]["client_http_attempts"] if sample["mode"] == "batch" else 0)
+        for sample in samples
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "message", "expected"),
+    [
+        (429, 4, "too many concurrent requests, queue is full[limit=8]", "queue_full"),
+        (200, 4, "too many concurrent requests, queue is full[limit=8]", "queue_full"),
+        (
+            200,
+            4,
+            "failed to search: limit by queryNode.scheduler.maxUnsolvedQueueSize: "
+            "too many concurrent requests, queue is full[limit=8]",
+            None,
+        ),
+        (200, 8, "rate limit exceeded[rate=8]", "rate_limit"),
+        (200, 1807, "request is rejected by grpc RateLimiter middleware: rate limit exceeded[rate=8]", "rate_limit"),
+        (200, 1807, "quota exceeded[reason=deny]", None),
+        (200, 9, "quota exceeded[reason=deny]", None),
+    ],
+)
+def test_multisearch_load_retry_policy(status, code, message, expected):
+    assert search_retry_reason(status, code, message) == expected
+
+
 def test_multisearch_load(endpoint, token, request):
     host = urlsplit(endpoint).hostname
     metrics_url = os.environ.get("MULTISEARCH_METRICS_URL", f"http://{host}:9091/metrics")
@@ -416,17 +566,36 @@ def test_multisearch_load(endpoint, token, request):
     call = make_requests(endpoint, token)
     for search in searches:
         assert call("search", search, TRANSPORT_TIMEOUT_SECONDS)[0]
-    assert call("multi_search", batch_payload(searches, 4), TRANSPORT_TIMEOUT_SECONDS)[0]
+    assert call("multi_search", batch_payload(searches, 4), TRANSPORT_TIMEOUT_SECONDS)[0] == len(searches)
     samples = [
-        phase(metrics_url, call, searches, mode, concurrency)
+        phase(metrics_url, endpoint, token, searches, mode, concurrency)
         for mode, concurrency in [("fanout", 4), ("batch", 4), ("batch", 8), ("fanout", 8)]
     ]
-    # Leave headroom for ordinary Search so each mode can sustain the same
-    # scheduled batch rate during the mixed comparison.
-    offered_rate = min(sample["group"]["rounds"] / sample["seconds"] for sample in samples[:2]) * 0.2
-    phase(metrics_url, call, searches, "resident", 4, mixed=True)
-    for mode in ["fanout", "batch", "batch", "fanout"]:
-        phase(metrics_url, call, searches, mode, 4, offered_rate=offered_rate, mixed=True)
+    # Set an identical schedule from the slower pure-load mode, leaving
+    # headroom for resident Search. Validate the realized arrivals below.
+    at_eight = (sample for sample in samples if sample["concurrency"] == 8)
+    grouped_rate = min(sample["group"]["successful_items_per_second"] for sample in at_eight) * MIXED_GROUPED_SHARE
+    scheduled_groups = int(grouped_rate * PHASE_SECONDS / BATCH_SIZE)
+    assert scheduled_groups > 0, samples
+    phase(metrics_url, endpoint, token, searches, "resident", 8)
+    mixed = [
+        phase(metrics_url, endpoint, token, searches, mode, 8, scheduled_groups=scheduled_groups)
+        for mode in ["fanout", "batch", "batch", "fanout"]
+    ]
+    scheduled_items = scheduled_groups * BATCH_SIZE
+    comparable = mixed_phases_are_comparable(mixed, scheduled_items)
+    print(
+        "MULTISEARCH_MIXED "
+        + json.dumps(
+            {
+                "comparable": comparable,
+                "scheduled_items_per_phase": scheduled_items,
+                "actual_grouped_items_per_phase": [sample["group"]["offered_items"] for sample in mixed],
+            }
+        ),
+        flush=True,
+    )
+    assert comparable, "Mixed phases missed the shared schedule or did not match the Proxy request counters"
 
     for concurrent_batches in (8, 32, 80):
         measure_batch_admission(endpoint, metrics_url, token, searches, concurrent_batches)
