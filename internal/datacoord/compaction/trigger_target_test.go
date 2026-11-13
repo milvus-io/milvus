@@ -111,7 +111,7 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 		Statslogs: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(0, 1001)},
 	}))
 
-	manager, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	manager, err := targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocID(mock.Anything).Return(100, nil).Once()
@@ -167,7 +167,7 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	// The bucket is exhausted and the Inspector still reports full backlog.
 	// The semantic pass must still persist REWRITE's satisfied result.
 	triggers.handleTicker(ctx, TargetTicker)
-	restarted, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	restarted, err := targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	require.Equal(t, targets.StopSatisfied, restarted.GetCompactionTarget(rewrite.GetTargetID()).GetStopReason())
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, restarted.GetCompactionTarget(standing.GetTargetID()).GetState())
@@ -240,7 +240,7 @@ func TestStandingSizeAdmitsOneCompletePackageAcrossGroups(t *testing.T) {
 	catalog := kvdatacoord.NewCatalog(backend, "", "")
 	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
 	require.NoError(t, err)
-	targetMeta, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	targetMeta, err := targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	segmentMeta := meta.NewEmptyTestMeta()
 	segmentMeta.Catalog, segmentMeta.Ctx = catalog, ctx
@@ -324,7 +324,7 @@ func TestOptimizeAndSizeRevalidateScopeAtAdmission(t *testing.T) {
 	catalog, _ := targets.NewCompactionTargetTestCatalog(t, optimize)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
-	targetMeta, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	targetMeta, err := targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
 	require.NoError(t, err)

@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -58,7 +60,7 @@ func (thresholds DeleteCleanupThresholds) Match(stats *datapb.Statistics, rows i
 	return thresholds.reason(stats, rows) != belowDeleteThresholds
 }
 
-func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
+func HasTooManyDeletions(ctx context.Context, segment *meta.SegmentInfo) bool {
 	thresholds := DeleteCleanupThresholds{
 		MaxLogs:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt64(),
 		Ratio:    Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat(),
@@ -67,20 +69,20 @@ func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
 	stats := segment.EnsureStats()
 	switch thresholds.reason(stats, segment.GetNumOfRows()) {
 	case tooManyDeltaLogs:
-		mlog.Info(context.TODO(), "delta logs file count exceeds threshold",
+		mlog.RatedInfo(ctx, rate.Limit(1), "delta logs file count exceeds threshold",
 			mlog.FieldSegmentID(segment.GetID()),
 			mlog.Int64("delta log count", stats.GetDeltaBinlogCount()),
 			mlog.Int64("file number threshold", thresholds.MaxLogs),
 		)
 	case tooManyDeletedRows:
-		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
+		mlog.RatedInfo(ctx, rate.Limit(1), "deleted entities rows proportion exceeds threshold",
 			mlog.FieldSegmentID(segment.GetID()),
 			mlog.Int64("number of rows", segment.GetNumOfRows()),
 			mlog.Int64("deleted rows", stats.GetDeleteNumRows()),
 			mlog.Float64("proportion threshold", thresholds.Ratio),
 		)
 	case tooManyDeltaBytes:
-		mlog.Info(context.TODO(), "total delete entries size exceeds threshold",
+		mlog.RatedInfo(ctx, rate.Limit(1), "total delete entries size exceeds threshold",
 			mlog.FieldSegmentID(segment.GetID()),
 			mlog.Int64("numRows", segment.GetNumOfRows()),
 			mlog.Int64("delete entries size", stats.GetDeltaBinlogSize()),

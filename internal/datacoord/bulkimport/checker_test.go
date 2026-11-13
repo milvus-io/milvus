@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	compactiontask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -44,6 +45,74 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestImportCheckerSortDependencyAdmission(t *testing.T) {
+	paramtable.Init()
+	cfg := &Params.DataCoordCfg
+	settings := map[string]string{
+		cfg.EnableSortCompaction.Key:        "true",
+		cfg.CompactionMaxTaskNum.Key:        "1",
+		cfg.CompactionTaskQueueCapacity.Key: "2",
+		cfg.CompactionRateLimitTokens.Key:   "2",
+		cfg.CompactionRateLimitInterval.Key: "3600",
+	}
+	for key, value := range settings {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+
+	ctx := t.Context()
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	taskMeta, err := compactiontask.NewCompactionTaskMeta(ctx, catalog)
+	require.NoError(t, err)
+	mt := meta.NewEmptyTestMeta()
+	mt.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{}})
+	publish := func(id int64, importing bool) {
+		mt.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 1, InsertChannel: "ch",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			IsImporting: importing, NumOfRows: 10,
+		}))
+	}
+	publish(1, false)
+	publish(2, true)
+	publish(3, true)
+
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(100), nil).Twice()
+	alloc.EXPECT().AllocN(int64(2)).Return(int64(200), int64(202), nil).Once()
+	alloc.EXPECT().AllocN(int64(2)).Return(int64(202), int64(204), nil).Once()
+	handler := meta.NewMockHandlerWithMeta(mt)
+	idx := &index.IndexMeta{}
+	inspector := compaction.NewCompactionInspector(mt, taskMeta, idx, nil, nil, nil, nil, alloc, handler, nil, nil, nil)
+	require.NoError(t, inspector.InitAdmission())
+	require.NoError(t, inspector.EnqueueCompaction(ctx, &datapb.CompactionTask{
+		PlanID: 11, TriggerID: 10, CollectionID: 1, Type: datapb.CompactionType_MixCompaction,
+		InputSegments: []int64{1},
+	}, compaction.AdmissionOptions{Producer: compaction.ProducerTBC}))
+
+	importMeta := NewMockImportMeta(t)
+	job := &Job{ImportJob: &datapb.ImportJob{JobID: 99, CollectionID: 1, State: internalpb.ImportJobState_Sorting}}
+	task := &Task{}
+	task.Task.Store(&datapb.ImportTaskV2{
+		JobID: job.GetJobID(), TaskID: 100, CollectionID: 1,
+		SegmentIDs: []int64{2, 3}, SortedSegmentIDs: []int64{12, 13},
+		State: datapb.ImportTaskStateV2_Completed,
+	})
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, job.GetJobID(), mock.Anything).Return([]ImportTask{task}).Once()
+	checker := NewImportChecker(ctx, mt, idx, alloc, importMeta, inspector, handler, nil, nil, ImportCheckerHooks{}).(*Checker)
+	checker.CheckSortingJob(job)
+
+	plans := taskMeta.GetCompactionTasksByTriggerID(200)
+	require.Len(t, plans, 1)
+	require.Equal(t, datapb.CompactionType_SortCompaction, plans[0].GetType())
+	require.Equal(t, []int64{2}, plans[0].GetInputSegments())
+	require.Equal(t, int64(12), plans[0].GetPreAllocatedSegmentIDs().GetBegin())
+	require.Empty(t, taskMeta.GetCompactionTasksByTriggerID(202))
+	require.False(t, mt.IsSegmentCompacting(3))
+}
 
 func TestImportCheckerCompaction(t *testing.T) {
 	paramtable.Init()

@@ -166,7 +166,7 @@ func TestStorageStandingConditionsSurviveFailuresAndRestart(t *testing.T) {
 	require.Nil(t, describe(formatID).RemainingRows)
 	session = semver.MustParse("3.0.0")
 	require.NoError(t, Params.Save(Params.CommonCfg.UseLoonFFI.Key, "false"))
-	s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+	s.compactionTargetMeta, err = targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{10, 11}, round())
 	require.Equal(t, "2", describe(versionID).GetParameters()["storage_version"])

@@ -536,6 +536,53 @@ func (_c *DataCoordCatalog_DropCompactionTarget_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// DropCompactionTargetCreateFence provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCompactionTargetCreateFence")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropCompactionTargetCreateFence_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionTargetCreateFence'
+type DataCoordCatalog_DropCompactionTargetCreateFence_Call struct {
+	*mock.Call
+}
+
+// DropCompactionTargetCreateFence is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) DropCompactionTargetCreateFence(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+	return &DataCoordCatalog_DropCompactionTargetCreateFence_Call{Call: _e.mock.On("DropCompactionTargetCreateFence", ctx, collectionID)}
+}
+
+func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) Return(_a0 error) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionTargetCreateFence_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropCompactionTargetCreateFence_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropCompactionTask provides a mock function with given fields: ctx, task
 func (_m *DataCoordCatalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	ret := _m.Called(ctx, task)
@@ -1338,6 +1385,62 @@ func (_c *DataCoordCatalog_DropStatsTask_Call) Return(_a0 error) *DataCoordCatal
 }
 
 func (_c *DataCoordCatalog_DropStatsTask_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropStatsTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FenceCompactionTargetCreates provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) FenceCompactionTargetCreates(ctx context.Context) (uint64, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FenceCompactionTargetCreates")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (uint64, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) uint64); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_FenceCompactionTargetCreates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FenceCompactionTargetCreates'
+type DataCoordCatalog_FenceCompactionTargetCreates_Call struct {
+	*mock.Call
+}
+
+// FenceCompactionTargetCreates is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) FenceCompactionTargetCreates(ctx interface{}) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+	return &DataCoordCatalog_FenceCompactionTargetCreates_Call{Call: _e.mock.On("FenceCompactionTargetCreates", ctx)}
+}
+
+func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) Return(_a0 uint64, _a1 error) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_FenceCompactionTargetCreates_Call) RunAndReturn(run func(context.Context) (uint64, error)) *DataCoordCatalog_FenceCompactionTargetCreates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2885,6 +2988,66 @@ func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) Return(_a0 int, _a1 e
 }
 
 func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) RunAndReturn(run func(context.Context) (int, error)) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResolveCompactionTargetCreate provides a mock function with given fields: ctx, candidate, collection
+func (_m *DataCoordCatalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error) {
+	ret := _m.Called(ctx, candidate, collection)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveCompactionTargetCreate")
+	}
+
+	var r0 *datapb.CompactionTarget
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error)); ok {
+		return rf(ctx, candidate, collection)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) *datapb.CompactionTarget); ok {
+		r0 = rf(ctx, candidate, collection)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CompactionTarget)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) error); ok {
+		r1 = rf(ctx, candidate, collection)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ResolveCompactionTargetCreate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveCompactionTargetCreate'
+type DataCoordCatalog_ResolveCompactionTargetCreate_Call struct {
+	*mock.Call
+}
+
+// ResolveCompactionTargetCreate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - candidate *datapb.CompactionTarget
+//   - collection metastore.CompactionTargetCollectionVersion
+func (_e *DataCoordCatalog_Expecter) ResolveCompactionTargetCreate(ctx interface{}, candidate interface{}, collection interface{}) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+	return &DataCoordCatalog_ResolveCompactionTargetCreate_Call{Call: _e.mock.On("ResolveCompactionTargetCreate", ctx, candidate, collection)}
+}
+
+func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) Run(run func(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(metastore.CompactionTargetCollectionVersion))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) Return(_a0 *datapb.CompactionTarget, _a1 error) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ResolveCompactionTargetCreate_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error)) *DataCoordCatalog_ResolveCompactionTargetCreate_Call {
 	_c.Call.Return(run)
 	return _c
 }

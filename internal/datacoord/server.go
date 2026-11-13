@@ -137,6 +137,7 @@ type Server struct {
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	collectionDropped                   func(context.Context, int64) (bool, error)
 	checkCompactionTargetReplication    func(context.Context) error
+	lockCompactionTargetReplication     func(context.Context) (func(), error)
 	targetCompactionEnabled             bool
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
@@ -289,6 +290,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		metricsRequest:                   metricsinfo.NewMetricsRequest(),
 		pkindexService:                   pkindexservice.New(),
 		checkCompactionTargetReplication: validateCompactionTargetReplication,
+		lockCompactionTargetReplication:  lockCompactionTargetReplication,
 		targetCompactionEnabled:          Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 
@@ -831,7 +833,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 		if targetCompactionEnabled {
 			g.Go(func() error {
 				var err error
-				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+				out.compactionTargetMeta, err = targets.RecoverCompactionTargetMeta(ctx, catalog)
 				return err
 			})
 		}

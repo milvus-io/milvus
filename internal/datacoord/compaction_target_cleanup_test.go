@@ -117,7 +117,7 @@ func TestStandingCleanupTargetConditions(t *testing.T) {
 	require.NoError(t, Params.Save(cfg.EnableAutoCompaction.Key, "true"))
 	require.NoError(t, Params.Save(cfg.CompactionExpiryTolerance.Key, "0"))
 	var err error
-	s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+	s.compactionTargetMeta, err = targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	after := round()
 	require.Equal(t, deleteID, after[deleteCleanup].GetTargetId())

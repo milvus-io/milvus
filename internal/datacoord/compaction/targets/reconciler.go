@@ -76,7 +76,6 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	standingRewrites = append(standingRewrites, reconciler.selectableStorageRewrites(ctx, auto, segments)...)
 	standingRewrites = append(standingRewrites, reconciler.selectableCleanupRewrites(ctx, auto, segments, eligible)...)
 	manager := reconciler.CompactionTargetMeta
-	manager.refreshUnconfirmedCreates(ctx)
 	var size SizeCondition
 	var sizeErr error
 	if _, err := manager.SyncSize(ctx, reconciler.allocator); err != nil {
@@ -88,9 +87,16 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		mlog.RatedWarn(ctx, rate.Limit(1), "could not synchronize Standing SIZE compaction target", mlog.Err(sizeErr))
 		size.Enabled = false
 	}
-	records := manager.GetActiveCompactionTargets()
+	records, reservedOptimize := manager.ActiveCompactionTargets(ctx)
 	matches := make(map[int64]*meta.SegmentInfo)
 	optimizeInputs := make(map[int64]optimizeInput)
+	for _, record := range reservedOptimize {
+		for _, segment := range optimizeScope(ctx, reconciler.meta, record) {
+			optimizeInputs[segment.GetID()] = optimizeInput{
+				expected: record.GetOptimize().GetActualTargetSizeBytes(),
+			}
+		}
+	}
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
 			return nil, err

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	streamingcatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -47,12 +49,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1199,13 +1203,46 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) FenceCompactionTargetCreates(ctx context.Context) (uint64, error) {
+	epoch, guard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
+	if err != nil {
+		return 0, err
+	}
+	if epoch == math.MaxUint64 {
+		return 0, merr.WrapErrDataIntegrityMsg("compaction target Create epoch exhausted")
+	}
+	epoch++
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{
+		compactionTargetCreateEpoch: strconv.FormatUint(epoch, 10),
+	}, nil, guard)
+	if err != nil {
+		return 0, merr.Wrap(err, "advance compaction target Create epoch")
+	}
+	return epoch, nil
+}
+
+func (kc *Catalog) loadTargetCreateGeneration(ctx context.Context, key string) (uint64, predicates.Predicate, error) {
+	raw, err := kc.MetaKv.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return 0, predicates.KeyNotExist(key), nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	generation, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || generation == 0 {
+		return 0, nil, merr.WrapErrDataIntegrityMsg("invalid compaction target Create generation at %s", key)
+	}
+	return generation, predicates.ValueEqual(key, raw), nil
+}
+
 func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
 	records := make([]*datapb.CompactionTarget, 0)
 
 	applyFn := func(key []byte, value []byte) error {
 		record := &datapb.CompactionTarget{}
 		if err := proto.Unmarshal(value, record); err != nil {
-			return merr.WrapErrSerializationFailed(err, "unmarshal compaction target at %s", key)
+			return merr.WrapErrDataIntegrity(err, "unmarshal compaction target at %s", key)
 		}
 		path := buildCompactionTargetPath(record.GetTargetID())
 		if record.GetTargetID() <= 0 || (string(key) != path && string(key) != kc.MetaKv.GetPath(path)) {
@@ -1238,7 +1275,7 @@ func (kc *Catalog) loadCompactionTarget(ctx context.Context, targetID int64) (*d
 	}
 	record := &datapb.CompactionTarget{}
 	if err := proto.Unmarshal([]byte(value), record); err != nil {
-		return nil, "", merr.WrapErrSerializationFailed(err, "unmarshal compaction target %d", targetID)
+		return nil, "", merr.WrapErrDataIntegrity(err, "unmarshal compaction target %d", targetID)
 	}
 	if record.GetTargetID() != targetID {
 		return nil, "", merr.WrapErrDataIntegrityMsg("compaction target %d identity does not match its key", targetID)
@@ -1256,30 +1293,39 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 	}
 	guards := []predicates.Predicate{predicates.KeyNotExist(key)}
 	saves := map[string]string{key: value}
-	if record.GetCollectionID() != 0 {
+	if collectionID := record.GetCollectionID(); collectionID != 0 {
 		if collection == nil {
 			return false, merr.WrapErrServiceInternalMsg("compaction target creation is missing the collection version")
 		}
-		// Guard the same row that RootCoord replaces with its DropCollection
-		// tombstone. A timed-out create must not commit after ACK closes the
-		// scope, even if an earlier read did not find the candidate.
-		collectionKey := rootcatalog.BuildCollectionKey(collection.DatabaseID, record.GetCollectionID())
-		raw, err := kc.MetaKv.Load(ctx, collectionKey)
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
-		}
+		scopeGuard, err := kc.targetCreateCollectionGuard(ctx, collectionID, *collection)
 		if err != nil {
-			return false, merr.Wrap(err, "load collection for compaction target creation")
+			return false, err
 		}
-		current := &etcdpb.CollectionInfo{}
-		if err := proto.Unmarshal([]byte(raw), current); err != nil {
-			return false, merr.Wrap(err, "decode collection for compaction target creation")
+		epoch, epochGuard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
+		if err != nil {
+			return false, merr.Wrap(err, "load compaction target Create epoch")
 		}
-		if current.GetID() != record.GetCollectionID() || current.GetState() != etcdpb.CollectionState_CollectionCreated ||
-			current.GetUpdateTimestamp() != collection.Revision {
-			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+		if epoch != collection.Epoch {
+			return false, merr.WrapErrServiceUnavailableMsg("compaction target Create epoch changed")
 		}
-		guards = append(guards, predicates.ValueEqual(collectionKey, raw))
+		replicationGuard, err := kc.targetCreateReplicationGuard(ctx)
+		if err != nil {
+			return false, err
+		}
+		fence := targetCreateFenceKey(collectionID)
+		generation, fenceGuard, err := kc.loadTargetCreateGeneration(ctx, fence)
+		if err != nil {
+			return false, merr.Wrap(err, "load compaction target Create fence")
+		}
+		if record.GetIntent() == datapb.TargetIntent_INTENT_OPTIMIZE {
+			if generation == math.MaxUint64 {
+				return false, merr.WrapErrDataIntegrityMsg("compaction target Create fence exhausted for collection %d", collectionID)
+			}
+			// The slot can become empty again. Advance the fence with the
+			// winning OPTIMIZE so an older Create cannot use that empty slot.
+			saves[fence] = strconv.FormatUint(generation+1, 10)
+		}
+		guards = append(guards, scopeGuard, epochGuard, replicationGuard, fenceGuard)
 	}
 	if record.GetIntent() != datapb.TargetIntent_INTENT_OPTIMIZE {
 		err = kc.MetaKv.MultiSaveAndRemove(ctx, saves, nil, guards...)
@@ -1307,6 +1353,117 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 		}
 	}
 	return unknown, err
+}
+
+// ResolveCompactionTargetCreate races an unacknowledged Create against a
+// fence for the collection. The fence can win only while the candidate is
+// absent. CollectionWrites serializes these resolutions with new Creates.
+func (kc *Catalog) ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection metastore.CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error) {
+	id := candidate.GetTargetID()
+	stored, err := kc.LoadCompactionTarget(ctx, id)
+	if err != nil || stored != nil {
+		return stored, err
+	}
+	epoch, epochGuard, err := kc.loadTargetCreateGeneration(ctx, compactionTargetCreateEpoch)
+	if err != nil {
+		return nil, merr.Wrap(err, "load compaction target Create epoch")
+	}
+	if epoch != collection.Epoch {
+		// Any old Create that committed did so before this epoch was read.
+		return kc.LoadCompactionTarget(ctx, id)
+	}
+	collectionKey := rootcatalog.BuildCollectionKey(collection.DatabaseID, candidate.GetCollectionID())
+	raw, err := kc.MetaKv.Load(ctx, collectionKey)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		// Rename or drop removed this exact row, permanently changing its
+		// revision. Read after that durable fence to preserve a winning Create.
+		return kc.LoadCompactionTarget(ctx, id)
+	}
+	if err != nil {
+		return nil, merr.Wrap(err, "load collection to resolve compaction target creation")
+	}
+	current, err := decodeTargetCollection(raw, candidate.GetCollectionID())
+	if err != nil {
+		return nil, err
+	}
+	if current.GetState() != etcdpb.CollectionState_CollectionCreated || current.GetUpdateTimestamp() != collection.Revision {
+		return kc.LoadCompactionTarget(ctx, id)
+	}
+	scopeGuard := predicates.ValueEqual(collectionKey, raw)
+	fence := targetCreateFenceKey(candidate.GetCollectionID())
+	generation, fenceGuard, err := kc.loadTargetCreateGeneration(ctx, fence)
+	if err != nil {
+		return nil, merr.Wrap(err, "load compaction target Create fence")
+	}
+	if generation == math.MaxUint64 {
+		return nil, merr.WrapErrDataIntegrityMsg("compaction target Create fence exhausted for collection %d", candidate.GetCollectionID())
+	}
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{fence: strconv.FormatUint(generation+1, 10)}, nil,
+		predicates.KeyNotExist(buildCompactionTargetPath(id)), epochGuard, scopeGuard, fenceGuard)
+	if err != nil {
+		stored, readErr := kc.LoadCompactionTarget(ctx, id)
+		if readErr == nil && stored != nil {
+			return stored, nil
+		}
+		return nil, merr.Wrapf(err, "fence compaction target Create %d", id)
+	}
+	return nil, nil
+}
+
+func (kc *Catalog) targetCreateCollectionGuard(ctx context.Context, id int64, collection metastore.CompactionTargetCollectionVersion) (predicates.Predicate, error) {
+	// Guard the row that RootCoord replaces with its DropCollection tombstone.
+	collectionKey := rootcatalog.BuildCollectionKey(collection.DatabaseID, id)
+	raw, err := kc.MetaKv.Load(ctx, collectionKey)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+	}
+	if err != nil {
+		return nil, merr.Wrap(err, "load collection for compaction target creation")
+	}
+	current, err := decodeTargetCollection(raw, id)
+	if err != nil {
+		return nil, err
+	}
+	if current.GetState() != etcdpb.CollectionState_CollectionCreated || current.GetUpdateTimestamp() != collection.Revision {
+		return nil, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+	}
+	return predicates.ValueEqual(collectionKey, raw), nil
+}
+
+func decodeTargetCollection(raw string, id int64) (*etcdpb.CollectionInfo, error) {
+	current := &etcdpb.CollectionInfo{}
+	if err := proto.Unmarshal([]byte(raw), current); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode collection %d for compaction target creation", id)
+	}
+	if current.GetID() != id {
+		return nil, merr.WrapErrDataIntegrityMsg("collection %d identity does not match its key during compaction target creation", id)
+	}
+	return current, nil
+}
+
+func (kc *Catalog) targetCreateReplicationGuard(ctx context.Context) (predicates.Predicate, error) {
+	const key = streamingcatalog.ReplicateConfigurationKey
+	raw, err := kc.MetaKv.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return predicates.KeyNotExist(key), nil
+	}
+	if err != nil {
+		return nil, merr.Wrap(err, "load replication topology for compaction target creation")
+	}
+	topology := &streamingpb.ReplicateConfigurationMeta{}
+	if err := proto.Unmarshal([]byte(raw), topology); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode replication topology for compaction target creation")
+	}
+	if replicateutil.HasReplicationTopology(topology.GetReplicateConfiguration()) {
+		return nil, merr.WrapErrOperationNotSupportedMsg("compaction targets are not supported on a replicating cluster")
+	}
+	// The process lock can be released before a timed-out KV request finishes.
+	// Compare the durable topology so a late transaction cannot cross a change.
+	return predicates.ValueEqual(key, raw), nil
+}
+
+func targetCreateFenceKey(collectionID int64) string {
+	return compactionTargetCreateFencePrefix + "/" + strconv.FormatInt(collectionID, 10)
 }
 
 func activeOptimizeTargetKey(collectionID int64) string {
@@ -1403,6 +1560,10 @@ func (kc *Catalog) DropCompactionTarget(ctx context.Context, record *datapb.Comp
 	}
 	key := buildCompactionTargetPath(record.GetTargetID())
 	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) DropCompactionTargetCreateFence(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.Remove(ctx, targetCreateFenceKey(collectionID))
 }
 
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {

@@ -38,45 +38,29 @@ func isActiveOptimize(record *datapb.CompactionTarget) bool {
 	return IsOptimize(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE
 }
 
-// ActiveOptimize also accounts for a prior write whose result could still
-// arrive. In that case the original scope remains reserved for admission.
-func (m *CompactionTargetMeta) ActiveOptimize(ctx context.Context, collectionID int64) (*datapb.CompactionTarget, bool, error) {
+// ActiveOptimize refreshes an unresolved Create or Stop before returning the
+// current scope to another admission path.
+func (m *CompactionTargetMeta) ActiveOptimize(ctx context.Context, collectionID int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	pendingID := m.pendingOptimize[collectionID]
-	activeID := m.activeOptimize[collectionID]
-	pending := m.unconfirmedCreates[pendingID]
+	id := m.activeOptimize[collectionID]
+	if pending := m.pendingOptimize[collectionID]; pending != 0 {
+		id = pending
+	}
 	m.mu.RUnlock()
-
-	if pending != nil {
-		record, err := m.Read(ctx, pendingID)
-		if err != nil {
-			return nil, false, err
-		}
-		if record == nil {
-			return pending, false, nil
-		}
-		if isActiveOptimize(record) {
-			return record, true, nil
-		}
-		return nil, true, nil
+	if id == 0 {
+		return nil, nil
 	}
-	if activeID != 0 {
-		record, err := m.Read(ctx, activeID)
-		if err != nil || isActiveOptimize(record) {
-			return record, true, err
-		}
+	record, err := m.Read(ctx, id)
+	if err != nil || isActiveOptimize(record) {
+		return record, err
 	}
-	return nil, true, nil
+	return nil, nil
 }
 
 func (m *CompactionTargetMeta) CheckOptimizeConflict(ctx context.Context, collectionID int64) error {
-	record, confirmed, err := m.ActiveOptimize(ctx, collectionID)
+	record, err := m.ActiveOptimize(ctx, collectionID)
 	if err != nil || record == nil {
 		return err
-	}
-	if !confirmed {
-		return merr.Wrapf(merr.ErrCompactionTargetCreateOutcomeUnknown,
-			"previous OPTIMIZE candidate %d for collection %d is still unconfirmed", record.GetTargetID(), collectionID)
 	}
 	return merr.Wrapf(merr.ErrCompactionPlanConflict, "collection %d already has active OPTIMIZE target %d; this Create was not admitted", collectionID, record.GetTargetID())
 }
@@ -242,18 +226,15 @@ func CheckClusteringConflict(ctx context.Context, mt *meta.Meta, tasks *task.Com
 	return ctx.Err()
 }
 
-// OptimizeHasInFlightWork checks current input ownership and L0's dynamic
+// optimizeHasInFlightWork checks current input ownership and L0's dynamic
 // base selection. Ordinary L0 tasks do not lock their destination bases.
-func OptimizeHasInFlightWork(mt *meta.Meta, tasks *task.CompactionTaskMeta, collectionID int64, scope []*meta.SegmentInfo) bool {
+func optimizeHasInFlightWork(mt *meta.Meta, tasks map[int64][]*datapb.CompactionTask, scope []*meta.SegmentInfo) bool {
 	for _, segment := range scope {
 		if segment.IsCompacting || mt.IsSegmentCompacting(segment.GetID()) {
 			return true
 		}
 	}
-	if tasks == nil || len(scope) == 0 {
-		return false
-	}
-	for _, plans := range tasks.GetCompactionTasksByCollection(collectionID) {
+	for _, plans := range tasks {
 		for _, plan := range plans {
 			switch plan.GetState() {
 			case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:

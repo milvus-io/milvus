@@ -35,7 +35,8 @@ func (m *CompactionTargetMeta) CollectExpired(ctx context.Context, now time.Time
 	m.mu.RLock()
 	var candidates []int64
 	for id, record := range m.targets {
-		if record.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE {
+		_, stopping := m.unconfirmedStops[id]
+		if record.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE || stopping {
 			candidates = append(candidates, id)
 		}
 	}
@@ -55,7 +56,7 @@ func (m *CompactionTargetMeta) collectExpiredTarget(ctx context.Context, id int6
 	m.writes.Lock(id)
 	defer m.writes.Unlock(id)
 
-	record, err := m.readLocked(ctx, id)
+	record, err := m.readLocked(ctx, id, false)
 	if err != nil || record == nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func (m *CompactionTargetMeta) collectExpiredTarget(ctx context.Context, id int6
 		// fresh deadline to resolve it even if the caller already timed out.
 		confirmation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
-		stored, readErr := m.readLocked(confirmation, id)
+		stored, readErr := m.readLocked(confirmation, id, false)
 		if readErr == nil && stored == nil {
 			return nil
 		}

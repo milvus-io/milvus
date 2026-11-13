@@ -35,6 +35,7 @@ type BinlogsUpdateMask struct {
 type CompactionTargetCollectionVersion struct {
 	DatabaseID int64
 	Revision   uint64
+	Epoch      uint64
 }
 
 func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
@@ -137,12 +138,20 @@ type DataCoordCatalog interface {
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	// FenceCompactionTargetCreates advances the finite Create epoch before
+	// the active coordinator loads its Target snapshot.
+	FenceCompactionTargetCreates(ctx context.Context) (uint64, error)
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
 	LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error)
 	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *CompactionTargetCollectionVersion) (mayHaveCommitted bool, err error)
+	// ResolveCompactionTargetCreate returns the record if the pending Create
+	// committed, or fences its transaction and returns nil.
+	ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection CompactionTargetCollectionVersion) (*datapb.CompactionTarget, error)
 	UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget) error
 	StopCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (current *datapb.CompactionTarget, changed bool, err error)
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
+	// DropCompactionTargetCreateFence runs after the durable collection tombstone.
+	DropCompactionTargetCreateFence(ctx context.Context, collectionID int64) error
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error

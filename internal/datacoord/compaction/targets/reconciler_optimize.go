@@ -39,7 +39,6 @@ type optimizeInput struct {
 
 func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record *datapb.CompactionTarget, inputs map[int64]optimizeInput) {
 	observation, err := ObserveOptimize(ctx, r.meta, record)
-	finished := false
 	if err == nil && observation.Satisfied {
 		defer r.CompactionTargetMeta.LockCollectionAdmission(record.GetCollectionID())()
 		err = r.CompactionTargetMeta.Stop(ctx, record.GetTargetID(), StopSatisfied, func(current *datapb.CompactionTarget) (bool, error) {
@@ -47,22 +46,32 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 				!r.meta.GetCollection(current.GetCollectionID()).IsCreated() {
 				return false, nil
 			}
-			currentObservation, err := ObserveOptimize(ctx, r.meta, current)
-			if err != nil {
-				return false, err
+			// L0 publishes delta metadata before changing its task state.
+			// Read task state first so either the task or its output is
+			// visible to this final observation.
+			var plans map[int64][]*datapb.CompactionTask
+			if r.taskMeta != nil {
+				plans = r.taskMeta.GetCompactionTasksByCollection(current.GetCollectionID())
 			}
+			currentObservation, err := ObserveOptimize(ctx, r.meta, current)
 			observation = currentObservation
-			finished = observation.Satisfied && !OptimizeHasInFlightWork(r.meta, r.taskMeta, current.GetCollectionID(), observation.Scope)
-			return finished, nil
+			return err == nil && observation.Satisfied && !optimizeHasInFlightWork(r.meta, plans, observation.Scope), err
 		})
+		// Only the durable transition releases OPTIMIZE's scope. The
+		// validation callback can accept a stop whose save later fails.
+		current := r.CompactionTargetMeta.GetCompactionTarget(record.GetTargetID())
+		if err == nil && (current == nil || current.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE) {
+			return
+		}
 	}
 	if err != nil {
 		mlog.RatedWarn(ctx, rate.Limit(1), "could not reconcile OPTIMIZE target", mlog.Int64("targetID", record.GetTargetID()), mlog.Err(err))
 	}
-	if finished {
-		return
-	}
 	expected := record.GetOptimize().GetActualTargetSizeBytes()
+	if err != nil && observation.Scope == nil {
+		// A malformed record or failed observation cannot give up scope.
+		observation.Scope = optimizeScope(ctx, r.meta, record)
+	}
 	for _, segment := range observation.Scope {
 		size, valid := observation.sizes[segment.GetID()]
 		inputs[segment.GetID()] = optimizeInput{

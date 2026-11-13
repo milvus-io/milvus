@@ -5,23 +5,240 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	compactiontask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metacache"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCompactionTargetReconcilerResolvesLostStopBeforePlanning(t *testing.T) {
+	for _, committed := range []bool{true, false} {
+		name := "uncommitted stop"
+		if committed {
+			name = "committed stop"
+		}
+		t.Run(name, func(t *testing.T) {
+			enableCompactionTargetReconciler(t)
+			ctx := t.Context()
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			record := &datapb.CompactionTarget{
+				TargetID: 100, CollectionID: 1, ExpectedTS: 200, ActivatedAtTS: 200,
+				Intent: datapb.TargetIntent_INTENT_REWRITE, Rewrite: &datapb.CompactionTargetRewrite{},
+			}
+			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil)
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+			persisted := proto.CloneOf(record)
+			catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, next *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+					if committed {
+						persisted = proto.CloneOf(next)
+					}
+					return nil, false, context.DeadlineExceeded
+				}).Once()
+			// All subsequent reads reflect the state actually persisted.
+			catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).RunAndReturn(
+				func(context.Context, int64) (*datapb.CompactionTarget, error) {
+					return proto.CloneOf(persisted), nil
+				}).Maybe()
+			manager, err := NewCompactionTargetMetaForTest(ctx, catalog)
+			require.NoError(t, err)
+			mt := newCompactionTargetReconcilerTestMeta(t, manager)
+			reconciler := newCompactionTargetReconcilerForTest(mt)
+
+			events, err := reconciler.Reconcile(ctx)
+			require.NoError(t, err)
+			require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
+			late := sortedTargetSegment(1, 1, 10, "ch", 0, 199, false)
+			mt.Segments.SetSegment(late.GetID(), late)
+
+			events, err = reconciler.Reconcile(ctx)
+			require.NoError(t, err)
+			plans := plannedTaskDescriptors(t, events[policy.TriggerTypeSingle])
+			if committed {
+				require.Empty(t, plans)
+				require.Equal(t, StopSatisfied, manager.GetCompactionTarget(record.GetTargetID()).GetStopReason())
+				return
+			}
+			require.Len(t, plans, 1)
+			require.Equal(t, []int64{late.GetID()}, plans[0].GetInputSegments())
+			require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, persisted.GetState())
+		})
+	}
+}
+
+func TestCompactionTargetGCRefreshesUnconfirmedStopsIndependently(t *testing.T) {
+	ctx := t.Context()
+	const retention = "dataCoord.compaction.target.retentionSeconds"
+	require.NoError(t, Params.Save(retention, "60"))
+	t.Cleanup(func() { Params.Reset(retention) })
+
+	expired := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, ExpectedTS: 200, ActivatedAtTS: 200,
+		Intent: datapb.TargetIntent_INTENT_REWRITE, Rewrite: &datapb.CompactionTargetRewrite{},
+	}
+	unreadable := proto.CloneOf(expired)
+	unreadable.TargetID++
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{expired, unreadable}, nil)
+	now := time.Now()
+	terminal := proto.CloneOf(expired)
+	terminal.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	terminal.StopReason = StopOperatorDropped
+	terminal.InactivatedAtTS = tsoutil.ComposeTSByTime(now.Add(-time.Hour))
+	for _, record := range []*datapb.CompactionTarget{expired, unreadable} {
+		catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.MatchedBy(func(next *datapb.CompactionTarget) bool {
+			return next.GetTargetID() == record.GetTargetID()
+		})).Return(nil, false, context.DeadlineExceeded).Once()
+	}
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, expired.GetTargetID()).Return(terminal, nil).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, unreadable.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, terminal).Return(nil).Once()
+
+	manager, err := NewCompactionTargetMetaForTest(ctx, catalog)
+	require.NoError(t, err)
+	for _, record := range []*datapb.CompactionTarget{expired, unreadable} {
+		err = manager.Stop(ctx, record.GetTargetID(), StopOperatorDropped, func(*datapb.CompactionTarget) (bool, error) {
+			return true, nil
+		})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	}
+	manager.CollectExpired(ctx, now)
+	got, err := manager.Read(ctx, expired.GetTargetID())
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestCompactionTargetReconcilerKeepsOptimizeScopeUntilTerminalSave(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "true"))
+	require.NoError(t, Params.Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "false"))
+	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1"))
+	require.NoError(t, Params.Save(Params.DataCoordCfg.DiskSegmentMaxSize.Key, "1"))
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
+		Params.Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+		Params.Reset(Params.DataCoordCfg.SegmentMaxSize.Key)
+		Params.Reset(Params.DataCoordCfg.DiskSegmentMaxSize.Key)
+	})
+	ctx := t.Context()
+	record := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 200, ActivatedAtTS: 200, TailLimit: 1,
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: 1 << 20, ActualTargetSizeBytes: 1 << 20},
+	}
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil)
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).Return(nil, false, merr.ErrIoFailed).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Maybe()
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, next *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
+			return proto.CloneOf(next), true, nil
+		}).Once()
+	manager, err := NewCompactionTargetMetaForTest(ctx, catalog)
+	require.NoError(t, err)
+	inside := sortedTargetSegment(1, 1, 10, "ch", 0, 199, false)
+	outside := sortedTargetSegment(2, 1, 10, "ch", 0, 201, false)
+	for _, segment := range []*meta.SegmentInfo{inside, outside} {
+		segment.NumOfRows = 10
+		segment.Stats = &datapb.Statistics{InsertBinlogSize: 500 << 10}
+	}
+	mt := newCompactionTargetReconcilerTestMeta(t, manager, inside, outside)
+	reconciler := newCompactionTargetReconcilerForTest(mt)
+
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, manager.GetCompactionTarget(record.GetTargetID()).GetState())
+
+	events, err = reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	plans := plannedTaskDescriptors(t, events[policy.TriggerTypeSingle])
+	require.Len(t, plans, 1)
+	require.ElementsMatch(t, []int64{inside.GetID(), outside.GetID()}, plans[0].GetInputSegments())
+	require.Equal(t, StopSatisfied, manager.GetCompactionTarget(record.GetTargetID()).GetStopReason())
+}
+
+func TestCompactionTargetReconcilerDoesNotMissL0PublicationDuringOptimizeFinish(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := t.Context()
+	const targetSize = 1 << 20
+	record := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 200, ActivatedAtTS: 200, TailLimit: 1,
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: targetSize, ActualTargetSizeBytes: targetSize},
+	}
+	manager := NewLoadedCompactionTargetMeta(t, ctx, record)
+	segment := sortedTargetSegment(1, 1, 10, "ch", 0, 199, false)
+	segment.Stats = &datapb.Statistics{InsertBinlogSize: targetSize}
+	mt := newCompactionTargetReconcilerTestMeta(t, manager, segment)
+	reconciler := newCompactionTargetReconcilerForTest(mt)
+
+	l0 := &datapb.CompactionTask{
+		PlanID: 20, TriggerID: 19, CollectionID: 1, PartitionID: 10, Channel: "ch",
+		Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_executing,
+		Pos: &msgpb.MsgPosition{Timestamp: 200},
+	}
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{l0}, nil).Once()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	tasks, err := compactiontask.NewCompactionTaskMeta(ctx, catalog)
+	require.NoError(t, err)
+	reconciler.SetTaskMeta(tasks)
+
+	// Inject the L0 publication between the final segment snapshot and
+	// consumption of that snapshot, then publish its persisted task state.
+	var selectSegments func(*meta.Meta, context.Context, ...meta.SegmentFilter) []*meta.SegmentInfo
+	var observations int
+	patch := mockey.Mock((*meta.Meta).SelectSegments).Origin(&selectSegments).To(
+		func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+			segments := selectSegments(m, ctx, filters...)
+			if len(filters) == 2 {
+				observations++
+				if observations == 2 {
+					output := proto.CloneOf(segment.SegmentInfo)
+					output.Stats.DeltaBinlogSize = targetSize / 2
+					m.Segments.SetSegment(output.GetID(), meta.NewSegmentInfo(output))
+					updated := proto.CloneOf(l0)
+					updated.State = datapb.CompactionTaskState_meta_saved
+					require.NoError(t, tasks.SaveCompactionTask(ctx, updated))
+				}
+			}
+			return segments
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	_, err = reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, observations, 2)
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, manager.GetCompactionTarget(record.GetTargetID()).GetState())
+
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	plans := plannedTaskDescriptors(t, events[policy.TriggerTypeSingle])
+	require.Len(t, plans, 1)
+	require.Equal(t, []int64{segment.GetID()}, plans[0].GetInputSegments())
+}
 
 func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T) {
 	enableCompactionTargetReconciler(t)

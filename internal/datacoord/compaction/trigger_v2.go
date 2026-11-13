@@ -335,7 +335,7 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 func (m *CompactionTriggerManager) checkManualClusteringScope(ctx context.Context, collectionID int64, views []view.CompactionView) error {
 	targetMeta := m.targetReconciler.CompactionTargetMeta
 	defer targetMeta.LockCollectionAdmission(collectionID)()
-	record, _, err := targetMeta.ActiveOptimize(ctx, collectionID)
+	record, err := targetMeta.ActiveOptimize(ctx, collectionID)
 	if err != nil || record == nil {
 		return err
 	}
