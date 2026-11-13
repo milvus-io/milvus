@@ -33,11 +33,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func NewCompactionTargetMetaForTest(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
+	return loadCompactionTargetMeta(ctx, catalog, 0)
+}
+
 func NewCompactionTargetTestCatalog(
 	t *testing.T,
 	records ...*datapb.CompactionTarget,
 ) (*metastoremocks.DataCoordCatalog, map[int64]*datapb.CompactionTarget) {
 	catalog := metastoremocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, mock.Anything).Return(nil).Maybe()
 	stored := make(map[int64]*datapb.CompactionTarget)
 	for _, record := range records {
 		stored[record.GetTargetID()] = proto.CloneOf(record)
@@ -104,7 +109,7 @@ func NewLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ..
 		}
 	}
 	catalog, _ := NewCompactionTargetTestCatalog(t, records...)
-	targetMeta, err := NewCompactionTargetMeta(ctx, catalog)
+	targetMeta, err := NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	return targetMeta
 }

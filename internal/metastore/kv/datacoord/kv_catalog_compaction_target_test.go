@@ -18,23 +18,30 @@ package datacoord
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
 	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	streamingcatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -120,6 +127,17 @@ func (s *CatalogCompactionTargetSuite) TestListReturnsUnmarshalError() {
 	records, err := s.catalog.ListCompactionTargets(s.ctx)
 	s.Error(err)
 	s.Nil(records)
+}
+
+func (s *CatalogCompactionTargetSuite) TestCreateRejectsCorruptCollectionMetadata() {
+	const collectionID = 100
+	s.Require().NoError(s.metakv.Save(s.ctx, rootcatalog.BuildCollectionKey(0, collectionID), "not-protobuf"))
+
+	unknown, err := s.catalog.CreateCompactionTarget(s.ctx, &datapb.CompactionTarget{
+		TargetID: 10, CollectionID: collectionID,
+	}, &metastore.CompactionTargetCollectionVersion{})
+	s.Require().ErrorIs(err, merr.ErrDataIntegrity)
+	s.False(unknown)
 }
 
 func (s *CatalogCompactionTargetSuite) loadRecord(targetID int64) *datapb.CompactionTarget {
@@ -213,4 +231,254 @@ type targetWriteErrorKV struct {
 
 func (m *targetWriteErrorKV) MultiSaveAndRemove(context.Context, map[string]string, []string, ...predicates.Predicate) error {
 	return m.err
+}
+
+func newCompactionTargetEtcd(t *testing.T) kv.MetaKv {
+	t.Helper()
+	cfg := embed.NewConfig()
+	cfg.Dir = t.TempDir()
+	cfg.LogLevel = "error"
+	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	backend, err := etcdkv.NewEmbededEtcdKV(cfg, "test/meta")
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	return backend
+}
+
+func TestOptimizeSlotSerializesCoordinatorsAndReleasesAtStop(t *testing.T) {
+	backend := newCompactionTargetEtcd(t)
+	ctx := t.Context()
+	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, rootcatalog.NewCatalog(backend).CreateCollection(ctx, collection, collection.UpdateTimestamp))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Revision: collection.UpdateTimestamp}
+	newCandidate := func(id int64) *datapb.CompactionTarget {
+		return &datapb.CompactionTarget{TargetID: id, CollectionID: collection.CollectionID,
+			Intent: datapb.TargetIntent_INTENT_OPTIMIZE, Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: 1000, ActualTargetSizeBytes: 1000}}
+	}
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	first := NewCatalog(delayed, "", "")
+	unknown, err := first.CreateCompactionTarget(ctx, newCandidate(100), scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, unknown)
+	second := NewCatalog(backend, "", "")
+	rows, err := second.ListCompactionTargets(ctx)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	winner := newCandidate(101)
+	_, err = second.CreateCompactionTarget(ctx, winner, scope)
+	require.NoError(t, err)
+	unknown, err = second.CreateCompactionTarget(ctx, newCandidate(102), scope)
+	require.ErrorIs(t, err, merr.ErrCompactionPlanConflict)
+	require.False(t, unknown)
+	require.ErrorContains(t, err, "101")
+	winner.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	winner.StopReason = "operator_dropped"
+	stopped, changed, err := second.StopCompactionTarget(ctx, winner)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, winner.GetState(), stopped.GetState())
+	// The empty slot must not let the older, unacknowledged Create through.
+	require.Error(t, delayed.commit())
+	_, err = second.CreateCompactionTarget(ctx, newCandidate(102), scope)
+	require.NoError(t, err)
+	rows, err = second.ListCompactionTargets(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+}
+
+func TestResolveCompactionTargetCreateConfirmsCommitOrFencesAbsentCandidate(t *testing.T) {
+	ctx := t.Context()
+	backend := newCompactionTargetEtcd(t)
+	root := rootcatalog.NewCatalog(backend)
+	catalog := NewCatalog(backend, "", "")
+	for _, committed := range []bool{false, true} {
+		name := "fence absent candidate"
+		id := int64(100)
+		if committed {
+			name, id = "preserve a late commit", 200
+		}
+		t.Run(name, func(t *testing.T) {
+			collection := &model.Collection{CollectionID: id, DBID: 2, State: etcdpb.CollectionState_CollectionCreated}
+			require.NoError(t, root.CreateCollection(ctx, collection, 0))
+			scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID}
+			candidate := &datapb.CompactionTarget{TargetID: id + 1, CollectionID: id, Intent: datapb.TargetIntent_INTENT_OPTIMIZE}
+			delayed := &delayedTargetCreateKV{MetaKv: backend}
+			unknown, err := NewCatalog(delayed, "", "").CreateCompactionTarget(ctx, candidate, scope)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.True(t, unknown)
+			absent, err := catalog.LoadCompactionTarget(ctx, candidate.GetTargetID())
+			require.NoError(t, err)
+			require.Nil(t, absent)
+			if committed {
+				require.NoError(t, delayed.commit())
+			}
+			record, err := catalog.ResolveCompactionTargetCreate(ctx, candidate, *scope)
+			require.NoError(t, err)
+			if committed {
+				require.True(t, proto.Equal(candidate, record))
+				return
+			}
+			require.Nil(t, record)
+			replacement := proto.CloneOf(candidate)
+			replacement.TargetID++
+			_, err = catalog.CreateCompactionTarget(ctx, replacement, scope)
+			require.NoError(t, err)
+			replacement.State = datapb.TargetState_TARGET_STATE_INACTIVE
+			_, _, err = catalog.StopCompactionTarget(ctx, replacement)
+			require.NoError(t, err)
+			require.Error(t, delayed.commit())
+			record, err = catalog.LoadCompactionTarget(ctx, candidate.GetTargetID())
+			require.NoError(t, err)
+			require.Nil(t, record)
+		})
+	}
+}
+
+func TestCompactionTargetCreateEpochOrdersRecoverySnapshot(t *testing.T) {
+	ctx := t.Context()
+	backend := newCompactionTargetEtcd(t)
+	catalog := NewCatalog(backend, "", "")
+	epoch, err := catalog.FenceCompactionTargetCreates(ctx)
+	require.NoError(t, err)
+	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated}
+	require.NoError(t, rootcatalog.NewCatalog(backend).CreateCollection(ctx, collection, 0))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID, Epoch: epoch}
+	durable := &datapb.CompactionTarget{TargetID: 100, CollectionID: collection.CollectionID}
+	late := &datapb.CompactionTarget{TargetID: 101, CollectionID: collection.CollectionID}
+
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	prior := NewCatalog(delayed, "", "")
+	_, err = prior.CreateCompactionTarget(ctx, durable, scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, delayed.commit())
+	_, err = prior.CreateCompactionTarget(ctx, late, scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	nextEpoch, err := catalog.FenceCompactionTargetCreates(ctx)
+	require.NoError(t, err)
+	require.Greater(t, nextEpoch, epoch)
+	require.Error(t, delayed.commit())
+	rows, err := catalog.ListCompactionTargets(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.True(t, proto.Equal(durable, rows[0]))
+
+	_, err = catalog.CreateCompactionTarget(ctx, late, scope)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	scope.Epoch = nextEpoch
+	_, err = catalog.CreateCompactionTarget(ctx, late, scope)
+	require.NoError(t, err)
+}
+
+func TestLateCompactionTargetCreateCannotCrossReplicationTopologyChange(t *testing.T) {
+	ctx := t.Context()
+	backend := newCompactionTargetEtcd(t)
+	collection := &model.Collection{CollectionID: 42, DBID: 2, State: etcdpb.CollectionState_CollectionCreated}
+	require.NoError(t, rootcatalog.NewCatalog(backend).CreateCollection(ctx, collection, 0))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: collection.DBID}
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	catalog := NewCatalog(delayed, "", "")
+	record := &datapb.CompactionTarget{TargetID: 123, CollectionID: collection.CollectionID}
+	unknown, err := catalog.CreateCompactionTarget(ctx, record, scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, unknown)
+
+	require.NoError(t, streamingcatalog.NewCataLog(backend).SaveReplicateConfiguration(ctx,
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{{ClusterId: "primary"}, {ClusterId: "secondary"}},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "primary", TargetClusterId: "secondary"},
+			},
+		}}, nil))
+	require.Error(t, delayed.commit())
+	stored, err := catalog.LoadCompactionTarget(ctx, record.GetTargetID())
+	require.NoError(t, err)
+	require.Nil(t, stored)
+	unknown, err = catalog.CreateCompactionTarget(ctx, record, scope)
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.False(t, unknown)
+}
+
+// Hold the storage request past its timeout and a subsequent read-back, as a
+// server may do after the caller has already lost its response.
+type delayedTargetCreateKV struct {
+	kv.MetaKv
+	commit func() error
+}
+
+func (m *delayedTargetCreateKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	m.commit = func() error {
+		return m.MetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
+	}
+	return context.DeadlineExceeded
+}
+
+func TestLegacyCollectionTargetCreateGuardsBothDatabaseRows(t *testing.T) {
+	ctx := t.Context()
+	backend := newCompactionTargetEtcd(t)
+	root := rootcatalog.NewCatalog(backend)
+	legacy := &model.Collection{CollectionID: 42, DBID: util.NonDBID,
+		State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, root.CreateCollection(ctx, legacy, legacy.UpdateTimestamp))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: util.DefaultDBID, Revision: legacy.UpdateTimestamp}
+	catalog := NewCatalog(backend, "", "")
+	first := &datapb.CompactionTarget{TargetID: 100, CollectionID: legacy.CollectionID}
+	_, err := catalog.CreateCompactionTarget(ctx, first, scope)
+	require.NoError(t, err)
+
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	candidate := &datapb.CompactionTarget{TargetID: 101, CollectionID: legacy.CollectionID}
+	unknown, err := NewCatalog(delayed, "", "").CreateCompactionTarget(ctx, candidate, scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, unknown)
+
+	// A namespaced row takes precedence even while a legacy row still exists.
+	namespaced := legacy.Clone()
+	namespaced.DBID = util.DefaultDBID
+	namespaced.UpdateTimestamp = 20
+	require.NoError(t, root.CreateCollection(ctx, namespaced, namespaced.UpdateTimestamp))
+	require.Error(t, delayed.commit())
+	stored, err := catalog.ResolveCompactionTargetCreate(ctx, candidate, *scope)
+	require.NoError(t, err)
+	require.Nil(t, stored)
+}
+
+func TestLegacyCollectionDropFencesDelayedOptimizeCreate(t *testing.T) {
+	ctx := t.Context()
+	backend := newCompactionTargetEtcd(t)
+	root := rootcatalog.NewCatalog(backend)
+	legacy := &model.Collection{CollectionID: 42, DBID: util.NonDBID,
+		State: etcdpb.CollectionState_CollectionCreated, UpdateTimestamp: 10}
+	require.NoError(t, root.CreateCollection(ctx, legacy, legacy.UpdateTimestamp))
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: util.DefaultDBID, Revision: legacy.UpdateTimestamp}
+	delayed := &delayedTargetCreateKV{MetaKv: backend}
+	catalog := NewCatalog(backend, "", "")
+	first := &datapb.CompactionTarget{TargetID: 100, CollectionID: legacy.CollectionID, Intent: datapb.TargetIntent_INTENT_OPTIMIZE}
+	_, err := catalog.CreateCompactionTarget(ctx, first, scope)
+	require.NoError(t, err)
+	first.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	_, changed, err := catalog.StopCompactionTarget(ctx, first)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	candidate := proto.CloneOf(first)
+	candidate.TargetID++
+	candidate.State = datapb.TargetState_TARGET_STATE_ACTIVE
+	unknown, err := NewCatalog(delayed, "", "").CreateCompactionTarget(ctx, candidate, scope)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, unknown)
+
+	dropped := legacy.Clone()
+	dropped.State = etcdpb.CollectionState_CollectionDropping
+	dropped.UpdateTimestamp = 20
+	require.NoError(t, root.AlterCollection(ctx, legacy, dropped, metastore.MODIFY, dropped.UpdateTimestamp, false))
+	require.NoError(t, catalog.DropCompactionTargetCreateFence(ctx, legacy.CollectionID))
+	require.Error(t, delayed.commit())
+	stored, err := catalog.ResolveCompactionTargetCreate(ctx, candidate, *scope)
+	require.NoError(t, err)
+	require.Nil(t, stored)
 }

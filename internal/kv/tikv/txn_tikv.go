@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	tikverr "github.com/tikv/client-go/v2/error"
 	tikv "github.com/tikv/client-go/v2/kv"
+	"github.com/tikv/client-go/v2/oracle"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
@@ -45,6 +46,8 @@ import (
 // A quick note is that we are using loggingErr at our outermost scope in order to perform logging
 
 const (
+	pessimisticLockWait = 3 * time.Second
+
 	// We are using a Snapshot instead of transaction when doing read only operations due to the
 	// lower overhead (50% less overhead in small tests). In order to guarantee the latest values are
 	// grabbed at call, we can set the TS to be the max uint64.
@@ -163,7 +166,7 @@ func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 }
 
 func rollbackOnFailure(err *error, txn *transaction.KVTxn) {
-	if *err != nil && EnableRollback == true {
+	if *err != nil && (EnableRollback || txn.IsPessimistic()) {
 		txn.Rollback()
 	}
 }
@@ -435,6 +438,56 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// guardsUnwrittenKey reports whether a predicate targets a key for which
+// written returns false.
+func guardsUnwrittenKey(preds []predicates.Predicate, written func(key string) bool) bool {
+	for _, pred := range preds {
+		if !written(pred.Key()) {
+			return true
+		}
+	}
+	return false
+}
+
+// beginPredicateTxn locks every predicate key at a fresh timestamp when a
+// predicate guards a key outside the transaction's writes. A concurrent
+// change of a guard then waits for the lock or is visible to the predicate.
+// Same-key predicates can use optimistic write conflict detection.
+func (kv *txnTiKV) beginPredicateTxn(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate, written func(key string) bool) (map[string]tikv.ReturnedValue, error) {
+	if !guardsUnwrittenKey(preds, written) {
+		return nil, nil
+	}
+	txn.SetPessimistic(true)
+	keys := make([][]byte, 0, len(preds))
+	seen := typeutil.NewSet[string]()
+	for _, pred := range preds {
+		key := kv.GetPath(pred.Key())
+		if !seen.Contain(key) {
+			seen.Insert(key)
+			keys = append(keys, []byte(key))
+		}
+	}
+	for {
+		forUpdateTS, err := kv.txn.CurrentTimestamp(oracle.GlobalTxnScope)
+		if err != nil {
+			return nil, merr.WrapErrIoFailedErr(err, "get predicate lock timestamp")
+		}
+		lockCtx := tikv.NewLockCtx(forUpdateTS, pessimisticLockWait.Milliseconds(), time.Now())
+		lockCtx.InitReturnValues(len(keys))
+		err = txn.LockKeys(ctx, lockCtx, keys...)
+		if err == nil {
+			return lockCtx.Values, nil
+		}
+		// the key changed after forUpdateTS, for example while the lock
+		// waited for another writer: lock again at a newer timestamp, until
+		// the request times out
+		if tikverr.IsErrWriteConflict(err) && ctx.Err() == nil {
+			continue
+		}
+		return nil, merr.WrapErrIoFailedErr(err, "lock predicate keys")
+	}
+}
+
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
@@ -453,14 +506,21 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	if loggingErr = kv.checkPredicates(ctx, txn, preds); loggingErr != nil {
-		return loggingErr
-	}
-
 	// use complement to remove keys that are not in saves
 	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
 	removeKeys := typeutil.NewSet(removals...)
 	removals = removeKeys.Complement(saveKeys).Collect()
+
+	locked, err := kv.beginPredicateTxn(ctx, txn, preds, func(key string) bool {
+		return saveKeys.Contain(key) || removeKeys.Contain(key)
+	})
+	if err != nil {
+		loggingErr = err
+		return loggingErr
+	}
+	if loggingErr = kv.checkPredicates(ctx, txn, preds, locked); loggingErr != nil {
+		return loggingErr
+	}
 
 	for _, key := range removals {
 		key = kv.GetPath(key)
@@ -494,18 +554,28 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	return nil
 }
 
-func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
+func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate, locked map[string]tikv.ReturnedValue) error {
 	for _, pred := range preds {
 		key := kv.GetPath(pred.Key())
-		value, err := txn.Get(ctx, []byte(key))
-		if pred.Target() == predicates.PredTargetKeyExistence && pred.Type() == predicates.PredTypeNotExist &&
-			tikverr.IsErrNotFound(err) {
+		var value []byte
+		var exists bool
+		if locked != nil {
+			entry := locked[key]
+			value, exists = entry.Value, entry.Exists
+		} else {
+			entry, err := txn.Get(ctx, []byte(key))
+			if err != nil && !tikverr.IsErrNotFound(err) {
+				return merr.WrapErrIoFailedErr(err, "failed to read predicate target %s", pred.Key())
+			}
+			if err == nil {
+				value, exists = entry.Value, true
+			}
+		}
+
+		if pred.Target() == predicates.PredTargetKeyExistence && pred.Type() == predicates.PredTypeNotExist && !exists {
 			continue
 		}
-		if err != nil {
-			return merr.WrapErrIoFailedErr(err, "failed to read predicate target %s", pred.Key())
-		}
-		if !pred.IsTrue(value.Value) {
+		if !exists || !pred.IsTrue(value) {
 			return merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
 		}
 	}
@@ -530,7 +600,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	if loggingErr = kv.checkPredicates(ctx, txn, preds); loggingErr != nil {
+	if loggingErr = kv.checkPredicates(ctx, txn, preds, nil); loggingErr != nil {
 		return loggingErr
 	}
 

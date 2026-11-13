@@ -113,6 +113,7 @@ var Params = paramtable.Get()
 type Server struct {
 	compactionTargetCollection       func(context.Context, int64) (*datapb.CompactionTargetResource, bool, error)
 	checkCompactionTargetReplication func(context.Context) error
+	lockCompactionTargetReplication  func(context.Context) (func(), error)
 	targetCompactionEnabled          bool
 
 	ctx              context.Context
@@ -252,6 +253,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		metricsCacheManager:              metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:                   metricsinfo.NewMetricsRequest(),
 		checkCompactionTargetReplication: validateCompactionTargetReplication,
+		lockCompactionTargetReplication:  lockCompactionTargetReplication,
 		targetCompactionEnabled:          Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 
@@ -1488,7 +1490,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 		if targetCompactionEnabled {
 			g.Go(func() error {
 				var err error
-				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+				out.compactionTargetMeta, err = targets.RecoverCompactionTargetMeta(ctx, catalog)
 				return err
 			})
 		}

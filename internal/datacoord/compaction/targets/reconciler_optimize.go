@@ -39,7 +39,6 @@ type optimizeInput struct {
 
 func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record *datapb.CompactionTarget, inputs map[int64]optimizeInput) {
 	observation, err := ObserveOptimize(ctx, r.meta, record)
-	finished := false
 	if err == nil && observation.Satisfied {
 		defer r.CompactionTargetMeta.LockCollectionAdmission(record.GetCollectionID())()
 		err = r.CompactionTargetMeta.Stop(ctx, record.GetTargetID(), StopSatisfied, func(current *datapb.CompactionTarget) (bool, error) {
@@ -58,21 +57,22 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 				tasks = r.taskMeta.GetCompactionTasksByCollection(current.GetCollectionID())
 			}
 			currentObservation, err := ObserveOptimize(ctx, r.meta, current)
-			if err != nil {
-				return false, err
-			}
 			observation = currentObservation
-			finished = observation.Satisfied && !optimizeHasInFlightWork(tasks, observation.Scope)
-			return finished, nil
+			return err == nil && observation.Satisfied && !optimizeHasInFlightWork(tasks, observation.Scope), err
 		})
+		// A failed terminal save leaves OPTIMIZE's scope reserved.
+		current := r.CompactionTargetMeta.GetCompactionTarget(record.GetTargetID())
+		if err == nil && (current == nil || current.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE) {
+			return
+		}
 	}
 	if err != nil {
 		mlog.RatedWarn(ctx, rate.Limit(1), "could not reconcile OPTIMIZE target", mlog.Int64("targetID", record.GetTargetID()), mlog.Err(err))
 	}
-	if finished {
-		return
-	}
 	expected := record.GetOptimize().GetActualTargetSizeBytes()
+	if err != nil && observation.Scope == nil {
+		observation.Scope = optimizeScope(ctx, r.meta, record)
+	}
 	for _, segment := range observation.Scope {
 		size, valid := observation.sizes[segment.GetID()]
 		inputs[segment.GetID()] = optimizeInput{

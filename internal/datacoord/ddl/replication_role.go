@@ -19,14 +19,9 @@ package ddl
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
-
-func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
-	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
-}
 
 // GetReplicationRole reports this cluster's live replication role (primary/secondary) and
 // whether it is part of a CDC replication topology at all. It is modeled on
@@ -50,7 +45,7 @@ func GetReplicationRole(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, nil
 	}
 	cfg := assignment.ReplicateConfiguration
-	if !isReplicatingCluster(cfg) {
+	if !replicateutil.HasReplicationTopology(cfg) {
 		return replicateutil.RolePrimary, false, nil
 	}
 	helper, err := replicateutil.NewConfigHelper(Params.CommonCfg.ClusterPrefix.GetValue(), cfg)

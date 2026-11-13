@@ -39,7 +39,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -63,7 +66,7 @@ func enableTestCompactionTargets(t *testing.T) {
 
 func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, alloc allocator.Allocator) (*Server, *datapb.CompactionTargetResource) {
 	t.Helper()
-	targetMeta, err := targets.NewCompactionTargetMeta(t.Context(), catalog)
+	targetMeta, err := targets.NewCompactionTargetMetaForTest(t.Context(), catalog)
 	require.NoError(t, err)
 	segmentMeta := meta.NewTestMetaForCompactionTargets()
 	collection := &meta.CollectionInfo{
@@ -84,6 +87,8 @@ func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, al
 		}, current.IsExternal(), nil
 	}
 	s.compactionTargetMeta = targetMeta
+	s.checkCompactionTargetReplication = func(context.Context) error { return nil }
+	s.lockCompactionTargetReplication = func(context.Context) (func(), error) { return func() {}, nil }
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	return s, &datapb.CompactionTargetResource{
 		CollectionId: 1, DbId: 2, DbName: "default", CollectionName: "records", Revision: 10,
@@ -168,7 +173,7 @@ func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
 	restart := func() {
 		t.Helper()
 		var err error
-		s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+		s.compactionTargetMeta, err = targets.NewCompactionTargetMetaForTest(ctx, catalog)
 		require.NoError(t, err)
 	}
 	sortConfig.SwapTempValue("false")
@@ -321,7 +326,7 @@ func TestCreateOptimizePersistsOneSizeForEmptyScopeAndLateGroups(t *testing.T) {
 	require.Zero(t, response.GetTotalRows())
 
 	require.NoError(t, Params.Save(params.SegmentMaxSize.Key, "8"))
-	s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+	s.compactionTargetMeta, err = targets.NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	// 0.95E and 1.05E are inclusive even though E is not a multiple of 20.
 	for _, fact := range []struct{ id, group, size, rows int64 }{
@@ -403,6 +408,137 @@ func TestStandingSizeReadUsesCurrentParameters(t *testing.T) {
 	require.Nil(t, persisted[targetID].Enabled)
 }
 
+func TestCreateCompactionTargetHoldsReplicationLockThroughConfirmation(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(101, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(100, nil).Once()
+
+	var held bool
+	b := mock_broadcaster.NewMockBroadcaster(t)
+	b.EXPECT().TryLockResourceKeys(mock.Anything, message.NewSharedClusterResourceKey()).RunAndReturn(
+		func(context.Context, ...message.ResourceKey) (func(), error) {
+			require.False(t, held)
+			held = true
+			return func() { held = false }, nil
+		}).Once()
+	b.EXPECT().Close().Return().Once()
+	broadcast.ResetBroadcaster()
+	t.Cleanup(broadcast.ResetBroadcaster)
+	broadcast.Register(b)
+
+	assignment := mock_balancer.NewMockBalancer(t)
+	assignment.EXPECT().GetLatestChannelAssignment().RunAndReturn(
+		func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
+			require.True(t, held)
+			return nil, nil
+		}).Once()
+	balance.ResetBalancer()
+	t.Cleanup(balance.ResetBalancer)
+	balance.Register(assignment)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
+	var persisted *datapb.CompactionTarget
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, candidate *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion) (bool, error) {
+			require.True(t, held)
+			persisted = proto.CloneOf(candidate)
+			return true, context.DeadlineExceeded
+		}).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).RunAndReturn(
+		func(context.Context, int64) (*datapb.CompactionTarget, error) {
+			require.True(t, held)
+			return persisted, nil
+		}).Once()
+	s, resource := newTargetRPCServer(t, catalog, alloc)
+	s.lockCompactionTargetReplication = lockCompactionTargetReplication
+
+	resp, err := s.CreateCompactionTarget(ctx, rewriteRPCRequest(resource))
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, int64(101), resp.GetTargetId())
+	require.False(t, held)
+}
+
+func TestCreateCompactionTargetRejectsMalformedInternalBinding(t *testing.T) {
+	enableTestCompactionTargets(t)
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t)
+	s, _ := newTargetRPCServer(t, catalog, nil)
+
+	resp, err := s.CreateCompactionTarget(t.Context(), rewriteRPCRequest(&datapb.CompactionTargetResource{CollectionId: 1}))
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrServiceInternal)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(resp.GetStatus())))
+	require.Empty(t, persisted)
+}
+
+func TestCreateOptimizeRecoversFromUnconfirmedCreateAndCollectionDrop(t *testing.T) {
+	for _, closeScope := range []bool{false, true} {
+		name := "live scope"
+		if closeScope {
+			name = "deleted scope"
+		}
+		t.Run(name, func(t *testing.T) {
+			enableTestCompactionTargets(t)
+			ctx := t.Context()
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().AllocID(mock.Anything).Return(101, nil).Once()
+			alloc.EXPECT().AllocTimestamp(mock.Anything).Return(100, nil).Once()
+
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Once()
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).
+				Return(true, context.DeadlineExceeded).Once()
+			catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(nil, nil).Once()
+			s, resource := newTargetRPCServer(t, catalog, alloc)
+			collectionBroker := broker.NewMockBroker(t)
+			collectionBroker.EXPECT().DescribeCollectionInternal(mock.Anything, resource.GetCollectionId()).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionID: resource.GetCollectionId(), UpdateTimestamp: resource.GetRevision(),
+				Schema: &schemapb.CollectionSchema{Name: resource.GetCollectionName()},
+			}, nil).Maybe()
+			s.broker = collectionBroker
+			topology := view.NewMockCollectionTopologyQuerier(t)
+			topology.EXPECT().GetCollectionTopology(mock.Anything, int64(1)).Return(&view.CollectionTopology{}, nil).Maybe()
+			s.compactionTargetTopology = topology
+			req := &datapb.CreateCompactionTargetRequest{
+				Collection: resource,
+				Target: &datapb.CreateCompactionTargetRequest_InputTargetSizeBytes{
+					InputTargetSizeBytes: 4 << 30,
+				},
+			}
+			resp, err := s.CreateCompactionTarget(ctx, req)
+			require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrCompactionTargetCreateOutcomeUnknown)
+			require.Zero(t, resp.GetTargetId())
+
+			if closeScope {
+				// The RootCoord tombstone has already fenced the original
+				// collection CAS. A missing target needs no stop record.
+				catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(nil, nil).Once()
+				s.meta.DropCollection(resource.GetCollectionId())
+				catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, resource.GetCollectionId()).Return(nil).Twice()
+				require.NoError(t, s.DropCollectionCompactionTargets(ctx, resource.GetCollectionId()))
+				require.NoError(t, s.DropCollectionCompactionTargets(ctx, resource.GetCollectionId()))
+				listed, err := s.ListCompactionTargets(ctx, &datapb.ListCompactionTargetsRequest{})
+				require.NoError(t, merr.CheckRPCCall(listed, err))
+				require.Empty(t, listed.GetTargets())
+				return
+			}
+
+			catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, metastore.CompactionTargetCollectionVersion{DatabaseID: 2, Revision: 10}).Return(nil, nil).Once()
+			alloc.EXPECT().AllocID(mock.Anything).Return(102, nil).Once()
+			alloc.EXPECT().AllocTimestamp(mock.Anything).Return(101, nil).Once()
+			catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Once()
+			resp, err = s.CreateCompactionTarget(ctx, req)
+			require.NoError(t, merr.CheckRPCCall(resp, err))
+			require.Equal(t, int64(102), resp.GetTargetId())
+			listed, err := s.ListCompactionTargets(ctx, &datapb.ListCompactionTargetsRequest{})
+			require.NoError(t, merr.CheckRPCCall(listed, err))
+			require.Len(t, listed.GetTargets(), 1)
+			require.Equal(t, int64(102), listed.GetTargets()[0].GetTargetId())
+		})
+	}
+}
+
 func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -448,7 +584,7 @@ func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) 
 				require.ErrorIs(t, merr.Error(resp.GetStatus()), tc.want)
 				require.Zero(t, resp.GetTargetId())
 				if tc.commitsLate {
-					catalog.EXPECT().LoadCompactionTarget(mock.Anything, int64(101)).Return(candidate, nil).Once()
+					catalog.EXPECT().ResolveCompactionTargetCreate(mock.Anything, mock.Anything, mock.Anything).Return(candidate, nil).Once()
 					listed, err := s.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
 					require.NoError(t, merr.CheckRPCCall(listed, err))
 					require.Len(t, listed.GetTargets(), 1)

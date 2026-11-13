@@ -606,7 +606,7 @@ func (c *Inspector) EnqueueCompaction(ctx context.Context, task *datapb.Compacti
 }
 
 func (c *Inspector) validateSizeAndClusteringAdmission(ctx context.Context, task *datapb.CompactionTask, sizeCompaction bool) error {
-	record, _, err := c.compactionTargetMeta.ActiveOptimize(ctx, task.GetCollectionID())
+	record, err := c.compactionTargetMeta.ActiveOptimize(ctx, task.GetCollectionID())
 	if err != nil || record == nil {
 		return err
 	}

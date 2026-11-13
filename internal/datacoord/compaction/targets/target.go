@@ -41,16 +41,22 @@ const (
 	StopScopeDropped    = "scope_dropped"
 )
 
+type pendingTargetCreate struct {
+	record *datapb.CompactionTarget
+	scope  metastore.CompactionTargetCollectionVersion
+}
+
 type CompactionTargetMeta struct {
 	mu              sync.RWMutex
 	catalog         metastore.DataCoordCatalog
+	createEpoch     uint64
 	targets         map[int64]*datapb.CompactionTarget
 	activeOptimize  map[int64]int64 // collection ID -> confirmed active target ID
 	pendingOptimize map[int64]int64 // collection ID -> unconfirmed create candidate ID
 	// A failed stop may already have reached storage. Refresh the durable
 	// record before making another decision about this Target.
 	unconfirmedStops   map[int64]struct{}
-	unconfirmedCreates map[int64]*datapb.CompactionTarget
+	unconfirmedCreates map[int64]pendingTargetCreate
 	unconfirmedDeletes map[int64]struct{}
 	writes             *lock.KeyLock[int64]
 	admission          *lock.KeyLock[int64]
@@ -61,18 +67,30 @@ type CompactionTargetMeta struct {
 	standing   map[datapb.TargetIntent]*standingState
 }
 
-func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
+// RecoverCompactionTargetMeta runs during coordinator activation, before
+// accepting requests. A Create dispatched by the previous coordinator must
+// commit before the epoch advances and appear in this snapshot, or lose its CAS.
+func RecoverCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
+	epoch, err := catalog.FenceCompactionTargetCreates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return loadCompactionTargetMeta(ctx, catalog, epoch)
+}
+
+func loadCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog, epoch uint64) (*CompactionTargetMeta, error) {
 	records, err := catalog.ListCompactionTargets(ctx)
 	if err != nil {
 		return nil, err
 	}
 	m := &CompactionTargetMeta{
 		catalog:            catalog,
+		createEpoch:        epoch,
 		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
 		activeOptimize:     make(map[int64]int64),
 		pendingOptimize:    make(map[int64]int64),
 		unconfirmedStops:   make(map[int64]struct{}),
-		unconfirmedCreates: make(map[int64]*datapb.CompactionTarget),
+		unconfirmedCreates: make(map[int64]pendingTargetCreate),
 		unconfirmedDeletes: make(map[int64]struct{}),
 		writes:             lock.NewKeyLock[int64](),
 		admission:          lock.NewKeyLock[int64](),
@@ -139,7 +157,7 @@ func (m *CompactionTargetMeta) CloseCollectionScope(ctx context.Context, collect
 		}
 	}
 	for id, candidate := range m.unconfirmedCreates {
-		if candidate.GetCollectionID() == collectionID {
+		if candidate.record.GetCollectionID() == collectionID {
 			ids = append(ids, id)
 		}
 	}
@@ -158,7 +176,12 @@ func (m *CompactionTargetMeta) CloseCollectionScope(ctx context.Context, collect
 			firstErr = err
 		}
 	}
-	return firstErr
+	if firstErr != nil {
+		return firstErr
+	}
+	// The RootCoord tombstone excludes all old writers, including a
+	// resolution that is still in flight. The generation can now be removed.
+	return m.catalog.DropCompactionTargetCreateFence(ctx, collectionID)
 }
 
 func (m *CompactionTargetMeta) GetCompactionTarget(targetID int64) *datapb.CompactionTarget {
@@ -200,16 +223,58 @@ func (m *CompactionTargetMeta) List(ctx context.Context) (map[int64]*datapb.Comp
 	return m.GetCompactionTargets(), ctx.Err()
 }
 
-func (m *CompactionTargetMeta) GetActiveCompactionTargets() []*datapb.CompactionTarget {
+// ActiveCompactionTargets resolves prior terminal writes before starting a
+// fresh round. An unreadable Target is isolated; an OPTIMIZE in that state
+// still reserves its scope until the durable outcome is known.
+func (m *CompactionTargetMeta) ActiveCompactionTargets(ctx context.Context) (active, reservedOptimize []*datapb.CompactionTarget) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	records := make([]*datapb.CompactionTarget, 0, len(m.targets))
-	for _, record := range m.targets {
-		if record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && (IsRewrite(record) || IsOptimize(record)) {
-			records = append(records, proto.CloneOf(record))
+	pending := make([]int64, 0, len(m.unconfirmedCreates)+len(m.unconfirmedStops))
+	for id, candidate := range m.unconfirmedCreates {
+		if candidate.record.GetCollectionID() > 0 {
+			pending = append(pending, id)
 		}
 	}
-	return records
+	for id := range m.unconfirmedStops {
+		pending = append(pending, id)
+	}
+	m.mu.RUnlock()
+
+	readActive := make(map[int64]bool, len(pending))
+	for _, id := range pending {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		record, err := m.Read(ctx, id)
+		if err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "could not refresh compaction target before planning",
+				mlog.Int64("targetID", id), mlog.Err(err))
+			continue
+		}
+		readActive[id] = record != nil && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, record := range m.targets {
+		if record.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE || (!IsRewrite(record) && !IsOptimize(record)) {
+			continue
+		}
+		if _, stopping := m.unconfirmedStops[record.GetTargetID()]; stopping {
+			// A successful read of an active record is a valid planning
+			// snapshot even if its earlier stop could still commit.
+			if readActive[record.GetTargetID()] {
+				active = append(active, proto.CloneOf(record))
+			} else if IsOptimize(record) {
+				reservedOptimize = append(reservedOptimize, proto.CloneOf(record))
+			}
+			continue
+		}
+		active = append(active, proto.CloneOf(record))
+	}
+	for _, id := range m.pendingOptimize {
+		reservedOptimize = append(reservedOptimize, proto.CloneOf(m.unconfirmedCreates[id].record))
+	}
+	return active, reservedOptimize
 }
 
 func IsRewrite(record *datapb.CompactionTarget) bool {
@@ -222,8 +287,8 @@ func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) 
 	if previous := m.targets[id]; isActiveOptimize(previous) && m.activeOptimize[previous.GetCollectionID()] == id {
 		delete(m.activeOptimize, previous.GetCollectionID())
 	}
-	if pending := m.unconfirmedCreates[id]; IsOptimize(pending) {
-		delete(m.pendingOptimize, pending.GetCollectionID())
+	if pending := m.unconfirmedCreates[id]; IsOptimize(pending.record) {
+		delete(m.pendingOptimize, pending.record.GetCollectionID())
 	}
 	if record == nil {
 		delete(m.targets, id)
@@ -260,6 +325,11 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if scope != nil {
+		currentScope := *scope
+		currentScope.Epoch = m.createEpoch
+		scope = &currentScope
+	}
 	mayHaveCommitted, err := m.catalog.CreateCompactionTarget(ctx, candidate, scope)
 	if err == nil {
 		m.store(candidate, id)
@@ -276,7 +346,11 @@ func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.Com
 		return stored, nil
 	}
 	m.mu.Lock()
-	m.unconfirmedCreates[id] = proto.CloneOf(candidate)
+	pending := pendingTargetCreate{record: proto.CloneOf(candidate)}
+	if scope != nil {
+		pending.scope = *scope
+	}
+	m.unconfirmedCreates[id] = pending
 	if IsOptimize(candidate) {
 		m.pendingOptimize[candidate.GetCollectionID()] = id
 	}
@@ -303,7 +377,7 @@ func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.Comp
 	m.mu.RLock()
 	_, stopping := m.unconfirmedStops[id]
 	_, deleting := m.unconfirmedDeletes[id]
-	if !stopping && !deleting && m.unconfirmedCreates[id] == nil {
+	if !stopping && !deleting && m.unconfirmedCreates[id].record == nil {
 		record := proto.CloneOf(m.targets[id])
 		m.mu.RUnlock()
 		return record, nil
@@ -311,20 +385,26 @@ func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.Comp
 	m.mu.RUnlock()
 	m.writes.Lock(id)
 	defer m.writes.Unlock(id)
-	return m.readLocked(ctx, id)
+	return m.readLocked(ctx, id, false)
 }
 
-func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
+func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64, scopeClosed bool) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
 	_, stopping := m.unconfirmedStops[id]
 	_, deleting := m.unconfirmedDeletes[id]
 	candidate := m.unconfirmedCreates[id]
 	record := proto.CloneOf(m.targets[id])
 	m.mu.RUnlock()
-	if !stopping && !deleting && candidate == nil {
+	if !stopping && !deleting && candidate.record == nil {
 		return record, nil
 	}
-	stored, err := m.catalog.LoadCompactionTarget(ctx, id)
+	var stored *datapb.CompactionTarget
+	var err error
+	if candidate.record.GetCollectionID() > 0 && !scopeClosed {
+		stored, err = m.catalog.ResolveCompactionTargetCreate(ctx, candidate.record, candidate.scope)
+	} else {
+		stored, err = m.catalog.LoadCompactionTarget(ctx, id)
+	}
 	if err != nil {
 		return nil, merr.Wrapf(err, "read compaction target %d after ambiguous write", id)
 	}
@@ -336,11 +416,13 @@ func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datap
 		}
 		return stored, nil
 	}
-	if candidate != nil {
-		if stored == nil {
+	if candidate.record != nil {
+		// Standing creation retries the same ID. Only a finite candidate
+		// has been fenced or belongs to a durably closed collection.
+		if stored == nil && candidate.record.GetCollectionID() == 0 {
 			return nil, nil
 		}
-		if !sameCreation(stored, candidate) {
+		if stored != nil && !sameCreation(stored, candidate.record) {
 			return nil, merr.WrapErrDataIntegrityMsg("persisted compaction target %d differs from its candidate", id)
 		}
 		m.store(stored, id)
@@ -355,24 +437,6 @@ func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datap
 		}
 	}
 	return stored, nil
-}
-
-func (m *CompactionTargetMeta) refreshUnconfirmedCreates(ctx context.Context) {
-	m.mu.RLock()
-	ids := make([]int64, 0, len(m.unconfirmedCreates))
-	for id := range m.unconfirmedCreates {
-		ids = append(ids, id)
-	}
-	m.mu.RUnlock()
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return
-		}
-		if _, err := m.Read(ctx, id); err != nil {
-			mlog.RatedWarn(ctx, rate.Limit(1), "could not refresh compaction target creation",
-				mlog.Int64("targetID", id), mlog.Err(err))
-		}
-	}
 }
 
 // Stop revalidates the current record before the first transition. A satisfied
@@ -397,7 +461,7 @@ func (m *CompactionTargetMeta) Stop(ctx context.Context, id int64, reason string
 func (m *CompactionTargetMeta) stop(ctx context.Context, id int64, reason string, validate func(*datapb.CompactionTarget) (bool, error)) (bool, error) {
 	m.writes.Lock(id)
 	defer m.writes.Unlock(id)
-	record, err := m.readLocked(ctx, id)
+	record, err := m.readLocked(ctx, id, reason == StopScopeDropped)
 	if err != nil {
 		return false, err
 	}

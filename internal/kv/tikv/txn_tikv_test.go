@@ -32,6 +32,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -661,4 +662,45 @@ func TestConditionalCreatePreservesExistingValue(t *testing.T) {
 	}
 	err = kv.MultiSaveAndRemove(ctx, map[string]string{"new": "value"}, nil, predicates.KeyNotExist("new"))
 	require.True(t, tikverr.IsErrorUndetermined(err), "got %v", err)
+}
+
+func TestConditionalWriteSeesGuardChangedAfterTransactionBegan(t *testing.T) {
+	ctx := t.Context()
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_changed")
+	for _, initiallyPresent := range []bool{true, false} {
+		name := "new guard"
+		if initiallyPresent {
+			name = "changed guard"
+		}
+		t.Run(name, func(t *testing.T) {
+			guard := name + "/guard"
+			target := name + "/target"
+			predicate := predicates.KeyNotExist(guard)
+			if initiallyPresent {
+				require.NoError(t, kv.Save(ctx, guard, "original"))
+				predicate = predicates.ValueEqual(guard, "original")
+			}
+
+			oldBegin := beginTxn
+			t.Cleanup(func() { beginTxn = oldBegin })
+			changed := false
+			beginTxn = func(c *txnkv.Client) (*transaction.KVTxn, error) {
+				txn, err := oldBegin(c)
+				if err == nil && !changed {
+					changed = true
+					require.NoError(t, kv.Save(ctx, guard, "current"))
+				}
+				return txn, err
+			}
+
+			err := kv.MultiSaveAndRemove(ctx, map[string]string{target: "target value"}, nil,
+				predicates.KeyNotExist(target), predicate)
+			require.True(t, changed)
+			require.Error(t, err)
+			_, err = kv.Load(ctx, target)
+			require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+			require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{target: "target value"}, nil,
+				predicates.KeyNotExist(target), predicates.ValueEqual(guard, "current")))
+		})
+	}
 }

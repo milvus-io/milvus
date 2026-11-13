@@ -50,6 +50,21 @@ func validateCompactionTargetReplication(ctx context.Context) error {
 	return nil
 }
 
+func lockCompactionTargetReplication(ctx context.Context) (func(), error) {
+	release, err := broadcast.TryLockResourceKeys(ctx, message.NewSharedClusterResourceKey())
+	if err != nil {
+		return nil, err
+	}
+	if release == nil {
+		return nil, merr.WrapErrServiceUnavailableMsg("replication topology is changing")
+	}
+	if err := validateCompactionTargetReplication(ctx); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
 func (s *Server) compactionTargetsReady() error {
 	if !s.targetCompactionEnabled {
 		return merr.WrapErrOperationNotSupportedMsg("target-based compaction is disabled")
@@ -130,7 +145,7 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 	}
 	resource := req.GetCollection()
 	if resource.GetCollectionId() <= 0 || resource.GetDbName() == "" || resource.GetCollectionName() == "" || resource.GetDeleted() {
-		return nil, merr.WrapErrParameterInvalidMsg("a resolved collection identity is required")
+		return nil, merr.WrapErrServiceInternalMsg("a resolved collection identity is required")
 	}
 
 	rewrite := req.GetRewrite()
@@ -155,14 +170,12 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 		if external {
 			return merr.WrapErrParameterInvalidMsg("compaction is not supported for external collection")
 		}
-		if s.checkCompactionTargetReplication != nil {
-			if err := s.checkCompactionTargetReplication(ctx); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 	if err := validate(); err != nil {
+		return nil, err
+	}
+	if err := s.checkCompactionTargetReplication(ctx); err != nil {
 		return nil, err
 	}
 	scope := &metastore.CompactionTargetCollectionVersion{
@@ -186,7 +199,7 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 		if err != nil {
 			return nil, err
 		}
-		return s.compactionTargetMeta.Create(ctx, candidate, scope, func() error {
+		return s.persistCompactionTarget(ctx, candidate, scope, func() error {
 			if err := validate(); err != nil {
 				return err
 			}
@@ -202,6 +215,17 @@ func (s *Server) createCompactionTarget(ctx context.Context, req *datapb.CreateC
 		return nil, err
 	}
 	candidate.TotalRows = proto.Int64(observation.Rows)
+	return s.persistCompactionTarget(ctx, candidate, scope, validate)
+}
+
+func (s *Server) persistCompactionTarget(ctx context.Context, candidate *datapb.CompactionTarget,
+	scope *metastore.CompactionTargetCollectionVersion, validate func() error,
+) (*datapb.CompactionTarget, error) {
+	release, err := s.lockCompactionTargetReplication(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	return s.compactionTargetMeta.Create(ctx, candidate, scope, validate)
 }
 
