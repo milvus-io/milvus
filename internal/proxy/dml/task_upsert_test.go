@@ -3529,6 +3529,61 @@ func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
 	require.Zero(t, fakeWAL.appendCalls)
 }
 
+// A retried read must not reuse the failed attempt's query task, read schema or
+// snapshots, and only the successful attempt's snapshots become CAS proofs.
+func TestRetrieveByPKsRebuildsEachAttempt(t *testing.T) {
+	readSchemas := 0
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		readSchemas++
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
+	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
+	task.partitionKeyMode = true
+	task.node.(*mockUpsertNode).retryOnce = true
+	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+	oldWAL := streaming.WAL()
+	streaming.SetWALForTest(fakeWAL)
+	defer streaming.SetWALForTest(oldWAL)
+	require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
+
+	var queries []*dql.QueryTask
+	patch := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, qt *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		queries = append(queries, qt)
+		if len(queries) == 1 {
+			for ch := range task.partialUpdateCASGroups {
+				qt.RecordChannelMvcc(ch, 70)
+			}
+			return nil, segcore.StorageCost{ScannedRemoteBytes: 3}, merr.Wrap(merr.ErrQueryViewNotReady, "view retired")
+		}
+		for ch := range task.partialUpdateCASGroups {
+			qt.RecordChannelMvcc(ch, 90)
+		}
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{ScannedRemoteBytes: 5}, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	result, cost, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{10, 20, 30}), []string{"*"})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, queries, 2)
+	require.NotSame(t, queries[0], queries[1])
+	require.Equal(t, 2, readSchemas)
+	require.EqualValues(t, 5, cost.ScannedRemoteBytes)
+	for _, meta := range task.partialUpdateCASGroups {
+		require.EqualValues(t, 90, meta.GetReadTs())
+	}
+	require.Zero(t, fakeWAL.appendCalls)
+}
+
+func TestRetrieveByPKsRequiresQueryRunner(t *testing.T) {
+	task := createTestUpdateTask()
+	task.node = &mockTaskNode{}
+	_, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{1}), []string{"id"})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
 func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
 	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
 		return task.schema, nil

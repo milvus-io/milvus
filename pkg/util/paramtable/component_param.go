@@ -3149,7 +3149,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Key:          "proxy.enableAutoLoad",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether to automatically load an unloaded collection before DQL requests",
+		Doc:          "whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows",
 		Export:       true,
 	}
 	p.EnableAutoLoad.Init(base.mgr)
