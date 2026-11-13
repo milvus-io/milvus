@@ -11,10 +11,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// DecodeInsertBody decodes the body of an insert message on the append path.
+// DecodeLegacyInsertBody decodes V1-shaped Insert bodies on the append path.
+// Converted historical records may retain VersionOld.
 // A message that is not a valid insert is rejected as unrecoverable, a payload
 // that can not be read right now stays retriable. msg must not be nil.
-func DecodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.InsertRequest, error) {
+func DecodeLegacyInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.InsertRequest, error) {
 	insertMsg, err := message.AsMutableInsertMessageV1(msg)
 	if err != nil {
 		return nil, status.NewUnrecoverableError("decode insert message failed: %v", err)
@@ -23,7 +24,7 @@ func DecodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.I
 }
 
 // DecodeDeleteBody decodes the body of a delete message on the append path,
-// with the same error classification as DecodeInsertBody. msg must not be nil.
+// with the same error classification as DecodeLegacyInsertBody. msg must not be nil.
 func DecodeDeleteBody(ctx context.Context, msg message.MutableMessage) (*msgpb.DeleteRequest, error) {
 	deleteMsg, err := message.AsMutableDeleteMessageV1(msg)
 	if err != nil {

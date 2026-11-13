@@ -158,7 +158,7 @@ func TestAppendWaitingBehindAlterWALIsFenced(t *testing.T) {
 	assert.Equal(t, []message.MessageType{message.MessageTypeAlterWAL}, appendedTypes)
 }
 
-func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *testing.T) {
+func TestOversizedAppendChunksBelowInterceptorChain(t *testing.T) {
 	var persisted atomic.Int32
 	walImpls := &chunkRetryTestWALImpls{firstTimeTickWALImpls: newFirstTimeTickWALImpls(
 		func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
@@ -171,8 +171,7 @@ func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *test
 
 	const chunkBudget = 2048
 	params := paramtable.Get()
-	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("false")
-	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
+
 	maxMessageSizeKey := params.PulsarCfg.MaxMessageSize.Key
 	reserveSizeKey := params.PulsarCfg.MessageReserveSize.Key
 	require.NoError(t, params.Save(maxMessageSizeKey, strconv.Itoa(testMinWALMessageSize)))
@@ -188,7 +187,7 @@ func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *test
 	_, err := w.Append(context.Background(), msg)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), observer.calls.Load())
-	assert.Equal(t, int32(1), persisted.Load())
+	assert.Greater(t, persisted.Load(), int32(1))
 }
 
 // The WAL detaches an append from its caller: client cancellation must not

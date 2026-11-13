@@ -201,7 +201,21 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, m.pchannelStats[belongs.PChannel])
 }
 
-// AllocRows alloc number of rows on current segment.
+// CanAllocRows checks the soft assignment target without charging rows or bytes.
+// It preserves the asynchronous capacity hint for a segment that is already full.
+// The result is not a reservation; AllocRowsBatch revalidates under the same mutex.
+func (m *StatsManager) CanAllocRows(segmentID int64) bool {
+	m.mu.Lock()
+	stat := m.segmentStats[segmentID]
+	sealed := stat != nil && stat.ShouldBeSealed()
+	available := stat != nil && !sealed
+	m.mu.Unlock()
+	if sealed {
+		m.worker.NotifySealSegment(segmentID, policy.PolicyCapacity())
+	}
+	return available
+}
+
 // AllocRows treats the segment limits as soft sealing targets: every segment
 // may accept one allocation that crosses a target and is sealed afterwards;
 // later allocations are rejected so the caller can move to another segment.
@@ -234,6 +248,10 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.allocRowsLocked(segmentID, insert, runtimeFlushSize)
+}
+
+func (m *StatsManager) allocRowsLocked(segmentID int64, insert ModifiedMetrics, runtimeFlushSize uint64) (bool, error) {
 	// Must be exist, otherwise it's a bug.
 	info, ok := m.segmentIndex[segmentID]
 	if !ok {
@@ -587,4 +605,43 @@ func (m *StatsManager) getConfig() statsConfig {
 type segmentWithBinarySize struct {
 	segmentID  int64
 	binarySize uint64
+}
+
+// Allocation describes one segment in an all-or-nothing batch.
+type Allocation struct {
+	SegmentID        int64
+	Modified         ModifiedMetrics
+	RuntimeFlushSize uint64
+}
+
+// AllocRowsBatch validates every segment before changing any accounting.
+func (m *StatsManager) AllocRowsBatch(batch []Allocation) error {
+	m.mu.Lock()
+	for _, allocation := range batch {
+		stat := m.segmentStats[allocation.SegmentID]
+		if stat == nil || stat.ShouldBeSealed() {
+			m.mu.Unlock()
+			return ErrNotEnoughSpace
+		}
+		if allocation.Modified.Rows == 0 || allocation.Modified.BinarySize == 0 {
+			m.mu.Unlock()
+			return ErrNotEnoughSpace
+		}
+	}
+	var sealed []int64
+	for _, allocation := range batch {
+		seal, err := m.allocRowsLocked(allocation.SegmentID, allocation.Modified, normalizeRuntimeFlushSize(allocation.Modified, allocation.RuntimeFlushSize))
+		if err != nil {
+			panic("validated batch allocation failed")
+		}
+		if seal {
+			sealed = append(sealed, allocation.SegmentID)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range sealed {
+		m.worker.NotifySealSegment(id, policy.PolicyCapacity())
+	}
+	m.notifyIfTotalGrowingBytesOverHWM()
+	return nil
 }

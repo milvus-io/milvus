@@ -3,12 +3,11 @@ package dml
 import (
 	"math"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (it *InsertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
@@ -160,20 +159,13 @@ func appendAutoIDCandidatesByChannels(buckets [][]int64, rowIDs []int64, primary
 	if err != nil {
 		return err
 	}
-	channel2RowOffsets, err := assignChannelsByPK(ids, channelNames, &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{},
-	})
+	hashes, err := typeutil.HashPK2Channels(ids, channelNames)
 	if err != nil {
 		return err
 	}
-	channelIndex := make(map[string]int, len(channelNames))
-	for idx, channelName := range channelNames {
-		channelIndex[channelName] = idx
-	}
-	for _, channelName := range channelNames {
-		bucket := channelIndex[channelName]
-		for _, offset := range channel2RowOffsets[channelName] {
-			buckets[bucket] = append(buckets[bucket], rowIDs[offset])
+	for channel, selected := range groupRowsByChannel(hashes, len(channelNames)) {
+		for _, row := range selected {
+			buckets[channel] = append(buckets[channel], rowIDs[row])
 		}
 	}
 	return nil

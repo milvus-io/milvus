@@ -718,3 +718,49 @@ func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *Seg
 		Level:            datapb.SegmentLevel_L1,
 	}
 }
+
+func TestBatchAllocationDoesNotChargeSuccessfulPrefixOnRetry(t *testing.T) {
+	paramtable.Init()
+	manager := NewStatsManager()
+	operator := mock_utils.NewMockSealOperator(t)
+	operator.EXPECT().Channel().Return(types.PChannelInfo{Name: "batch"}).Maybe()
+	operator.EXPECT().AsyncFlushSegment(mock.Anything).Return().Maybe()
+	manager.RegisterSealOperator(operator, nil, nil)
+	for _, id := range []int64{10, 20} {
+		manager.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "batch", VChannel: "v1", CollectionID: 1, PartitionID: id, SegmentID: id}, createSegmentStats(0, 0, 1000))
+	}
+	first := Allocation{SegmentID: 10, Modified: ModifiedMetrics{Rows: 2, BinarySize: 40}}
+	require.ErrorIs(t, manager.AllocRowsBatch([]Allocation{first, {SegmentID: 30, Modified: ModifiedMetrics{Rows: 1, BinarySize: 20}}}), ErrNotEnoughSpace)
+	require.Zero(t, manager.GetStatsOfSegment(10).Modified.Rows)
+	require.Zero(t, manager.GetStatsOfSegment(10).Modified.BinarySize)
+	require.NoError(t, manager.AllocRowsBatch([]Allocation{first, {SegmentID: 20, Modified: ModifiedMetrics{Rows: 1, BinarySize: 15}}}))
+	require.Equal(t, ModifiedMetrics{Rows: 2, BinarySize: 40}, manager.GetStatsOfSegment(10).Modified)
+	require.Equal(t, ModifiedMetrics{Rows: 1, BinarySize: 15}, manager.GetStatsOfSegment(20).Modified)
+	require.Equal(t, uint64(55), manager.vchannelStats["v1"].Insert.BinarySize)
+}
+
+func TestAssignmentCapacityCheckDoesNotAccount(t *testing.T) {
+	stat := createSegmentStats(1, 10, 100)
+	manager := &StatsManager{segmentStats: map[int64]*SegmentStats{1: stat}}
+	manager.worker = newSealWorker(manager)
+	before := *stat
+	require.True(t, manager.CanAllocRows(1))
+	require.Equal(t, before, *stat)
+	stat.ReachLimit = true
+	before = *stat
+	require.False(t, manager.CanAllocRows(1))
+	require.Equal(t, before, *stat)
+	select {
+	case signal := <-manager.worker.sealNotifier:
+		require.EqualValues(t, 1, signal.segmentID)
+		require.Equal(t, policy.PolicyNameCapacity, signal.sealPolicy.Policy)
+	default:
+		t.Fatal("full segment lost its immediate capacity hint")
+	}
+	require.False(t, manager.CanAllocRows(999))
+	select {
+	case <-manager.worker.sealNotifier:
+		t.Fatal("missing segment generated a capacity hint")
+	default:
+	}
+}

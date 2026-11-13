@@ -24,6 +24,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
+| Upsert | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Broadcast: collection VChannels + CChannel, AckSyncUp, Unreplicable (`_ur`) | Yes (data VChannels) | SharedDBName + ExclusiveCollectionName |
@@ -48,6 +49,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
 - **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
+- **Insert V2**: Ordinary Insert uses a row-only message with a distinct header/body. `InsertMessageBody.rows` contains shared `InsertRows`; the body has no delete effects or header result. Historical Insert v0/V1 remains readable.
+- **Upsert**: Upsert and partial update combine the same nested `InsertRows` with producer-decided explicit delete effects and optional CAS proof. The partition table places rows in several partitions of one collection/VChannel. Delete scope is independent. Deletes affect strictly older versions; equal-TimeTick duplicates keep existing semantics. Proxy creates one logical message per VChannel, and SN performs physical payload chunking when needed. There is no format or chunk activation setting in 3.1. The prerequisite latest 3.0 release and CDC targets must have complete reading/receiving support before upgrade. See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Flushes the collection on the receiving cluster, on either replication role. Broadcasts to all collection VChannels plus CChannel and waits for local L1/L0 completion with AckSyncUp. See [Local Flush Control](../wal/local-flush.md) for ordering between replicated transactions.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
@@ -57,6 +60,16 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.
+
+## 3.1 namespace write restriction
+
+Insert V2 and Upsert producers reject namespace-bearing Insert, Upsert and
+partial-update requests before WAL append. They also reject writes to
+namespace-enabled collections when namespace is omitted. This deliberately
+changes the namespace write behavior exposed by released 3.0 SDKs; there is no
+legacy producer fallback. Historical records remain readable, namespace reads retain their existing
+behavior, and standalone Delete keeps its namespace routing. See the
+[WAL format compatibility contract](../../../design-docs/design_docs/wal/upsert_message.md).
 
 ## Replication Compatibility
 

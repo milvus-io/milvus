@@ -19,11 +19,20 @@ func (b *mutableMesasgeBuilder[H, B]) AddPartialUpdateCAS(meta *messagespb.Parti
 	if err != nil {
 		return err
 	}
-	body, ok := any(b.body).(*InsertRequest)
-	if !ok || body == nil {
-		return merr.WrapErrServiceInternalMsg("partial update CAS metadata requires an insert message builder")
+	switch body := any(b.body).(type) {
+	case *InsertRequest:
+		if body == nil {
+			return merr.WrapErrServiceInternalMsg("partial update CAS requires a body")
+		}
+		setPartialUpdateCASInsertBody(body, encoded)
+	case *UpsertMessageBody:
+		if body == nil {
+			return merr.WrapErrServiceInternalMsg("partial update CAS requires a body")
+		}
+		body.PartialUpdateCas = meta
+	default:
+		return merr.WrapErrServiceInternalMsg("partial update CAS requires an Insert or Upsert builder")
 	}
-	setPartialUpdateCASInsertBody(body, encoded)
 	b.properties.Set(messagePartialUpdateCAS, "")
 	return nil
 }
@@ -53,7 +62,7 @@ func EncodePartialUpdateCASIntoInsertTemplate(meta *messagespb.PartialUpdateCAS,
 // the builder.
 func (b *mutableMesasgeBuilder[H, B]) MarkPartialUpdateCASForBodyEncoder() error {
 	messageType := MustGetMessageTypeWithVersion[H, B]()
-	if messageType.MessageType != MessageTypeInsert {
+	if messageType.MessageType != MessageTypeInsert && messageType.MessageType != MessageTypeUpsert {
 		return merr.WrapErrServiceInternalMsg("partial update CAS metadata requires an insert message builder")
 	}
 	if isNilBodyEncoder(b.bodyEncoder) {

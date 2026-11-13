@@ -26,18 +26,20 @@ const (
 var bodyCacheNextShard atomic.Uint32
 
 func newBodyCacheSlot() *bodyCacheSlot {
-	return &bodyCacheSlot{shard: bodyCacheNextShard.Add(1) % bodyCacheShardCount}
+	shard := bodyCacheNextShard.Add(1) % bodyCacheShardCount
+	return &bodyCacheSlot{shard: shard}
 }
 
 // The shard is fixed at construction; all other fields are protected by that
 // shard's mutex. Transaction clones share the slot, even if their TimeTick changes.
 type bodyCacheSlot struct {
-	shard      uint32
-	body       proto.Message
-	loading    *bodyCacheAttempt
-	element    *list.Element
-	lastAccess time.Time
-	bytes      int64
+	insertOrUpsertProjectionCache *bodyCacheSlot
+	shard                         uint32
+	body                          proto.Message
+	loading                       *bodyCacheAttempt
+	element                       *list.Element
+	lastAccess                    time.Time
+	bytes                         int64
 }
 
 type bodyCacheAttempt struct {
@@ -111,8 +113,8 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 	shard.mu.Unlock()
 
 	body, payloadBytes, err := decode()
-	// Account for the plaintext bytes already consumed by the decoder, without
-	// traversing the decoded protobuf again. This is still a heap estimate.
+	// Use the decoder's retained-size estimate without traversing columns again.
+	// Compact RowID readers include their expanded storage in this estimate.
 	size := int64(bodyCacheEntryOverhead) + 2*int64(payloadBytes)
 	reserved := false
 	if err == nil {

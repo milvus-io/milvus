@@ -19,7 +19,7 @@ import (
 
 type schemaShardManager struct{ shards.ShardManager }
 
-func (*schemaShardManager) GetWriteSchema(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+func (*schemaShardManager) GetWriteSchema(int64, string) (*schemapb.CollectionSchema, error) {
 	panic("unpatched")
 }
 
@@ -27,7 +27,7 @@ func TestWALSchemaSelectors(t *testing.T) {
 	mockey.PatchConvey("exact versions prefer write admission and fall back to retained history", t, func() {
 		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
 		mockey.Mock((*analyzerWALTest).Channel).To(func(*analyzerWALTest) types.PChannelInfo { return channel }).Build()
-		mockey.Mock((*schemaShardManager).GetWriteSchema).To(func(_ *schemaShardManager, collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+		mockey.Mock((*schemaShardManager).GetWriteSchema).To(func(_ *schemaShardManager, collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
 			if collectionID == 2 {
 				require.Equal(t, "p_2v0", vchannel)
 				return nil, status.NewUnrecoverableError("collection does not exist")
@@ -38,7 +38,7 @@ func TestWALSchemaSelectors(t *testing.T) {
 			}
 			require.EqualValues(t, 1, collectionID)
 			require.Contains(t, []string{"p_1v0", "p_1v1"}, vchannel)
-			return &streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: 2}, CheckpointTimeTick: 30}, nil
+			return &schemapb.CollectionSchema{Version: 2}, nil
 		}).Build()
 		manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"p_1v0": {
 			Vchannel: "p_1v0", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,

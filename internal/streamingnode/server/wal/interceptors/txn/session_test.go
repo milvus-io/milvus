@@ -110,7 +110,7 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+	session.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(0, message.MessageTypeInsert, 0))
 
 	// Test Commit.
 	err = session.RequestCommitAndWait(ctx, 0, 0)
@@ -177,7 +177,7 @@ func TestManager(t *testing.T) {
 			switch i % 3 {
 			case 0:
 				require.NoError(t, session.AddNewMessage(context.Background(), 0))
-				session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+				session.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(0, message.MessageTypeInsert, 0))
 				err := session.RequestCommitAndWait(context.Background(), 0, 0)
 				session.CommitDone()
 				assert.NoError(t, err)
@@ -290,7 +290,7 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 	}, 0)
 
 	require.NoError(t, session.AddNewMessage(context.Background(), 10))
-	session.AddNewMessageDoneAndKeepalive(10, message.MessageTypeInsert)
+	session.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(10, message.MessageTypeInsert, 0))
 	err := session.RequestCommitAndWait(context.Background(), 11, 0)
 	require.NoError(t, err)
 
@@ -337,7 +337,7 @@ func TestCommitRejectsEmptyTransactionAfterPendingAppends(t *testing.T) {
 				default:
 				}
 				if tc.success {
-					session.AddNewMessageDoneAndKeepalive(11, message.MessageTypeInsert)
+					session.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(11, message.MessageTypeInsert, 0))
 				} else {
 					session.AddNewMessageFail()
 				}
@@ -358,24 +358,32 @@ func TestCommitRejectsEmptyTransactionAfterPendingAppends(t *testing.T) {
 }
 
 func TestSuccessfulBodiesDetermineInsertOnlyCommit(t *testing.T) {
+	insert := newTxnBodyMessage(11, message.MessageTypeInsert, 0)
+	deleted := newTxnBodyMessage(11, message.MessageTypeDelete, 0)
+	upsert := newTxnBodyMessage(11, message.MessageTypeUpsert, 0)
+	replacement := newTxnBodyMessage(11, message.MessageTypeUpsert, 1)
 	for _, tc := range []struct {
 		name       string
-		bodies     []message.MessageType
+		bodies     []message.ImmutableMessage
 		insertOnly bool
 	}{
-		{"insert-only", []message.MessageType{message.MessageTypeInsert, message.MessageTypeInsert}, true},
-		{"insert-delete", []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete}, false},
-		{"delete-insert", []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, false},
-		{"delete-only", []message.MessageType{message.MessageTypeDelete}, false},
+		{"insert-only", []message.ImmutableMessage{insert, insert}, true},
+		{"insert-delete", []message.ImmutableMessage{insert, deleted}, false},
+		{"delete-insert", []message.ImmutableMessage{deleted, insert}, false},
+		{"delete-only", []message.ImmutableMessage{deleted}, false},
+		{"row-only-upsert", []message.ImmutableMessage{upsert, insert}, true},
+		{"replacement-insert", []message.ImmutableMessage{replacement, insert}, false},
+		{"replacement-row-only-upsert", []message.ImmutableMessage{replacement, upsert}, false},
+		{"insert-replacement", []message.ImmutableMessage{insert, replacement}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			metrics := metricsutil.NewTxnMetrics("commit-classification-test")
 			defer metrics.Close()
 			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
 			defer session.Cleanup()
-			for _, typ := range tc.bodies {
+			for _, body := range tc.bodies {
 				require.NoError(t, session.AddNewMessage(t.Context(), 11))
-				session.AddNewMessageDoneAndKeepalive(11, typ)
+				session.AddNewMessageDoneAndKeepalive(body)
 			}
 			// A failed append must not change the committed body classification.
 			require.NoError(t, session.AddNewMessage(t.Context(), 12))
@@ -453,7 +461,7 @@ func TestFailAllTransactions(t *testing.T) {
 			cleanupCalled.Inc()
 		}, 0)
 		require.NoError(t, session2.AddNewMessage(context.Background(), 0))
-		session2.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+		session2.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(0, message.MessageTypeInsert, 0))
 		err = session2.RequestCommitAndWait(context.Background(), 0, 0)
 		assert.NoError(t, err)
 		session2.CommitDone()
@@ -466,7 +474,7 @@ func TestFailAllTransactions(t *testing.T) {
 		}, 0)
 		err = session3.AddNewMessage(context.Background(), 0)
 		assert.NoError(t, err)
-		session3.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+		session3.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(0, message.MessageTypeInsert, 0))
 
 		// Rollback all in-flight transactions
 		m.FailTxnAtVChannel("")
@@ -690,4 +698,63 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 		}).
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
+}
+
+func TestManagerRecoversUpsertEffects(t *testing.T) {
+	resource.InitForTest(t)
+	for _, effects := range []bool{false, true} {
+		ctx := message.TxnContext{TxnID: 70, Keepalive: message.TxnKeepaliveInfinite}
+		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(10))
+		header := &message.UpsertMessageHeader{CollectionId: 1}
+		if effects {
+			header.DeleteRows = 1
+		}
+		body := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(header).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(11))
+		insert := message.NewInsertMessageBuilderV1().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(12).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(12))
+		manager := NewTxnManager(types.PChannelInfo{Name: "test"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{70: message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(body).Add(insert)})
+		session, err := manager.GetSessionOfTxn(70)
+		require.NoError(t, err)
+		require.Equal(t, !effects, session.IsInsertOnly())
+		require.NoError(t, session.RequestCommitAndWait(t.Context(), 13, 2))
+		session.CommitDone()
+		manager.Close()
+	}
+}
+
+func TestManagerCloseCleansSessionsAndPreservesUncertainCommit(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("manager-close")
+	defer metrics.Close()
+	s := newTxnSession("p_1v0", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 0, metrics.BeginTxn())
+	require.NoError(t, s.AddNewMessage(context.Background(), 0))
+	s.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(0, message.MessageTypeInsert, 0))
+	require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 1))
+	cleaned := false
+	s.RegisterCleanup(func() { cleaned = true }, 0)
+	m := &TxnManager{sessions: map[message.TxnID]*TxnSession{1: s}, recoveredSessions: map[message.TxnID]struct{}{1: {}}, recoveredSessionsDoneChan: make(chan struct{})}
+	m.Close()
+	require.Equal(t, message.TxnStateOnCommit, s.State(), "WAL recovery owns the ambiguous outcome")
+	require.True(t, cleaned)
+	require.Empty(t, m.sessions)
+	require.Empty(t, m.recoveredSessions)
+	select {
+	case <-m.RecoverDone():
+	default:
+		t.Fatal("close must release recovery waiters")
+	}
+	m.Close()
+}
+
+func newTxnBodyMessage(timetick uint64, typ message.MessageType, deleteRows uint64) message.ImmutableMessage {
+	var body message.MutableMessage
+	switch typ {
+	case message.MessageTypeInsert:
+		body = message.CreateTestEmptyInsertMesage(1, nil)
+	case message.MessageTypeDelete:
+		body = message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{}).WithBody(&msgpb.DeleteRequest{}).MustBuildMutable()
+	case message.MessageTypeUpsert:
+		body = message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{DeleteRows: deleteRows}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+	default:
+		panic("unsupported transaction test body type")
+	}
+	return body.WithTimeTick(timetick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(1))
 }

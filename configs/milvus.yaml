@@ -336,7 +336,7 @@ pulsar:
   webaddress: 
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
-  # By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+  # By default, Pulsar can transmit at most 2MB of data in a single message. The StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
   # Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.
   maxMessageSize: 2097152
   # The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
@@ -447,10 +447,6 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
-  # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
-  # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
-  splitChunk: true
   exprParseCache:
     enabled: true # Enable caching expression parse trees and parsing errors. These settings apply to all components using the expression parser, not only Proxy; each process maintains its own cache. Restart required; disabling the cache does not reject expressions.
     maxEntries: 1024 # Maximum number of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 1024. Entries retain the existing 10-minute TTL. Restart required.
@@ -1764,10 +1760,6 @@ streaming:
   schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
-  # Whether StreamingNode splits oversized logical messages into physical WAL records.
-  # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
-  # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
-  splitChunkSN: false
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

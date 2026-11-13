@@ -59,6 +59,25 @@ restart resumes from the existing checkpoint and immutable source WAL; there is 
 additional replication-term high-water mark to allocate or recover. Existing WAL
 assignment terms and fencing retain their separate writer-ownership role.
 
+## Unified row-write format
+
+CDC forwards Upsert rows, partition identities, explicit delete effects, CAS proof,
+and original request mapping. The secondary preserves these decisions and assigns
+its own segments. It does not query a local PK index to infer deletes. Transaction
+replay retains Commit visibility and the existing source-ID prefix rules.
+
+3.1 produces Insert V2 and Upsert without a format setting, and SN always chunks
+oversized physical payloads when the backend has a configured chunk budget.
+Readers always reassemble before CDC sends logical records. The prerequisite
+latest 3.0 release must support final-format decoding, consumption and chunk
+reading. The reader-only [backport #55375](https://github.com/milvus-io/milvus/pull/55375)
+keeps existing producers and append handlers and adds no chunk writer; it does not
+enable new-format appends through a 3.0 SN. Deployment management keeps the secondary
+ahead of its primary and prohibits switchover during upgrades. Mixed-version
+appends may fail, wait or time out until the owner upgrades or moves. No automatic
+target negotiation or retained-history downgrade guarantee is provided.
+See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
+
 ## Recovery
 
 On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it also recovers in-progress transaction state from the `TxnBuffer` (uncommitted replicated transactions), so that the secondary can continue receiving body/commit messages for the interrupted transaction.

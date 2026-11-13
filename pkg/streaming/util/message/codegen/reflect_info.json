@@ -22,7 +22,12 @@
         "messagespb.AlterCollectionMessageUpdates",
         "messagespb.CacheExpirations",
         "messagespb.CacheExpiration",
-        "messagespb.LegacyProxyCollectionMetaCache"
+        "messagespb.LegacyProxyCollectionMetaCache",
+        "messagespb.InsertRows",
+        "messagespb.InsertRows_RowIds",
+        "messagespb.InsertRows_DeltaRowIds",
+        "messagespb.DeltaEncodedRowIDs",
+        "messagespb.RequestRowMapping"
     ],
     "messageReflectInfoTable": [
         {
@@ -67,12 +72,32 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.InsertMessageHeaderV2",
+                "BodyType": "messagespb.InsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeInsert",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.DeleteMessageHeader",
                 "BodyType": "msgpb.DeleteRequest"
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeDelete",
                 "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.UpsertMessageHeader",
+                "BodyType": "messagespb.UpsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeUpsert",
+                "Version": 2
             }
         },
         {

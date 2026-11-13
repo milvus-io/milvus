@@ -123,7 +123,9 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 	for _, summary := range summaries {
 		summary.ObserveMessage(context.Background(), raw)
 	}
-	require.True(t, module.ObserveMessage(context.Background(), retained))
+	observed, observeErr := module.ObserveMessage(context.Background(), retained)
+	require.NoError(t, observeErr)
+	require.True(t, observed)
 	retained.Release()
 	owner.Release()
 }

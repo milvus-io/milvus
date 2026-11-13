@@ -99,7 +99,9 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			owner := tracker.Track(raw)
 			retained := owner.Clone()
 			summary.ObserveMessage(ctx, raw)
-			require.True(t, module.ObserveMessage(ctx, retained))
+			observed, observeErr := module.ObserveMessage(ctx, retained)
+			require.NoError(t, observeErr)
+			require.True(t, observed)
 			retained.Release()
 			owner.Release()
 			expectedState := streamingpb.PartitionState_PARTITION_STATE_NORMAL

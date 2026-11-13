@@ -202,3 +202,41 @@ func newCommitTxnMessageForExistingSession(
 		MustBuildMutable().
 		WithTxnContext(*txnContext), session
 }
+
+func TestTimeTickUpsertBodyCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		deleteRows uint64
+		fail       bool
+	}{
+		{"rows", 0, false}, {"replacement", 1, false}, {"failed-replacement", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			impl := newTestTimeTickAppendInterceptor(t)
+			commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
+			body := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{DeleteRows: tc.deleteRows}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(session.TxnContext())
+			ctx := utility.WithExtraAppendResult(t.Context(), &utility.ExtraAppendResult{})
+			appendErr := errors.New("body append failed")
+			_, err := impl.DoAppend(ctx, body, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				if tc.fail {
+					return nil, appendErr
+				}
+				return walimplstest.NewTestMessageID(2), nil
+			})
+			count := uint64(2)
+			if tc.fail {
+				require.ErrorIs(t, err, appendErr)
+				count = 1
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.fail || tc.deleteRows == 0, session.IsInsertOnly())
+			message.MustAsMutableCommitTxnMessageV2(commit).OverwriteHeader(&message.CommitTxnMessageHeader{BodyCnt: count})
+			_, err = impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				return walimplstest.NewTestMessageID(3), nil
+			})
+			require.NoError(t, err, "only successful logical bodies count toward Commit")
+			require.Equal(t, message.TxnStateCommitted, session.State())
+		})
+	}
+}

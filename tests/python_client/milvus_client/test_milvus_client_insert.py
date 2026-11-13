@@ -40,6 +40,39 @@ default_int32_value = ct.default_int32_value
 class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
     """Test case of search interface"""
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "enable_namespace, namespace, message",
+        [
+            (False, "namespace_0", "namespace data is set but namespace disabled"),
+            (True, "namespace_0", "Upsert WAL does not support namespace requests"),
+            (True, None, "namespace data is not set but namespace enabled"),
+        ],
+    )
+    def test_milvus_client_insert_namespace_unsupported(self, enable_namespace, namespace, message):
+        """3.1 rejects namespace writes, including writes without a namespace to an enabled collection."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client,
+            collection_name,
+            default_dim,
+            consistency_level="Strong",
+            enable_namespace=enable_namespace,
+            shards_num=1,
+        )
+        rows = [{default_primary_key_field_name: 1, default_vector_field_name: [0.1] * default_dim}]
+        kwargs = {} if namespace is None else {"namespace": namespace}
+        self.insert(
+            client,
+            collection_name,
+            rows,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: message},
+            **kwargs,
+        )
+        self.drop_collection(client, collection_name)
+
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
         yield request.param

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -88,7 +89,7 @@ func TestGrowingBM25StatsRejectIncompleteOutput(t *testing.T) {
 	body.NumRows = 2
 	raw := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(original.Header()).WithBody(body).
 		MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
-	insert := walview.SegmentInsertMessage{Message: message.MustAsImmutableInsertMessageV1(raw), Assignment: original.Header().GetPartitions()[0]}
+	insert := walview.SegmentInsertMessage{RowsReader: func() messageutil.InsertRowsReader { rows, _, _ := messageutil.AsInsertRowsReader(raw); return rows }(), Assignment: original.Header().GetPartitions()[0]}
 	stats := bm25Stats{}
 	stats.getOrCreate(102)
 	require.ErrorIs(t, (&oracleRuntime{}).collectGrowingInsertStats(t.Context(), stats, insert), merr.ErrDataIntegrity)
@@ -101,7 +102,7 @@ func TestGrowingStatsMaterializesOnlyRequiredBM25(t *testing.T) {
 	body.FieldsData = body.FieldsData[:1]
 	raw := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(original.Header()).WithBody(body).
 		MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
-	insert := walview.SegmentInsertMessage{Message: message.MustAsImmutableInsertMessageV1(raw), Assignment: original.Header().GetPartitions()[0]}
+	insert := walview.SegmentInsertMessage{RowsReader: func() messageutil.InsertRowsReader { rows, _, _ := messageutil.AsInsertRowsReader(raw); return rows }(), Assignment: original.Header().GetPartitions()[0]}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}, {Key: "max_length", Value: "256"}}},
 		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
@@ -120,5 +121,5 @@ func TestGrowingStatsMaterializesOnlyRequiredBM25(t *testing.T) {
 	require.NoError(t, r.collectGrowingInsertStats(t.Context(), stats, insert))
 	require.EqualValues(t, 1, stats[102].NumRow())
 	require.Positive(t, stats[102].GetAvgdl())
-	require.Len(t, insert.Message.MustBody().GetFieldsData(), 1, "materialization must preserve retained WAL body")
+	require.Len(t, message.MustAsImmutableInsertMessageV1(raw).MustBody().GetFieldsData(), 1, "materialization must preserve retained WAL body")
 }

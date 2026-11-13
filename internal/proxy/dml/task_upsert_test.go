@@ -750,7 +750,7 @@ func requireAppendedPartialUpdateCASGroups(
 		}
 		_, ok := expected[msg.VChannel()]
 		require.True(t, ok, "unexpected partial update CAS for vchannel %s", msg.VChannel())
-		require.Equal(t, streamingmessage.MessageTypeInsert, msg.MessageType())
+		require.Contains(t, []streamingmessage.MessageType{streamingmessage.MessageTypeInsert, streamingmessage.MessageTypeUpsert}, msg.MessageType())
 		require.Equal(t, readTS, meta.GetReadTs())
 		require.EqualValues(t, term, meta.GetObservedPchannelTerm())
 		seen[msg.VChannel()] = struct{}{}
@@ -758,17 +758,25 @@ func requireAppendedPartialUpdateCASGroups(
 	require.Len(t, seen, len(expected))
 }
 
-// partialUpdateCASOf reads the CAS metadata from the body of a marked insert
-// message. It returns nil when the message is not marked.
+// partialUpdateCASOf reads CAS metadata from a marked Insert or Upsert body.
+// It returns nil when the message is not marked.
 func partialUpdateCASOf(t *testing.T, msg streamingmessage.MutableMessage) *messagespb.PartialUpdateCAS {
 	t.Helper()
 	if !streamingmessage.HasPartialUpdateCAS(msg) {
 		return nil
 	}
-	body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-	meta, err := streamingmessage.DecodePartialUpdateCASMetadata(body.GetBase().GetProperties()["_puc"])
-	require.NoError(t, err)
-	return meta
+	switch msg.MessageType() {
+	case streamingmessage.MessageTypeInsert:
+		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+		meta, err := streamingmessage.DecodePartialUpdateCASMetadata(body.GetBase().GetProperties()["_puc"])
+		require.NoError(t, err)
+		return meta
+	case streamingmessage.MessageTypeUpsert:
+		return streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody().GetPartialUpdateCas()
+	default:
+		t.Fatalf("unsupported marked message: %v", msg.MessageType())
+		return nil
+	}
 }
 
 func requireFirstPartialUpdateCAS(t *testing.T, msgs []streamingmessage.MutableMessage) *messagespb.PartialUpdateCAS {
@@ -876,51 +884,24 @@ func buildPartialUpdateCASTestMessages(
 	casGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]streamingmessage.MutableMessage, []streamingmessage.MutableMessage) {
 	insertGroups := groupPartialUpdateCASIntPKs(t, insertPKs, vchannels)
-	insertMsgs := make([]streamingmessage.MutableMessage, 0, len(insertGroups))
-	for vchannel, pks := range insertGroups {
-		builder := streamingmessage.NewInsertMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&streamingmessage.InsertMessageHeader{
-				CollectionId: collectionID,
-				Partitions: []*streamingmessage.PartitionSegmentAssignment{{
-					PartitionId: 100,
-					Rows:        uint64(len(pks)),
-				}},
-			}).
-			WithBody(&msgpb.InsertRequest{
-				CollectionID: collectionID,
-				NumRows:      uint64(len(pks)),
-				FieldsData:   []*schemapb.FieldData{partialUpdateCASPKFieldData(pks)},
-			})
-		if casGroups != nil {
-			meta, ok := casGroups[vchannel]
-			require.True(t, ok)
-			require.NoError(t, builder.AddPartialUpdateCAS(meta))
-		}
-		insertMsg, err := builder.BuildMutable()
-		require.NoError(t, err)
-		insertMsgs = append(insertMsgs, insertMsg)
-	}
-
 	deleteGroups := groupPartialUpdateCASIntPKs(t, deletePKs, vchannels)
-	deleteMsgs := make([]streamingmessage.MutableMessage, 0, len(deleteGroups))
-	for vchannel, pks := range deleteGroups {
-		deleteMsg, err := streamingmessage.NewDeleteMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&streamingmessage.DeleteMessageHeader{
-				CollectionId: collectionID,
-				Rows:         uint64(len(pks)),
-			}).
-			WithBody(&msgpb.DeleteRequest{
-				CollectionID: collectionID,
-				NumRows:      int64(len(pks)),
-				PrimaryKeys:  partialUpdateCASIDs(pks),
-			}).
-			BuildMutable()
-		require.NoError(t, err)
-		deleteMsgs = append(deleteMsgs, deleteMsg)
+	var messages []streamingmessage.MutableMessage
+	for channel, keys := range insertGroups {
+		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASIDs(keys), RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, len(keys))}}}}
+		header := &streamingmessage.UpsertMessageHeader{CollectionId: collectionID, Partitions: []*streamingmessage.PartitionSegmentAssignment{{PartitionId: 100, Rows: uint64(len(keys))}}}
+		if deleted := deleteGroups[channel]; len(deleted) > 0 {
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: partialUpdateCASIDs(deleted)}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			header.DeleteRows = uint64(len(deleted))
+		}
+		builder := streamingmessage.NewUpsertMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body)
+		if casGroups != nil {
+			proof, ok := casGroups[channel]
+			require.True(t, ok)
+			require.NoError(t, builder.AddPartialUpdateCAS(proof))
+		}
+		messages = append(messages, builder.MustBuildMutable())
 	}
-	return insertMsgs, deleteMsgs
+	return messages, nil
 }
 
 func buildPartialUpdateCASStringTestMessages(
@@ -932,51 +913,24 @@ func buildPartialUpdateCASStringTestMessages(
 	casGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]streamingmessage.MutableMessage, []streamingmessage.MutableMessage) {
 	insertGroups := groupPartialUpdateCASStringPKs(t, insertPKs, vchannels)
-	insertMsgs := make([]streamingmessage.MutableMessage, 0, len(insertGroups))
-	for vchannel, pks := range insertGroups {
-		builder := streamingmessage.NewInsertMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&streamingmessage.InsertMessageHeader{
-				CollectionId: collectionID,
-				Partitions: []*streamingmessage.PartitionSegmentAssignment{{
-					PartitionId: 100,
-					Rows:        uint64(len(pks)),
-				}},
-			}).
-			WithBody(&msgpb.InsertRequest{
-				CollectionID: collectionID,
-				NumRows:      uint64(len(pks)),
-				FieldsData:   []*schemapb.FieldData{partialUpdateCASStringPKFieldData(pks)},
-			})
-		if casGroups != nil {
-			meta, ok := casGroups[vchannel]
-			require.True(t, ok)
-			require.NoError(t, builder.AddPartialUpdateCAS(meta))
-		}
-		insertMsg, err := builder.BuildMutable()
-		require.NoError(t, err)
-		insertMsgs = append(insertMsgs, insertMsg)
-	}
-
 	deleteGroups := groupPartialUpdateCASStringPKs(t, deletePKs, vchannels)
-	deleteMsgs := make([]streamingmessage.MutableMessage, 0, len(deleteGroups))
-	for vchannel, pks := range deleteGroups {
-		deleteMsg, err := streamingmessage.NewDeleteMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&streamingmessage.DeleteMessageHeader{
-				CollectionId: collectionID,
-				Rows:         uint64(len(pks)),
-			}).
-			WithBody(&msgpb.DeleteRequest{
-				CollectionID: collectionID,
-				NumRows:      int64(len(pks)),
-				PrimaryKeys:  partialUpdateCASStringIDs(pks),
-			}).
-			BuildMutable()
-		require.NoError(t, err)
-		deleteMsgs = append(deleteMsgs, deleteMsg)
+	var messages []streamingmessage.MutableMessage
+	for channel, keys := range insertGroups {
+		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASStringIDs(keys), RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, len(keys))}}}}
+		header := &streamingmessage.UpsertMessageHeader{CollectionId: collectionID, Partitions: []*streamingmessage.PartitionSegmentAssignment{{PartitionId: 100, Rows: uint64(len(keys))}}}
+		if deleted := deleteGroups[channel]; len(deleted) > 0 {
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: partialUpdateCASStringIDs(deleted)}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			header.DeleteRows = uint64(len(deleted))
+		}
+		builder := streamingmessage.NewUpsertMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body)
+		if casGroups != nil {
+			proof, ok := casGroups[channel]
+			require.True(t, ok)
+			require.NoError(t, builder.AddPartialUpdateCAS(proof))
+		}
+		messages = append(messages, builder.MustBuildMutable())
 	}
-	return insertMsgs, deleteMsgs
+	return messages, nil
 }
 
 func groupPartialUpdateCASIntPKs(t *testing.T, pks []int64, vchannels []string) map[string][]int64 {
@@ -1117,374 +1071,11 @@ func partialUpdateCASRealPackTestTask(
 	return task
 }
 
-func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
-	mockCache := &metacache.MetaCache{}
-	partitionPatch := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
-
-	newInput := func() (*UpsertTask, string, map[string]*messagespb.PartialUpdateCAS) {
-		task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-		vchannel := partialUpdateCASTestVChannels[0]
-		return task, vchannel, map[string]*messagespb.PartialUpdateCAS{
-			vchannel: {
-				ReadTs:               100,
-				ObservedPchannelTerm: 1,
-			},
-		}
-	}
-
-	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-
-	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		map[string]*messagespb.PartialUpdateCAS{},
-		nil,
-	)
-	require.Error(t, err)
-
-	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
-		nil,
-	)
-	require.Error(t, err)
-
-	task, vchannel, groups = newInput()
-	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-}
-
-func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
-	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	mockCache := &metacache.MetaCache{}
-	partitionPatch := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
-
-	pks := []int64{10, 20}
-	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
-	vchannel := partialUpdateCASTestVChannels[0]
-	groups := map[string]*messagespb.PartialUpdateCAS{
-		vchannel: {
-			ReadTs:               100,
-			ObservedPchannelTerm: 1,
-		},
-	}
-
-	msgs, err := repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	meta := partialUpdateCASOf(t, msgs[0])
-	require.True(t, proto.Equal(groups[vchannel], meta))
-
-	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
-	require.Equal(t, uint64(len(pks)), insert.Header().GetPartitions()[0].GetRows())
-	require.Equal(t, []int64{101, 102}, insert.MustBody().GetRowIDs())
-}
-
-func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) {
-	mockCache := &metacache.MetaCache{}
-	partitionPatch := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
-	defer partitionPatch.UnPatch()
-
-	pks := []int64{10, 20}
-	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
-	vchannel := partialUpdateCASTestVChannels[0]
-	groups := map[string]*messagespb.PartialUpdateCAS{
-		vchannel: {
-			ReadTs:               100,
-			ObservedPchannelTerm: 1,
-		},
-	}
-
-	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	unsplit, err := repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, unsplit, 1)
-
-	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(strconv.Itoa(unsplit[0].EstimateSize() - 1))
-	t.Cleanup(func() { paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
-
-	paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("true")
-	proxySplit, err := repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, proxySplit, 2)
-	for _, msg := range proxySplit {
-		require.LessOrEqual(t, msg.EstimateSize(), unsplit[0].EstimateSize()-1)
-		require.True(t, streamingmessage.HasPartialUpdateCAS(msg))
-	}
-
-	paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	snSplit, err := repackInsertDataForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		nil,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, snSplit, 1)
-}
-
-func TestRepackInsertDataByPartitionForStreamingServiceRejectsMisalignedSource(t *testing.T) {
-	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-	// A source column shorter than NumRows is a proxy-internal contract
-	// violation and must fail before materialization.
-	task.upsertMsg.InsertMsg.FieldsData = []*schemapb.FieldData{
-		{
-			Type: schemapb.DataType_VarChar,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{},
-					},
-				},
-			},
-		},
-	}
-
-	_, err := repackInsertDataByPartitionForStreamingService(
-		context.Background(),
-		200,
-		"_default",
-		[]int{0},
-		partialUpdateCASTestVChannels[0],
-		task.upsertMsg.InsertMsg,
-		nil,
-		1,
-		nil,
-		nil,
-	)
-	require.ErrorIs(t, err, merr.ErrDataIntegrity)
-}
-
-func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testing.T) {
-	mockCache := NewMockCache(t)
-	mockCache.EXPECT().
-		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"_default_0": 200}, nil).
-		Maybe()
-	mockCache.EXPECT().
-		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
-		Return(int64(200), nil).
-		Maybe()
-
-	newInput := func() (*UpsertTask, string, map[string]*messagespb.PartialUpdateCAS) {
-		task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
-		task.partitionKeys = partialUpdateCASPKFieldData([]int64{10})
-		vchannel := partialUpdateCASTestVChannels[0]
-		return task, vchannel, map[string]*messagespb.PartialUpdateCAS{
-			vchannel: {
-				ReadTs:               100,
-				ObservedPchannelTerm: 1,
-			},
-		}
-	}
-
-	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-
-	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		map[string]*messagespb.PartialUpdateCAS{},
-		nil,
-	)
-	require.Error(t, err)
-
-	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
-		nil,
-	)
-	require.Error(t, err)
-
-	task, vchannel, groups = newInput()
-	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		groups,
-		nil,
-	)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-}
-
-func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
-	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	mockCache := NewMockCache(t)
-	mockCache.EXPECT().
-		GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"_default_0": 200}, nil).
-		Maybe()
-	mockCache.EXPECT().
-		GetPartitionID(mock.Anything, mock.Anything, mock.Anything, "_default_0").
-		Return(int64(200), nil).
-		Maybe()
-
-	pks := []int64{10, 20}
-	task := partialUpdateCASRealPackTestTask(t, pks, pks, nil)
-	task.partitionKeys = partialUpdateCASPKFieldData(pks)
-	vchannel := partialUpdateCASTestVChannels[0]
-	groups := map[string]*messagespb.PartialUpdateCAS{
-		vchannel: {
-			ReadTs:               100,
-			ObservedPchannelTerm: 1,
-		},
-	}
-
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
-		context.Background(),
-		mockCache,
-		[]string{vchannel},
-		task.upsertMsg.InsertMsg,
-		task.result,
-		task.partitionKeys,
-		nil,
-		task.schema.CollectionSchema,
-		1,
-		groups,
-		nil,
-	)
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	meta := partialUpdateCASOf(t, msgs[0])
-	require.True(t, proto.Equal(groups[vchannel], meta))
-
-	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
-	require.Equal(t, uint64(len(pks)), insert.Header().GetPartitions()[0].GetRows())
-	require.Equal(t, []int64{101, 102}, insert.MustBody().GetRowIDs())
-}
-
 func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 	for _, partitionKey := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
-			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
-				Build()
-			defer primaryPatch.UnPatch()
-			partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
-				Build()
-			defer partitionPatch.UnPatch()
+			packPatch := mockey.Mock(repackInsertMessages).Return([]streamingmessage.MutableMessage{}, nil).Build()
+			defer packPatch.UnPatch()
 
 			fakeWAL := newPartialUpdateCASTestWAL(t, 1)
 			oldWAL := streaming.WAL()
@@ -1526,20 +1117,16 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	task.partitionKeys = partialUpdateCASPKFieldData([]int64{20, 10})
 	collectionPatch := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
-	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).To(
-		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg,
-			result *milvuspb.MutationResult, _ *schemapb.FieldData, _ *streamingmessage.CipherConfig,
-			_ *schemapb.CollectionSchema, _ int32, _ map[string]*messagespb.PartialUpdateCAS,
-			_ *insertIdempotencyDecoration,
-		) ([]streamingmessage.MutableMessage, error) {
-			require.Same(t, task.result, result)
-			require.Equal(t, []int64{20, 10}, result.GetIDs().GetIntId().GetData())
+	partitionPatch := mockey.Mock(repackUpsertMessages).To(
+		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, _ *schemapb.CollectionSchema, _ int32, _ *streamingmessage.CipherConfig, _ map[string]*messagespb.PartialUpdateCAS, _ streamingmessage.IdempotencyKey, _ *schemapb.IDs, _ int64) ([]streamingmessage.MutableMessage, error) {
+			require.Same(t, task.result.IDs, ids)
+			require.Same(t, task.partitionKeys, partitionKeys)
+			require.Equal(t, []int64{20, 10}, ids.GetIntId().Data)
 			return nil, nil
-		},
-	).Build()
+		}).Build()
 	defer partitionPatch.UnPatch()
 
-	msgs, err := task.packInsertMessage(context.Background(), nil)
+	msgs, err := task.packUpsertMessages(context.Background(), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 }
@@ -1554,49 +1141,24 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 	task.upsertMsg.InsertMsg.CollectionID = task.collectionID + 1
 
 	var routingIDs *schemapb.IDs
-	repackPatch := mockey.Mock(repackInsertDataForStreamingService).To(
-		func(
-			_ context.Context,
-			_ Cache,
-			_ []string,
-			insertMsg *msgstream.InsertMsg,
-			result *milvuspb.MutationResult,
-			_ *streamingmessage.CipherConfig,
-			_ int32,
-			_ map[string]*messagespb.PartialUpdateCAS,
-			_ *insertIdempotencyDecoration,
-		) ([]streamingmessage.MutableMessage, error) {
+	repackPatch := mockey.Mock(repackUpsertMessages).To(
+		func(_ context.Context, _ Cache, _ []string, insertMsg *msgstream.InsertMsg, ids *schemapb.IDs, _ *schemapb.FieldData, _ *schemapb.CollectionSchema, _ int32, _ *streamingmessage.CipherConfig, _ map[string]*messagespb.PartialUpdateCAS, _ streamingmessage.IdempotencyKey, _ *schemapb.IDs, _ int64) ([]streamingmessage.MutableMessage, error) {
 			require.Equal(t, task.collectionID, insertMsg.GetCollectionID())
-			routingIDs = result.GetIDs()
+			routingIDs = ids
 			primaryData, err := typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), task.schema.GetFields()[0])
 			require.NoError(t, err)
 			payloadIDs, err := parsePrimaryFieldData2IDs(primaryData)
 			require.NoError(t, err)
 			require.True(t, proto.Equal(payloadIDs, routingIDs))
 			return nil, nil
-		},
-	).Build()
+		}).Build()
 	defer repackPatch.UnPatch()
 
-	msgs, err := task.packInsertMessage(context.Background(), nil)
+	msgs, err := task.packUpsertMessages(context.Background(), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 	require.Equal(t, []int64{10, 1001}, routingIDs.GetIntId().GetData())
 	require.True(t, proto.Equal(routingIDs, task.result.GetIDs()))
-}
-
-func TestPackDeleteMessageSkipsEmptyPrimaryKeys(t *testing.T) {
-	task := &UpsertTask{
-		upsertMsg: &msgstream.UpsertMsg{
-			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{
-				PrimaryKeys: &schemapb.IDs{},
-			}},
-		},
-	}
-
-	msgs, err := task.packDeleteMessage(context.Background(), nil)
-	require.NoError(t, err)
-	require.Empty(t, msgs)
 }
 
 // The message cipher is registered once per process. Re-exec this test so the
@@ -1616,8 +1178,6 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 	}
 
 	paramtable.Init()
-	oldSplit := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplit) })
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
@@ -1683,7 +1243,7 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 						Base: &commonpb.MsgBase{}, DbName: "db", CollectionName: "upsert_cipher", PartitionName: "_default",
 						NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{12345, 12345}, FieldsData: []*schemapb.FieldData{field}, Version: msgpb.InsertDataVersion_ColumnBased,
 					}},
-					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{DbName: "db", CollectionName: "upsert_cipher", CollectionID: 10, PartitionID: 20, PartitionName: "_default"}},
+					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{DbName: "db", CollectionName: "upsert_cipher", CollectionID: 10, PartitionID: 20, PartitionName: "_default", PrimaryKeys: ids}},
 				},
 			}
 			task.SetTs(12345)
@@ -1709,19 +1269,15 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 			if tc.failGet || tc.failEncrypt {
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 				wal.AssertNotCalled(t, "AppendMessages", mock.Anything, mock.Anything, mock.Anything)
-				require.Len(t, fixture.encryptorContexts, 2, "insert must succeed before the delete failure")
+				require.Len(t, fixture.encryptorContexts, 1, "compound encryption fails before any append")
 				return
 			}
 			require.NoError(t, err)
-			require.Len(t, persisted, 2)
+			require.Len(t, persisted, 1)
 			encrypted := tc.clusterEnabled && tc.collectionEZ
 			for _, wire := range persisted {
 				restored := streamingmessage.NewMutableMessageBeforeAppend(wire.Payload, wire.Properties)
 				if encrypted {
-					if restored.MessageType() == streamingmessage.MessageTypeDelete {
-						plain := &msgpb.DeleteRequest{}
-						require.False(t, proto.Unmarshal(wire.Payload, plain) == nil && proto.Equal(ids, plain.PrimaryKeys), "WAL raw delete payload exposes primary keys without decryption")
-					}
 					require.NotContains(t, string(wire.Payload), "upsert_cipher")
 					header := &messagespb.CipherHeader{}
 					require.NoError(t, streamingmessage.DecodeProto(wire.Properties["_ch"], header))
@@ -1731,31 +1287,21 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 				} else {
 					require.NotContains(t, wire.Properties, "_ch")
 				}
-				switch restored.MessageType() {
-				case streamingmessage.MessageTypeInsert:
-					body, err := streamingmessage.MustAsMutableInsertMessageV1(restored).Body(context.Background())
-					require.NoError(t, err)
-					require.True(t, proto.Equal(field, body.FieldsData[0]))
-				case streamingmessage.MessageTypeDelete:
-					body, err := streamingmessage.MustAsMutableDeleteMessageV1(restored).Body(context.Background())
-					require.NoError(t, err)
-					require.True(t, proto.Equal(ids, body.PrimaryKeys))
-					require.Equal(t, []uint64{12345, 12345}, body.Timestamps)
-					require.Equal(t, int64(10), body.CollectionID)
-					require.Equal(t, int64(2), body.NumRows)
-					plain, err := proto.Marshal(body)
-					require.NoError(t, err)
-					if encrypted {
-						require.NotEqual(t, plain, wire.Payload)
-					} else {
-						require.Equal(t, plain, wire.Payload)
-					}
-				default:
-					t.Fatalf("unexpected message type %v", restored.MessageType())
+				require.Equal(t, streamingmessage.MessageTypeUpsert, restored.MessageType())
+				body, err := streamingmessage.MustAsMutableUpsertMessageV2(restored).Body(context.Background())
+				require.NoError(t, err)
+				require.True(t, proto.Equal(ids, body.Rows.PrimaryKeys))
+				require.Len(t, body.DeleteEffects, 1)
+				require.True(t, proto.Equal(ids, body.DeleteEffects[0].GetPrimaryKeys()))
+				require.Equal(t, int64(20), body.DeleteEffects[0].GetPartitionId())
+				require.Empty(t, body.Rows.Columns, "PK is stored independently")
+				if encrypted {
+					plain := &streamingmessage.UpsertMessageBody{}
+					require.Error(t, proto.Unmarshal(wire.Payload, plain), "encrypted WAL cannot expose either effect")
 				}
 			}
 			if encrypted {
-				require.Equal(t, []streamingmessage.CipherConfig{{EzID: 7, CollectionID: 10}, {EzID: 7, CollectionID: 10}}, fixture.encryptorContexts)
+				require.Equal(t, []streamingmessage.CipherConfig{{EzID: 7, CollectionID: 10}}, fixture.encryptorContexts)
 			} else {
 				require.Empty(t, fixture.encryptorContexts)
 			}
@@ -1768,13 +1314,14 @@ type upsertMessageTestCipher struct {
 	aead              cipher.AEAD
 	encryptorContexts []streamingmessage.CipherConfig
 	encryptCalls      int
+	encryptBytes      int
 	failGet           bool
 	failEncrypt       bool
 }
 
 func (c *upsertMessageTestCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, []byte, error) {
 	c.encryptorContexts = append(c.encryptorContexts, streamingmessage.CipherConfig{EzID: ezID, CollectionID: collectionID})
-	if c.failGet && len(c.encryptorContexts) == 2 {
+	if c.failGet && len(c.encryptorContexts) == 1 {
 		return nil, nil, merr.ErrServiceInternal
 	}
 	return c, []byte("test-edek"), nil
@@ -1789,7 +1336,8 @@ func (c *upsertMessageTestCipher) GetDecryptor(ezID, collectionID int64, safeKey
 
 func (c *upsertMessageTestCipher) Encrypt(plain []byte) ([]byte, error) {
 	c.encryptCalls++
-	if c.failEncrypt && c.encryptCalls == 2 {
+	c.encryptBytes += len(plain)
+	if c.failEncrypt && c.encryptCalls == 1 {
 		return nil, merr.ErrServiceInternal
 	}
 	nonce := make([]byte, c.aead.NonceSize())
@@ -1860,29 +1408,35 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 	require.Equal(t, 1, reads)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Zero(t, fakeWAL.resolveCalls, "Full Upsert must not prepare CAS terms")
-	var insertMsgs, deleteMsgs []streamingmessage.MutableMessage
+	insertChannels := make(map[int64]string)
+	deleteChannels := make(map[int64]string)
 	for _, msg := range fakeWAL.appended {
-		proof := partialUpdateCASOf(t, msg)
-		require.Nil(t, proof)
-		if msg.MessageType() == streamingmessage.MessageTypeInsert {
-			insertMsgs = append(insertMsgs, msg)
-		} else {
-			require.Equal(t, streamingmessage.MessageTypeDelete, msg.MessageType())
-			deleteMsgs = append(deleteMsgs, msg)
+		require.Nil(t, partialUpdateCASOf(t, msg))
+		switch msg.MessageType() {
+		case streamingmessage.MessageTypeUpsert:
+			body := streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody()
+			for _, id := range body.Rows.PrimaryKeys.GetIntId().Data {
+				insertChannels[id] = msg.VChannel()
+			}
+			for _, effect := range body.DeleteEffects {
+				for _, id := range effect.GetPrimaryKeys().GetIntId().Data {
+					deleteChannels[id] = msg.VChannel()
+				}
+			}
+		case streamingmessage.MessageTypeInsert:
+			body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+			pk, err := typeutil.GetPrimaryFieldData(body.FieldsData, task.schema.Fields[0])
+			require.NoError(t, err)
+			for _, id := range pk.GetScalars().GetLongData().Data {
+				insertChannels[id] = msg.VChannel()
+			}
+		case streamingmessage.MessageTypeDelete:
+			for _, id := range streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody().PrimaryKeys.GetIntId().Data {
+				deleteChannels[id] = msg.VChannel()
+			}
 		}
 	}
 
-	insertChannels := make(map[int64]string)
-	for _, msg := range insertMsgs {
-		body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-		primaryData, err := typeutil.GetPrimaryFieldData(body.GetFieldsData(), task.schema.GetFields()[0])
-		require.NoError(t, err)
-		ids, err := parsePrimaryFieldData2IDs(primaryData)
-		require.NoError(t, err)
-		for _, id := range ids.GetIntId().GetData() {
-			insertChannels[id] = msg.VChannel()
-		}
-	}
 	require.Contains(t, insertChannels, existingPK)
 	require.Contains(t, insertChannels, generatedPK)
 	require.Equal(t, []int64{existingPK, generatedPK}, task.result.GetIDs().GetIntId().GetData())
@@ -1893,13 +1447,6 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 		}
 	}
 
-	deleteChannels := make(map[int64]string)
-	for _, msg := range deleteMsgs {
-		body := streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody()
-		for _, id := range body.GetPrimaryKeys().GetIntId().GetData() {
-			deleteChannels[id] = msg.VChannel()
-		}
-	}
 	require.Equal(t, map[int64]string{existingPK: insertChannels[existingPK]}, deleteChannels)
 	require.NotContains(t, deleteChannels, generatedPK)
 }
@@ -1915,16 +1462,14 @@ func TestAppendUpsertAttemptMapsSchemaVersionMismatch(t *testing.T) {
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
-	insertPatch := mockey.Mock((*UpsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	insertPatch := mockey.Mock((*UpsertTask).packUpsertMessages).Return(insertMsgs, nil).Build()
 	defer insertPatch.UnPatch()
-	deletePatch := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
-	defer deletePatch.UnPatch()
 
 	err := task.appendUpsertAttempt(context.Background(), nil)
 	require.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 }
 
-func TestAttachPartialUpdateCASRejectsMissingMarker(t *testing.T) {
+func TestValidatePartialUpdateCASCoverageRejectsMissingMarker(t *testing.T) {
 	task, insertMsgs, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	require.NotEmpty(t, insertMsgs)
 	task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{
@@ -1933,7 +1478,7 @@ func TestAttachPartialUpdateCASRejectsMissingMarker(t *testing.T) {
 			ObservedPchannelTerm: 1,
 		},
 	}
-	err := task.attachPartialUpdateCAS(insertMsgs[:1])
+	err := task.validatePartialUpdateCASCoverage(insertMsgs[:1])
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Contains(t, err.Error(), "missing CAS metadata")
 }
@@ -1975,7 +1520,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 	preparePartialUpdateCASTestGroups(t, task)
-	insertMsgs, deleteMsgs := buildPartialUpdateCASTestMessages(
+	insertMsgs, _ := buildPartialUpdateCASTestMessages(
 		t,
 		task.collectionID,
 		partialUpdateCASTestVChannels,
@@ -1984,9 +1529,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*UpsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
-	defer m.UnPatch()
-	m = mockey.Mock((*UpsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m := mockey.Mock((*UpsertTask).packUpsertMessages).Return(insertMsgs, nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -1994,7 +1537,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 	expected := expectedPartialUpdateCASGroups(t, partialUpdateCASIDs([]int64{10, 20, 30}), partialUpdateCASTestVChannels)
 	require.Equal(t, len(expected), fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
-	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
+	require.Len(t, fakeWAL.appended, len(insertMsgs))
 	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, 1000, 9)
 }
 
@@ -2018,14 +1561,25 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 	expected := expectedPartialUpdateCASGroups(t, partialUpdateCASIDs([]int64{10, 20, 30}), partialUpdateCASTestVChannels[:1])
 	require.Equal(t, 1, fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
-	require.Len(t, fakeWAL.appended, 2)
+	{
+		require.Len(t, fakeWAL.appended, 1)
+		require.Equal(t, streamingmessage.MessageTypeUpsert, fakeWAL.appended[0].MessageType())
+	}
+
 	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, 1000, 9)
 	require.Equal(t, []int64{20, 10, 30}, task.result.GetIDs().GetIntId().GetData())
-	insert := streamingmessage.MustAsMutableInsertMessageV1(fakeWAL.appended[0])
-	primaryData, err := typeutil.GetPrimaryFieldData(insert.MustBody().GetFieldsData(), task.schema.GetFields()[0])
-	require.NoError(t, err)
-	payloadIDs, err := parsePrimaryFieldData2IDs(primaryData)
-	require.NoError(t, err)
+	var payloadIDs *schemapb.IDs
+	switch fakeWAL.appended[0].MessageType() {
+	case streamingmessage.MessageTypeInsert:
+		body := streamingmessage.MustAsMutableInsertMessageV1(fakeWAL.appended[0]).MustBody()
+		pk, err := typeutil.GetPrimaryFieldData(body.FieldsData, task.schema.Fields[0])
+		require.NoError(t, err)
+		payloadIDs, err = parsePrimaryFieldData2IDs(pk)
+		require.NoError(t, err)
+	case streamingmessage.MessageTypeUpsert:
+		payloadIDs = streamingmessage.MustAsMutableUpsertMessageV2(fakeWAL.appended[0]).MustBody().Rows.PrimaryKeys
+	}
+
 	require.True(t, proto.Equal(payloadIDs, task.result.GetIDs()))
 }
 
@@ -2059,7 +1613,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	preparePartialUpdateCASTestGroups(t, task)
 	firstAttemptReadTS := uint64(1000)
 
-	m := mockey.Mock((*UpsertTask).packInsertMessage).To(
+	m := mockey.Mock((*UpsertTask).packUpsertMessages).To(
 		func(task *UpsertTask, ctx context.Context, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, error) {
 			insertMsgs, _ := buildPartialUpdateCASTestMessages(
 				t,
@@ -2070,20 +1624,6 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 				task.partialUpdateCASGroups,
 			)
 			return insertMsgs, nil
-		},
-	).Build()
-	defer m.UnPatch()
-	m = mockey.Mock((*UpsertTask).packDeleteMessage).To(
-		func(task *UpsertTask, ctx context.Context, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, error) {
-			_, deleteMsgs := buildPartialUpdateCASTestMessages(
-				t,
-				task.collectionID,
-				partialUpdateCASTestVChannels,
-				[]int64{20, 10, 30},
-				[]int64{20},
-				nil,
-			)
-			return deleteMsgs, nil
 		},
 	).Build()
 	defer m.UnPatch()
@@ -2410,7 +1950,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 	preparePartialUpdateCASTestGroups(t, task)
-	insertMsgs, deleteMsgs := buildPartialUpdateCASStringTestMessages(
+	insertMsgs, _ := buildPartialUpdateCASStringTestMessages(
 		t,
 		task.collectionID,
 		partialUpdateCASTestVChannels,
@@ -2419,9 +1959,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*UpsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
-	defer m.UnPatch()
-	m = mockey.Mock((*UpsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m := mockey.Mock((*UpsertTask).packUpsertMessages).Return(insertMsgs, nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -2429,7 +1967,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 	expected := expectedPartialUpdateCASGroups(t, partialUpdateCASStringIDs([]string{"pk10", "pk20", "pk30"}), partialUpdateCASTestVChannels)
 	require.Equal(t, len(expected), fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
-	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
+	require.Len(t, fakeWAL.appended, len(insertMsgs))
 	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, 1000, 9)
 }
 
@@ -2455,22 +1993,20 @@ func TestPartialUpdateAutoIDPreparesAllDestinationChannels(t *testing.T) {
 }
 
 func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
-	task, insertMsgs, deleteMsgs := partialUpdateCASTestTask(t, false, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
+	task, insertMsgs, _ := partialUpdateCASTestTask(t, false, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 
-	m := mockey.Mock((*UpsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
-	defer m.UnPatch()
-	m = mockey.Mock((*UpsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m := mockey.Mock((*UpsertTask).packUpsertMessages).Return(insertMsgs, nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 0, fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
-	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
+	require.Len(t, fakeWAL.appended, len(insertMsgs))
 	for _, msg := range fakeWAL.appended {
 		meta := partialUpdateCASOf(t, msg)
 		require.Nil(t, meta)
@@ -2505,10 +2041,10 @@ func TestPreparePartialUpdateCASGroupsRejectsInvalidTerm(t *testing.T) {
 	require.Empty(t, task.partialUpdateCASGroups)
 }
 
-func TestAttachPartialUpdateCASRequiresMetadataSnapshot(t *testing.T) {
-	task, insertMsgs, deleteMsgs := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
+func TestValidatePartialUpdateCASCoverageRequiresMetadataSnapshot(t *testing.T) {
+	task, insertMsgs, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 
-	err := task.attachPartialUpdateCAS(append(insertMsgs, deleteMsgs...))
+	err := task.validatePartialUpdateCASCoverage(insertMsgs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "metadata snapshot is empty")
 }
@@ -2527,14 +2063,14 @@ func TestPreparePartialUpdateCASGroupsSetsEveryVChannelTerm(t *testing.T) {
 	}
 }
 
-func TestAttachPartialUpdateCASValidatesPreparedGroups(t *testing.T) {
+func TestValidatePartialUpdateCASCoverageValidatesPreparedGroups(t *testing.T) {
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 	preparePartialUpdateCASTestGroups(t, task)
-	insertMsgs, deleteMsgs := buildPartialUpdateCASTestMessages(
+	insertMsgs, _ := buildPartialUpdateCASTestMessages(
 		t,
 		task.collectionID,
 		partialUpdateCASTestVChannels,
@@ -2546,11 +2082,11 @@ func TestAttachPartialUpdateCASValidatesPreparedGroups(t *testing.T) {
 	// Validation uses the attempt-scoped channel snapshot and does not rebuild
 	// metadata from the request payload after message encryption.
 	task.req.FieldsData = nil
-	err := task.attachPartialUpdateCAS(append(insertMsgs, deleteMsgs...))
+	err := task.validatePartialUpdateCASCoverage(insertMsgs)
 	require.NoError(t, err)
 }
 
-func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
+func TestValidatePartialUpdateCASCoverageRejectsVChannelMismatch(t *testing.T) {
 	newMeta := func() *messagespb.PartialUpdateCAS {
 		return &messagespb.PartialUpdateCAS{
 			ReadTs:               100,
@@ -2577,7 +2113,7 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 			messageGroups,
 		)
 
-		err := task.attachPartialUpdateCAS(insertMsgs)
+		err := task.validatePartialUpdateCASCoverage(insertMsgs)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Contains(t, err.Error(), "no CAS metadata")
 	})
@@ -2599,7 +2135,7 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 			task.partialUpdateCASGroups,
 		)
 
-		err := task.attachPartialUpdateCAS(insertMsgs)
+		err := task.validatePartialUpdateCASCoverage(insertMsgs)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Contains(t, err.Error(), "no insert message")
 	})
@@ -2627,7 +2163,7 @@ func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	require.Equal(t, len(smallEncoded), len(largeEncoded))
 }
 
-func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T) {
+func TestValidatePartialUpdateCASCoverageAcceptsEveryBuilderMarkedInsertChunk(t *testing.T) {
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -2639,7 +2175,7 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 	first, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels[:1], []int64{10}, nil, task.partialUpdateCASGroups)
 	second, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels[:1], []int64{20}, nil, task.partialUpdateCASGroups)
 	msgs := []streamingmessage.MutableMessage{first[0], second[0]}
-	require.NoError(t, task.attachPartialUpdateCAS(msgs))
+	require.NoError(t, task.validatePartialUpdateCASCoverage(msgs))
 
 	for _, msg := range msgs {
 		meta := partialUpdateCASOf(t, msg)
@@ -4366,19 +3902,31 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	fakeWAL.appendHook = func(ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
 		responses := streamingtypes.NewAppendResponseN(len(msgs))
 		for index, msg := range msgs {
+			{
+				require.Equal(t, streamingmessage.MessageTypeUpsert, msg.MessageType())
+			}
+
 			if fakeWAL.appendCalls == 1 && msg.VChannel() != newChannel {
 				responses.FillResponseAtIdx(streaming.AppendResponse{Error: streamingstatus.NewPartialUpdateRetryable("conflict on existing row")}, index)
 				continue
 			}
-			if msg.MessageType() == streamingmessage.MessageTypeInsert {
+			var pks []int64
+			var values []int32
+			switch msg.MessageType() {
+			case streamingmessage.MessageTypeUpsert:
+				body := streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody()
+				pks = body.Rows.PrimaryKeys.GetIntId().Data
+				values = body.Rows.Columns[0].GetScalars().GetIntData().Data
+			case streamingmessage.MessageTypeInsert:
 				body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-				pks := body.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-				values := body.GetFieldsData()[1].GetScalars().GetIntData().GetData()
-				for row, pk := range pks {
-					require.NotEqualValues(t, 2, pk, "missing supplied PK must never reach WAL")
-					stored[pk] = values[row]
-				}
+				pks = body.FieldsData[0].GetScalars().GetLongData().Data
+				values = body.FieldsData[1].GetScalars().GetIntData().Data
 			}
+			for row, pk := range pks {
+				require.NotEqualValues(t, 2, pk, "missing supplied PK must never reach WAL")
+				stored[pk] = values[row]
+			}
+
 			responses.FillResponseAtIdx(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{TimeTick: 2000}}, index)
 		}
 		return responses
@@ -4397,7 +3945,10 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 2, fakeWAL.appendCalls)
 	require.Equal(t, 2, reads)
-	require.Equal(t, 5, allocations) // one PK range, two RowID ranges, two Delete message ID ranges
+	expectedAllocations := 3 // One PK range and two RowID ranges.
+
+	// Legacy delete message IDs, one per attempt.
+	require.Equal(t, expectedAllocations, allocations)
 	require.Equal(t, map[int64]int32{1: 200, newID: 100}, stored)
 	// The successful first-channel insert becomes a delete+insert at the same
 	// PK on retry, so it cannot accumulate a second undeleted physical row.
@@ -4568,20 +4119,24 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 			require.Contains(t, task.partialUpdateCASGroups, destination)
 			require.NoError(t, task.insertPreExecute(ctx))
 			require.NoError(t, task.deletePreExecute(ctx))
+			if scenario.namespace {
+				require.ErrorContains(t, task.Execute(ctx), "namespace")
+				require.Zero(t, fakeWAL.appendCalls)
+				return
+			}
 			require.NoError(t, task.Execute(ctx))
 			require.Equal(t, 1, queryCalls)
 			require.Equal(t, 1, fakeWAL.appendCalls)
 			require.Len(t, fakeWAL.appended, 1, "a missing PK produces only an insert, with no source-channel delete")
 			msg := fakeWAL.appended[0]
 			require.Equal(t, destination, msg.VChannel())
-			require.Equal(t, streamingmessage.MessageTypeInsert, msg.MessageType())
+			require.Equal(t, streamingmessage.MessageTypeUpsert, msg.MessageType())
 			proof := requireFirstPartialUpdateCAS(t, fakeWAL.appended)
 			require.Equal(t, channelReadTs[destination], proof.GetReadTs())
 			require.Equal(t, terms[destination], proof.GetObservedPchannelTerm())
-			body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
-			pk, err := typeutil.GetPrimaryFieldData(body.GetFieldsData(), task.schema.Fields[0])
-			require.NoError(t, err)
-			require.Equal(t, []int64{newID}, pk.GetScalars().GetLongData().GetData())
+			body := streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody()
+			require.Equal(t, []int64{newID}, body.Rows.PrimaryKeys.GetIntId().Data)
+			require.Empty(t, body.DeleteEffects)
 			require.NoError(t, task.PostExecute(ctx))
 			require.Equal(t, []int64{newID}, task.result.IDs.GetIntId().GetData())
 		})
@@ -7856,6 +7411,93 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 				require.Zero(t, queryCalls)
 			}
 			require.Zero(t, fakeWAL.appendCalls)
+		})
+	}
+}
+
+func TestUpsertPackingPreservesCASAndExplicitEffects(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprint(partial), func(t *testing.T) {
+			task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 20}, []int64{10})
+			task.req.PartialUpdate = partial
+			if partial {
+				task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{partialUpdateCASTestVChannels[0]: {ReadTs: 1, ObservedPchannelTerm: 1}}
+			}
+			partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+			defer partition.UnPatch()
+			msgs, err := task.packUpsertMessages(t.Context(), nil)
+			require.NoError(t, err)
+			require.Len(t, msgs, 1)
+			upsert := streamingmessage.MustAsMutableUpsertMessageV2(msgs[0])
+			body := upsert.MustBody()
+			require.Len(t, body.Rows.GetRowIds().Data, 2)
+			require.Len(t, body.DeleteEffects, 1)
+			require.Equal(t, []int64{10}, body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data)
+			require.Equal(t, partial, streamingmessage.HasPartialUpdateCAS(msgs[0]))
+			if partial {
+				require.NoError(t, task.validatePartialUpdateCASCoverage(msgs))
+			}
+		})
+	}
+}
+
+func TestUpsertNamespaceRejectedBeforePacking(t *testing.T) {
+	for _, kind := range []string{"request", "collection"} {
+		t.Run(kind, func(t *testing.T) {
+			task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+			namespace := "tenant"
+			if kind == "request" {
+				task.req.Namespace = &namespace
+			} else {
+				task.schema.EnableNamespace = true
+			}
+			_, err := task.packUpsertMessages(t.Context(), nil)
+			require.ErrorContains(t, err, "namespace")
+		})
+	}
+}
+
+func TestDeletePreExecuteOwnsPreparedKeys(t *testing.T) {
+	for _, kind := range []string{"nil", "empty", "subset"} {
+		t.Run("true"+"/"+kind, func(t *testing.T) {
+			task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 20}, []int64{10})
+			task.oldIDs = partialUpdateCASIDs([]int64{10, 20})
+			task.partitionKeyMode = true
+			var want []int64
+			switch kind {
+			case "nil":
+				task.upsertMsg.DeleteMsg.PrimaryKeys = nil
+				want = []int64{10, 20}
+			case "empty":
+				task.upsertMsg.DeleteMsg.PrimaryKeys = partialUpdateCASIDs(nil)
+			case "subset":
+				task.upsertMsg.DeleteMsg.PrimaryKeys = partialUpdateCASIDs([]int64{20})
+				want = []int64{20}
+			}
+			require.NoError(t, task.deletePreExecute(t.Context()))
+			prepared := task.upsertMsg.DeleteMsg.GetPrimaryKeys()
+			if kind == "nil" {
+				require.Same(t, task.oldIDs, prepared)
+			}
+			partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+			defer partition.UnPatch()
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1001), nil).Build()
+			defer alloc.UnPatch()
+			msgs, err := task.packUpsertMessages(t.Context(), nil)
+			require.NoError(t, err)
+			var deleted []int64
+			for _, msg := range msgs {
+				switch msg.MessageType() {
+				case streamingmessage.MessageTypeUpsert:
+					for _, effect := range streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody().GetDeleteEffects() {
+						deleted = append(deleted, effect.GetPrimaryKeys().GetIntId().GetData()...)
+					}
+				case streamingmessage.MessageTypeDelete:
+					deleted = append(deleted, streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody().GetPrimaryKeys().GetIntId().GetData()...)
+				}
+			}
+			require.Equal(t, want, deleted)
+			require.Same(t, prepared, task.upsertMsg.DeleteMsg.GetPrimaryKeys())
 		})
 	}
 }

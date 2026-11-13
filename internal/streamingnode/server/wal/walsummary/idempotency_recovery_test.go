@@ -40,7 +40,8 @@ func TestIdempotencyRecoveryReadsOnlySelectedTail(t *testing.T) {
 	observe := func(vc, key string, at time.Time) int {
 		msg := newTestIdempotentInsertMessage(t, vc, tsoutil.ComposeTSByTime(at), key, []int64{1}, []uint32{0})
 		m.ObserveMessage(ctx, msg)
-		annotation, insert := insertSummaryOf(msg)
+		annotation, insert, err := insertSummaryOf(ctx, msg)
+		require.NoError(t, err)
 		return int(idempotencyEncodedSize(&stagedRecord{idempotency: annotation, insert: insert}))
 	}
 	observe("a", "x", now.Add(-2*time.Hour))
@@ -120,7 +121,8 @@ func TestIdempotencyRecoveryMixedSectionBudgetBoundaries(t *testing.T) {
 			observe := func(key string, at time.Time, pks []int64, offsets []uint32) uint64 {
 				msg := newTestIdempotentInsertMessage(t, "mixed", tsoutil.ComposeTSByTime(at), key, pks, offsets)
 				m.ObserveMessage(ctx, msg)
-				annotation, insert := insertSummaryOf(msg)
+				annotation, insert, err := insertSummaryOf(ctx, msg)
+				require.NoError(t, err)
 				return idempotencyEncodedSize(&stagedRecord{idempotency: annotation, insert: insert})
 			}
 			observe("older", now.Add(-30*time.Minute), []int64{1}, []uint32{0})

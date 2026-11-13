@@ -63,6 +63,28 @@ func (bs *TxnInsertResultBuffers) Add(msg message.MutableMessage, result *messag
 		builder = &txnInsertResultBuilder{}
 		builders[key.txnID] = builder
 	}
+	builder.hasMissingResult = builder.hasMissingResult || result == nil
+	var rows uint64
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		var partitions []*message.PartitionSegmentAssignment
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			partitions = message.MustAsMutableInsertMessageV1(msg).Header().GetPartitions()
+		case message.VersionV2:
+			partitions = message.MustAsMutableInsertMessageV2(msg).Header().GetPartitions()
+		default:
+			panic("unexpected Insert message version")
+		}
+		for _, partition := range partitions {
+			rows += partition.GetRows()
+		}
+	case message.MessageTypeUpsert:
+		rows = message.UpsertRowCount(message.MustAsMutableUpsertMessageV2(msg).Header())
+	}
+	if rows > 0 && uint64(len(result.GetRowOffsets())) != rows {
+		builder.hasMissingResult = true
+	}
 	builder.add(result, expiredTimeTick)
 	bs.clearExpiredLocked(key.vchannel, currentTimeTick, hasCurrentTimeTick)
 }

@@ -3152,7 +3152,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
-        "top_input, partition_mode",
+        "top_input, growing_only",
         [
             pytest.param("legacy", False, id="legacy-requery"),
             pytest.param("json", False, id="json-requery"),
@@ -3161,7 +3161,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         ],
     )
     @pytest.mark.parametrize("return_json_root", [False, True])
-    def test_hybrid_search_json_dynamic_chains(self, top_input, partition_mode, return_json_root):
+    def test_hybrid_search_json_dynamic_chains(self, top_input, growing_only, return_json_root):
         """Nested JSON L0 and dynamic L1 feed either legacy fusion or typed L2.
 
         Use the HybridSearch protobuf directly so this server regression also
@@ -3169,9 +3169,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         """
         client = self._client()
         name = cf.gen_unique_str(prefix)
-        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True, enable_namespace=partition_mode)[
-            0
-        ]
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("metadata", DataType.JSON)
         schema.add_field(self.vector_field, DataType.FLOAT_VECTOR, dim=self.dim)
@@ -3192,12 +3190,11 @@ class TestFunctionChain(TestMilvusClientV2Base):
             name,
             schema=schema,
             index_params=index_params,
-            properties={"namespace.mode": "partition"} if partition_mode else {},
         )
-        if partition_mode:
-            # Exercise direct dynamic-field materialization on growing rows.
-            # Namespace-partition flush currently depends on separate compaction support.
-            self.insert(client, name, rows, namespace="_default")
+        if growing_only:
+            # Exercise direct dynamic-field materialization without namespace,
+            # which is not supported for writes in 3.1.
+            self.insert(client, name, rows)
         else:
             self.insert(client, name, rows[:1])
             self.flush(client, name)
@@ -3221,7 +3218,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
             # L1 limits are worker-local. Keep all flushed candidates so
             # segment placement/handoff cannot change expected global recall;
             # the growing-only direct case exercises the smaller L1 budget.
-            .limit(2 if partition_mode else 3)
+            .limit(2 if growing_only else 3)
         )
         self._set_input_data_types(l1, 0, DataType.INT64, DataType.INT64)
         request = milvus_pb2.HybridSearchRequest(
@@ -3241,8 +3238,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
                 for stage in [l0, l1]
             ],
         )
-        if partition_mode:
-            request.namespace = "_default"
         if top_input == "legacy":
             request.rank_params.extend(
                 [

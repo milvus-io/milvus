@@ -4,7 +4,10 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -17,8 +20,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "shard"
@@ -40,6 +45,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
 		message.MessageTypeInsert:             impl.handleInsertMessage,
+		message.MessageTypeUpsert:             impl.handleInsertOrUpsert,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
@@ -81,8 +87,7 @@ func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableM
 	op, ok := impl.ops[msg.MessageType()]
 	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.
-		// control channel message is only used to determine the DDL/DCL order,
-		// perform no effect on the shard manager, so skip it.
+		// Control-channel messages skip shard effects unless they are PChannel-level.
 		return op(ctx, msg, appendOp)
 	}
 	return appendOp(ctx, msg)
@@ -174,9 +179,20 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 
 // handleInsertMessage handles the insert message.
 func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	switch msg.Version() {
+	case message.VersionOld, message.VersionV1:
+		return impl.handleLegacyInsert(ctx, msg, appendOp)
+	case message.VersionV2:
+		return impl.handleInsertOrUpsert(ctx, msg, appendOp)
+	default:
+		panic("unexpected Insert message version")
+	}
+}
+
+func (impl *shardInterceptor) handleLegacyInsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
 	// Assign segment for insert message.
-	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
+	// Legacy Insert messages carry one partition.
 	header := insertMsg.Header()
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
@@ -293,7 +309,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
-	impl.shardManager.ApplyDelete(deleteMessage)
+	impl.shardManager.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetRows(), uint64(msg.EstimateSize()))
 	return appendOp(ctx, msg)
 }
 
@@ -451,4 +467,213 @@ func (impl *shardInterceptor) Close() {
 			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
+}
+
+// mutableInsertOrUpsert exposes the shared row content to the function manager.
+type mutableInsertOrUpsert struct {
+	header           *message.InsertOrUpsertHeader
+	primary          *schemapb.FieldSchema
+	readRows         func(context.Context) (*message.InsertRows, error)
+	overwriteColumns func([]*schemapb.FieldData)
+	overwriteHeader  func()
+}
+
+func (u mutableInsertOrUpsert) MustBody() *msgpb.InsertRequest {
+	rows, err := u.readRows(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	fields := append([]*schemapb.FieldData(nil), rows.GetColumns()...)
+	fields = append(fields, message.UpsertPrimaryKeyColumn(u.primary, rows.GetPrimaryKeys()))
+	return &msgpb.InsertRequest{CollectionID: u.header.GetCollectionId(), NumRows: uint64(len(rows.GetRowIds().GetData())), RowIDs: rows.GetRowIds().GetData(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+}
+
+func (u mutableInsertOrUpsert) OverwriteBody(insert *msgpb.InsertRequest) {
+	var columns []*schemapb.FieldData
+	for _, field := range insert.GetFieldsData() {
+		if field.GetFieldId() != u.primary.GetFieldID() {
+			columns = append(columns, field)
+		}
+	}
+	u.overwriteColumns(columns)
+}
+
+func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	// Hold one specialized wrapper through validation, materialization and assignment.
+	var mutable mutableInsertOrUpsert
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		typed, err := message.AsMutableInsertMessageV2(msg)
+		if err != nil {
+			return nil, status.NewUnrecoverableError("invalid Insert V2 header: %v", err)
+		}
+		h := typed.Header()
+		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion}
+		// Reuse this attempt's body for function reads, writeback and sizing.
+		// The value does not escape into a message cache or survive a redo.
+		var content *message.InsertMessageBody
+		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
+			if content == nil {
+				var err error
+				content, err = typed.Body(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// A reused body must preserve Body(ctx)'s cancellation boundary.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return content.GetRows(), nil
+		}
+		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
+			content.Rows.Columns = columns
+			typed.OverwriteBody(content)
+		}
+		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
+	case message.MessageTypeUpsert:
+		typed, err := message.AsMutableUpsertMessageV2(msg)
+		if err != nil {
+			return nil, status.NewUnrecoverableError("invalid Upsert header: %v", err)
+		}
+		h := typed.Header()
+		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion, DeleteRows: h.DeleteRows}
+		// Reuse this attempt's body for function reads, writeback and sizing.
+		// The value does not escape into a message cache or survive a redo.
+		var content *message.UpsertMessageBody
+		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
+			if content == nil {
+				var err error
+				content, err = typed.Body(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// A reused body must preserve Body(ctx)'s cancellation boundary.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return content.GetRows(), nil
+		}
+		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
+			content.Rows.Columns = columns
+			typed.OverwriteBody(content)
+		}
+		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
+	default:
+		panic("unexpected row-write message type")
+	}
+	header := mutable.header
+	collectionID := header.GetCollectionId()
+
+	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: collectionID, SchemaVersion: header.SchemaVersion})
+	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+		return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d", header.GetSchemaVersion(), version)
+	}
+	if err != nil {
+		return nil, err
+	}
+	schema, err := impl.shardManager.GetWriteSchema(collectionID, msg.VChannel())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := message.ValidateUpsertSchema(schema); err != nil {
+		return nil, status.NewInvalidArgument("%v", err)
+	}
+	primary, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	body, err := message.ReadInsertOrUpsertProjection(ctx, msg)
+	if err != nil {
+		return nil, insertOrUpsertBodyDecodeError(err)
+	}
+	selections, err := message.ValidateInsertOrUpsertWithSelections(header, body, primary)
+	if err != nil {
+		return nil, status.NewUnrecoverableError("invalid row-write body: %v", err)
+	}
+	if (body.GetPartialUpdateCas() != nil) != message.HasPartialUpdateCAS(msg) {
+		return nil, status.NewUnrecoverableError("row-write CAS marker and proof differ")
+	}
+	mutable.primary = primary
+	materialized := false
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
+		materialized, err = function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutable)
+		if err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Keep the legacy execution policy and retain the original cause.
+			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// One partition selects every row: projection already knows canonical column
+	// framing, so validate producer accounting without decoding ordinary values.
+	// Multiple partitions still use exact selected-row sizing.
+	sizes := []uint64(nil)
+	if len(header.GetPartitions()) == 1 && !materialized {
+		size, exact, err := body.SinglePartitionBinarySize(primary)
+		if err != nil {
+			return nil, insertOrUpsertBodyDecodeError(err)
+		}
+		if exact {
+			sizes = []uint64{size}
+		}
+	}
+	if sizes == nil {
+		content, err := mutable.readRows(ctx)
+		if err != nil {
+			return nil, insertOrUpsertBodyDecodeError(err)
+		}
+		// Borrow all columns for exact selected-row sizing. The view encoder does not
+		// copy vectors or materialize partition-sized FieldData objects.
+		primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
+		fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
+		source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds().GetData())), RowIDs: content.GetRowIds().GetData(), Timestamps: make([]uint64, len(content.GetRowIds().GetData())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+		sizes, err = fastpb.UpsertPartitionSizes(source, selections)
+		if err != nil {
+			return nil, err
+		}
+	}
+	session := txn.GetTxnSessionFromContext(ctx)
+	requests := make([]*shards.AssignSegmentRequest, len(header.GetPartitions()))
+	for index, partition := range header.GetPartitions() {
+		partition.BinarySize = sizes[index]
+		requests[index] = &shards.AssignSegmentRequest{CollectionID: collectionID, PartitionID: partition.GetPartitionId(), ModifiedMetrics: stats.ModifiedMetrics{Rows: partition.GetRows(), BinarySize: partition.GetBinarySize()}, TimeTick: msg.TimeTick()}
+		if session != nil {
+			requests[index].TxnSession = session
+		}
+	}
+	assignments, err := impl.shardManager.AssignSegments(requests)
+	if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
+		return nil, redo.ErrRedo
+	}
+	if err != nil {
+		return nil, err
+	}
+	for index, assignment := range assignments {
+		defer assignment.Ack()
+		header.Partitions[index].SegmentAssignment = &message.SegmentAssignment{SegmentId: assignment.SegmentID}
+	}
+	mutable.overwriteHeader()
+	if header.GetDeleteRows() > 0 {
+		impl.shardManager.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects()})))
+	}
+
+	return appendOp(ctx, msg)
+}
+
+func insertOrUpsertBodyDecodeError(err error) error {
+	if errors.Is(err, message.ErrMalformedBody) {
+		return status.NewUnrecoverableError("malformed row-write body: %v", err)
+	}
+	return err
 }

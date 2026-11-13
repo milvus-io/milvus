@@ -30,11 +30,12 @@ func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	wal := &invalidationTestWAL{}
 	patch := mockey.Mock(streaming.WAL).Return(wal).Build()
 	defer patch.UnPatch()
-	patch = mockey.Mock(repackInsertDataForStreamingService).Return([]message.MutableMessage{}, nil).Build()
+	patch = mockey.Mock(repackInsertMessages).Return([]message.MutableMessage{}, nil).Build()
 	defer patch.UnPatch()
 	appends, invalidations := 0, 0
 	patch = mockey.Mock((*invalidationTestWAL).AppendMessagesWithOptions).To(func(_ *invalidationTestWAL, _ context.Context, _ []message.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {
 		appends++
+		// An unknown or partial outcome must not resend the fan-out.
 		return streaming.AppendResponses{Responses: []streaming.AppendResponse{
 			{Error: status.NewOnShutdownError("first shard shutting down")},
 			{}, // This shard committed and must not be replayed.

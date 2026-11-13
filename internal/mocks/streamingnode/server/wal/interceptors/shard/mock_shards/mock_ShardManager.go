@@ -83,52 +83,6 @@ func (_c *MockShardManager_AlterCollection_Call) RunAndReturn(run func(message.M
 	return _c
 }
 
-// ApplyDelete provides a mock function with given fields: msg
-func (_m *MockShardManager) ApplyDelete(msg message.MutableDeleteMessageV1) error {
-	ret := _m.Called(msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ApplyDelete")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(message.MutableDeleteMessageV1) error); ok {
-		r0 = rf(msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_ApplyDelete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyDelete'
-type MockShardManager_ApplyDelete_Call struct {
-	*mock.Call
-}
-
-// ApplyDelete is a helper method to define mock.On call
-//   - msg message.MutableDeleteMessageV1
-func (_e *MockShardManager_Expecter) ApplyDelete(msg interface{}) *MockShardManager_ApplyDelete_Call {
-	return &MockShardManager_ApplyDelete_Call{Call: _e.mock.On("ApplyDelete", msg)}
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Run(run func(msg message.MutableDeleteMessageV1)) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.MutableDeleteMessageV1))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Return(_a0 error) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) RunAndReturn(run func(message.MutableDeleteMessageV1) error) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AssignSegment provides a mock function with given fields: req
 func (_m *MockShardManager) AssignSegment(req *shards.AssignSegmentRequest) (*shards.AssignSegmentResult, error) {
 	ret := _m.Called(req)
@@ -183,6 +137,64 @@ func (_c *MockShardManager_AssignSegment_Call) Return(_a0 *shards.AssignSegmentR
 }
 
 func (_c *MockShardManager_AssignSegment_Call) RunAndReturn(run func(*shards.AssignSegmentRequest) (*shards.AssignSegmentResult, error)) *MockShardManager_AssignSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AssignSegments provides a mock function with given fields: requests
+func (_m *MockShardManager) AssignSegments(requests []*shards.AssignSegmentRequest) ([]*shards.AssignSegmentResult, error) {
+	ret := _m.Called(requests)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AssignSegments")
+	}
+
+	var r0 []*shards.AssignSegmentResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]*shards.AssignSegmentRequest) ([]*shards.AssignSegmentResult, error)); ok {
+		return rf(requests)
+	}
+	if rf, ok := ret.Get(0).(func([]*shards.AssignSegmentRequest) []*shards.AssignSegmentResult); ok {
+		r0 = rf(requests)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*shards.AssignSegmentResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]*shards.AssignSegmentRequest) error); ok {
+		r1 = rf(requests)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_AssignSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AssignSegments'
+type MockShardManager_AssignSegments_Call struct {
+	*mock.Call
+}
+
+// AssignSegments is a helper method to define mock.On call
+//   - requests []*shards.AssignSegmentRequest
+func (_e *MockShardManager_Expecter) AssignSegments(requests interface{}) *MockShardManager_AssignSegments_Call {
+	return &MockShardManager_AssignSegments_Call{Call: _e.mock.On("AssignSegments", requests)}
+}
+
+func (_c *MockShardManager_AssignSegments_Call) Run(run func(requests []*shards.AssignSegmentRequest)) *MockShardManager_AssignSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]*shards.AssignSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_AssignSegments_Call) Return(_a0 []*shards.AssignSegmentResult, _a1 error) *MockShardManager_AssignSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_AssignSegments_Call) RunAndReturn(run func([]*shards.AssignSegmentRequest) ([]*shards.AssignSegmentResult, error)) *MockShardManager_AssignSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -994,6 +1006,65 @@ func (_c *MockShardManager_GetCollectionSchemaSnapshot_Call) RunAndReturn(run fu
 	return _c
 }
 
+// GetWriteSchema provides a mock function with given fields: collectionID, vchannel
+func (_m *MockShardManager) GetWriteSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
+	ret := _m.Called(collectionID, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetWriteSchema")
+	}
+
+	var r0 *schemapb.CollectionSchema
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, string) (*schemapb.CollectionSchema, error)); ok {
+		return rf(collectionID, vchannel)
+	}
+	if rf, ok := ret.Get(0).(func(int64, string) *schemapb.CollectionSchema); ok {
+		r0 = rf(collectionID, vchannel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*schemapb.CollectionSchema)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, string) error); ok {
+		r1 = rf(collectionID, vchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_GetWriteSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWriteSchema'
+type MockShardManager_GetWriteSchema_Call struct {
+	*mock.Call
+}
+
+// GetWriteSchema is a helper method to define mock.On call
+//   - collectionID int64
+//   - vchannel string
+func (_e *MockShardManager_Expecter) GetWriteSchema(collectionID interface{}, vchannel interface{}) *MockShardManager_GetWriteSchema_Call {
+	return &MockShardManager_GetWriteSchema_Call{Call: _e.mock.On("GetWriteSchema", collectionID, vchannel)}
+}
+
+func (_c *MockShardManager_GetWriteSchema_Call) Run(run func(collectionID int64, vchannel string)) *MockShardManager_GetWriteSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_GetWriteSchema_Call) Return(_a0 *schemapb.CollectionSchema, _a1 error) *MockShardManager_GetWriteSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_GetWriteSchema_Call) RunAndReturn(run func(int64, string) (*schemapb.CollectionSchema, error)) *MockShardManager_GetWriteSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Logger provides a mock function with no fields
 func (_m *MockShardManager) Logger() *mlog.Logger {
 	ret := _m.Called()
@@ -1038,6 +1109,42 @@ func (_c *MockShardManager_Logger_Call) Return(_a0 *mlog.Logger) *MockShardManag
 
 func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *mlog.Logger) *MockShardManager_Logger_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RecordDelete provides a mock function with given fields: vchannel, timeTick, rows, binarySize
+func (_m *MockShardManager) RecordDelete(vchannel string, timeTick uint64, rows uint64, binarySize uint64) {
+	_m.Called(vchannel, timeTick, rows, binarySize)
+}
+
+// MockShardManager_RecordDelete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RecordDelete'
+type MockShardManager_RecordDelete_Call struct {
+	*mock.Call
+}
+
+// RecordDelete is a helper method to define mock.On call
+//   - vchannel string
+//   - timeTick uint64
+//   - rows uint64
+//   - binarySize uint64
+func (_e *MockShardManager_Expecter) RecordDelete(vchannel interface{}, timeTick interface{}, rows interface{}, binarySize interface{}) *MockShardManager_RecordDelete_Call {
+	return &MockShardManager_RecordDelete_Call{Call: _e.mock.On("RecordDelete", vchannel, timeTick, rows, binarySize)}
+}
+
+func (_c *MockShardManager_RecordDelete_Call) Run(run func(vchannel string, timeTick uint64, rows uint64, binarySize uint64)) *MockShardManager_RecordDelete_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(uint64), args[2].(uint64), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_RecordDelete_Call) Return() *MockShardManager_RecordDelete_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardManager_RecordDelete_Call) RunAndReturn(run func(string, uint64, uint64, uint64)) *MockShardManager_RecordDelete_Call {
+	_c.Run(run)
 	return _c
 }
 

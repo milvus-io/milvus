@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// globalRowLockManager coordinates row writes across all WALs in this process.
+// globalRowLockManager coordinates Insert/Upserts across all WALs in this process.
 // WAL close and collection drop never reset active tables. Proof stays per WAL.
 var globalRowLockManager = newRowLockManager()
 
@@ -418,7 +418,7 @@ func (i *appendInterceptor) Acquire(ctx context.Context, msg message.MutableMess
 		release, err := i.state.rowLocks.acquire(ctx, msg.VChannel(), pks, localCAS)
 		return ctx, release, err
 	case message.MessageTypeBeginTxn, message.MessageTypeRollbackTxn, message.MessageTypeTimeTick:
-		// These messages carry no row writes.
+		// These messages carry no Insert/Upserts.
 		return ctx, func() {}, nil
 	}
 	// Transaction bodies only stage writes. Their CommitTxn locks the union of
@@ -458,6 +458,8 @@ func (i *appendInterceptor) extractOrdinaryWriteSet(ctx context.Context, msg mes
 			return set, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
 		}
 		set.droppedCollectionID = collectionID
+	} else if msg.MessageType() == message.MessageTypeUpsert {
+		set.pks, err = extractPKsFromInsertOrUpsert(ctx, msg, i.pkDescriptorGetter)
 	} else if msg.MessageType() == message.MessageTypeInsert {
 		set.pks, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
 	}

@@ -74,6 +74,7 @@ enum MessageType {
     UpdateImport                 = 49;
     AddFileResource              = 50;
     RemoveFileResource           = 51;
+    Upsert                       = 52;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -197,50 +198,45 @@ message InsertMessageHeader {
     optional IdempotentInsertResult idempotent_result = 4;
 }
 
-// IdempotentInsertResult is what a duplicate idempotent insert replays back to
-// the client: the primary keys the FIRST attempt produced on this write unit,
-// and where each of them belongs in the client's original request.
-//
-// It has two roles. As a field of InsertMessageHeader it is what the streaming
-// node stores so the answer survives; as the payload of an append result's
-// `extra` it is what the proxy reads back to rebuild MutationResult. It is
-// defined here, next to the header, because the header is what makes it durable.
-//
-// THIS FIELD IS THE ONE EXCEPTION to the "keep the header light" rule above, and
-// the exception is deliberate:
-//
-//   - ids cannot be recovered from the body. For autoID the keys are
-//     server-allocated and a retry allocates different ones, so a duplicate must
-//     answer with the originals. They do sit in the body, but the streaming node
-//     never decodes an insert body on the append path -- segment assignment and
-//     size estimation all read the header -- and decoding would materialize every
-//     column including vectors to extract an 8-byte key per row, on the write hot
-//     path, without even holding the schema needed to locate the primary column.
-//   - row_offsets does not exist in the body at all. The mapping back to the
-//     client's row order is built in the proxy. It could be recomputed on retry
-//     since routing is deterministic, but only if the size-driven message split
-//     boundaries also matched between attempts; a maxMessageSize or schema change
-//     moves them, and a recomputed mapping would then scatter primary keys onto
-//     the wrong rows silently.
-//
-// The cost is real: for a large insert this is the dominant term in the message,
-// and it is stamped whether or not the collection uses autoID. Making the stamp
-// conditional on autoID is tracked as follow-up work.
+// Insert V2 uses the shared nested row representation, without a result copy.
+message InsertMessageHeaderV2 {
+    int64 collection_id = 1;
+    repeated PartitionSegmentAssignment partitions = 2;
+    optional int32 schema_version = 3;
+}
+
+// IdempotentInsertResult returns the original primary keys and request offsets.
+// Historical Insert headers retain this result. Upsert reconstructs it
+// from primary_keys and request_row_mapping without decoding ordinary columns.
+// AppendResult.extra uses the same result type for both message formats.
 message IdempotentInsertResult {
     repeated uint32 row_offsets = 1;
     schema.IDs ids = 2;
 }
 
-// PartitionSegmentAssignment is the segment assignment of a partition.
+// Describes the insert rows assigned to one partition.
 message PartitionSegmentAssignment {
+    // Target partition within the message's collection.
     int64 partition_id                   = 1;
+
+    // Number of logical insert rows assigned to this partition.
+    // For Upsert, this matches the partition_indexes occurrence count.
+    // A single-partition Upsert omits indexes and assigns all rows here.
     uint64 rows                          = 2;
+
+    // Estimated insert data bytes for this partition's rows.
+    // For Upsert, excludes delete effects and the outer message envelope.
+    // Do not repeat the size of the entire multi-partition batch.
     uint64 binary_size                   = 3;
+
+    // Physical placement assigned by the receiving StreamingNode before append.
+    // A CDC secondary replaces source placement with its own local assignment.
     SegmentAssignment segment_assignment = 4;
 }
 
-// SegmentAssignment is the assignment of a segment.
+// Physical insert placement within the receiving cluster.
 message SegmentAssignment {
+    // Local segment that receives the assigned insert rows.
     int64 segment_id = 1;
 }
 
@@ -249,6 +245,118 @@ message DeleteMessageHeader {
     int64 collection_id = 1;
     uint64 rows = 2;
 }
+
+// Describes one logical write for one collection and one VChannel.
+// The outer message properties carry VChannel, TimeTick, transaction context,
+// and the idempotency key. The partition table controls insert placement only.
+message UpsertMessageHeader {
+    // Collection that owns all inserted rows and explicit delete effects.
+    // Must match the collection identity encoded in the message's VChannel.
+    int64 collection_id = 1;
+
+    // Nonempty insert target table with unique, positive partition IDs.
+    // Each entry has a positive row count. Table order defines partition_indexes.
+    // Entry row counts must sum to the number of inserted primary keys.
+    repeated PartitionSegmentAssignment partitions = 2;
+
+    // Exact schema version used to prepare the row batch.
+    // Producers must supply this field, including an explicit version zero.
+    optional int32 schema_version = 3;
+
+    // Total delete-key occurrences after resolving every effect's key source.
+    // Zero means that the message has no delete effects.
+    uint64 delete_rows = 4;
+}
+
+// InsertMessageBody carries only inserted rows. Insert V2 does not express deletes.
+message InsertMessageBody {
+    InsertRows rows = 1;
+}
+
+// Upsert combines inserted rows with explicit effects at one visibility TimeTick.
+// A transaction body uses Commit's TimeTick. Equal-TimeTick rows do not imply
+// last-write-wins. The consumer never infers deletes from the inserted keys.
+message UpsertMessageBody {
+    InsertRows rows = 1;
+    repeated UpsertDeleteEffect delete_effects = 2;
+    PartialUpdateCAS partial_update_cas = 3;
+}
+
+// InsertRows is the shared row representation for Insert V2 and Upsert V2.
+// Separate fields permit PK projection without decoding ordinary column values.
+message InsertRows {
+    // Resolved Int64 or VarChar keys in logical row order. AutoID is resolved
+    // before encoding; columns must not contain another PK column.
+    schema.IDs primary_keys = 1;
+    // Exactly one encoding of internal RowIDs in logical row order.
+    // RowIDs and user primary keys have separate roles. The decoded count must
+    // equal the inserted primary key count; equal RowIDs are not deduplicated.
+    oneof row_ids_encoding {
+        // Explicit values, also used when delta encoding would not be smaller.
+        schema.LongArray row_ids = 2;
+        // Base plus signed differences, without changing logical row order.
+        DeltaEncodedRowIDs delta_row_ids = 5;
+    }
+    // Zero-based indexes into the header partition table. Omit for one partition.
+    // Multiple partitions require one index per row and matching header counts.
+    repeated uint32 partition_indexes = 3 [packed = true];
+    // Ordinary columns and materialized outputs, excluding PK, RowID and Timestamp.
+    // All columns share logical row order and the existing nullable encodings.
+    repeated schema.FieldData columns = 4;
+    // Original request offsets paired with primary_keys. Required for keyed retry
+    // results; no duplicate result copy is stored in the header or body.
+    RequestRowMapping request_row_mapping = 7;
+}
+
+// A nonempty logical RowID sequence. This is an internal encoding only.
+message DeltaEncodedRowIDs {
+    // First logical RowID; zero is a valid value.
+    int64 base = 1;
+    // Each value is the difference from the preceding RowID. Signed ZigZag
+    // encoding supports small negative differences without changing row order.
+    // Empty deltas represent the single value base. Reconstruction must not
+    // overflow int64. Producers fall back to explicit values when needed.
+    repeated sint64 deltas = 2 [packed = true];
+}
+
+message RequestRowMapping {
+    // One original request offset per logical row, never a chunk-local offset.
+    repeated uint32 row_offsets = 1 [packed = true];
+}
+
+// Deletes versions strictly older than the message's final visible TimeTick.
+// A transaction body uses the Commit TimeTick for both inserts and deletes.
+// Newly inserted rows cannot delete themselves. Missing older versions are a no-op.
+message UpsertDeleteEffect {
+    // Producers must select exactly one scope, independent of the insert table.
+    oneof scope {
+        // Every partition of this collection within the message's VChannel.
+        UpsertAllPartitions all_partitions = 1;
+
+        // One positive partition ID, which need not receive inserted rows.
+        // Do not use sentinel values for the all-partitions scope.
+        int64 partition_id = 2;
+    }
+
+    // Exactly one producer-selected key source, independent of delete scope.
+    // Preserve the selected sequence, including order and duplicate occurrences.
+    oneof key_source {
+        // Independent, nonempty keys matching the collection's PK type.
+        // They need not equal or be a subset of inserted keys.
+        schema.IDs primary_keys = 3;
+        // Explicitly references rows.primary_keys in the enclosing Upsert body.
+        // Select only when the intended delete sequence matches it exactly,
+        // including order and duplicate occurrences. Consumers never infer this
+        // choice merely because the message type is Upsert.
+        UpsertAllInsertedKeys all_inserted_keys = 4;
+    }
+}
+
+// Presence explicitly selects every inserted primary key as a delete key.
+message UpsertAllInsertedKeys {}
+
+// Presence selects all collection partitions within the message's VChannel.
+message UpsertAllPartitions {}
 
 // FlushMessageHeader just nothing.
 message FlushMessageHeader {

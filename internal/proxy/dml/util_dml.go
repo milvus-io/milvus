@@ -819,61 +819,12 @@ func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgs
 	return nil, merr.WrapErrParameterInvalidMsg("partition key not specify when insert")
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
-	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
-	if err != nil {
-		return nil, err
-	}
-	insertMsg.HashValues = hashValues
-
-	numChannels := len(channelNames)
-	if numChannels == 0 {
-		return nil, nil
-	}
-
-	numRows := len(insertMsg.HashValues)
-	avgCapacity := (numRows / numChannels) + 1
-
-	channel2RowOffsets := make(map[string][]int, numChannels)
-
-	for offset, channelID := range insertMsg.HashValues {
-		idx := int(channelID)
-		if idx >= numChannels {
-			continue
-		}
-
-		channelName := channelNames[idx]
-
-		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = make([]int, 0, avgCapacity)
-		}
-		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
-	}
-
-	return channel2RowOffsets, nil
-}
-
 func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
 	if len(channelNames) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
 	}
 	channelID := typeutil.HashNamespace2Channels(namespace, channelNames)
 	return assignChannelsByChannel(channelID, channelNames, insertMsg), nil
-}
-
-func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, collectionName string) ([]string, error) {
-	partitions, err := metaCache.GetPartitions(ctx, dbName, collectionName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Make sure the order of the partition names got every time is the same
-	partitionNames, _, err := typeutil.RearrangePartitionsForPartitionKey(partitions)
-	if err != nil {
-		return nil, err
-	}
-
-	return partitionNames, nil
 }
 
 // check whether insertMsg has all fields in schema

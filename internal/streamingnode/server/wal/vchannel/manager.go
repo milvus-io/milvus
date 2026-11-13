@@ -137,28 +137,31 @@ func (m *PChannelRecoveryManager) releaseInitialState() {
 func (m *PChannelRecoveryManager) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-) {
+) error {
 	if m == nil {
-		return
+		return nil
 	}
 	msg := retained.Message()
 	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
-		return
+		return nil
 	}
 	if m.shouldBroadcast(msg) {
-		m.observeBroadcastMessage(ctx, retained)
-		return
+		return m.observeBroadcastMessage(ctx, retained)
 	}
 	for {
 		module := m.moduleForMessage(msg)
 		if module == nil {
-			return
+			return nil
 		}
-		if !module.ObserveMessage(ctx, retained) {
+		observed, err := module.ObserveMessage(ctx, retained)
+		if err != nil {
+			return err
+		}
+		if !observed {
 			continue
 		}
 		m.markModuleUpdated(module)
-		return
+		return nil
 	}
 }
 
@@ -284,16 +287,22 @@ func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) 
 func (m *PChannelRecoveryManager) observeBroadcastMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-) {
+) error {
+	var observeErr error
 	m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
 		dispatch := retained.Clone()
-		observed := module.ObserveMessage(ctx, dispatch)
+		observed, err := module.ObserveMessage(ctx, dispatch)
 		dispatch.Release()
+		if err != nil {
+			observeErr = err
+			return false
+		}
 		if observed {
 			m.markModuleUpdated(module)
 		}
 		return true
 	})
+	return observeErr
 }
 
 func (m *PChannelRecoveryManager) moduleForMessage(

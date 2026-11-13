@@ -46,7 +46,7 @@ Messages transition through three stages:
 Every specialized message has a **header** and a **body**, both protobuf. Their storage is different:
 
 - `EncodeProto` stores the header as base64 in the `_h` property. Each `AsSpecialized*` call decodes it, and log output decodes it again (`marshalSpecializedHeader`).
-- The body is the payload. It is decoded only when a caller calls `Body()`/`MustBody()`. When cipher is enabled, only the payload is encrypted.
+- The body is the payload. `Body()`/`MustBody()` decode it fully. Insert V2 and Upsert also support a projection read that skips ordinary column values. Their shared `InsertRows` carries either explicit `LongArray` RowIDs or a base plus signed deltas; producers choose delta encoding only when smaller and safe from int64 overflow. Upsert delete effects explicitly choose independent PKs or an all-inserted-keys reference, preserving ordered duplicate occurrences. Body and projection readers expand these wire representations into the same logical view; do not infer delete effects from missing keys. When cipher is enabled, only the payload is encrypted.
 
 Use these rules to choose where a new field goes:
 
@@ -60,6 +60,8 @@ Use these rules to choose where a new field goes:
 
 If rule 1 and rule 2 or rule 3 point to different places, rules 2 and 3 win. Put a small handle (an ID or a fingerprint) in the header and put the full content in the body.
 
+Historical Insert `idempotent_result` remains a plaintext header exception. Insert V2 and Upsert store inserted PKs and `request_row_mapping` inside body `rows`, encrypted when cipher is enabled. `BuildInsertOrUpsertResult` uses the Insert/Upsert projection to reconstruct results without decoding ordinary column values. Neither new-format message stores a separate result copy. See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
+
 ## Immutable Body Cache
 
 [Immutable Message Body Cache](../../../design-docs/design_docs/wal/message_body_cache.md)
@@ -68,6 +70,25 @@ Immutable Body calls share decoded results through an object-local cache slot;
 typed wrappers and transaction property clones reuse that slot. Consumers copy
 the metadata they need to modify. Mutable/broadcast bodies retain independent
 decoding. Function-output materialization remains outside Body decoding.
+
+## Insert/Upsert projections and selected rows
+
+`ReadInsertOrUpsertProjection` reads PKs, RowIDs, partition indexes, explicit delete effects,
+request mapping, CAS, and column descriptors (field IDs and data types) from nested rows and operation fields. It skips materializing ordinary column values. Column framing sizes and deferred column-wire errors support single-partition admission accounting without retaining the payload.
+Immutable readers share the projection through the bounded body cache. Derived
+row selections and nullable-vector positions share its lifetime and accounting.
+Mutable payload replacement invalidates the projection. Header-only assignment
+leaves unchanged body data valid. Projections do not retain decrypted payloads.
+
+`messageutil.InsertRowsReader` reads selected rows at the execution boundary.
+All columns share partition selections. One partition uses nil to select all rows;
+a non-nil empty slice selects none. All-row reads borrow immutable values and own
+execution metadata. Multi-partition selections share exactly sized backing storage.
+The projection decoder consumes selected wire fields without a concatenation buffer.
+It restores the standalone PK column and
+system fields for storage conversion. The encoder's non-column fields describe
+encoded body content, not a read projection. Encryption remains over the whole
+payload, so projection reads can still require decryption of that payload.
 
 ## Adding a New Message Type
 

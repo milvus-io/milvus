@@ -192,16 +192,16 @@ func (m *VChannelRecoveryModule) segmentViewConfig() segment.ViewConfig {
 func (m *VChannelRecoveryModule) ObserveMessage(
 	ctx context.Context,
 	retained message.RetainedImmutableMessage,
-) bool {
+) (bool, error) {
 	if m == nil {
-		return true
+		return true, nil
 	}
 	msg := retained.Message()
 	if !m.shouldObserve(msg) {
-		return true
+		return true, nil
 	}
 	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
-		return true
+		return true, nil
 	}
 	m.mu.Lock()
 	defer func() {
@@ -210,10 +210,10 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		releaseDropHandles(completed)
 	}()
 	if m.removed {
-		return false
+		return false, nil
 	}
 	if m.vchannelView != nil && (m.vchannelView.IsClosing() || m.vchannelView.IsTombstoned()) {
-		return true
+		return true, nil
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
@@ -236,8 +236,11 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleTruncateCollectionMessage(ctx, retained)
 	case message.MessageTypeCreateSegment:
 		m.handleCreateSegmentMessage(ctx, message.MustAsRetainedImmutableCreateSegmentMessageV2(retained))
-	case message.MessageTypeInsert, message.MessageTypeTxn:
-		m.handleInsertMessage(ctx, retained)
+	case message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeTxn:
+		if err := m.handleInsertMessage(ctx, retained); err != nil {
+			retained.IntoPoisoned()
+			return true, merr.Wrap(err, "dispatch insert batches")
+		}
 	case message.MessageTypeFlush:
 		m.handleFlushMessage(ctx, retained)
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
@@ -247,7 +250,7 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	m.observeQueryResourceEvent(ctx, walview.VChannelResourceEvent{Message: msg})
 	m.queryResources.TryBuildLocked(m.queryWALViewLocked)
 	m.l0Materializer.ObserveMessage(retained)
-	return true
+	return true, nil
 }
 
 func (m *VChannelRecoveryModule) RecoverySnapshot() *moduleapi.WritePathRecoveryModuleSnapshot {
@@ -483,10 +486,10 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
 func (m *VChannelRecoveryModule) handleInsertMessage(
 	ctx context.Context,
 	owned message.RetainedImmutableMessage,
-) {
+) error {
 	batches, err := segment.BuildInsertBatches(owned.Message())
 	if err != nil {
-		return
+		return err
 	}
 	for segmentID, batch := range batches {
 		view := m.segments[segmentID]
@@ -505,6 +508,7 @@ func (m *VChannelRecoveryModule) handleInsertMessage(
 			m.markSegmentUpdatedLocked(segmentID)
 		}
 	}
+	return nil
 }
 
 func (m *VChannelRecoveryModule) handleFlushMessage(

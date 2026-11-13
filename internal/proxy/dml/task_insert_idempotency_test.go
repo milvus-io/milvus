@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestInsertTaskIdempotencyBehavior(t *testing.T) {
@@ -59,11 +60,6 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, key != "", task.idempotencyEnabled)
 				require.Equal(t, key, task.idempotencyKey)
-				if key == "" {
-					require.Nil(t, task.idempotentInsertDecoration())
-				} else {
-					require.NotNil(t, task.idempotentInsertDecoration())
-				}
 			})
 		}
 	}
@@ -89,7 +85,6 @@ func TestInsertTaskKeylessAutoIDIsNewWrite(t *testing.T) {
 		require.NoError(t, task.PreExecute(context.Background()))
 		require.False(t, task.idempotencyEnabled)
 		require.Empty(t, task.idempotencyKey)
-		require.Nil(t, task.idempotentInsertDecoration())
 		ids := task.result.GetIDs().GetIntId().GetData()
 		require.NotEmpty(t, ids)
 		require.NotEqual(t, previousIDs, ids)
@@ -166,21 +161,6 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 		require.Equal(t, channels[offset%len(channels)], actualChannels1[offset])
 		require.Equal(t, channels[offset%len(channels)], actualChannels2[offset])
 	}
-}
-
-func TestBuildInsertWriteUnitIdempotentInsertResult(t *testing.T) {
-	extra, err := buildInsertWriteUnitIdempotentInsertResult(
-		&schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 11, 12}}},
-		},
-		[]int{2, 0},
-	)
-	require.NoError(t, err)
-	require.Equal(t, []uint32{2, 0}, extra.GetRowOffsets())
-	require.Equal(t, []int64{12, 10}, extra.GetIds().GetIntId().GetData())
-
-	_, err = buildInsertWriteUnitIdempotentInsertResult(&schemapb.IDs{}, []int{0})
-	require.Error(t, err)
 }
 
 func TestMergeDuplicateInsertResults(t *testing.T) {
@@ -338,14 +318,10 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 }
 
 func rowChannelsByPK(ids *schemapb.IDs, channels []string) []string {
-	offsetsByChannel, _ := assignChannelsByPK(ids, channels, &BaseInsertTask{
-		InsertRequest: &msgpb.InsertRequest{},
-	})
-	rowChannels := make([]string, len(idsByOffsetsForTest(ids)))
-	for channel, offsets := range offsetsByChannel {
-		for _, offset := range offsets {
-			rowChannels[offset] = channel
-		}
+	hashes, _ := typeutil.HashPK2Channels(ids, channels)
+	rowChannels := make([]string, len(hashes))
+	for row, channel := range hashes {
+		rowChannels[row] = channels[channel]
 	}
 	return rowChannels
 }

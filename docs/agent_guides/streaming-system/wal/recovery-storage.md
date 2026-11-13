@@ -70,7 +70,7 @@ Explicitly ignored topology records have no abort effect. The old session is not
 for another Commit attempt on the cancelled writer. See
 [Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
 
-The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
+The temporary WAL L0 materializer retains Delete, delete-bearing Upsert/Txn, and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Materialization through T waits for final DataCoord publication of every L1
 created before T, across all partitions of the VChannel. Growing registration or
@@ -84,6 +84,17 @@ future Summary-based materialization and is not active simultaneously. QueryView
 query serving itself is already wired; it does not imply that this alternative
 materializer is active. Durable materialized
 metadata still governs Summary GC and tombstone retirement.
+
+## Unified Upsert recovery
+
+Upsert uses shared partition selections and `InsertRowsReader` for L1 row
+persistence. Explicit delete effects use the existing L0 path. Recovery restores
+L1 and L0 independently: completion on one side cannot suppress missing work on
+the other. Message completion joins all required effects before checkpoint
+publication. Transactions recover successful body counts and lightweight effects
+classification, without retaining complete members for Commit revalidation.
+Insert batch dispatch errors poison the outer message and return through startup recovery or the live fatal handler, before query/L0 observation. Native apply errors stop progress; no whole-unit predecode or rollback is added.
+See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 
 ## Key Packages
 

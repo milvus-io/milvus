@@ -120,7 +120,14 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 	m.pending = append(m.pending, retained.Clone())
 	if deleted {
 		// Account only Delete payloads, even for mixed Insert/Delete transactions.
-		m.pendingBytes += deleteBytes(msg)
+		size, err := deleteBytes(msg)
+		if err != nil {
+			m.terminalErr = err
+			retained.IntoPoisoned()
+			m.mu.Unlock()
+			return
+		}
+		m.pendingBytes += size
 	}
 	if flush {
 		m.flushThrough = msg.TimeTick()
@@ -142,21 +149,28 @@ func isL0FlushMessage(t message.MessageType) bool {
 	}
 }
 
-func deleteBytes(msg message.ImmutableMessage) uint64 {
+func deleteBytes(msg message.ImmutableMessage) (uint64, error) {
 	var size uint64
 	count := func(msg message.ImmutableMessage) error {
-		if msg.MessageType() == message.MessageTypeDelete {
-			body := message.MustAsImmutableDeleteMessageV1(msg).MustBody()
+		bodies, err := messageutil.DeleteRequests(context.Background(), msg)
+		if err != nil {
+			return err
+		}
+		for _, body := range bodies {
 			size += uint64(proto.Size(body.GetPrimaryKeys()) + 8*messageutil.PrimaryKeyCount(body.GetPrimaryKeys()))
 		}
 		return nil
 	}
 	if msg.MessageType() == message.MessageTypeTxn {
-		_ = message.AsImmutableTxnMessage(msg).RangeOver(count)
+		if err := message.AsImmutableTxnMessage(msg).RangeOver(count); err != nil {
+			return 0, err
+		}
 	} else {
-		_ = count(msg)
+		if err := count(msg); err != nil {
+			return 0, err
+		}
 	}
-	return size
+	return size, nil
 }
 
 // RequestPersistThrough shares the SegmentView stall/pressure contract. A batch
@@ -212,11 +226,21 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 		}
 	}
 	handles := m.pending[:end:end]
+	var charged uint64
+	for _, handle := range handles {
+		size, err := deleteBytes(handle.Message())
+		if err != nil {
+			m.terminalErr = err
+			for _, failed := range handles {
+				failed.IntoPoisoned()
+			}
+			return nil
+		}
+		charged += size
+	}
 	task := &walMaterializeTask{owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick()}
 	m.pending = m.pending[end:]
-	for _, handle := range handles {
-		m.pendingBytes -= deleteBytes(handle.Message())
-	}
+	m.pendingBytes -= charged
 	if len(m.pending) == 0 {
 		m.pending = nil
 		m.pendingSince = time.Time{}

@@ -63,9 +63,8 @@ func (s *FailpointSuite) SetupSuite() {
 		}
 		return env
 	}))
-	// Explicitly exercise the proxy's multi-message transaction path as well
-	// as single-message inserts, independently of the split-chunk defaults.
-	s.WithMilvusConfig("proxy.splitChunk", "true")
+	// Exercise ordinary and physically chunked Inserts. Proxy no longer
+	// splits an Insert into transaction bodies based on the backend size.
 	s.WithMilvusConfig("pulsar.maxMessageSize", "524288")
 	s.WithMilvusConfig("pulsar.messageReserveSize", "65536")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "false")
@@ -137,7 +136,7 @@ type writeCase struct {
 
 var writeCases = []writeCase{
 	{name: "single", rows: 32, dim: 8, messageType: message.MessageTypeInsert.String()},
-	{name: "transaction", rows: 1024, dim: 256, messageType: message.MessageTypeCommitTxn.String()},
+	{name: "chunked", rows: 1024, dim: 256, messageType: message.MessageTypeInsert.String()},
 }
 
 func (s *FailpointSuite) create(ctx context.Context, tc writeCase, shards int) (*milvuspb.InsertRequest, []string) {

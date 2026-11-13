@@ -78,7 +78,8 @@ func TestReadIdempotencyEntriesOfVChannelsMemoryTails(t *testing.T) {
 				want := &ChunkSections{}
 				for _, msg := range originals[vc] {
 					if msg.TimeTick() > bounds.from && msg.TimeTick() <= bounds.to {
-						key, insert := insertSummaryOf(msg)
+						key, insert, err := insertSummaryOf(ctx, msg)
+						require.NoError(t, err)
 						want.Inserts = append(want.Inserts, insert)
 						want.Idempotency = append(want.Idempotency, key)
 					}

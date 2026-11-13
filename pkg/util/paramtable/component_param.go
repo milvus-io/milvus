@@ -2811,9 +2811,6 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	// WAL payload chunking rollout switch.
-	SplitChunkProxy ParamItem `refreshable:"true"`
-
 	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
 	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
 
@@ -2920,17 +2917,6 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ExprParseCacheMaxEntries.Init(base.mgr)
-
-	p.SplitChunkProxy = ParamItem{
-		Key:          "proxy.splitChunk",
-		Version:      "3.0.2",
-		DefaultValue: "true",
-		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
-Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
-For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.`,
-		Export: true,
-	}
-	p.SplitChunkProxy.Init(base.mgr)
 
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
@@ -9578,9 +9564,6 @@ type streamingConfig struct {
 	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
-	// WAL payload chunking rollout switch.
-	SplitChunkSN ParamItem `refreshable:"true"`
-
 	// primary resource group
 	PrimaryResourceGroup ParamItem `refreshable:"true"`
 
@@ -9707,17 +9690,6 @@ type streamingConfig struct {
 func (p *streamingConfig) init(base *BaseTable) {
 	p.SchemaCacheTTL = ParamItem{Key: "streaming.schemaCacheTTL", Version: "3.0.5", DefaultValue: "900", Doc: "Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.", Export: true}
 	p.SchemaCacheTTL.Init(base.mgr)
-
-	p.SplitChunkSN = ParamItem{
-		Key:          "streaming.splitChunkSN",
-		Version:      "3.0.2",
-		DefaultValue: "false",
-		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
-Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
-Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.`,
-		Export: true,
-	}
-	p.SplitChunkSN.Init(base.mgr)
 
 	// primary resource group
 	p.PrimaryResourceGroup = ParamItem{

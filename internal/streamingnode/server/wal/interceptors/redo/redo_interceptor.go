@@ -80,33 +80,49 @@ func prepareRunner(ctx context.Context, preparation *function.PreparationRequire
 	return nil
 }
 
-// waitUntilGrowingSegmentReady waits until the growing segment is ready if msg is insert.
+// waitUntilGrowingSegmentReady waits for the target of a row-bearing write.
 func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context, msg message.MutableMessage) error {
-	if msg.MessageType() == message.MessageTypeInsert {
-		insertMessage := message.MustAsMutableInsertMessageV1(msg)
-		h := insertMessage.Header()
-		if len(h.Partitions) != 1 {
-			// TODO: We will support multi-partition insert in the future.
-			panic("insert message should only have one partition")
+	var collectionID int64
+	var partitions []*message.PartitionSegmentAssignment
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			h := message.MustAsMutableInsertMessageV1(msg).Header()
+			if len(h.Partitions) != 1 {
+				panic("insert message should only have one partition")
+			}
+			collectionID, partitions = h.CollectionId, h.Partitions
+		case message.VersionV2:
+			h := message.MustAsMutableInsertMessageV2(msg).Header()
+			collectionID, partitions = h.GetCollectionId(), h.GetPartitions()
+		default:
+			panic("unexpected Insert message version")
 		}
-		for _, partition := range h.Partitions {
-			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
-			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
-			if err != nil {
-				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
-					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
-				}
-				return err
+	case message.MessageTypeUpsert:
+		h := message.MustAsMutableUpsertMessageV2(msg).Header()
+		collectionID, partitions = h.GetCollectionId(), h.GetPartitions()
+
+	default:
+		return nil
+	}
+	for _, partition := range partitions {
+		uniqueKey := shards.PartitionUniqueKey{CollectionID: collectionID, PartitionID: partition.PartitionId}
+		ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
+		if err != nil {
+			if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
+				return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
 			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ready:
-				// do nothing
-				return nil
-			case <-r.gracefulStop:
-				return status.NewOnShutdownError("redo interceptor is on shutdown")
-			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ready:
+			// Check every target partition before the inner append.
+			continue
+		case <-r.gracefulStop:
+			return status.NewOnShutdownError("redo interceptor is on shutdown")
 		}
 	}
 	return nil
