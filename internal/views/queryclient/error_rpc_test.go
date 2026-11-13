@@ -73,7 +73,7 @@ func TestRetainedQueryPublicErrorOverGRPC(t *testing.T) {
 				defer cancel()
 				_, err = client.Query(ctx, &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: 999}, Plans: []ShardPlan{plan}})
 				requireBusinessError(t, err)
-				plain := toMilvusError(cause)
+				plain := ToMilvusError(cause)
 				require.Equal(t, merr.Code(plain), merr.Code(err))
 				require.Equal(t, merr.GetErrorType(plain), merr.GetErrorType(err))
 				require.Equal(t, merr.IsRetryableErr(plain), merr.IsRetryableErr(err))

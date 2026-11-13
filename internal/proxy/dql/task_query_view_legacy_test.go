@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -138,6 +140,7 @@ type fakeLegacySearchStream struct {
 	recv       []fakeLegacySearchRecv
 	next       int
 	closeCalls int
+	closeErr   error
 }
 
 func (s *fakeLegacySearchStream) Recv() (*internalpb.SearchResults, error) {
@@ -151,7 +154,7 @@ func (s *fakeLegacySearchStream) Recv() (*internalpb.SearchResults, error) {
 
 func (s *fakeLegacySearchStream) Close() error {
 	s.closeCalls++
-	return nil
+	return s.closeErr
 }
 
 func (*fakeLegacySearchStream) Interrupt() (*internalpb.SearchResults, error) {
@@ -167,6 +170,7 @@ type fakeLegacyQueryStream struct {
 	recv       []fakeLegacyQueryRecv
 	next       int
 	closeCalls int
+	closeErr   error
 }
 
 func (s *fakeLegacyQueryStream) Recv() (*internalpb.RetrieveResults, error) {
@@ -180,7 +184,7 @@ func (s *fakeLegacyQueryStream) Recv() (*internalpb.RetrieveResults, error) {
 
 func (s *fakeLegacyQueryStream) Close() error {
 	s.closeCalls++
-	return nil
+	return s.closeErr
 }
 
 func (*fakeLegacyQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {
@@ -619,6 +623,11 @@ func TestSearchTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 }
 
 func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
+	mixCoord := mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+	defer mixCoord.UnPatch()
+	lookup := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(
+		&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil).Build()
+	defer lookup.UnPatch()
 	streams := make([]*fakeLegacySearchStream, 3)
 	legacy := &fakeLegacyQueryClient{maxRetries: len(streams)}
 	legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
@@ -629,9 +638,12 @@ func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 		return &queryclient.LegacySearchResult{Stream: stream}, nil
 	}
 	task := newQueryViewSearchTask(t, legacy, 1)
+	task.node = &namespaceRequeryMockNode{}
 
 	err := task.Execute(context.Background())
-	require.Equal(t, "attempt 3", viewerror.AsViewError(err).Cause)
+	require.ErrorIs(t, err, merr.ErrQueryViewNotReady)
+	require.Contains(t, err.Error(), "attempt 3")
+	require.EqualValues(t, 1, lookup.Times())
 	require.Equal(t, 3, legacy.searchCalled)
 	for _, stream := range streams {
 		require.Equal(t, 1, stream.closeCalls)
@@ -642,6 +654,11 @@ func TestQueryViewUnavailableRetryBudget(t *testing.T) {
 	for _, query := range []bool{false, true} {
 		for _, canceled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("query_%t/canceled_%t", query, canceled), func(t *testing.T) {
+				mixCoord := mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+				defer mixCoord.UnPatch()
+				lookup := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(
+					&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil).Build()
+				defer lookup.UnPatch()
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				failure := status.Error(codes.Unavailable, "worker disconnected")
@@ -667,10 +684,12 @@ func TestQueryViewUnavailableRetryBudget(t *testing.T) {
 				var err error
 				if query {
 					task := newQueryViewQueryTask(t, legacy, 2)
+					task.node = &namespaceRequeryMockNode{}
 					err = task.Execute(ctx)
 					require.Empty(t, task.resultBuf.Collect())
 				} else {
 					task := newQueryViewSearchTask(t, legacy, 2)
+					task.node = &namespaceRequeryMockNode{}
 					err = task.Execute(ctx)
 					require.Nil(t, task.reducedResult)
 				}
@@ -678,8 +697,11 @@ func TestQueryViewUnavailableRetryBudget(t *testing.T) {
 				if canceled {
 					wantAttempts = 1
 					require.ErrorIs(t, err, context.Canceled)
+					require.Zero(t, lookup.Times())
 				} else {
-					require.Equal(t, codes.Unavailable, status.Code(err))
+					require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+					require.Equal(t, merr.Status(merr.ErrServiceUnavailable).GetCode(), merr.Status(err).GetCode())
+					require.EqualValues(t, 1, lookup.Times())
 				}
 				require.Equal(t, wantAttempts, legacy.queryCalled+legacy.searchCalled)
 				for _, stream := range queryStreams {

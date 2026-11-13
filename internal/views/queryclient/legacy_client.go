@@ -161,7 +161,7 @@ func (c *legacyClient) MaxRetries() int {
 }
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+	defer func() { err = ToMilvusError(err) }()
 	if req.AllowStreaming {
 		return c.searchStream(ctx, req, req.ReduceStreamChunkBytes)
 	}
@@ -278,7 +278,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 }
 
 func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+	defer func() { err = ToMilvusError(err) }()
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}

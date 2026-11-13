@@ -20,16 +20,20 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/mocks"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -119,12 +123,18 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 }
 
 func TestStreamingConfigStableAcrossRetries(t *testing.T) {
+	mixCoord := mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+	defer mixCoord.UnPatch()
+	lookup := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(
+		&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil).Build()
+	defer lookup.UnPatch()
 	for _, operation := range []string{"Search", "Hybrid", "Query"} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(operation+"/"+strconv.FormatBool(enabled), func(t *testing.T) {
 				legacy := &fakeLegacyQueryClient{maxRetries: 2}
 				search := newQueryViewSearchTask(t, legacy, 1)
 				query := newQueryViewQueryTask(t, legacy, 1)
+				search.node, query.node = &namespaceRequeryMockNode{}, &namespaceRequeryMockNode{}
 				if operation == "Hybrid" {
 					search.IsIterator, search.IsAdvanced = false, true
 					search.rerankMeta = &legacyRerankMeta{}
@@ -214,9 +224,15 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 }
 
 func TestStreamingConfigLeavesRetainedPlansOnBatch(t *testing.T) {
+	mixCoord := mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+	defer mixCoord.UnPatch()
+	lookup := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(
+		&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil).Build()
+	defer lookup.UnPatch()
 	for _, plans := range [][]queryclient.ShardPlan{{}, {{Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10}}}} {
 		legacy := &fakeLegacyQueryClient{maxRetries: 2, err: streamViewError(viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND, "do not retry requery")}
 		task := newQueryViewQueryTask(t, legacy, 1)
+		task.node = &namespaceRequeryMockNode{}
 		task.queryViewPlans = plans
 		require.Error(t, task.Execute(context.Background()))
 		require.Equal(t, 1, legacy.queryCalled)
