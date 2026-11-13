@@ -47,7 +47,9 @@ mutex. It does not acquire the handler's View map lock, a snShardView lock, or a
 state-machine lock, and it does not encode protobuf or perform network I/O.
 
 `TakeViewFeedback` detaches the current map in O(1) and starts a new window at
-the take time. The first access initializes a window if none has started yet.
+one nanosecond after the take time. This makes the next Start strictly greater
+than the previous End, including across empty takes. The first access initializes
+a window if none has started yet.
 **Every take advances Start, even when the map is empty and no report is sent.**
 Later accesses therefore do not inherit earlier skipped empty windows. The sender
 owns the detached map; collection immediately continues in a new map. Encoding
@@ -141,17 +143,28 @@ snapshot rather than guessing the divisor from observed shards.
 
 ## 5. Windows, contributions, and expiration
 
-Each shard retains contributions sorted by the **Node's EndUnixNanos**. A
-contribution contains Start, End, and request count. Out-of-order arrival across
-stream reconnections is inserted in report-time order. Start must be positive,
-End must exceed Start, and the entire window must be no longer than two minutes.
-There is no Coordinator receipt timestamp or correction of Node timestamps.
+Each shard appends accepted contributions in strictly increasing **Node
+EndUnixNanos** order. A contribution contains Start, End, and request count.
+Start must be positive and End must exceed Start. If Start is less than or equal
+to that shard's last accepted End, discard the sample, including its count and
+LastAccess. This rejects out-of-order, duplicate, overlapping and equal-boundary
+windows without sorting or inserting into retained history. Admission is per
+shard, so batches or distinct shards sharing window boundaries remain independent.
+The last accepted End survives window expiration until Replica withdrawal;
+Coordinator restart starts with no feedback or watermark.
+
+There is no duration cap: a long window after stream disconnection retains its
+full count and actual time span, including its recent LastAccess. It expires by
+End under the same two-minute retention rule. Do not clip Start while retaining
+all requests. There is no Coordinator receipt timestamp or correction of Node
+timestamps. A sender clock rollback or owner change may cause windows to be
+rejected until their Start exceeds the previous accepted End.
 
 The store maintains four private recent-window counters per shard, for up to the
-latest 2, 6, 12, and 24 received windows. Insertion adds a contribution to affected
-groups and removes any contribution displaced from a full group. The minimum
-Start for each group is refreshed from its bounded set of windows, including
-when overlapping windows have Start values in a different order from End.
+latest 2, 6, 12, and 24 accepted windows. Appending adds the request count to each
+group and subtracts the window displaced from a full group. Strict non-overlap
+makes the first selected window's Start the minimum and the last window's End
+the maximum; no cached group start or boundary scan is needed.
 
 One store-owned goroutine runs every second. It removes the expired prefix whose
 End is at or before `now - 2 minutes`, subtracts those contributions from affected
@@ -161,10 +174,10 @@ or prorated. Empty window lists release their backing arrays.
 
 Current Coordinator time only advances cleanup. Late reports already outside the
 retention horizon are removed on the next sweep. Node clock skew directly affects
-expiration. Reports are best effort, with no cross-stream deduplication or loss
-compensation.
+expiration. Reports are best effort. The timestamp watermark rejects stale or
+overlapping samples across streams; there is no replay or loss compensation.
 
-`LastAccessUnixNanos` is the maximum access timestamp ever observed for the
+`LastAccessUnixNanos` is the maximum access timestamp in accepted samples for the
 Replica. Its revert operation is a no-op. After all windows expire, RequestRates
 becomes zero while LastAccess remains, until the Replica is withdrawn.
 
@@ -175,10 +188,10 @@ windows by Node End and calculate:
 
 ```text
 shardRate[N] = sum(selected request counts)
-               / seconds(max(selected End) - min(selected Start))
+               / seconds(selected[last].End - selected[0].Start)
 replicaRate[N] = sum(shardRate[N]) / total collection shard count
 globalRate[N] = sum(replicaRate[N] across all configured Replicas)
-replicaLastAccess = max(all observed shard access timestamps)
+replicaLastAccess = max(all accepted shard access timestamps)
 ```
 
 The time denominator includes gaps between selected windows. It uses actual Node
@@ -254,9 +267,9 @@ floating-point subtraction residue. Close publishes zero without changing any
 snapshot already held by a reader. Global and Replica reads are individually
 consistent; separate getter calls do not constitute an atomic multi-value read.
 
-Writes locate a window in O(log W); an out-of-order insertion moves its suffix.
-Rate-boundary refresh examines at most 2 + 6 + 12 + 24 contributions per affected
-shard. Replica publication is O(S) over cached rates of its observed shards, once
+Window admission, append and the four rate-group updates are amortized O(1)
+per shard, with no sorted insertion or boundary scan. Replica publication is O(S)
+over cached rates of its observed shards, once
 per affected Replica per batch/sweep. Reads are O(1). Configuration callbacks,
 reports, and cleanup share only the feedback store's lock, but their CPU,
 allocation, and lock-wait costs can still indirectly delay synchronous metadata
@@ -281,8 +294,11 @@ accesses provide new feedback. Persistent SN streams remain alive while idle.
   takes advancing Start without a report, and state/close handling between batches.
 - Dropped feedback is not replayed after failure or reconnection; idle streams
   remain active without pending Views.
-- Actual-span rates for variable windows, gaps, out-of-order/overlapping windows,
+- Actual-span rates for variable windows, gaps and long reconnect windows;
   partial groups, prefix reversion, and autonomous expiration.
+- Reject old, duplicate, overlapping and equal-boundary samples; preserve the
+  last accepted End after expiration; accept consecutive real SN windows.
+- Long reconnect windows retain recent LastAccess and use their full duration.
 - Replica means include silent shards, preserve independent shard time spans,
   isolate Replica identities, and follow DataView shard counts.
 - Copy-on-write pointer identity, retained snapshot stability, zero-allocation

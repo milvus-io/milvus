@@ -37,7 +37,7 @@ func TestViewFeedbackWindowOwnershipAndViewIndependence(t *testing.T) {
 	require.Greater(t, first.EndUnixNanos, first.StartUnixNanos)
 	h.RecordShardAccess(id)
 	second := h.TakeViewFeedback()
-	require.Equal(t, first.EndUnixNanos, second.StartUnixNanos)
+	require.Equal(t, first.EndUnixNanos+1, second.StartUnixNanos)
 	require.EqualValues(t, 1, second.Shards[id].RequestCount)
 	require.EqualValues(t, 2, first.Shards[id].RequestCount, "detached window must never change")
 	require.Empty(t, h.TakeViewFeedback().Shards, "taking twice cannot replay a window")
@@ -143,8 +143,8 @@ func TestViewFeedbackEmptyTakesAdvanceStart(t *testing.T) {
 			time.Sleep(5 * time.Second)
 			empty := h.TakeViewFeedback()
 			require.Empty(t, empty.Shards)
-			require.Equal(t, last.EndUnixNanos, empty.StartUnixNanos)
-			require.EqualValues(t, 5*time.Second, empty.EndUnixNanos-empty.StartUnixNanos)
+			require.Equal(t, last.EndUnixNanos+1, empty.StartUnixNanos)
+			require.EqualValues(t, 5*time.Second-time.Nanosecond, empty.EndUnixNanos-empty.StartUnixNanos)
 			last = empty
 		}
 		time.Sleep(2 * time.Second)
@@ -152,8 +152,8 @@ func TestViewFeedbackEmptyTakesAdvanceStart(t *testing.T) {
 		h.RecordShardAccess(id)
 		time.Sleep(time.Second)
 		active := h.TakeViewFeedback()
-		require.Equal(t, last.EndUnixNanos, active.StartUnixNanos)
-		require.EqualValues(t, 3*time.Second, active.EndUnixNanos-active.StartUnixNanos)
+		require.Equal(t, last.EndUnixNanos+1, active.StartUnixNanos)
+		require.EqualValues(t, 3*time.Second-time.Nanosecond, active.EndUnixNanos-active.StartUnixNanos)
 		require.EqualValues(t, 1, active.Shards[id].RequestCount)
 	})
 }
