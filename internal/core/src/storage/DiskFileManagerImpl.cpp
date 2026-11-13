@@ -17,8 +17,10 @@
 #include <cxxabi.h>
 #include "common/FastMem.h"
 #include <string.h>
+#include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -36,7 +38,10 @@
 #include <vector>
 
 #include "arrow/api.h"
+#include "arrow/buffer.h"
 #include "arrow/filesystem/filesystem.h"
+#include "arrow/io/memory.h"
+#include "arrow/util/thread_pool.h"
 #include "boost/filesystem/path.hpp"
 #include "common/Common.h"
 #include "common/Consts.h"
@@ -65,6 +70,7 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteOutputStream.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -126,6 +132,141 @@ AppendVectorArrayElementValidity(const FieldDataPtr& data,
 }
 
 }  // namespace
+
+class DiskFileManagerImpl::BufferedOutput final : public milvus::OutputStream {
+ public:
+    explicit BufferedOutput(size_t expected_size) {
+        AssertInfo(expected_size <= std::numeric_limits<int64_t>::max(),
+                   "buffered index output size exceeds int64");
+        auto result = arrow::AllocateResizableBuffer(expected_size);
+        if (!result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                      result.status().ToString());
+        }
+        buffer_ = std::move(result).ValueOrDie();
+        ResetWriter();
+    }
+
+    size_t
+    Tell() const override {
+        return size_;
+    }
+
+    size_t
+    Write(const void* data, size_t size) override {
+        AssertInfo(!closed_, "buffered index output is closed");
+        AssertInfo(
+            size <= static_cast<size_t>(std::numeric_limits<int64_t>::max()) -
+                        size_,
+            "buffered index output size overflows");
+        if (size == 0) {
+            return 0;
+        }
+        const auto required = size_ + size;
+        if (required > static_cast<size_t>(buffer_->size())) {
+            const auto capacity = std::max<size_t>(buffer_->size(), 256);
+            const auto limit =
+                static_cast<size_t>(std::numeric_limits<int64_t>::max());
+            const auto grown = capacity <= limit / 2 ? capacity * 2 : limit;
+            auto status = buffer_->Resize(std::max(required, grown), false);
+            if (!status.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(status), status.ToString());
+            }
+            ResetWriter();
+        }
+        auto status = writer_->WriteAt(size_, data, size);
+        if (!status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(status), status.ToString());
+        }
+        size_ += size;
+        return size;
+    }
+
+    size_t
+    Write(int fd, size_t size) override {
+        std::vector<uint8_t> bytes(
+            std::min<size_t>(size, DEFAULT_INDEX_FILE_SLICE_SIZE));
+        size_t remaining = size;
+        while (remaining != 0) {
+            auto count =
+                ::read(fd, bytes.data(), std::min(remaining, bytes.size()));
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            if (count <= 0) {
+                ThrowInfo(FileReadFailed,
+                          "failed to read buffered index output");
+            }
+            Write(bytes.data(), count);
+            remaining -= count;
+        }
+        return size;
+    }
+
+    void
+    Close() override {
+        if (!closed_) {
+            auto status = buffer_->Resize(size_, false);
+            if (!status.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(status), status.ToString());
+            }
+            writer_.reset();
+            buffer_->ZeroPadding();
+            closed_ = true;
+        }
+    }
+
+    std::shared_ptr<arrow::Buffer>
+    Buffer() const {
+        AssertInfo(closed_, "buffered index output is still open");
+        return buffer_;
+    }
+
+ private:
+    void
+    ResetWriter() {
+        writer_ = std::make_unique<arrow::io::FixedSizeBufferWriter>(buffer_);
+        writer_->set_memcopy_threads(
+            std::min(8, arrow::GetCpuThreadPoolCapacity()));
+        writer_->set_memcopy_threshold(8 * 1024 * 1024);
+    }
+
+    std::shared_ptr<arrow::ResizableBuffer> buffer_;
+    std::unique_ptr<arrow::io::FixedSizeBufferWriter> writer_;
+    size_t size_ = 0;
+    bool closed_ = false;
+};
+
+std::shared_ptr<milvus::OutputStream>
+DiskFileManagerImpl::OpenOutputStream(const std::string& filename,
+                                      milvus::OutputStreamOptions options) {
+    if (!options.use_memory) {
+        return FileManagerImpl::OpenOutputStream(filename, true);
+    }
+    auto output = std::make_shared<BufferedOutput>(options.expected_size);
+    std::lock_guard lock(buffered_output_mutex_);
+    AssertInfo(buffered_outputs_.emplace(filename, output).second,
+               "duplicate buffered index output: {}",
+               filename);
+    return output;
+}
+
+void
+DiskFileManagerImpl::UploadBufferedFiles() {
+    std::map<std::string, std::shared_ptr<BufferedOutput>> outputs;
+    {
+        std::lock_guard lock(buffered_output_mutex_);
+        outputs.swap(buffered_outputs_);
+    }
+    for (auto& [name, output] : outputs) {
+        auto buffer = output->Buffer();
+        auto stream = std::static_pointer_cast<RemoteOutputStream>(
+            FileManagerImpl::OpenOutputStream(name, true));
+        stream->Write(buffer);
+        stream->Close();
+        AddFileMeta({name, static_cast<size_t>(buffer->size())});
+    }
+}
 
 struct DiskFileManagerImpl::LocalDirState {
     explicit LocalDirState(std::string dir) : dir(std::move(dir)) {
@@ -435,6 +576,7 @@ DiskFileManagerImpl::AddFileOrThrow(const std::string& file) {
 
 bool
 DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
+    std::lock_guard lock(buffered_output_mutex_);
     auto local_file_name = GetFileName(file_meta.file_path);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
@@ -695,7 +837,7 @@ DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
 }
 
 template <typename DataType>
-std::string
+CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
     auto raw_data_lease =
         AcquireLocalDirWriteLease(GetLocalRawDataObjectPrefix());
@@ -717,7 +859,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
 }
 
 template <typename DataType>
-std::string
+CachedRawData
 DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
         config, INSERT_FILES_KEY);
@@ -879,7 +1021,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                               total_num_rows);
     }
 
-    return local_data_path;
+    return {std::move(local_data_path),
+            num_rows,
+            dim,
+            std::move(offsets),
+            nullable && valid_data_path.has_value() ? total_num_rows : 0,
+            std::move(valid_bitmap)};
 }
 
 template <typename DataType>
@@ -1005,7 +1152,7 @@ DiskFileManagerImpl::write_valid_data_file(
 }
 
 template <typename T>
-std::string
+CachedRawData
 DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
     auto element_type =
@@ -1192,7 +1339,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                               total_num_rows);
     }
 
-    return local_data_path;
+    return {std::move(local_data_path),
+            num_rows,
+            var_dim,
+            std::move(offsets),
+            nullable && valid_data_path.has_value() ? total_num_rows : 0,
+            std::move(valid_bitmap)};
 }
 
 void
@@ -1758,17 +1910,17 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
     return isExist;
 }
 
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<float>(const Config& config);
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<float16>(const Config& config);
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
-template std::string
+template CachedRawData
 DiskFileManagerImpl::CacheRawDataToDisk<int8_t>(const Config& config);
 
 }  // namespace milvus::storage

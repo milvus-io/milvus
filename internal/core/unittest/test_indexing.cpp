@@ -1757,6 +1757,12 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     build_conf[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
     build_conf[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
+    auto* prepared_index =
+        dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    ASSERT_NE(prepared_index, nullptr);
+    ASSERT_NO_THROW(prepared_index->Prepare(build_conf));
+    EXPECT_TRUE(prepared_index->TryReserveBuild(build_conf));
+    EXPECT_TRUE(prepared_index->TryReserveBuild(build_conf));
     ASSERT_NO_THROW(index->Build(build_conf));
 
     // Upload -> Load
@@ -2216,6 +2222,10 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
 
     auto create_index_result = index->Upload();
     ASSERT_GT(create_index_result->GetSerializedSize(), 0);
+    const auto expected_metadata_size = sizeof(uint64_t) + (row_count + 7) / 8 +
+                                        sizeof(int64_t) + sizeof(uint64_t) +
+                                        sizeof(size_t);
+    EXPECT_EQ(create_index_result->GetMemSize(), expected_metadata_size);
     auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 

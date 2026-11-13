@@ -39,7 +39,7 @@ pipeline {
                         sed -i. 's/--dirty="-dev"//g' Makefile
                         export IS_NETWORK_MODE_HOST="true"
                         export OS_NAME=ubuntu22.04
-                        ./build/builder_gpu.sh /bin/bash -c \"make gpu-install\"
+                        ./build/builder_gpu.sh /bin/bash -c \"make install WITH_GPU=ON\"
                         """
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()

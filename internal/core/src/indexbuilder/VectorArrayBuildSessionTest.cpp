@@ -722,12 +722,15 @@ TEST_F(VectorArrayBuildSessionTest, DiskElementLevelWritesElementValidity) {
     auto offsets_path = root_ + "/offsets";
     prepared.params[index::VALID_DATA_PATH_KEY] = validity_path;
     prepared.params[index::EMB_LIST_OFFSETS_PATH] = offsets_path;
-    auto raw_path = manager.CacheRawDataToDisk<float>(prepared.params);
+    auto cached_data = manager.CacheRawDataToDisk<float>(prepared.params);
+    const auto& raw_path = cached_data.path;
     std::ifstream raw(raw_path, std::ios::binary);
     uint32_t header[2]{};
     raw.read(reinterpret_cast<char*>(header), sizeof(header));
     EXPECT_EQ(header[0], 2);
     EXPECT_EQ(header[1], 2);
+    EXPECT_EQ(cached_data.rows, header[0]);
+    EXPECT_EQ(cached_data.dim, header[1]);
     float payload[4]{};
     raw.read(reinterpret_cast<char*>(payload), sizeof(payload));
     EXPECT_TRUE(raw.good());
@@ -742,6 +745,8 @@ TEST_F(VectorArrayBuildSessionTest, DiskElementLevelWritesElementValidity) {
     ASSERT_TRUE(valid.good());
     EXPECT_EQ(count, 5);
     EXPECT_EQ(bits, 0b00101);
+    EXPECT_EQ(cached_data.valid_data_count, count);
+    EXPECT_EQ(cached_data.validity, std::vector<uint8_t>{bits});
 }
 
 TEST_F(VectorArrayBuildSessionTest, ResidentElementLevelUsesElementValidity) {

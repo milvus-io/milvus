@@ -43,7 +43,7 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Milvus Build Option")
 
-define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+define_option(WITH_GPU "Build with GPU support" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

@@ -775,16 +775,19 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	}
 
 	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importV2Used   = node.importScheduler.Slots()
-		importV3Used   = node.importV3Scheduler.Slots()
-		queueUsed      = node.importV3Scheduler.QueuedSlots()
+		totalSlots                       = index.CalculateNodeSlots()
+		indexStatsUsed, indexStatsQueued = node.taskScheduler.TaskQueue.GetSlotUsage()
+		compactionUsed                   = node.compactionExecutor.Slots()
+		importV2Used                     = node.importScheduler.Slots()
+		importV3Used                     = node.importV3Scheduler.Slots()
+		queueUsed                        = node.importV3Scheduler.QueuedSlots()
 	)
 	importUsed := importV2Used + importV3Used
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed
+	// Queue capacity limits new intake; it does not reserve execution resources
+	// or gate tasks that have already been dispatched.
+	availableSlots = min(availableSlots, totalSlots-indexStatsQueued)
 	if availableSlots < 0 {
 		availableSlots = 0
 	}
@@ -793,6 +796,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("totalSlots", totalSlots),
 		mlog.Int64("availableSlots", availableSlots),
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
+		mlog.Int64("indexStatsQueued", indexStatsQueued),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
 		mlog.Int64("importV3Used", importV3Used),
@@ -802,6 +806,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsQueued").Set(float64(indexStatsQueued))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
