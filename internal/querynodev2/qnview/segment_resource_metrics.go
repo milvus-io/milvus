@@ -57,6 +57,17 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 		// share a base and must not multiply its memory or logical row count.
 		item.MemSize += s.MemSize()
 		item.LoadedInsertRowCount = max(item.LoadedInsertRowCount, s.InsertCount())
+		data := metricsinfo.SegmentData{ManifestPath: s.LoadInfo().GetManifestPath()}
+		if stats := s.GetFieldJSONIndexStats(); len(stats) > 0 {
+			data.JSONStats = make(map[int64]metricsinfo.JSONStatsIdentity, len(stats))
+			for fieldID, stat := range stats {
+				data.JSONStats[fieldID] = metricsinfo.JSONStatsIdentity{
+					BuildID: stat.GetBuildID(),
+					Version: stat.GetVersionID(),
+				}
+			}
+		}
+		item.LoadedData = append(item.LoadedData, data)
 		for _, index := range s.Indexes() {
 			info := index.IndexInfo
 			found := false
