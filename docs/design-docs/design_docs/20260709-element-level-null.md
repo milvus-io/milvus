@@ -356,9 +356,7 @@ including sub-fields added to an existing struct.
   CreateIndex rejects them.
 - MAX_SIM-family metrics, emb-list indexes and EmbeddingList search on
   element-nullable vector Arrays; these are out of scope for this project.
-- Binlog import (backup restore) and snapshot-source import into a collection
-  with any element-nullable (scalar or vector) or nested Array field, and
-  NumPy import into a collection with any struct field; see
+- NumPy import into a collection with any struct field; see
   [Bulk Import](#bulk-import).
 - Struct fields in external collections; an external collection rejects
   every struct field, so element-nullable and nested Array sub-fields are not
@@ -431,12 +429,10 @@ V2 and Import V3 use the same readers and the same DataNode post-processing.
   when their values are valid.
 - Capacity limits count logical elements, null elements included.
 
+Binlog (backup restore) and snapshot-source imports accept element-nullable and nested Array targets, including added or dropped struct sub-fields. Imports read source columns by field ID and rewrite rows with the target writers; they do not copy the source binlogs unchanged. See [backup and restore](./20260306-struct.md#backup-and-restore) for the storage paths, missing-column rules and preserved field-ID contract.
+
 ### Unsupported import paths
 
-- Binlog import (backup restore) and snapshot-source import into a collection
-  with an element-nullable or nested Array field are rejected with
-  ParameterInvalid before the job is accepted: they copy source binlogs and
-  cannot produce the new layout.
 - NumPy has one file per top-level field and no form for a struct field. A
   NumPy import into a collection with any struct field is rejected with
   ImportFailed, including collections whose struct sub-fields are neither
