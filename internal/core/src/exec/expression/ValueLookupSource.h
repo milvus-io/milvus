@@ -26,6 +26,7 @@
 #include "exec/expression/IndexPathSelection.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/UpdatesRecordReaders.h"
 
 namespace milvus::exec {
 
@@ -41,6 +42,11 @@ class ValueLookupSource final {
                       FieldId field_id,
                       DataType data_type,
                       int64_t active_count) {
+        if (auto updates = segment->GetExperimentalUpdates();
+            updates && updates->HasField(field_id.get())) {
+            // Q_TS is bound by the expression compiler before execution.
+            return;
+        }
         const auto capabilities =
             segment->ResolveIndexCapability(op_ctx, field_id);
         const auto decision =
@@ -79,6 +85,23 @@ class ValueLookupSource final {
                    field_id.get());
         ValidateReader(field_id, data_type, reader);
         reader_ = reader;
+    }
+
+    bool
+    BindUpdates(const segcore::SegmentInternalInterface* segment,
+                FieldId field_id,
+                Timestamp timestamp,
+                int64_t active_count) {
+        auto records = segment->GetExperimentalUpdates();
+        if (!records || !records->HasField(field_id.get())) {
+            return false;
+        }
+        auto readers = records->CreateReaders(field_id.get(), timestamp);
+        index_reader_ = std::move(readers.values);
+        growing_pin_ = {};
+        reader_ = index_reader_.get();
+        covered_end_ = active_count;
+        return true;
     }
 
     ValueLookupSource(const ValueLookupSource&) = delete;

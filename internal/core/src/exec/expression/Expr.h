@@ -21,6 +21,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -40,6 +41,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/IndexPathSelection.h"
 #include "exec/expression/ValueLookupSource.h"
+#include "exec/expression/UpdatedFieldBatch.h"
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
@@ -521,6 +523,11 @@ class Expr : public std::enable_shared_from_this<Expr> {
         }
     }
 
+    // The compiler binds the same query timestamp to every leaf before prefetch.
+    virtual void
+    SetQueryTimestamp(Timestamp timestamp) {
+    }
+
     // Bind the request-scoped sealed read snapshot to this expression.
     // Called right after construction by the expression compiler; the pointer
     // is borrowed from the owning QueryContext and stays valid for the whole
@@ -589,6 +596,47 @@ class SegmentExpr : public Expr {
     }
 
     virtual ~SegmentExpr();
+
+    void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        auto records = segment_->GetExperimentalUpdates();
+        if (records && records->HasField(field_id_.get())) {
+            update_readers_ =
+                records->CreateReaders(field_id_.get(), timestamp);
+        }
+    }
+
+    bool
+    HasUpdates() const {
+        return update_readers_.values != nullptr;
+    }
+
+    bool
+    IsCacheable() const override {
+        return !HasUpdates() && Expr::IsCacheable();
+    }
+
+    // Preserve existing index selection when no temp-index path is available.
+    virtual void
+    DetermineUpdateExecPath() {
+        DetermineExecPath();
+    }
+
+    void
+    SelectUpdateIndexReader() {
+        exec_path_ = ExprExecPath::RawData;
+        if (!update_readers_.temp_index) {
+            DetermineExecPath();
+            return;
+        }
+        selected_reader_ = update_readers_.temp_index.get();
+        null_reader_ = update_readers_.temp_index.get();
+        pattern_reader_ =
+            dynamic_cast<const index::IPatternMatchReader*>(selected_reader_);
+        selected_covered_row_end_ = active_count_;
+        num_index_chunk_ = 1;
+        exec_path_ = ExprExecPath::ScalarIndex;
+    }
 
     void
     InitSegmentExpr() {
@@ -905,7 +953,8 @@ class SegmentExpr : public Expr {
         // fallback remains possible. Once Scan is selected its retained cursor
         // uses only the segment offset; Chunk coordinates are no longer read or
         // kept synchronized.
-        if (data_access_mode_ != DataAccessMode::Scan && num_data_chunk_ > 0) {
+        if (!HasUpdates() && data_access_mode_ != DataAccessMode::Scan &&
+            num_data_chunk_ > 0) {
             AdvanceDataChunkCursor(rows);
         }
         current_data_global_pos_ += rows;
@@ -1181,7 +1230,8 @@ class SegmentExpr : public Expr {
     // Call at the top of ByStats / ByIndex methods to skip computation.
     bool
     TryCacheGet() {
-        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+        if (!IsCacheable() || !ExprResCacheManager::IsEnabled() ||
+            segment_ == nullptr) {
             return false;
         }
         bool cache_hit = false;
@@ -1211,7 +1261,8 @@ class SegmentExpr : public Expr {
     // Call after full bitset computation completes.
     void
     CachePut(int64_t eval_duration_us) {
-        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+        if (!IsCacheable() || !ExprResCacheManager::IsEnabled() ||
+            segment_ == nullptr) {
             return;
         }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
@@ -1643,7 +1694,7 @@ class SegmentExpr : public Expr {
                                  const ValTypes&... values) {
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
-            if (UseIndexCursor() && num_data_chunk_ == 0) {
+            if (!HasUpdates() && UseIndexCursor() && num_data_chunk_ == 0) {
                 return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
                                                           input,
                                                           res,
@@ -1701,7 +1752,7 @@ class SegmentExpr : public Expr {
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
-            if (UseIndexCursor() && num_data_chunk_ == 0) {
+            if (!HasUpdates() && UseIndexCursor() && num_data_chunk_ == 0) {
                 return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
                                                           input,
                                                           res,
@@ -1984,6 +2035,24 @@ class SegmentExpr : public Expr {
                                TargetBitmapView valid_res,
                                const TargetBitmap* candidate_mask,
                                const ValTypes&... values) {
+        if constexpr (std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            if (HasUpdates()) {
+                std::vector<int64_t> rows(input->begin(), input->end());
+                UpdatedFieldBatch<T> batch(
+                    update_readers_.values->ReadCandidates(rows,
+                                                           candidate_mask));
+                func.template operator()<FilterType::random>(batch.Data(),
+                                                             batch.Validity(),
+                                                             nullptr,
+                                                             rows.size(),
+                                                             res,
+                                                             valid_res,
+                                                             values...);
+                return rows.size();
+            }
+        }
         // VECTOR_ARRAY has a target tag for typed access, but neither Raw nor
         // Vortex implements Take for it. Fall back before building an O(N)
         // Cell plan that the backend must reject.
@@ -2493,7 +2562,7 @@ class SegmentExpr : public Expr {
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
-            if (UseIndexCursor() && num_data_chunk_ == 0) {
+            if (!HasUpdates() && UseIndexCursor() && num_data_chunk_ == 0) {
                 return ProcessIndexLookupByOffsets<T>(
                     func, input, res, valid_res, values...);
             }
@@ -2989,6 +3058,43 @@ class SegmentExpr : public Expr {
                             TargetBitmapView valid_res,
                             const TargetBitmap* candidate_mask,
                             const ValTypes&... values) {
+        if constexpr (std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            if (HasUpdates()) {
+                const auto count = GetNextBatchSize();
+                std::vector<int64_t> candidate_rows(count);
+                std::iota(candidate_rows.begin(),
+                          candidate_rows.end(),
+                          current_data_global_pos_);
+                UpdatedFieldBatch<T> batch(
+                    update_readers_.values->ReadCandidates(candidate_rows,
+                                                           candidate_mask));
+                if constexpr (NeedSegmentOffsets) {
+                    std::vector<int32_t> rows(count);
+                    std::iota(
+                        rows.begin(), rows.end(), current_data_global_pos_);
+                    func(batch.Data(),
+                         batch.Validity(),
+                         nullptr,
+                         rows.data(),
+                         count,
+                         res,
+                         valid_res,
+                         values...);
+                } else {
+                    func(batch.Data(),
+                         batch.Validity(),
+                         nullptr,
+                         count,
+                         res,
+                         valid_res,
+                         values...);
+                }
+                AdvanceDataCursor(count);
+                return count;
+            }
+        }
         if constexpr (!milvus::HasTargetType<T>) {
             return -1;
         } else {
@@ -3192,6 +3298,18 @@ class SegmentExpr : public Expr {
         AssertInfo(segment_->type() == SegmentType::Sealed,
                    "ProcessDataChunkForRange requires sealed segment");
 
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            if (HasUpdates()) {
+                std::vector<int64_t> rows(size);
+                std::iota(rows.begin(), rows.end(), segment_offset);
+                TargetBitmap mask(size, false);
+                for (int64_t i = 0; i < size; ++i) mask[i] = res[i];
+                UpdatedFieldBatch<T> batch(
+                    update_readers_.values->ReadCandidates(rows, &mask));
+                func(batch.Data(), size, res);
+                return size;
+            }
+        }
         int64_t processed_size = 0;
         int64_t remaining = size;
 
@@ -3329,11 +3447,28 @@ class SegmentExpr : public Expr {
             cached_is_nested_index_ = selected_element_level_result_;
 
             auto cached = ExprCacheHelper::GetOrCompute(
-                segment_,
+                HasUpdates() ? nullptr : segment_,
                 [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
+                    // Explicitly opt-in wall-time profiling for this POC.
+                    static const bool profile_index =
+                        std::getenv("MILVUS_POC_PROFILE_INDEX") != nullptr;
+                    using ProfileClock = std::chrono::steady_clock;
+                    const auto* correction_profile = dynamic_cast<
+                        const segcore::experimental::IndexCorrectionProfile*>(
+                        predicate);
+                    const auto before =
+                        correction_profile
+                            ? correction_profile->CorrectionTimings()
+                            : segcore::experimental::IndexCorrectionTimings{};
+                    const auto profile_start = profile_index
+                                                   ? ProfileClock::now()
+                                                   : ProfileClock::time_point{};
                     TargetBitmap res = func(predicate, values...);
+                    const auto predicate_done =
+                        profile_index ? ProfileClock::now()
+                                      : ProfileClock::time_point{};
 
                     TargetBitmap valid_res;
                     const bool multi_path_json =
@@ -3413,6 +3548,37 @@ class SegmentExpr : public Expr {
                             "selected predicate reader has no null reader");
                         valid_res = null_reader_->IsNotNull();
                     }
+                    if (profile_index) {
+                        const auto done = ProfileClock::now();
+                        const auto after =
+                            correction_profile
+                                ? correction_profile->CorrectionTimings()
+                                : segcore::experimental::
+                                      IndexCorrectionTimings{};
+                        const auto ns = [](auto duration) {
+                            return std::chrono::duration_cast<
+                                       std::chrono::nanoseconds>(duration)
+                                .count();
+                        };
+                        const auto original_ns = after.original_predicate_ns -
+                                                 before.original_predicate_ns;
+                        const auto validity_ns = after.original_validity_ns -
+                                                 before.original_validity_ns;
+                        const auto correction_ns =
+                            after.correction_ns - before.correction_ns;
+                        LOG_INFO(
+                            "POC_INDEX_PROFILE field={} corrected={} "
+                            "predicate_call_ns={} validity_call_ns={} "
+                            "original_predicate_ns={} original_validity_ns={} "
+                            "correction_ns={}",
+                            field_id_.get(),
+                            correction_profile != nullptr,
+                            ns(predicate_done - profile_start),
+                            ns(done - predicate_done),
+                            original_ns,
+                            validity_ns,
+                            correction_ns);
+                    }
                     return {std::move(res), std::move(valid_res)};
                 },
                 /*enable_cache_write=*/true,
@@ -3445,6 +3611,24 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessChunksForValid(bool use_index) {
+        if (HasUpdates() && !use_index) {
+            const auto count = GetNextBatchSize();
+            const auto start = UseIndexCursor() ? current_index_chunk_pos_
+                                                : current_data_global_pos_;
+            auto versions = update_readers_.values->Scan(start, count);
+            TargetBitmap valid(count, false);
+            for (size_t i = 0; i < versions.size(); ++i) {
+                valid[i] =
+                    versions[i] &&
+                    !std::holds_alternative<std::monostate>(*versions[i]);
+            }
+            if (UseIndexCursor()) {
+                current_index_chunk_pos_ += count;
+            } else {
+                AdvanceDataCursor(count);
+            }
+            return valid;
+        }
         if constexpr (std::is_same_v<T, VectorArray>) {
             return ProcessDataChunksForValid<T>();
         } else {
@@ -3500,6 +3684,17 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessChunksForValidByOffsets(bool use_index, const OffsetVector& input) {
+        if (HasUpdates() && !use_index) {
+            auto versions = update_readers_.values->ReadOffsets(
+                std::vector<int64_t>(input.begin(), input.end()));
+            TargetBitmap valid(versions.size(), false);
+            for (size_t i = 0; i < versions.size(); ++i) {
+                valid[i] =
+                    versions[i] &&
+                    !std::holds_alternative<std::monostate>(*versions[i]);
+            }
+            return valid;
+        }
         auto batch_size = input.size();
         TargetBitmap valid_result(batch_size);
         valid_result.set();
@@ -4204,7 +4399,30 @@ class SegmentExpr : public Expr {
             // so cleanup's second call would wait forever after prefetch fails.
             try {
                 auto self = const_cast<SegmentExpr*>(this);
-                self->DetermineExecPath();
+                if (self->HasUpdates()) {
+                    self->DetermineUpdateExecPath();
+                    if (self->exec_path_ == ExprExecPath::ScalarIndex &&
+                        self->selected_reader_ !=
+                            self->update_readers_.temp_index.get()) {
+                        self->corrected_index_reader_ =
+                            self->update_readers_.values->CorrectOriginalIndex(
+                                self->selected_reader_);
+                        self->selected_reader_ =
+                            self->corrected_index_reader_.get();
+                        self->null_reader_ =
+                            dynamic_cast<const index::INullReader*>(
+                                self->selected_reader_);
+                        self->pattern_reader_ =
+                            dynamic_cast<const index::IPatternMatchReader*>(
+                                self->selected_reader_);
+                        if (self->ngram_reader_)
+                            self->ngram_reader_ =
+                                dynamic_cast<const index::INgramReader*>(
+                                    self->selected_reader_);
+                    }
+                } else {
+                    self->DetermineExecPath();
+                }
                 self->FallbackToJsonStatsIfEligible();
                 self->RecordExecPath();
             } catch (...) {
@@ -4448,6 +4666,9 @@ class SegmentExpr : public Expr {
             return;
         }
         EnsureExecPathDetermined();
+        if (HasUpdates()) {
+            return;
+        }
         if (exec_path_ != ExprExecPath::RawData &&
             selected_reader_ != nullptr) {
             selected_reader_->Prefetch();
@@ -4575,6 +4796,8 @@ class SegmentExpr : public Expr {
                selected_element_level_result_;
     }
 
+    segcore::experimental::UpdateReaders update_readers_;
+    std::unique_ptr<index::IIndexReaderBase> corrected_index_reader_;
     const segcore::SegmentInternalInterface* segment_;
     // Request-scoped sealed read snapshot, borrowed from the owning
     // QueryContext. Null for growing segments and non-pinned paths.

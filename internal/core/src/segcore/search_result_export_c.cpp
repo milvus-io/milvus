@@ -653,7 +653,9 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
                 field_id,
                 field_meta,
                 search_result->seg_offsets_.data(),
-                size);
+                size,
+                nullptr,
+                search_result->query_timestamp_);
         }
         search_result->search_storage_cost_.scanned_remote_bytes +=
             op_ctx.storage_usage.scanned_cold_bytes.load();
@@ -1291,6 +1293,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 OrderedSegmentFields& materialized) {
                 SearchResult output;
                 output.segment_ = segment;
+                output.query_timestamp_ =
+                    materialized.search_result->query_timestamp_;
                 output.seg_offsets_ = materialized.segment_offsets;
                 output.distances_.resize(output.seg_offsets_.size());
                 output.read_snapshot_ =
@@ -1449,7 +1453,9 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                             field_id,
                             field_meta,
                             materialized.segment_offsets.data(),
-                            materialized.segment_offsets.size());
+                            materialized.segment_offsets.size(),
+                            nullptr,
+                            materialized.search_result->query_timestamp_);
                     });
                 for (auto& fetched : fetched_fields) {
                     materialized.fields[fetched.field_id] =

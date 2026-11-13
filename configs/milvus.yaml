@@ -671,6 +671,10 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
+  pkUpdatePOC: # Requires eager loading and enableSegmentPrune=false on all query runtimes.
+    collectionID: 0 # Internal static single-segment POC only; 0 disables injection (R2).
+    updatesFile: "" # Local JSONL file; publish with atomic rename. Read at segment load.
+    enabled_temp_index: false # true: R1-ON; false: R1-OFF. Reload to change modes.
   queryView:
     transformLogDrainConcurrencyRatio: 0.25 # QueryNode-wide TransformLog backlog drain worker count is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   groupBy:

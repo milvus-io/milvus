@@ -86,6 +86,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     }
 
     void
+    DetermineUpdateExecPath() override {
+        SelectUpdateIndexReader();
+    }
+
+    void
     DetermineExecPath() override;
 
     bool

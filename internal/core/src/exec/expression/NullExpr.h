@@ -62,6 +62,11 @@ class PhyNullExpr : public SegmentExpr {
     CanExecuteAllAtOnce() const override;
 
     void
+    DetermineUpdateExecPath() override {
+        SelectUpdateIndexReader();
+    }
+
+    void
     DetermineExecPath() override;
 
     void

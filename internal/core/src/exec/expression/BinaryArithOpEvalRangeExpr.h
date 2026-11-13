@@ -756,6 +756,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         SelectAndCreateIndexReader(req);
     }
 
+    void
+    DetermineUpdateExecPath() override {
+        // Arithmetic has no predicate-index operation. Read candidate values
+        // through the overlay; its pinned base reader can use the original index.
+        exec_path_ = ExprExecPath::RawData;
+    }
+
     bool
     SupportsRawExprCache() const override {
         if (expr_->column_.element_level_) {
@@ -800,7 +807,8 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
  private:
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
+    ExecRangeVisitorImpl(OffsetVector* input = nullptr,
+                         const TargetBitmap* candidates = nullptr);
 
     template <typename T>
     VectorPtr
@@ -808,7 +816,8 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForData(OffsetVector* input = nullptr,
+                                const TargetBitmap* candidates = nullptr);
 
     template <typename ValueType>
     VectorPtr

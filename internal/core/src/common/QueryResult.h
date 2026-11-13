@@ -341,6 +341,7 @@ struct SearchResult {
         result->allow_filtered_vector_search_ = false;
         result->vector_search_filter_owner_ = filter;
         filtered_vector_search_fn_(BitsetView(*filter), topk, *result);
+        result->query_timestamp_ = query_timestamp_;
         AssertInfo(!result->vector_iterators_.has_value(),
                    "ordinary filtered search must not return iterators");
         return result;
@@ -363,6 +364,8 @@ struct SearchResult {
     // HasFieldData, ...) may still self-capture; migrating them is a Phase 4
     // follow-up. Growing and non-pinned paths leave this empty.
     std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_;
+    // Original filter timestamp, retained through deferred output materialization.
+    std::optional<Timestamp> query_timestamp_;
 
     // Pins resources whose iterators or offset mappings may outlive the
     // original search call independently from segment snapshot publication.
