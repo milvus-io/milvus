@@ -235,6 +235,7 @@ func TestCompactionTargetWithEmptyMatchWaitsForCollectionDropAck(t *testing.T) {
 		message.NewSharedDBNameResourceKey("default"),
 		message.NewSharedCollectionNameResourceKey("default", "records")).
 		Return(nil, nil).Once()
+	b.EXPECT().Close().Return().Once()
 	broadcast.ResetBroadcaster()
 	t.Cleanup(broadcast.ResetBroadcaster)
 	broadcast.Register(b)
