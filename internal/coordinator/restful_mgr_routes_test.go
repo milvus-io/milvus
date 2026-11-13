@@ -306,6 +306,29 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "alterWAL endpoint")
 	})
 
+	t.Run("access log config should fail", func(t *testing.T) {
+		for _, key := range []string{
+			"proxy.accessLog.localPath",
+			"proxy.accessLog.filename",
+			"proxy.accessLog.enable",
+			"proxy.accessLog.formatters.base.format",
+		} {
+			reqBody := map[string]interface{}{
+				"configs": []map[string]interface{}{
+					{"key": key, "value": "test"},
+				},
+			}
+			body, _ := json.Marshal(reqBody)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+
+			coord.HandleAlterConfig(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code, "key %s should be blocked", key)
+			assert.Contains(t, w.Body.String(), "access log configuration cannot be modified")
+		}
+	})
+
 	t.Run("immutable config should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
 			"configs": []map[string]interface{}{
