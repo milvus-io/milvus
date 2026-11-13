@@ -208,13 +208,18 @@ func (s *SegmentsInfo) updateDCState(segmentID UniqueID, update func(dc *dcSegme
 // Callers MUST NOT mutate the returned SegmentInfo.SegmentInfo proto; use the
 // SegmentsInfo setter methods which clone before writing.
 func (s *SegmentsInfo) assemble(segProto *datapb.SegmentInfo, dc *dcSegmentState) *SegmentInfo {
-	si := &SegmentInfo{SegmentInfo: segProto}
+	si := &SegmentInfo{}
+	s.fill(si, segProto, dc)
+	return si
+}
+
+func (s *SegmentsInfo) fill(si *SegmentInfo, segProto *datapb.SegmentInfo, dc *dcSegmentState) {
+	*si = SegmentInfo{SegmentInfo: segProto}
 	if dc != nil {
 		si.LastFlushTime = dc.lastFlushTime
 		si.IsCompacting = dc.isCompacting
 		si.LastWrittenTime = dc.lastWrittenTime
 	}
-	return si
 }
 
 // GetSegment returns SegmentInfo
@@ -251,7 +256,7 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return result
 }
 
-func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*SegmentInfo {
+func (s *SegmentsInfo) candidateProtos(criterion *segmentCriterion) map[UniqueID]*datapb.SegmentInfo {
 	var protos map[int64]*datapb.SegmentInfo
 	switch {
 	case criterion.collectionID > 0 && criterion.channel != "":
@@ -269,28 +274,34 @@ func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*
 	default:
 		protos = s.store.GetAllSegments()
 	}
-	result := make(map[UniqueID]*SegmentInfo, len(protos))
-	for id, segProto := range protos {
-		result[id] = s.assemble(segProto, s.dcStateOf(id))
-	}
-	return result
+	return protos
 }
 
 func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
+	result := make([]*SegmentInfo, 0)
+	s.RangeReused(func(segment *SegmentInfo) bool {
+		result = append(result, segment.ShadowClone())
+		return true
+	}, filters...)
+	return result
+}
+
+// RangeReused visits the selected segments using one wrapper valid only during fn.
+// Keep segment.ShadowClone() to retain it. The proto snapshot still comes from
+// MetaStore, preserving its per-collection atomic publication guarantees. No
+// SegmentInfo is allocated for a segment the visitor does not retain.
+func (s *SegmentsInfo) RangeReused(fn func(segment *SegmentInfo) bool, filters ...SegmentFilter) {
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
 	}
-
-	// apply criterion
-	candidates := s.getCandidates(criterion)
-	result := make([]*SegmentInfo, 0, len(candidates))
-	for _, segment := range candidates {
-		if criterion.Match(segment) {
-			result = append(result, segment)
+	segment := &SegmentInfo{}
+	for id, segProto := range s.candidateProtos(criterion) {
+		s.fill(segment, segProto, s.dcStateOf(id))
+		if criterion.Match(segment) && !fn(segment) {
+			return
 		}
 	}
-	return result
 }
 
 func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
