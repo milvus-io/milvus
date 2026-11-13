@@ -47,6 +47,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestSchemaVersionTickerRemainsExclusiveToLegacyCompaction(t *testing.T) {
+	ctx := t.Context()
+	cfg := &Params.DataCoordCfg
+	require.NoError(t, Params.Save(cfg.BumpSchemaVersionCompactionEnabled.Key, "true"))
+	t.Cleanup(func() { Params.Reset(cfg.BumpSchemaVersionCompactionEnabled.Key) })
+	mt := meta.NewEmptyTestMeta()
+	handler := meta.NewMockHandlerWithMeta(mt)
+	alloc := meta.NewMockAllocator(t)
+	legacyInspector := NewMockCompactionInspector(t)
+	legacyInspector.EXPECT().isFull().Return(false).Once()
+	legacy := NewCompactionTriggerManager(alloc, handler, legacyInspector, mt, nil, nil, nil, nil, nil)
+	legacy.handleTicker(ctx, BumpSchemaVersionTicker)
+
+	targetMeta := targets.NewLoadedCompactionTargetMeta(t, ctx)
+	tbc := NewCompactionTriggerManager(alloc, handler, NewMockCompactionInspector(t), mt, nil, nil, nil, targetMeta, nil)
+	tbc.handleTicker(ctx, BumpSchemaVersionTicker)
+}
+
 func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	params := paramtable.Get()
 	for _, setting := range []struct {

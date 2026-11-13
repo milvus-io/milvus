@@ -123,10 +123,10 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	// Initialize policies map for ticker handling
 	m.policies[L0Ticker] = m.l0Policy
 	m.policies[ClusteringTicker] = m.clusteringPolicy
-	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	if m.targetReconciler == nil {
 		m.policies[SingleTicker] = m.singlePolicy
 		m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
+		m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	}
 	return m
 }
@@ -170,7 +170,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer clusteringTicker.Stop()
-	var singleTick, storageVersionTick <-chan time.Time
+	var singleTick, storageVersionTick, bumpSchemaVersionTick <-chan time.Time
 	if m.targetReconciler == nil {
 		singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 		defer singleTicker.Stop()
@@ -178,9 +178,10 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 		storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 		defer storageVersionTicker.Stop()
 		storageVersionTick = storageVersionTicker.C
+		bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
+		defer bumpSchemaVersionTicker.Stop()
+		bumpSchemaVersionTick = bumpSchemaVersionTicker.C
 	}
-	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
-	defer bumpSchemaVersionTicker.Stop()
 	targetTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer targetTicker.Stop()
 	if m.targetReconciler != nil {
@@ -200,7 +201,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTick:
 			m.handleTicker(ctx, StorageVersionTicker)
-		case <-bumpSchemaVersionTicker.C:
+		case <-bumpSchemaVersionTick:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
 		case <-targetTicker.C:
 			m.handleTicker(ctx, TargetTicker)

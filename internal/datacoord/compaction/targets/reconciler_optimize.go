@@ -73,26 +73,22 @@ func (r *CompactionTargetReconciler) observeOptimize(ctx context.Context, record
 }
 
 func (r *CompactionTargetReconciler) mixViews(
-	ctx context.Context, rewrites []*meta.SegmentInfo, optimizeInputs map[int64]optimizeInput,
+	ctx context.Context, requiredRewrites map[int64]*meta.SegmentInfo, optimizeInputs map[int64]optimizeInput,
 	allocated map[int64]struct{}, eligible map[int64]collectionPlanningFacts, size SizeCondition,
 	segments []*meta.SegmentInfo,
 ) []view.TargetView {
-	requiredRewrites := make(map[int64]*meta.SegmentInfo, len(rewrites))
-	for _, segment := range rewrites {
-		requiredRewrites[segment.GetID()] = segment
-	}
 	sizeInputs := r.selectSizeInputs(ctx, size, optimizeInputs, allocated, eligible, segments)
 
 	var optimizeSelectable []*meta.SegmentInfo
 	for id, input := range optimizeInputs {
-		_, sorting := allocated[id]
-		if input.valid && !sorting && r.selectable(ctx, input.segment, eligible) {
+		_, assigned := allocated[id]
+		if input.valid && !assigned && r.selectable(ctx, input.segment, eligible) {
 			optimizeSelectable = append(optimizeSelectable, input.segment)
 		}
 	}
 	optimizeSelectable = r.filterMixCompactionSelectable(ctx, optimizeSelectable)
 	optimizeCandidates := make(map[int64]bool, len(optimizeSelectable))
-	selected := make(map[int64]*meta.SegmentInfo, len(optimizeSelectable)+len(rewrites)+len(sizeInputs))
+	selected := make(map[int64]*meta.SegmentInfo, len(optimizeSelectable)+len(requiredRewrites)+len(sizeInputs))
 	for _, segment := range optimizeSelectable {
 		selected[segment.GetID()] = segment
 		optimizeCandidates[segment.GetID()] = true

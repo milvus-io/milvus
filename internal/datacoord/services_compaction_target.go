@@ -339,6 +339,9 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingCleanup(record) && record.GetEnabled():
 		rows, observationErr = targets.ObserveCleanup(ctx, s.meta, record)
 		observed = true
+	case record.GetIntent() == datapb.TargetIntent_INTENT_SCHEMA_VERSION && targets.HasStandingCondition(record) && record.GetEnabled():
+		rows, observationErr = targets.ObserveSchemaVersion(ctx, s.meta)
+		observed = true
 	case targets.IsStandingStorage(record) && record.GetEnabled():
 		rows, observationErr = targets.ObserveStorage(ctx, s.meta, record)
 		observed = true
