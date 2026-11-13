@@ -133,7 +133,7 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}
 	entry := manifestIndexEntryForCommitTest(t, mt, dm.IndexMeta, segmentID, buildID, taskInfo)
-	require.NoError(t, mt.CommitSegmentManifest(context.Background(), meta.SegmentManifestCommit{
+	request := meta.SegmentManifestCommit{
 		SegmentID:     segmentID,
 		StorageConfig: &indexpb.StorageConfig{},
 		Mutation: meta.ManifestMutation{
@@ -147,7 +147,16 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 				FinishedTask: taskInfo,
 			}},
 		},
-	}))
+	}
+	failCatalog := mockey.Mock((*datacoord.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
+	require.ErrorIs(t, mt.CommitSegmentManifest(ctx, request), merr.ErrServiceUnavailable)
+	require.Equal(t, oldManifest, mt.GetSegment(ctx, segmentID).GetManifestPath())
+	require.Empty(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries())
+	pending, exists := dm.IndexMeta.GetIndexJob(buildID)
+	require.True(t, exists)
+	require.Equal(t, commonpb.IndexState_InProgress, pending.IndexState)
+	failCatalog.UnPatch()
+	require.NoError(t, mt.CommitSegmentManifest(ctx, request))
 
 	require.Equal(t, newManifest, mt.GetSegment(context.Background(), segmentID).GetManifestPath())
 	require.True(t, mt.GetSegment(context.Background(), segmentID).GetManifestHasIndex())
@@ -155,6 +164,12 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, persistedSegments, 1)
 	require.True(t, persistedSegments[0].GetManifestHasIndex())
+	require.Len(t, persistedSegments[0].GetIndexSummaries(), 1)
+	summary := persistedSegments[0].GetIndexSummaries()[0]
+	require.EqualValues(t, buildID, summary.GetBuildId())
+	require.EqualValues(t, indexID, summary.GetIndexId())
+	require.EqualValues(t, 2000, summary.GetSerializedSize())
+	require.True(t, summary.GetHasArtifact())
 	published, ok := dm.IndexMeta.GetIndexJob(buildID)
 	require.True(t, ok)
 	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
