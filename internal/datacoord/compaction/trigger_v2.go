@@ -332,7 +332,7 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 
 // notify submits the views of one trigger type. When capped, it stops once the
 // inspector is full and leaves the rest to later runs.
-func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) (limited bool) {
+func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) bool {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
 	for _, cv := range views {
@@ -377,7 +377,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	taskID, err := m.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
-		return nil
+		return err
 	}
 
 	levelZeroSegs := lo.Map(cv.GetSegmentsView(), func(segView *view.SegmentView, _ int) int64 {
@@ -387,7 +387,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because get collection fail", mlog.Err(err))
-		return nil
+		return err
 	}
 	if collection == nil {
 		log.Warn(ctx, "collection not found when submitting l0 compaction view", mlog.Int64("collectionID", cv.GetGroupLabel().CollectionID))
@@ -440,7 +440,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because get collection fail", mlog.Err(err))
-		return nil
+		return err
 	}
 	if collection == nil {
 		log.Warn(ctx, "collection not found when submitting clustering compaction", mlog.Int64("collectionID", cv.GetGroupLabel().CollectionID))
@@ -455,7 +455,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(collection, cv, expectedSegmentSize)
 	if err != nil {
 		log.Warn(ctx, "Failed to calculate cluster compaction config fail", mlog.Err(err))
-		return nil
+		return err
 	}
 
 	totalSize := cv.GetTotalSize()
@@ -463,7 +463,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	planID, analyzeTaskID, preAllocatedSegmentIDs, err := allocClusteringCompactionPlanIDs(m.allocator, totalSize, preferSegmentSize)
 	if err != nil {
 		log.Warn(ctx, "failed to pre-allocate result segment IDs", mlog.Err(err))
-		return nil
+		return err
 	}
 	now := time.Now().Unix()
 	task := &datapb.CompactionTask{
@@ -514,7 +514,7 @@ func (m *CompactionTriggerManager) submitSingleView(ctx context.Context, cv view
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because get collection fail", mlog.Err(err))
-		return nil
+		return err
 	}
 	if collection == nil {
 		log.Warn(ctx, "collection not found when submitting single compaction", mlog.Int64("collectionID", cv.GetGroupLabel().CollectionID))
@@ -530,7 +530,7 @@ func (m *CompactionTriggerManager) submitSingleView(ctx context.Context, cv view
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
-		return nil
+		return err
 	}
 
 	var totalRows int64 = 0
@@ -543,7 +543,7 @@ func (m *CompactionTriggerManager) submitSingleView(ctx context.Context, cv view
 		triggerID, err = m.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn(ctx, "failed to allocate compaction trigger ID", mlog.Err(err))
-			return nil
+			return err
 		}
 	}
 
@@ -679,7 +679,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection", mlog.Err(err))
-		return nil
+		return err
 	}
 	if collection == nil {
 		log.Warn(ctx, "collection not found when submitting force merge compaction", mlog.Int64("collectionID", cv.GetGroupLabel().CollectionID))
@@ -698,7 +698,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(forceMergeView.GetTargetSegmentSize()))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
-		return nil
+		return err
 	}
 
 	now := time.Now().Unix()
@@ -747,7 +747,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because get collection fail", mlog.Err(err))
-		return nil
+		return err
 	}
 	if collection == nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because collection is nil")
@@ -760,7 +760,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit schema bump compaction because get collection ttl failed", mlog.Err(err))
-		return nil
+		return err
 	}
 	var totalRows int64 = 0
 	for _, s := range cv.GetSegmentsView() {
@@ -770,7 +770,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, cv.GetTotalSize(), float64(expectedSize))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
-		return nil
+		return err
 	}
 	now := time.Now().Unix()
 	task := &datapb.CompactionTask{

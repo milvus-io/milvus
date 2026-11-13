@@ -609,3 +609,39 @@ func TestStandingSortCompactionTargetConditionAndObservation(t *testing.T) {
 	require.Len(t, records, 1)
 	require.True(t, describe().GetEnabled())
 }
+
+func TestStandingSortConditionSaveFailureKeepsLastConfirmedDefinition(t *testing.T) {
+	enableTestCompactionTargets(t)
+	params := paramtable.Get()
+	params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+	t.Cleanup(func() { params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key) })
+
+	ctx := t.Context()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	record := &datapb.CompactionTarget{
+		TargetID: 44, Intent: datapb.TargetIntent_INTENT_SORT, TailLimit: -1,
+		ActivatedAtTS: 1, Enabled: proto.Bool(true), ConditionRevision: 1,
+	}
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{record}, nil).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, record.GetTargetID()).Return(record, nil).Twice()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
+
+	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
+	s.meta.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", Level: datapb.SegmentLevel_L1,
+		State: commonpb.SegmentState_Flushed, NumOfRows: 7,
+	}))
+	reconciler := targets.NewCompactionTargetReconciler(s.meta, &index.IndexMeta{}, s.compactionTargetMeta, meta.NewMockHandlerWithMeta(s.meta), s.allocator)
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	for _, views := range events {
+		require.Empty(t, views)
+	}
+
+	resp, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{
+		TargetId: record.GetTargetID(), Collection: &datapb.CompactionTargetResource{},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.True(t, resp.GetTarget().GetEnabled())
+	require.Equal(t, int64(7), resp.GetTarget().GetRemainingRows())
+}
