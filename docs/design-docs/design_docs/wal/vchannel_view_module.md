@@ -93,8 +93,10 @@ Rules include:
   not trigger schema-change flushing. Exact-version lookup selects the latest
   retained metadata for that version, while allocation-time lookup retains its
   existing WAL boundary semantics;
-- AlterWAL state belongs to the PChannel control fields embedded in the global
-  WALCheckpoint, not a VChannel snapshot.
+- Legacy AlterWAL stage state belongs to the PChannel control fields embedded in
+  the global WALCheckpoint. The [hot-switch protocol](alter-wal.md) derives the
+  writer from durable links instead. Both protocols still route the old-prefix
+  flush through the VChannel modules.
 
 ### Runtime Close And Stable Tombstones
 

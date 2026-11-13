@@ -58,13 +58,15 @@ type scannerConfig struct {
 // caller finishes initialization. The consumer snapshots unfinished transactions
 // before delivering the barrier. Cancellation also releases the pause.
 type scannerStartupBarrier struct {
-	message message.ImmutableMessage
-	resume  <-chan struct{}
+	message         message.ImmutableMessage
+	resume          <-chan struct{}
+	stopAtWALSwitch bool
+	liveSource      func() (walimpls.ROWALImpls, wab.ROWriteAheadBuffer)
 }
 
 func (b *scannerStartupBarrier) matches(msg message.ImmutableMessage) bool {
 	return msg.MessageType() == message.MessageTypeRecoveryBarrier &&
-		msg.TimeTick() == b.message.TimeTick() && msg.MessageID().EQ(b.message.MessageID())
+		msg.TimeTick() == b.message.TimeTick() && msg.WALName() == b.message.WALName() && msg.MessageID().EQ(b.message.MessageID())
 }
 
 // newScannerAdaptor creates a new scanner adaptor.
@@ -199,7 +201,7 @@ func (s *scannerAdaptorImpl) execute() {
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
 	wb := s.writeAheadBuffer
 	var err error
-	if wb == nil && s.Channel().AccessMode == types.AccessModeRW {
+	if wb == nil && s.startupBarrier == nil && s.Channel().AccessMode == types.AccessModeRW {
 		if wb, err = s.waitWriteAheadBuffer(); err != nil {
 			return err
 		}
@@ -306,7 +308,7 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error {
 	// Filtering the message if needed.
 	// System message should never be filtered.
-	if s.filterFunc != nil && !s.filterFunc(msg) {
+	if s.filterFunc != nil && !message.IsWALSwitch(msg) && !s.filterFunc(msg) {
 		return nil
 	}
 
@@ -314,13 +316,16 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 	var isTailing bool
 	msg, isTailing = isTailingScanImmutableMessage(msg)
 	s.metrics.ObserveMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	if messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+	if messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) || message.IsWALSwitch(msg) {
 		// If a timetick confirm barrier arrives, the reorder buffer can be
 		// consumed until the latest confirmed timetick.
 		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
 		s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 
 		// There's some txn message need to hold until confirmed, so we need to handle them in txn buffer.
+		if message.IsWALSwitch(msg) {
+			messages = append(messages, msg)
+		}
 		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
 		s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
 		if s.startupBarrier != nil && s.startupBarrier.matches(msg) && s.startupTxnBuffer == nil {
@@ -341,7 +346,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 			}
 			s.pendingQueue.Add(msgs)
 		}
-		if msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || s.pendingQueue.Len() == 0 {
+		if !message.IsWALSwitch(msg) && (msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || s.pendingQueue.Len() == 0) {
 			// Keep the legacy scanner contract for TimeTick messages: persisted
 			// TimeTicks and otherwise-empty batches must reach consumers so the
 			// legacy query pipeline can advance tsafe. Other confirmation barriers

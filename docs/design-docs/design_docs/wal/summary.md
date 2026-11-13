@@ -242,6 +242,14 @@ is a Summary sealing trigger. Small low-traffic batches may remain in memory,
 backed by WAL, and pin the global checkpoint until size or tail pressure requires
 persistence. This does not weaken the Summary confirmation bound.
 
+AlterWAL observation explicitly calls `RequestFlushThrough` after updating the
+observed frontier. The old WAL is fenced during a backend switch, so reaching a
+size or pressure threshold cannot depend on later traffic. This asynchronous
+request seals pending records with coverage through the payload-free AlterWAL
+barrier, including during startup replay. It does not wait for object writes
+or change confirmation, catalog publication, or the switch's checkpoint wait.
+Ordinary TimeTick messages do not force sealing.
+
 Sealed chunks and dirty manifests continue on their own scheduler retry paths;
 periodic persistence checks do not manufacture completion or bypass the first-manifest
 requirement. Empty backlog produces no new chunk.

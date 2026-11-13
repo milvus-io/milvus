@@ -132,7 +132,8 @@ func NewManager(config ManagerConfig) *Manager {
 }
 
 // ObserveMessage copies one ordered WAL message into the summary without
-// retaining its source handle. Size thresholds schedule asynchronous writes.
+// retaining its source handle. Size thresholds and AlterWAL barriers schedule
+// asynchronous writes.
 // DDL messages preserve the history of previously committed requests.
 func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) {
 	if msg == nil {
@@ -163,7 +164,12 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
-	if overThreshold {
+	if msg.MessageType() == message.MessageTypeAlterWAL {
+		// The old WAL is fenced during a switch, so no later traffic may
+		// trigger sealing. Include this payload-free barrier in the coverage
+		// without waiting for object storage on the observation path.
+		m.RequestFlushThrough(msg.TimeTick())
+	} else if overThreshold {
 		m.requestSeal()
 	}
 }

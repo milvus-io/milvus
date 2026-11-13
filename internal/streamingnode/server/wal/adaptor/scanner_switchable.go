@@ -210,19 +210,30 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				return nil, err
 			}
 			if s.startupBarrier != nil {
+				if s.startupBarrier.stopAtWALSwitch && message.IsWALSwitch(msg) &&
+					message.WALName(message.MustAsImmutableAlterWALMessageV2(msg).Header().TargetWalName) != msg.WALName() {
+					// RecoveryStorage observes this boundary before replacing the
+					// physical leg. Never expose the old end's later probe barrier.
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
 				if !s.startupBarrier.matches(msg) {
 					continue
 				}
 				// This WAB was seeded by exactly this barrier. Older barriers and
 				// TimeTicks cannot switch sources before startup state is captured.
 				ready := s.startupBarrier.resume
+				binding := s.startupBarrier.liveSource
 				s.startupBarrier = nil
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				case <-ready:
 				}
-			} else if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier {
+				if binding != nil {
+					s.innerWAL, s.writeAheadBuffer = binding()
+				}
+			} else if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier && !message.IsWALSwitch(msg) {
 				// Ordinary catchup switches at a sync confirmation shared with WAB.
 				continue
 			}

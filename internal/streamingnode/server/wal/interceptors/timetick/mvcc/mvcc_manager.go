@@ -71,7 +71,7 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	defer cm.mu.Unlock()
 	// Confirmation can race ahead of this callback: Acker.Ack runs before
 	// UpdateMVCC. Never discard a successful write merely because tt <= C.
-	if messageutil.IsTimeTickConfirmBarrier(msgType) {
+	if messageutil.IsTimeTickConfirmBarrier(msgType) || message.IsWALSwitch(msg) {
 		cm.pchannelMVCCTimestamp = max(cm.pchannelMVCCTimestamp, tt)
 		return
 	}

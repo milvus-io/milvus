@@ -90,6 +90,9 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 }
 
 func (w *walImpl) Close() {
+	if w.p == nil {
+		return
+	}
 	closeWriterErr := w.p.Close(context.Background())
 	if closeWriterErr != nil {
 		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))

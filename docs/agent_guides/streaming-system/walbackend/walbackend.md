@@ -11,6 +11,11 @@ The WAL backend is the durable storage layer for WAL entries. Each PChannel maps
 
 ## WALImpls Interface
 
+Normal backend changes are composed by `autowalimpls`; see
+[AlterWAL](../../../design-docs/design_docs/wal/alter-wal.md) for the durable
+link, synchronization boundary and startup chain-recovery protocol. A backend
+switch preserves the outer WAL and its scanners.
+
 All backends implement the same interface:
 - `Append(ctx, msg) → MessageID` — Persist a message and return its backend-specific ID.
 - `Read(ctx, opts) → ScannerImpls` — Create a scanner starting from a delivery policy (earliest, latest, or specific MessageID).

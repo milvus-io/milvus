@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -115,7 +116,8 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			liveReady := make(chan struct{})
 			ro := adaptImplsToROWAL(l, func() {})
 			t.Cleanup(ro.Close)
-			stream := newRecoveryStreamBuilder(ro, buffer, liveReady).Build(recovery.BuildRecoveryStreamParam{
+			builder := newRecoveryStreamBuilder(ro, nil, liveReady)
+			stream := builder.Build(recovery.BuildRecoveryStreamParam{
 				StartCheckpoint: historical.MessageID(), RecoveryBarrier: barrier,
 			})
 			t.Cleanup(func() { _ = stream.Close() })
@@ -130,6 +132,17 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			require.Equal(t, uint64(2), begin.TimeTick())
 			require.Len(t, bodies, 1)
 			require.True(t, body.MessageID().EQ(bodies[0].MessageID()))
+
+			// Recovery completes against physical WAL, then the paused scanner
+			// receives the live wrapper and WAB without losing its partial txn.
+			builder.openBackend = func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
+				t.Fatal("handoff must not reopen a writer")
+				return nil, nil
+			}
+			live := builder.finishRecovery()
+			require.IsType(t, &autowalimpls.WAL{}, live)
+			ro.roWALImpls = live
+			builder.writeAheadBuffer = buffer
 
 			// The writer can confirm more data while recovery is paused. Even a tiny
 			// WAB must preserve the handoff and every unconsumed message.

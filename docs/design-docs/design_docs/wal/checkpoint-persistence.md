@@ -255,6 +255,12 @@ to be skipped while data components still replay.
 Already-covered AlterWAL events may still advance their persisted stage, after
 the required data checkpoint has been published.
 
+That staged protocol applies to legacy AlterWAL records. The
+[hot-switch protocol](alter-wal.md) uses the durable log chain to recover the
+write target and never rewrites a data checkpoint to the target's earliest ID.
+Its old-prefix flush is asynchronous and remains gated by this document's
+continuous-prefix publication rules.
+
 `ApplyControl`, proto conversion and cloning preserve the Control frontier.
 Recovery initializes its applied boundary to the maximum of the saved Control
 frontier and the global TimeTick: the global prefix is already covered even if
