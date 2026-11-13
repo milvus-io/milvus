@@ -241,6 +241,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
+	// This can create the collection with an index list older than one that a
+	// delegator on another node already published to this node, and no
+	// delegator is told about it. The collection is created only when no
+	// segment or channel of it is on this node, so this node has left the
+	// shards of those delegators. Each of them drops it from its published set
+	// at its next SyncIndexMeta, and a node that comes back before that comes
+	// back through the delegator's LoadSegments, which calls
+	// forgetIndexMetaWorker.
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
@@ -581,6 +589,27 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 		log.Warn("failed to update schema", zap.Error(err))
 	}
 
+	return merr.Status(err), nil
+}
+
+// SyncIndexMeta applies the collection index list a delegator publishes to its
+// workers. A stopping node still serves its remaining segments, so it accepts it.
+func (node *QueryNode) SyncIndexMeta(ctx context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		return merr.Success(), nil
+	}
+	meta := node.composeIndexMeta(ctx, req.GetIndexInfoList(), collection.Schema())
+	err := node.manager.Collection.UpdateIndexMeta(req.GetCollectionID(), meta, req.GetIndexInfoVersion())
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to sync index meta", zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Int64("indexInfoVersion", req.GetIndexInfoVersion()), zap.Error(err))
+	}
 	return merr.Status(err), nil
 }
 
@@ -1509,6 +1538,15 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				}
 				return id, action.GetCheckpoint().Timestamp
 			})
+			// QueryCoord makes the new target readable once this call succeeds, so
+			// the workers must have the index list first: a search plan on a field
+			// missing from it fails. A request without a version carries no list.
+			if version := req.GetLoadMeta().GetIndexInfoVersion(); version > 0 {
+				if err := shardDelegator.SyncIndexMeta(ctx, req.GetIndexInfoList(), version); err != nil {
+					log.Warn("failed to sync index meta to workers", zap.Error(err))
+					return merr.Status(err), nil
+				}
+			}
 			shardDelegator.AddExcludedSegments(droppedInfos)
 			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {

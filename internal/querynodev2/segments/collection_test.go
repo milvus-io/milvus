@@ -19,7 +19,9 @@ package segments
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -87,6 +89,36 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			s.Error(err)
 		})
 	})
+}
+
+func (s *CollectionManagerSuite) TestIndexMetaIgnoresOlderList() {
+	coll := s.cm.Get(1)
+	oldMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	schema := coll.Schema()
+	newVecFieldID := int64(200)
+	newMeta := proto.Clone(oldMeta).(*segcorepb.CollectionIndexMeta)
+	newMeta.IndexMetas = append(newMeta.IndexMetas, &segcorepb.FieldIndexMeta{CollectionID: 1, FieldID: newVecFieldID, IndexName: "new_index"})
+	hasNewField := func() bool {
+		return lo.ContainsBy(coll.GetCCollection().IndexMeta().GetIndexMetas(), func(m *segcorepb.FieldIndexMeta) bool {
+			return m.GetFieldID() == newVecFieldID
+		})
+	}
+
+	s.Require().NoError(s.cm.PutOrRef(1, schema, newMeta, &querypb.LoadMetaInfo{IndexInfoVersion: 20}))
+	defer s.cm.Unref(1, 1)
+	s.True(hasNewField())
+
+	// A load that listed the indexes before the new one was created arrives late.
+	s.Require().NoError(s.cm.PutOrRef(1, schema, oldMeta, &querypb.LoadMetaInfo{IndexInfoVersion: 10}))
+	defer s.cm.Unref(1, 1)
+	s.True(hasNewField())
+
+	s.NoError(s.cm.UpdateIndexMeta(1, oldMeta, 15))
+	s.True(hasNewField())
+	s.NoError(s.cm.UpdateIndexMeta(1, oldMeta, 30))
+	s.False(hasNewField())
+
+	s.NoError(s.cm.UpdateIndexMeta(404, oldMeta, 40))
 }
 
 func (s *CollectionManagerSuite) TestGetIndexType() {

@@ -51,6 +51,7 @@ type Broker interface {
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
 	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
+	AllocTimestamp(ctx context.Context) (Timestamp, error)
 }
 
 type CoordinatorBroker struct {
@@ -411,4 +412,24 @@ func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID U
 	}
 
 	return resp.GetIndexInfos(), nil
+}
+
+// AllocTimestamp allocates a timestamp from the TSO. Unlike the local clock,
+// it keeps increasing across QueryCoord restarts and failovers.
+func (broker *CoordinatorBroker) AllocTimestamp(ctx context.Context) (Timestamp, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+
+	resp, err := broker.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		Count: 1,
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("failed to allocate timestamp", zap.Error(err))
+		return 0, err
+	}
+	return resp.GetTimestamp(), nil
 }
