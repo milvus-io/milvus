@@ -1,7 +1,7 @@
-# MEP: Snapshot-Sourced StorageV3 Backup Import
+# MEP: Snapshot-Sourced StorageV2/StorageV3 Backup Import
 
 - **Created:** 2026-09-02
-- **Updated:** 2026-09-28
+- **Updated:** 2026-11-05
 - **Status:** Proposed
 - **Feature DRI:** @weiliu1031
 - **Primary Approver:** TBD
@@ -32,6 +32,9 @@ reader isolation, cancellation and cleanup. Real V3 data, out-of-line TEXT and
 V1/V2 deletes exercise row alignment and single-/multi-batch equivalence.
 These are scoped local results, not whole-feature or service E2E validation;
 detailed execution history remains in the development records.
+
+The V2/mixed extension in section 21 requires its own validation; the historical
+results above do not establish that extension's correctness.
 
 The current revision has not established complete live E2E coverage, live CDC/
 backend coverage, full restore regression, whole-product builds, repository
@@ -65,15 +68,15 @@ The first version supports both snapshot layouts:
 - `SnapshotLayoutReferenced`, written by `CreateSnapshot`; and
 - `SnapshotLayoutSelfContained`, written by `ExportSnapshot`.
 
-The first version imports StorageV3 data segments only. Existing StorageV1 and
+Snapshot Import accepts StorageV2 and StorageV3 data segments, including mixed
+snapshots. Section 21 extends the original V3 contract. Existing StorageV1 and
 StorageV2 backup Import requests keep their current path-based contract.
 
 Snapshot L0 segments become **read-time delete inputs** for those data segments.
 DataNode merges applicable L0 deletes with each data segment's own deletes and
 emits only surviving rows, before target routing or writing. It does not create
 target L0 segments or delete rows already present in the target collection.
-L0 inputs may use V1, V2, or V3 delete storage; this does not add V1/V2 data
-segment support to snapshot-source Import.
+L0 inputs may use V1, V2, or V3 delete storage; StorageV1 data segments remain unsupported.
 
 ### 1.1 Narrowed Activation Boundary
 
@@ -83,6 +86,7 @@ timestamps, subject to the historical timestamp limitation in section 12.2.
 After asynchronous source preparation, DataCoord selects typed files
 when **any** of the following holds:
 
+- any selected data segment uses StorageV2 (section 21);
 - a selected data segment has an applicable captured L0 segment;
 - any selected data segment has a nonzero source commit timestamp;
 - the request supplies `external_spec`; or
@@ -241,8 +245,7 @@ them from the snapshot metadata and rejects unsupported combinations.
 - CMEK-protected StorageV3 snapshot sources containing TEXT/LOB fields. That
   combination remains a follow-up until the shared milvus-storage
   `SegmentReader` can receive Milvus's source key-retriever context.
-- Supporting StorageV1, StorageV2, or mixed-storage-version **data segments**
-  through the new snapshot-source contract in the first version.
+- Supporting StorageV1 **data segments** through the snapshot-source contract.
 - Unbounded in-memory L0 folding, external sorting/spill, or a shared delete
   cache in the first version.
 - Migrating already-persisted baseline jobs, changing legacy reader defaults,
@@ -465,7 +468,7 @@ DataCoord Create: read top-level metadata once
 DataCoord bounded background Pending preparation
   - reread and validate root metadata, then read its segment references
   - validate layout, paths, schema presence, source encryption, and segment types
-  - select StorageV3 L1/L2 data segments
+  - select StorageV2/StorageV3 L1/L2 data segments
   - match captured L0 inputs by source channel and partition scope
   - preserve captured commit timestamps and bind explicit partition mappings
           |
@@ -570,9 +573,9 @@ public source kind:
    job explicitly. In-place source modification is unsupported and is not
    detected when the replacement remains valid. Use the exact manifest versions
    recorded in the snapshot, never resolve latest.
-8. Exclude L0 from the data-file list. Reject any data segments
-   whose storage version is not StorageV3 or whose manifests are missing or
-   non-exact.
+8. Exclude L0 from the data-file list. Reject data segments outside StorageV2/3.
+   V3 requires an exact storage manifest; V2 retains its exact Avro reference as
+   specified in section 21.
 9. Independently scan the snapshot's L0 inventory. For each data segment `s`,
    select an L0 segment `d` only when:
 
@@ -1479,7 +1482,7 @@ dependencies with mockey:
 - Include L0 only in an unrelated channel/partition: it must not activate
   folding for the selected sources. Conversely, malformed applicable L0 must
   fail rather than be misclassified as no-L0 input.
-- Read V1/V2/V3 L0 storage without enabling V1/V2 snapshot data Import. Include
+- Read V1/V2/V3 L0 storage independently of the data segment storage version. Include
   V2 segment metadata whose deltalog was written by the legacy V1 writer.
 - Capture regular zero and nonzero import/CDC source commit timestamps; preserve
   them through both layouts and export. Re-exporting an old snapshot must not
@@ -1734,7 +1737,7 @@ coverage gate remain required before step 6.
 
 ## 20. Follow-Ups
 
-- Extend the typed descriptor to StorageV1/V2 data segments and mixed snapshots.
+- Extend the typed descriptor to StorageV1 data segments.
 - Cross-task per-channel delete caching, bitmap spill, and fully streaming
   decoding of arbitrarily large individual legacy deltalog files.
 - Name-based field remapping and broader type conversion beyond the shared
@@ -1744,3 +1747,98 @@ coverage gate remain required before step 6.
   `SegmentReader` for TEXT/LOB resolution.
 - A typed SDK option that replaces raw `source_type` key-value handling if the
   source contract expands beyond snapshots.
+
+## 21. StorageV2 and Mixed Snapshot Imports
+
+This section extends the earlier V3-only decisions. Target routing, writing,
+PreImport/Import scheduling and snapshot immutability obligations are unchanged.
+No public API, Avro schema or source-storage configuration is added.
+
+### 21.1 Durable per-segment references
+
+DataCoord supports V2/V3 data segments and rejects V1. It associates each parsed
+segment with its corresponding `SnapshotData.ManifestPaths` entry **before**
+filtering L0 and sorting. A V2 `SnapshotImportSource.v2_reference` contains:
+
+- `segment_id`: the captured source segment identity;
+- `snapshot_manifest_path`: its exact snapshot Avro object, never a prefix;
+- `snapshot_format_version`: the original metadata format version;
+- optional `original_key_prefix`: the original self-contained bundle key prefix,
+  obtained from the raw metadata's `SnapshotInfo.S3Location`. The full snapshot
+  reader overwrites its returned location with the current URI, so that view
+  cannot supply the original prefix. Present-empty means the original bucket
+  root; absent means no rebase. The current prefix comes from `snapshot_source_uri`.
+
+V3 continues to use `manifest_path`. The two payloads are exclusive. If any data
+segment is V2, **all** files in the job use descriptor versions 10-17, preserving
+respectively the external/mapping/shared-L0 capabilities of versions 1-8.
+Version 9 remains coordinator-only Pending. Legacy `ImportFile.paths` stays empty
+for typed descriptors, so old workers fail closed. Pure V3 selection is unchanged.
+The 256 KiB durable-plan limit counts references rather than expanded binlogs.
+
+### 21.2 Worker resolution and reads
+
+Each phase reads the V2 Avro through the shared `SnapshotReader.ReadSegmentManifest`
+parser, without rereading root metadata or consulting live segment state. It
+checks segment ID, V2 storage version, commit timestamp and applicable shared-L0
+scope. Missing/corrupt sources and captured-identity mismatches fail the phase.
+Replacing an Avro inventory or overwriting a data object while preserving those
+attributes is not fully detected; callers must retain immutable source objects
+for the job's lifetime.
+
+For self-contained inputs, reuse snapshot rebasing and root validation. Validate
+Avro references under the snapshot root and row/delete paths under `root/files`;
+referenced layouts use the source root. For moved self-contained bundles, check
+original URI shape before rebasing, then validate the actual read location's
+bucket and root before normalization. Referenced inputs keep identity checks on
+the original paths.
+Retain only ordered insert groups and own-delete paths, not index/stats metadata.
+Never list prefixes or infer files from segment IDs.
+
+Before footer/native IO, reject empty/nil groups, duplicate column-group IDs,
+unequal chunk counts, nil binlogs and empty/invalid paths. Determine physical
+columns with `PackedBinlogPresentFields`, project with `selectImportFields`, then
+read with `NewBinlogRecordReader`. Missing `ChildFields` uses existing footer
+inspection. Column-group IDs are not physical field IDs. Both bitmap and complete
+reads pass the same `WithPresentFields` set and ordered inputs; clone only the
+outer group slice required by the storage reader's in-place sort. Required,
+nullable/default/dynamic fields retain ordinary backup semantics.
+
+Own V2 deltas use `DeleteMerger`'s legacy V1/V2 probing. Shared L0 and own deletes
+are folded into one row mask per typed source identity and captured commit time.
+Count raw ordinals before filtering; scans and complete reads must use identical
+row order. Source encryption is explicit, including nil for a plaintext source;
+only calls without an explicit source context retain destination-schema fallback.
+The existing encrypted TEXT limitation remains.
+
+### 21.3 Ownership and admission
+
+Let B be the original per-reader delete reservation, R the actually admitted
+reader count, M the accounted retained V2 inputs, D the private delete map, and P
+the existing bitmap accounting.
+
+- Without shared L0, enforce M + D <= B and give `DeleteMerger` B-M. Its existing
+  positive-budget requirement remains. Close the reader before releasing the
+  original row-buffer+B reservation.
+- With shared L0, prepare one source at a time and charge M before retaining it.
+  Retained V2 inputs and masks jointly obey M+P <= R*B. The shared delete batch
+  and path inventory retain their separate B budget. The task owns immutable
+  preparation until all readers finish; closing one reader cannot invalidate
+  another's input.
+- Cleanup releases the original reservation, never the remaining B-M. Failure
+  publishes no partial prepared state. No cross-task or cross-phase Avro cache.
+
+Accounting covers retained path strings, groups/binlogs, child/present-field
+sets, projected schema and necessary reader path copies. It is not a hard bound
+on temporary Avro decode allocations, allocator RSS or native buffers.
+
+### 21.4 Validation requirements
+
+Exercise pure V2, pure V3 and real mixed packed files, both layouts, moved bundles,
+absent/empty original prefixes, historical formats, wrong identities, corrupt or
+missing Avro, multi-group/chunk ordering, missing `ChildFields`, source encryption,
+physical-field selection, own V1/V2 deletes and multi-batch L0. Assert exact PKs
+and values, not only successful completion. Verify protobuf recovery and old
+version rejection. Joint budgets must fail when each component separately fits
+but their sum does not, including one-byte boundaries and cleanup on cancellation.
+These are acceptance criteria, not a claim of executed coverage or live E2E.

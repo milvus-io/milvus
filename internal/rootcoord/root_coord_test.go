@@ -263,6 +263,8 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	streaming.SetWALForTest(wal)
 
 	core.session = sessionutil.NewSessionWithEtcd(t.Context(), path, kv)
+	var timeTickMu sync.Mutex
+	var lastTimeTick uint64
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		if msg.MessageType() == message.MessageTypeAlterCollection {
@@ -271,11 +273,21 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		// Stamp the header the way the real broadcaster does, control channel included.
 		msg = msg.OverwriteBroadcastHeader(1)
 		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
+		// A WAL assigns strictly increasing time ticks. Two broadcasts in the same
+		// millisecond would otherwise share one, and the second ALTER is then
+		// taken for a replay of the first and skipped.
+		timeTickMu.Lock()
+		timeTick := tsoutil.ComposeTSByTime(time.Now())
+		if timeTick <= lastTimeTick {
+			timeTick = lastTimeTick + 1
+		}
+		lastTimeTick = timeTick
+		timeTickMu.Unlock()
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
+				TimeTick:               timeTick,
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}

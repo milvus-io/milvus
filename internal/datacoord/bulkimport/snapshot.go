@@ -321,6 +321,18 @@ func expandSnapshotImportFiles(
 		return nil, nil, nil, err
 	}
 
+	// Preserve the Avro association before filtering L0 or sorting data segments.
+	if len(snapshot.Segments) != len(snapshot.ManifestPaths) {
+		return nil, nil, nil, merr.WrapErrDataIntegrityMsg("snapshot segment and Avro manifest counts differ")
+	}
+	manifestBySegment := make(map[int64]string, len(snapshot.Segments))
+	for i, segment := range snapshot.Segments {
+		if segment.GetStorageVersion() != milvusstorage.StorageV2 || segment.GetSegmentLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		manifestBySegment[segment.GetSegmentId()] = snapshot.ManifestPaths[i]
+	}
+
 	// The snapshot defines the source scope. Import all data partitions while
 	// retaining their original IDs/channels for L0 matching; target placement
 	// is independent and follows ordinary Import target partition routing.
@@ -347,12 +359,28 @@ func expandSnapshotImportFiles(
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(segments))
 	}
 
+	hasV2 := false
 	seenManifests := make(map[string]struct{}, len(segments))
 	result := make([]*internalpb.ImportFile, 0, len(segments))
 	for _, segment := range segments {
+		if segment.GetStorageVersion() == milvusstorage.StorageV2 {
+			hasV2 = true
+			ref := &internalpb.SnapshotImportV2Reference{
+				SegmentId:             segment.GetSegmentId(),
+				SnapshotManifestPath:  manifestBySegment[segment.GetSegmentId()],
+				SnapshotFormatVersion: metadata.GetFormatVersion(),
+			}
+			if snapshot.Layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+				if prefix, found := storage.DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location()); found {
+					ref.OriginalKeyPrefix = &prefix
+				}
+			}
+			result = append(result, &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{V2Reference: ref}})
+			continue
+		}
 		if segment.GetStorageVersion() != milvusstorage.StorageV3 {
 			return nil, nil, nil, merr.WrapErrOperationNotSupportedMsg(
-				"snapshot-source import only supports StorageV3 segments, segment %d uses storage version %d",
+				"snapshot-source import only supports StorageV2 and StorageV3 segments, segment %d uses storage version %d",
 				segment.GetSegmentId(), segment.GetStorageVersion(),
 			)
 		}
@@ -395,16 +423,20 @@ func expandSnapshotImportFiles(
 		if segment.GetManifestPath() == "" {
 			continue
 		}
-		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-		if err != nil {
-			return nil, nil, nil, err
+		base := segment.GetManifestPath()
+		// V2 also permits a plain manifest object key in snapshot metadata.
+		if segment.GetStorageVersion() != milvusstorage.StorageV2 || strings.HasPrefix(strings.TrimSpace(base), "{") {
+			base, _, err = packed.UnmarshalManifestPath(base)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 		}
 		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
 	}
 	if err := storage.ValidateExternalSnapshotPaths(metadataPath, snapshot, refs); err != nil {
 		return nil, nil, nil, err
 	}
-	needsSourceContext := len(applicable) != 0
+	needsSourceContext := hasV2 || len(applicable) != 0
 	for _, segment := range segments {
 		// Compaction can move L0 deletes into a data segment's manifest. The
 		// commit-time override still applies after the standalone L0 disappears;
@@ -418,21 +450,15 @@ func expandSnapshotImportFiles(
 			return nil, nil, nil, err
 		}
 	}
+	// Encode the complete job-wide capabilities once, after attaching source context.
 	external := importutilv2.HasExternalSource(options)
-	if external || partitionMapping != nil {
-		// Select the complete contract once: external storage adds 1, target
-		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
-		// must reject capabilities they cannot preserve, never ignore them.
-		version := uint32(1)
-		if external {
-			version++
-		}
-		if partitionMapping != nil {
-			version += 2
-		}
-		if len(l0Sources) != 0 {
-			version += 4
-		}
+	if needsSourceContext || external || partitionMapping != nil {
+		version := importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{
+			ExternalStorage:  external,
+			PartitionMapping: partitionMapping != nil,
+			SharedL0:         len(l0Sources) != 0,
+			V2Reference:      hasV2,
+		})
 		for i, file := range result {
 			if file.SnapshotSource == nil {
 				file.SnapshotSource = &internalpb.SnapshotImportSource{ManifestPath: file.GetPaths()[0]}
@@ -550,11 +576,12 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		return group
 	}
 	for i, segment := range data {
-		source := &internalpb.SnapshotImportSource{
-			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
+		source := files[i].GetSnapshotSource()
+		if source == nil {
+			source = &internalpb.SnapshotImportSource{ManifestPath: segment.GetManifestPath()}
 		}
+		source.SourceCommitTimestamp = segment.GetCommitTimestamp()
 		if len(deltas) != 0 {
-			source.Version = 5
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()
 			groupFor(source.SourceChannel, source.SourcePartitionId)

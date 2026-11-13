@@ -464,6 +464,13 @@ func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataF
 		var oldRootFound bool
 		oldRoot, oldRootFound = DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location())
 		shouldRebase = oldRootFound && oldRoot != newRoot
+		if oldRootFound && oldRoot == newRoot {
+			// Preserve same-location URI spelling for persisted restore fingerprints.
+			// Only two known, different storage identities establish a relocation.
+			oldIdentity, oldURI, oldErr := parseSnapshotURIIdentity(metadata.GetSnapshotInfo().GetS3Location())
+			newIdentity, newURI, newErr := parseSnapshotURIIdentity(metadataFilePath)
+			shouldRebase = oldErr == nil && newErr == nil && oldURI && newURI && oldIdentity != newIdentity
+		}
 		if shouldRebase {
 			if err := RebaseSelfContainedSnapshotMetadata(metadata, oldRoot, newRoot); err != nil {
 				return nil, merr.Wrap(err, "failed to rebase snapshot metadata")
@@ -481,7 +488,7 @@ func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataF
 	var allSegments []*datapb.SegmentDescription
 	if includeSegments {
 		for _, manifestPath := range metadata.GetManifestList() {
-			segment, err := r.readManifestFile(ctx, manifestPath, int(metadata.GetFormatVersion()))
+			segment, err := r.ReadSegmentManifest(ctx, manifestPath, int(metadata.GetFormatVersion()))
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to read manifest file %s", manifestPath)
 			}
@@ -614,7 +621,8 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 	return metadata, nil
 }
 
-func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, formatVersion int) (*datapb.SegmentDescription, error) {
+// ReadSegmentManifest reads one snapshot Avro using its captured format version.
+func (r *SnapshotReader) ReadSegmentManifest(ctx context.Context, filePath string, formatVersion int) (*datapb.SegmentDescription, error) {
 	data, err := r.chunkManager.Read(ctx, NormalizeSnapshotObjectPath(filePath))
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read manifest file")

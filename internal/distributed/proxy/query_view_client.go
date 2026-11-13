@@ -68,9 +68,14 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 	closeHook := func() {}
 	if hook != nil {
 		if err := optimizers.InitQueryHook(hook); err != nil {
-			return nil, nil, err
+			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+				return nil, nil, err
+			}
+			// Match QueryNode: a disabled AutoIndex does not require a usable hook.
+			hook = nil
+		} else {
+			closeHook = optimizers.WatchQueryHook(context.TODO(), hook, "queryViewClientHook")
 		}
-		closeHook = optimizers.WatchQueryHook(context.TODO(), hook, "queryViewClientHook")
 	}
 	shardResolver := resolver.NewShardResolverImpl(vchannelProvider)
 	queryNodeClient := querynodehandler.NewClient(etcdCli)

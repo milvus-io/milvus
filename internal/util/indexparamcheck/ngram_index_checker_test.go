@@ -7,19 +7,17 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func Test_NgramIndexChecker_CheckTrain(t *testing.T) {
 	checker := newNgramIndexChecker()
 
-	t.Run("valid ngram on varchar", func(t *testing.T) {
-		params := map[string]string{
-			MinGramKey: "2",
-			MaxGramKey: "3",
-		}
-		err := checker.CheckTrain(schemapb.DataType_VarChar, schemapb.DataType_None, params)
-		assert.NoError(t, err)
-	})
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_Text} {
+		t.Run("valid ngram on "+dtype.String(), func(t *testing.T) {
+			assert.NoError(t, checker.CheckTrain(dtype, schemapb.DataType_None, map[string]string{MinGramKey: "2", MaxGramKey: "3"}))
+		})
+	}
 
 	t.Run("valid ngram on json with varchar cast", func(t *testing.T) {
 		testCases := []string{"VARCHAR", "varchar", "VarChar", "  VARCHAR  "}
@@ -59,34 +57,47 @@ func Test_NgramIndexChecker_CheckTrain(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid ngram params", func(t *testing.T) {
-		testCases := []struct {
-			name   string
-			params map[string]string
-			errMsg string
-		}{
-			{
-				name:   "missing min_gram",
-				params: map[string]string{MaxGramKey: "3"},
-				errMsg: "Ngram index must specify both min_gram and max_gram",
-			},
-			{
-				name:   "non-integer min_gram",
-				params: map[string]string{MinGramKey: "abc", MaxGramKey: "3"},
-				errMsg: "min_gram for Ngram index must be an integer",
-			},
-			{
-				name:   "min_gram > max_gram",
-				params: map[string]string{MinGramKey: "5", MaxGramKey: "3"},
-				errMsg: "invalid min_gram or max_gram value",
-			},
-		}
-
-		for _, tc := range testCases {
-			err := checker.CheckTrain(schemapb.DataType_VarChar, schemapb.DataType_None, tc.params)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tc.errMsg)
-		}
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_Text} {
+		t.Run("invalid params on "+dtype.String(), func(t *testing.T) {
+			cases := []struct {
+				name, min, max string
+				missing        bool
+			}{
+				{name: "both missing", missing: true},
+				{name: "min missing", max: "3", missing: true},
+				{name: "max missing", min: "2", missing: true},
+				{name: "min non-integer", min: "abc", max: "3"},
+				{name: "max non-integer", min: "2", max: "abc"},
+				{name: "min zero", min: "0", max: "3"},
+				{name: "max zero", min: "2", max: "0"},
+				{name: "min negative", min: "-1", max: "3"},
+				{name: "max negative", min: "2", max: "-1"},
+				{name: "reversed range", min: "5", max: "3"},
+				{name: "min overflow", min: "999999999999999999999999", max: "3"},
+				{name: "max overflow", min: "2", max: "999999999999999999999999"},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					params := map[string]string{}
+					if tc.min != "" {
+						params[MinGramKey] = tc.min
+					}
+					if tc.max != "" {
+						params[MaxGramKey] = tc.max
+					}
+					err := checker.CheckTrain(dtype, schemapb.DataType_None, params)
+					if tc.missing {
+						assert.ErrorIs(t, err, merr.ErrParameterMissing)
+					} else {
+						assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+					}
+				})
+			}
+		})
+	}
+	t.Run("legacy STRING train remains unsupported", func(t *testing.T) {
+		err := checker.CheckTrain(schemapb.DataType_String, schemapb.DataType_None, map[string]string{MinGramKey: "2", MaxGramKey: "3"})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 }
 
@@ -96,6 +107,7 @@ func Test_NgramIndexChecker_CheckValidDataType(t *testing.T) {
 	t.Run("valid data types", func(t *testing.T) {
 		validTypes := []schemapb.DataType{
 			schemapb.DataType_VarChar,
+			schemapb.DataType_Text,
 			schemapb.DataType_JSON,
 		}
 		for _, dtype := range validTypes {
@@ -117,7 +129,7 @@ func Test_NgramIndexChecker_CheckValidDataType(t *testing.T) {
 			field := &schemapb.FieldSchema{DataType: dtype}
 			err := checker.CheckValidDataType(IndexNGRAM, field)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "ngram index can only be created on VARCHAR or JSON field")
+			assert.Contains(t, err.Error(), "ngram index can only be created on VARCHAR, TEXT or JSON field")
 		}
 	})
 }
