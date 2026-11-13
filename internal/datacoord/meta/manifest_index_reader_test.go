@@ -35,7 +35,7 @@ func TestManifestIndexReaderRetriesOnlyRejectedRead(t *testing.T) {
 		NewSegmentInfo(&datapb.SegmentInfo{ID: 1}),
 		NewSegmentInfo(&datapb.SegmentInfo{ID: 2}),
 	}
-	reader := (&Meta{}).newManifestIndexReader(ctx, segments, 2, nil)
+	reader := (&Meta{}).newManifestIndexReader(ctx, segments, 2, nil, "")
 	defer reader.Close()
 	calls := map[int64]int{}
 	reader.submitRead = func(_ context.Context, segment *SegmentInfo, complete func([]packed.ManifestIndexInfo, error)) error {
@@ -67,7 +67,7 @@ func TestManifestIndexReaderCancelDuringBackoff(t *testing.T) {
 	reader := (&Meta{}).newManifestIndexReader(ctx, []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{ID: 1}),
 		NewSegmentInfo(&datapb.SegmentInfo{ID: 2}),
-	}, 2, nil)
+	}, 2, nil, "")
 	defer reader.Close()
 	calls := 0
 	reader.submitRead = func(_ context.Context, segment *SegmentInfo, complete func([]packed.ManifestIndexInfo, error)) error {

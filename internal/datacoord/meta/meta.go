@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -88,6 +89,9 @@ type Meta struct {
 	PreparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
 
 	Segments *SegmentsInfo // segment id to segment info
+	// manifestIndexRecheck collects collections while startup recovers manifest
+	// indexes; see BeginManifestIndexRecovery.
+	manifestIndexRecheck atomic.Pointer[typeutil.ConcurrentSet[int64]]
 	// segmentLocks are the segment writer locks (see segment_locks.go). The
 	// Onces initialize them and segmentManifestLocks for a meta built without
 	// newMeta.
@@ -161,8 +165,11 @@ func (m *Meta) CloseManifestCommitExecutor() {
 	}
 }
 
-// NewMeta creates meta from provided `kv.TxnKV`
-func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*Meta, error) {
+// NewMetaWithoutManifestIndexes creates meta from provided `kv.TxnKV`, without
+// recovering the segment indexes recorded in segment manifests, which needs only
+// the segments and the index meta it recovers. The caller must run
+// ReloadSegmentIndexesFromManifests before the meta is used.
+func NewMetaWithoutManifestIndexes(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*Meta, error) {
 	// RootCoord has loaded the collection view before DataCoord starts, so
 	// its IDs (Dropping included) drive per-collection loading in both
 	// MetaStore.LoadFromCatalog and indexMeta.
@@ -229,16 +236,6 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.IndexCatalog = indexCatalog
 	if protection != nil {
 		mt.CompactionProtection = protection
-	}
-
-	// Recovery follows the durable storage location, not the current write
-	// mode. A segment marked manifest_has_index may contain records published
-	// while the switch was previously on, so it must still be loaded after the
-	// switch is turned off. Unmarked clusters perform no manifest reads.
-	if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
-		// Object-store reads have already retried per segment. Re-entering
-		// initMeta's metastore retry would reread every successful manifest.
-		return nil, retry.Unrecoverable(err)
 	}
 
 	// Segment change groups load AFTER segments are in memory: the recovery

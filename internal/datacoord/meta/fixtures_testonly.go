@@ -74,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -195,14 +196,19 @@ func (s *fakeManifestStore) FailReadsFrom() {
 // submits directly to the native executor; only this test stub uses a goroutine.
 func MockManifestIndexSubmissions(t *testing.T) {
 	t.Helper()
-	mock := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, io *packed.ManifestIOContext, manifest string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+	submit := func(ctx context.Context, io *packed.ManifestIOContext, manifest string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
 		go func() {
 			entries, err := packed.GetManifestIndexInfosAsync(ctx, io, manifest, config)
 			complete(entries, err)
 		}()
 		return nil
-	}).Build()
+	}
+	mock := mockey.Mock(packed.SubmitManifestIndexInfos).To(submit).Build()
 	t.Cleanup(func() { mock.UnPatch() })
+	withProperties := mockey.Mock(packed.SubmitManifestIndexInfosWithProperties).To(func(ctx context.Context, io *packed.ManifestIOContext, manifest string, _ *packed.ManifestReadProperties, complete func([]packed.ManifestIndexInfo, error)) error {
+		return submit(ctx, io, manifest, CreateStorageConfig(), complete)
+	}).Build()
+	t.Cleanup(func() { withProperties.UnPatch() })
 }
 
 func MockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdates) packed.ManifestUpdateResult {
@@ -355,6 +361,20 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 // noDomainMetas is a DomainMetaLoader that builds no domain metas.
 func NoDomainMetas(context.Context, []int64) (SegmentIndexCatalog, CompactionProtection, error) {
 	return nil, nil, nil
+}
+
+// NewMeta builds a meta and recovers its manifest indexes before returning, the
+// state initMeta publishes.
+func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*Meta, error) {
+	mt, err := NewMetaWithoutManifestIndexes(ctx, catalog, chunkManager, metaStore, broker, loadDomainMetas)
+	if err != nil {
+		return nil, err
+	}
+	if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
+		mt.CloseManifestCommitExecutor()
+		return nil, err
+	}
+	return mt, nil
 }
 
 // newMetaWithLoader builds a meta over catalog and cm and loads the domain metas with the loader that newLoader returns for them.
@@ -1839,6 +1859,95 @@ func AssertNoStatsTaskEvent(t *testing.T) {
 		require.Failf(t, "unexpected stats task event", "segmentID=%d", segID)
 	default:
 	}
+}
+
+// The Legacy* functions are the manifest index recovery code as it was before
+// validation moved to the read executor and installation was batched. They are
+// kept verbatim as the reference the current recovery must reproduce.
+
+func LegacyManifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
+	if manifestIndex.Path == "" || manifestIndex.IndexName == "" || manifestIndex.IndexType == "" ||
+		manifestIndex.IndexStorePathVersion < indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED ||
+		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 ||
+		len(manifestIndex.IndexFileKeys) == 0 {
+		return nil, false
+	}
+
+	filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
+	for _, fileKey := range manifestIndex.IndexFileKeys {
+		// Index file keys are plain file names under Path. Reject anything that
+		// could escape the artifact directory of a manifest we did not write.
+		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
+			return nil, false
+		}
+		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
+			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
+		} else {
+			filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		}
+	}
+
+	return &indexpb.IndexFilePathInfo{
+		SegmentID:                 segmentID,
+		FieldID:                   manifestIndex.FieldID,
+		IndexID:                   manifestIndex.IndexID,
+		BuildID:                   manifestIndex.BuildID,
+		IndexName:                 manifestIndex.IndexName,
+		IndexType:                 manifestIndex.IndexType,
+		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
+		IndexFilePaths:            filePaths,
+		SerializedSize:            uint64(manifestIndex.SerializedSize),
+		MemSize:                   uint64(manifestIndex.MemSize),
+		IndexVersion:              manifestIndex.IndexVersion,
+		NumRows:                   manifestIndex.NumRows,
+		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
+		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+	}, true
+}
+
+func LegacyManifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.SegmentInfo,
+	entry packed.ManifestIndexInfo,
+) (*indexpb.IndexFilePathInfo, bool) {
+	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
+		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
+		entry.BuildID, entry.IndexVersion).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
+	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
+		if entry.Path != expected {
+			return nil, false
+		}
+	} else if path.Clean(entry.Path) != expected {
+		return nil, false
+	}
+	return LegacyManifestIndexFilePathInfo(segment.GetID(), entry)
+}
+
+func LegacyRecoverManifestIndexes(ctx context.Context, m *Meta, segment *SegmentInfo, entries []packed.ManifestIndexInfo, err error, rootPath string) ([]*model.SegmentIndex, bool, error) {
+	if err != nil {
+		if segment.GetState() == commonpb.SegmentState_Dropped && m.ChunkManager != nil {
+			manifestFile, pathErr := packed.ManifestFilePath(segment.GetManifestPath())
+			if pathErr != nil {
+				return nil, false, merr.Wrap(pathErr, "resolve dropped segment manifest during recovery")
+			}
+			exists, existErr := m.ChunkManager.Exist(ctx, manifestFile)
+			if existErr != nil {
+				return nil, false, merr.Wrap(existErr, "check dropped segment manifest during recovery")
+			}
+			if !exists {
+				return nil, true, nil
+			}
+		}
+		return nil, false, retry.Unrecoverable(merr.Wrapf(err, "recover segment %d indexes from manifest %s", segment.GetID(), segment.GetManifestPath()))
+	}
+	indexes := make([]*model.SegmentIndex, 0, len(entries))
+	for _, entry := range entries {
+		if _, ok := LegacyManifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
+			return nil, false, merr.Wrapf(merr.ErrDataIntegrity,
+				"segment %d manifest holds an unusable index entry: indexID %d buildID %d", segment.GetID(), entry.IndexID, entry.BuildID)
+		}
+		indexes = append(indexes, segmentIndexFromManifest(segment, entry))
+	}
+	return indexes, false, nil
 }
 
 type (

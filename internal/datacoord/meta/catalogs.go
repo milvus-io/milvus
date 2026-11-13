@@ -37,8 +37,6 @@ type SegmentIndexCatalog interface {
 	// GetIndexNameByID returns the name of the index.
 	GetIndexNameByID(collID, indexID UniqueID) string
 
-	// HasBuildInfo reports whether a SegmentIndex record for the build ID is in memory.
-	HasBuildInfo(buildID int64) bool
 	GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool)
 	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
@@ -49,14 +47,9 @@ type SegmentIndexCatalog interface {
 	// UnlockBuildIDs releases the locks taken by LockBuildIDs. buildIDs must
 	// not contain duplicates.
 	UnlockBuildIDs(buildIDs []int64)
-	// UpdateSegmentIndex stores the SegmentIndex record in memory. It does not
-	// take the build-ID lock; the only caller today is the startup reload from
-	// manifests, which does not hold it.
-	UpdateSegmentIndex(segIdx *model.SegmentIndex)
-	// PublishStoredIndexSizes writes the stored index size of every collection
-	// whose size changed to the gauge. A write can wait for a Prometheus scrape,
-	// so callers must not hold a segment writer lock or fieldIndexLock.
-	PublishStoredIndexSizes()
+	// NewManifestIndexRecovery returns the installer of the SegmentIndex records
+	// startup recovers from segment manifests.
+	NewManifestIndexRecovery() ManifestIndexRecovery
 	// StageSegmentIndexMutation projects mut against the SegmentIndex record
 	// for mut.BuildID, and returns the catalog action to compose into the
 	// caller's transaction. The caller must hold LockBuildIDs for mut.BuildID
@@ -98,6 +91,19 @@ type CompactionProtection interface {
 	// IsCollectionCompactionBlocked reports whether compaction of the collection is blocked:
 	// a snapshot's RefIndex is not loaded yet, or a snapshot of the collection is being created.
 	IsCollectionCompactionBlocked(collectionID int64) bool
+}
+
+// ManifestIndexRecovery installs the SegmentIndex records startup recovers from
+// segment manifests.
+type ManifestIndexRecovery interface {
+	// Install adds segIdx unless a catalog row or an earlier manifest already
+	// holds its build ID, which then stays authoritative.
+	Install(segIdx *model.SegmentIndex)
+	// Finish publishes the stored sizes and fills the task-stats LRU from the
+	// records installed so far. Later calls do nothing.
+	Finish()
+	// Installed returns the number of records installed so far.
+	Installed() int
 }
 
 // DomainMetaLoader builds the per-domain metas. newMeta runs it in parallel

@@ -86,6 +86,10 @@ func BootMetaForRestart(t *testing.T, catalog metastore.DataCoordCatalog, collec
 	return m, dm
 }
 
+// UpdateSegmentIndex stores the SegmentIndex record in memory. It does not take
+// the build-ID lock.
+func (m *IndexMeta) UpdateSegmentIndex(segIdx *model.SegmentIndex) { m.updateSegmentIndex(segIdx) }
+
 func NewSegmentIndexMeta(catalog metastore.DataCoordCatalog) *IndexMeta {
 	return &IndexMeta{
 		KeyLock:          lock.NewKeyLock[UniqueID](),

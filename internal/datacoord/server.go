@@ -876,6 +876,26 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
 	}
+	// List the persisted DataViews while the phases below recover SegmentMeta
+	// and Collections. No DataView key can change before RecoverManager: every
+	// writer goes through the DataViewManager it builds, the DDL callbacks that
+	// reach the manager are registered only after recovery, and external RPCs
+	// wait for the recovery barrier. A failed RecoverManager attempt may have
+	// dropped or written keys, so only the first attempt uses this listing.
+	listCtx, cancelList := context.WithCancel(s.ctx)
+	var (
+		listed      = make(chan struct{})
+		listedErr   error
+		listedViews []*viewpb.DataViewOfCollection
+	)
+	go func() {
+		defer close(listed)
+		listedViews, listedErr = catalog.ListAllDataViews(listCtx)
+	}()
+	defer func() {
+		cancelList()
+		<-listed
+	}()
 	var (
 		recoveredMeta        *meta.Meta
 		recoveredDomainMetas domainMetas
@@ -885,7 +905,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			err error
 			dm  domainMetas
 		)
-		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
+		recoveredMeta, err = meta.NewMetaWithoutManifestIndexes(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
 		recoveredDomainMetas = dm
 		if err == nil {
 			recoveredMeta.PreparationSchema = coordinatorPreparationSchema
@@ -901,8 +921,25 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.CloseManifestCommitExecutor()
 		}
 	}()
+	// Recover the segment indexes recorded in segment manifests while the
+	// import and DataView phases below run: it needs only the recovered segments
+	// and index meta. Of those phases only DataView projections read index
+	// states; one that could not settle a segment the scan may still install an
+	// index for records its collection, and RecoverManager reconciles those once
+	// more after the scan, before its worker starts. A failed later phase
+	// cancels and joins the scan, since it writes through the shared MetaStore.
+	recoveredMeta.BeginManifestIndexRecovery()
+	manifestIndexCtx, cancelManifestIndexes := context.WithCancel(s.ctx)
+	var manifestIndexes errgroup.Group
+	manifestIndexes.Go(func() error {
+		return recoveredMeta.ReloadSegmentIndexesFromManifests(manifestIndexCtx)
+	})
+	defer func() {
+		cancelManifestIndexes()
+		_ = manifestIndexes.Wait()
+	}()
 	// Retry each recovery phase independently: a later metadata error must
-	// not repeat newMeta's successful object-storage manifest scan.
+	// not repeat the successful object-storage manifest scan.
 	var recoveredImports bulkimport.ImportMeta
 	if err := retry.Do(s.ctx, func() error {
 		var err error
@@ -921,7 +958,34 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return c.ID, c.VChannelNames
 	})
 	var manager dataview.Manager
+	firstAttempt := true
 	if err := retry.Do(s.ctx, func() error {
+		options := []dataview.Option{
+			dataview.WithRecoveryConcurrency(paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt()),
+			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			}),
+			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+			}),
+			dataview.WithReconcileBarrier(func(context.Context) ([]int64, error) {
+				if err := manifestIndexes.Wait(); err != nil {
+					// Object-store reads have already retried per segment. Retrying
+					// initMeta would reread every successful manifest.
+					return nil, retry.Unrecoverable(err)
+				}
+				return recoveredMeta.EndManifestIndexRecovery(), nil
+			}),
+		}
+		if firstAttempt {
+			firstAttempt = false
+			<-listed
+			if listedErr != nil {
+				return listedErr
+			}
+			options = append(options, dataview.WithListedDataViews(listedViews))
+			listedViews = nil
+		}
 		var err error
 		manager, err = dataview.RecoverManager(
 			s.ctx,
@@ -930,12 +994,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
-			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
-				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
-			}),
-			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
-				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
-			}),
+			options...,
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {

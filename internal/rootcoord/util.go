@@ -730,7 +730,39 @@ func maxAssignedFieldIDFromSchema(schema *schemapb.CollectionSchema) int64 {
 			}
 		}
 	}
-	for _, kv := range schema.GetProperties() {
+	return maxFieldIDWithProperty(maxFieldID, schema.GetProperties())
+}
+
+// maxAssignedFieldIDFromCollection equals
+// maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()) without copying
+// every field into a schema message.
+func maxAssignedFieldIDFromCollection(coll *model.Collection) int64 {
+	maxFieldID := int64(common.StartOfUserFieldID)
+	for _, field := range coll.Fields {
+		if field != nil && field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+	for _, structField := range coll.StructArrayFields {
+		if structField == nil {
+			continue
+		}
+		if structField.FieldID > maxFieldID {
+			maxFieldID = structField.FieldID
+		}
+		for _, subField := range structField.Fields {
+			if subField != nil && subField.FieldID > maxFieldID {
+				maxFieldID = subField.FieldID
+			}
+		}
+	}
+	return maxFieldIDWithProperty(maxFieldID, coll.Properties)
+}
+
+// maxFieldIDWithProperty raises maxFieldID to the first max_field_id property
+// when that property parses and is larger.
+func maxFieldIDWithProperty(maxFieldID int64, properties []*commonpb.KeyValuePair) int64 {
+	for _, kv := range properties {
 		if kv.GetKey() != common.MaxFieldIDKey {
 			continue
 		}
@@ -786,7 +818,7 @@ func ensureCollectionMaxFieldIDProperty(coll *model.Collection) {
 	if coll == nil {
 		return
 	}
-	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()))
+	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromCollection(coll))
 }
 
 func nextFunctionID(coll *model.Collection) int64 {
