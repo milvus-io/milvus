@@ -6,8 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -34,12 +32,7 @@ func SHA256(src string, salt string) string {
 func PasswordEncrypt(pwd string) (string, error) {
 	switch algorithm := paramtable.Get().CommonCfg.PasswordHashAlgorithm.GetValue(); algorithm {
 	case PasswordHashBcrypt:
-		bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
-		if err != nil {
-			return "", err
-		}
-
-		return string(bytes), err
+		return bcryptHash(pwd)
 	case PasswordHashPBKDF2SHA512:
 		return encryptPBKDF2SHA512(pwd)
 	default:

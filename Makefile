@@ -120,6 +120,12 @@ GOEXPERIMENT_FLAG :=
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
 	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
 endif
+
+# Set MILVUS_NO_BCRYPT=ON to leave bcrypt out of the binary. Passwords are then
+# always hashed with pbkdf2-sha512, and existing bcrypt hashes cannot be verified.
+ifeq ($(MILVUS_NO_BCRYPT),ON)
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),nobcrypt
+endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
