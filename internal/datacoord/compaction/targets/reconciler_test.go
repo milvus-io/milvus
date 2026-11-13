@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -676,4 +677,80 @@ func TestCompactionTargetReconcilerStandingSortWithAutoCompactionOff(t *testing.
 	require.ElementsMatch(t, []int64{1, 2}, sorting)
 	require.Equal(t, []int64{3}, rewriting)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
+func TestCompactionTargetReconcilerAllocatesSchemaBeforeSize(t *testing.T) {
+	ctx := t.Context()
+	cfg := &Params.DataCoordCfg
+	for key, value := range map[string]string{
+		cfg.EnableAutoCompaction.Key:               "true",
+		cfg.EnableSortCompaction.Key:               "true",
+		cfg.BumpSchemaVersionCompactionEnabled.Key: "true",
+		cfg.IndexBasedCompaction.Key:               "false",
+		cfg.StorageVersionCompactionEnabled.Key:    "false",
+		cfg.StorageFormatCompactionEnabled.Key:     "false",
+		cfg.SegmentMaxSize.Key:                     "16",
+		cfg.DiskSegmentMaxSize.Key:                 "16",
+	} {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+
+	const collectionID = int64(1)
+	rewrite := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: collectionID, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 200, Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{1, 2}},
+	}
+	optimize := &datapb.CompactionTarget{
+		TargetID: 200, CollectionID: collectionID, Intent: datapb.TargetIntent_INTENT_OPTIMIZE,
+		ExpectedTS: 200, ActivatedAtTS: 200, TailLimit: 1,
+		Optimize: &datapb.CompactionTargetOptimize{InputTargetSizeBytes: 16 << 20, ActualTargetSizeBytes: 16 << 20},
+	}
+	manager := NewLoadedCompactionTargetMeta(t, ctx, rewrite, optimize)
+	segment := func(id int64, sizeMiB int64, version int32, dataTS uint64, sorted bool) *meta.SegmentInfo {
+		t.Helper()
+		s := targetSegmentWithDataTS(id, collectionID, 10, "ch", 0, dataTS, false)
+		s.IsSorted = sorted
+		s.SchemaVersion = version
+		s.StorageVersion = storage.StorageV3
+		s.ManifestPath = "v3-manifest"
+		s.Stats = &datapb.Statistics{InsertBinlogSize: sizeMiB << 20}
+		return s
+	}
+	mt := newCompactionTargetReconcilerTestMeta(t, manager,
+		segment(1, 3, 1, 199, false), // SORT outranks independent REWRITE, Schema and OPTIMIZE.
+		segment(2, 6, 1, 199, true),  // REWRITE outranks Schema and OPTIMIZE.
+		segment(3, 7, 1, 199, true),  // Only Schema and OPTIMIZE; cannot support segment 2.
+		segment(4, 3, 2, 199, true),  // Remains eligible to support segment 2 in OPTIMIZE.
+		segment(5, 7, 1, 201, true),  // Schema outranks SIZE outside OPTIMIZE scope.
+		segment(6, 7, 2, 201, true),  // Pure SIZE inputs form their own full-size group.
+		segment(7, 7, 2, 201, true),
+	)
+	mt.AddCollection(&meta.CollectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{Version: 2}})
+	reconciler := newCompactionTargetReconcilerForTest(mt)
+	events, err := reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	inputs := make(map[int64]datapb.CompactionType)
+	for _, pools := range events {
+		for _, plan := range plannedTaskDescriptors(t, pools) {
+			for _, id := range plan.GetInputSegments() {
+				require.NotContains(t, inputs, id)
+				inputs[id] = plan.GetType()
+			}
+		}
+	}
+	require.Equal(t, map[int64]datapb.CompactionType{
+		1: datapb.CompactionType_SortCompaction,
+		2: datapb.CompactionType_MixCompaction,
+		3: datapb.CompactionType_BumpSchemaVersionCompaction,
+		4: datapb.CompactionType_MixCompaction,
+		5: datapb.CompactionType_BumpSchemaVersionCompaction,
+		6: datapb.CompactionType_MixCompaction,
+		7: datapb.CompactionType_MixCompaction,
+	}, inputs)
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, manager.GetCompactionTarget(rewrite.GetTargetID()).GetState())
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, manager.GetCompactionTarget(optimize.GetTargetID()).GetState())
+	rows, err := ObserveSchemaVersion(ctx, mt.Meta)
+	require.NoError(t, err)
+	require.EqualValues(t, 400, rows)
 }
