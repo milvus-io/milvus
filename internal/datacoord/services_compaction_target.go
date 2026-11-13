@@ -265,16 +265,24 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	if err != nil {
 		return nil, err
 	}
-	if !resource.GetDeleted() && targets.IsRewrite(record) {
+	var rows int64
+	var observed bool
+	var observationErr error
+	switch {
+	case !resource.GetDeleted() && targets.IsRewrite(record):
 		observation, err := targets.ObserveRewrite(ctx, s.meta, record, false)
-		if err == nil {
-			target.RemainingRows = proto.Int64(observation.Rows)
-			target.CheckedAt = tsoutil.ComposeTSByTime(time.Now())
-		} else if ctx.Err() == nil {
-			target.Message = "remaining rows could not be observed"
-			mlog.RatedWarn(ctx, rate.Limit(1), "describe compaction target observation failed",
-				mlog.Int64("targetID", record.GetTargetID()), mlog.Err(err))
-		}
+		rows, observed, observationErr = observation.Rows, true, err
+	case targets.IsStandingSort(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		observation, err := targets.ObserveSort(ctx, s.meta, s.handler)
+		rows, observed, observationErr = observation.Rows, true, err
+	}
+	if observed && observationErr == nil {
+		target.RemainingRows = proto.Int64(rows)
+		target.CheckedAt = tsoutil.ComposeTSByTime(time.Now())
+	} else if observationErr != nil && ctx.Err() == nil {
+		target.Message = "remaining rows could not be observed"
+		mlog.RatedWarn(ctx, rate.Limit(1), "describe compaction target observation failed",
+			mlog.Int64("targetID", record.GetTargetID()), mlog.Err(observationErr))
 	}
 	return target, nil
 }
@@ -285,6 +293,17 @@ func compactionTargetReadModel(record *datapb.CompactionTarget, resource *datapb
 		State: record.GetState(), CreatedAt: record.GetActivatedAtTS(),
 		StoppedAt: record.GetInactivatedAtTS(), StopReason: record.GetStopReason(),
 		TotalRows: record.TotalRows, Rewrite: record.GetRewrite(), Optimize: record.GetOptimize(),
+	}
+	if targets.HasStandingCondition(record) {
+		target.Enabled = record.Enabled
+		for _, key := range publicStandingConditionKeys(record.GetIntent()) {
+			if value, ok := record.GetProperties()[key]; ok {
+				if target.Parameters == nil {
+					target.Parameters = make(map[string]string)
+				}
+				target.Parameters[key] = value
+			}
+		}
 	}
 	switch target.GetState() {
 	case datapb.TargetState_TARGET_STATE_ACTIVE:
@@ -302,6 +321,19 @@ func compactionTargetReadModel(record *datapb.CompactionTarget, resource *datapb
 		return nil, merr.WrapErrDataIntegrityMsg("compaction target %d has an invalid total_rows", target.GetTargetId())
 	}
 	return target, nil
+}
+
+func publicStandingConditionKeys(intent datapb.TargetIntent) []string {
+	switch intent {
+	case datapb.TargetIntent_INTENT_INDEX_VERSION:
+		return []string{"vector_mode", "vector_version", "scalar_mode", "scalar_version"}
+	case datapb.TargetIntent_INTENT_STORAGE_VERSION:
+		return []string{"storage_version"}
+	case datapb.TargetIntent_INTENT_STORAGE_FORMAT:
+		return []string{"storage_format"}
+	default:
+		return nil
+	}
 }
 
 func (s *Server) ListCompactionTargets(ctx context.Context, req *datapb.ListCompactionTargetsRequest) (*datapb.ListCompactionTargetsResponse, error) {
@@ -398,8 +430,8 @@ func (s *Server) DropCompactionTarget(ctx context.Context, req *datapb.DropCompa
 		if !targets.IsRewrite(record) || record.GetCollectionID() == 0 {
 			return false, merr.WrapErrOperationNotSupportedMsg("target family does not support operator drop")
 		}
-		if resource.GetDeleted() {
-			return false, merr.WrapErrPrivilegeNotPermitted("compaction target collection is unavailable")
+		if resource.GetDeleted() && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE {
+			return false, merr.WrapErrServiceNotReadyMsg("compaction target scope is closing")
 		}
 		return true, nil
 	})

@@ -16,6 +16,8 @@
 
 package meta
 
+var clusteringSortCh = make(chan UniqueID, 1024)
+
 func GetBuildIndexChSingleton() chan UniqueID {
 	buildIndexChOnce.Do(func() {
 		buildIndexCh = make(chan UniqueID, 1024)
@@ -29,4 +31,9 @@ func GetStatsTaskChSingleton() chan UniqueID {
 		statsTaskCh = make(chan UniqueID, 1024)
 	})
 	return statsTaskCh
+}
+
+// GetClusteringSortCh carries Sort work needed by an admitted clustering task.
+func GetClusteringSortCh() chan UniqueID {
+	return clusteringSortCh
 }

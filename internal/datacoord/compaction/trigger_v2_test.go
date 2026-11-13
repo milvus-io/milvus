@@ -49,7 +49,7 @@ func TestEstimateResultSegmentCount(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := estimateResultSegmentCount(test.totalSize, test.targetSize)
+			got := view.EstimateResultSegmentCount(test.totalSize, test.targetSize)
 			if got != test.want {
 				t.Fatalf("estimateResultSegmentCount(%v, %v) = %d, want %d", test.totalSize, test.targetSize, got, test.want)
 			}
@@ -278,8 +278,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			// s.True(signal.isGlobal)
 			// s.False(signal.isForce)
@@ -321,8 +321,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			s.EqualValues(30000, task.GetPos().GetTimestamp())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
@@ -542,8 +542,8 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(19530), nil).Maybe()
 
 	// Mock inspector to expect compaction enqueue
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
 			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
@@ -608,8 +608,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(503)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.EqualValues(planID, task.GetPlanID())
 				s.EqualValues(1001, task.GetTriggerID())
 				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
@@ -658,8 +658,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(603)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_SortCompaction, task.GetType())
 				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
 				return nil
@@ -698,8 +698,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(703)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
 				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
 				return nil
@@ -745,8 +745,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 		endID         = int64(808)
 	)
 	s.mockAlloc.EXPECT().AllocN(int64(8)).Return(startID, endID, nil).Once()
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.Equal(datapb.CompactionType_ClusteringCompaction, task.GetType())
 			s.EqualValues(planID, task.GetPlanID())
 			s.EqualValues(analyzeTaskID, task.GetAnalyzeTaskID())
@@ -789,8 +789,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
 		endID        = int64(503)
 	)
 	s.mockAlloc.EXPECT().AllocN(int64(3)).Return(startID, endID, nil).Once()
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(planID, task.GetPlanID())
 			s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
 			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
@@ -1053,7 +1053,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				Schema: collectionSchema,
 			}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(errors.New("enqueue error")).Once()
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).Return(errors.New("enqueue error")).Once()
 
 		cv := makeBumpSchemaVersionView(triggerID)
 		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), cv)
@@ -1077,8 +1077,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				Properties: map[string]string{common.CollectionTTLConfigKey: "3600"},
 			}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.EqualValues(planID, task.GetPlanID())
 				s.EqualValues(triggerID, task.GetTriggerID())
 				s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, task.GetType())
@@ -1125,8 +1125,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&meta.CollectionInfo{ID: s.testLabel.CollectionID, Schema: liveSchema}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager}).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, task.GetType())
 				s.EqualValues(2, task.GetSchema().GetVersion())
 				s.Equal(frozenSchema, task.GetSchema())

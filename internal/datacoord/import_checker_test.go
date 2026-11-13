@@ -268,7 +268,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
 	cim := s.checker.Ci.(*compaction.MockCompactionInspector)
-	cim.EXPECT().EnqueueCompaction(mock.Anything).Return(nil)
+	cim.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, compaction.AdmissionOptions{Producer: compaction.ProducerImport}).Return(nil)
 
 	s.checker.CheckSortingJob(job)
 	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())

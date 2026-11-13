@@ -54,6 +54,9 @@ type CompactionTargetMeta struct {
 	admission          *lock.KeyLock[int64]
 	collectionWrites   *lock.KeyLock[int64]
 	tryLockScope       func(context.Context, int64) (func(), error)
+
+	standingMu sync.Mutex
+	standing   map[datapb.TargetIntent]*standingState
 }
 
 func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
@@ -70,6 +73,7 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 		writes:             lock.NewKeyLock[int64](),
 		admission:          lock.NewKeyLock[int64](),
 		collectionWrites:   lock.NewKeyLock[int64](),
+		standing:           make(map[datapb.TargetIntent]*standingState),
 	}
 	for _, record := range records {
 		m.targets[record.GetTargetID()] = record

@@ -5935,11 +5935,15 @@ type dataCoordConfig struct {
 	// compaction
 	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
 	CompactionTargetRetentionSeconds       ParamItem `refreshable:"true"`
+	TargetCompactionMaxEvents              ParamItem `refreshable:"true"`
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
+	CompactionRateLimitTokens              ParamItem `refreshable:"true"`
+	CompactionRateLimitInterval            ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionMaxTaskNum                   ParamItem `refreshable:"true"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
@@ -6343,6 +6347,33 @@ Compaction merges small-size segments into a large segment, and clears the entit
 	}
 	p.CompactionTargetRetentionSeconds.Init(base.mgr)
 
+	p.TargetCompactionMaxEvents = ParamItem{
+		Key:          "dataCoord.compaction.target.maxEventsPerReconcile",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Deprecated. Target reconciliation plans all matches and uses the shared admission limit.",
+		Export:       true,
+	}
+	p.TargetCompactionMaxEvents.Init(base.mgr)
+
+	p.CompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.rateLimitTokens",
+		Version:      "3.0.0",
+		DefaultValue: "256",
+		Doc:          "Shared compaction task token bucket capacity and number of tokens replenished per refill interval",
+		Export:       true,
+	}
+	p.CompactionRateLimitTokens.Init(base.mgr)
+
+	p.CompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.rateLimitInterval",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc:          "Refill interval in seconds for the shared compaction task token bucket",
+		Export:       true,
+	}
+	p.CompactionRateLimitInterval.Init(base.mgr)
+
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
 		Version:      "2.0.0",
@@ -6381,6 +6412,17 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionMaxTaskNum = ParamItem{
+		Key:          "dataCoord.compaction.maxTaskNum",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Soft cap on pending and running compaction tasks. Concurrent submissions can briefly exceed it.
+Sort tasks required by an admitted clustering task may pass this cap while still using the shared bucket and queue.
+0 or a negative value means unlimited.`,
+		Export: true,
+	}
+	p.CompactionMaxTaskNum.Init(base.mgr)
 
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",

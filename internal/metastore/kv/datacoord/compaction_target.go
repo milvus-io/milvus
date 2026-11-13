@@ -150,6 +150,23 @@ func ambiguousTxnCode(code codes.Code) bool {
 	}
 }
 
+func (kc *Catalog) UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget) error {
+	id := previous.GetTargetID()
+	current, raw, err := kc.loadCompactionTarget(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE ||
+		!proto.Equal(current, previous) {
+		return merr.WrapErrCompactionPlanConflict("standing compaction target changed during condition update")
+	}
+	key, value, err := buildCompactionTargetKV(next)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.ValueEqual(key, raw))
+}
+
 func (kc *Catalog) StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error) {
 	id := stopped.GetTargetID()
 	current, raw, err := kc.loadCompactionTarget(ctx, id)

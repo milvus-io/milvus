@@ -752,7 +752,7 @@ func (c *Checker) CheckSortingJob(job ImportJob) {
 					doneCnt++
 					continue
 				}
-				err = c.Ci.EnqueueCompaction(compactionTask)
+				err = c.Ci.EnqueueCompaction(c.ctx, compactionTask, compaction.AdmissionOptions{Producer: compaction.ProducerImport})
 				if err != nil {
 					logger.Warn(c.ctx, "sort compaction task enqueue failed", mlog.Err(err))
 					continue

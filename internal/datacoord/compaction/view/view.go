@@ -116,6 +116,11 @@ type SegmentView struct {
 	ExpireSize float64
 	DeltaSize  float64
 
+	InsertBytes  int64
+	SegmentSize  int64
+	ResidualSize int64
+	EarliestTS   uint64
+
 	NumOfRows int64
 	MaxRowNum int64
 
@@ -139,6 +144,10 @@ func (s *SegmentView) Clone() *SegmentView {
 		Size:          s.Size,
 		ExpireSize:    s.ExpireSize,
 		DeltaSize:     s.DeltaSize,
+		InsertBytes:   s.InsertBytes,
+		SegmentSize:   s.SegmentSize,
+		ResidualSize:  s.ResidualSize,
+		EarliestTS:    s.EarliestTS,
 		BinlogCount:   s.BinlogCount,
 		StatslogCount: s.StatslogCount,
 		DeltalogCount: s.DeltalogCount,
@@ -146,6 +155,18 @@ func (s *SegmentView) Clone() *SegmentView {
 		NumOfRows:     s.NumOfRows,
 		MaxRowNum:     s.MaxRowNum,
 	}
+}
+
+func GetTargetSegmentView(segment *meta.SegmentInfo) *SegmentView {
+	input := GetViewsByInfo(segment)[0]
+	input.InsertBytes = segment.EnsureStats().GetInsertBinlogSize()
+	input.SegmentSize = segment.GetSegmentSize()
+	input.ResidualSize = segment.GetResidualSegmentSize()
+	input.EarliestTS = segment.GetEarliestTs()
+	if input.EarliestTS == 0 {
+		input.EarliestTS = meta.SegmentEffectiveTs(segment.SegmentInfo)
+	}
+	return input
 }
 
 func GetViewsByInfo(segments ...*meta.SegmentInfo) []*SegmentView {
