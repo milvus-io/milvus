@@ -245,7 +245,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			exist = true
 			tmp, err := strconv.ParseInt(param.Value, 10, 64)
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", param.Key, field.GetName())
 			}
 			dim = tmp
 			break
@@ -293,7 +293,7 @@ func validateMaxLengthPerRow(collectionName string, fieldName string, dataType s
 
 		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
 		}
 
 		var defaultMaxLength int64
@@ -328,7 +328,7 @@ func getMaxCapacityPerRow(collectionName string, fieldName string, typeParams []
 		var err error
 		maxCapacityPerRow, err = strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+			return 0, merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 		}
 		if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
 			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
@@ -899,7 +899,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.Fields {
 		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 		}
 		// shoud load field, skip other check
 		if shouldLoad {
@@ -926,7 +926,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		for _, field := range structArrayField.Fields {
 			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 			}
 			if shouldLoad {
 				if typeutil.IsVectorType(field.ElementType) {
