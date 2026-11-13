@@ -799,6 +799,71 @@ func (s *QueryIteratorSuite) TestQueryIteratorWithVarCharPK() {
 	s.ErrorIs(err, io.EOF)
 }
 
+func (s *QueryIteratorSuite) TestQueryIteratorEscapesVarCharPK() {
+	for _, tc := range []struct {
+		name string
+		pk   string
+		expr string
+	}{
+		{"plain", "abc", `ID > "abc"`},
+		{"double_quote", `a"b`, `ID > "a\"b"`},
+		{"trailing_backslash", `a\`, `ID > "a\\"`},
+		{"literal_escape", `a\n`, `ID > "a\\n"`},
+		{"newline", "a\nb", `ID > "a\nb"`},
+		{"unicode", "a中文", `ID > "a中文"`},
+		{"single_quote", "a'b", `ID > "a'b"`},
+		{"backslash_quote", `a\"b`, `ID > "a\\\"b"`},
+	} {
+		for _, filter := range []string{"", `ID != "excluded"`} {
+			name := tc.name
+			if filter != "" {
+				name += "_with_filter"
+			}
+			s.Run(name, func() {
+				ctx := context.Background()
+				collectionName := s.randString(6)
+				schema := entity.NewSchema().WithName(collectionName).
+					WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true).WithMaxLength(64)).
+					WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
+				s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(),
+					Schema: schema.ProtoMessage(),
+				}, nil).Once()
+				s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+					s.Equal(filter, req.GetExpr())
+					return &milvuspb.QueryResults{
+						Status:       merr.Success(),
+						OutputFields: []string{"ID"},
+						FieldsData:   []*schemapb.FieldData{s.getVarcharFieldData("ID", []string{tc.pk})},
+					}, nil
+				}).Once()
+
+				iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+					WithBatchSize(1).WithOutputFields("ID").WithFilter(filter))
+				s.Require().NoError(err)
+				rs, err := iter.Next(ctx)
+				s.Require().NoError(err)
+				s.Equal(1, rs.ResultCount)
+				pk, err := rs.GetColumn("ID").Get(0)
+				s.Require().NoError(err)
+				s.Equal(tc.pk, pk)
+
+				// The raw primary key from the first page must be quoted in the next request.
+				wantExpr := tc.expr
+				if filter != "" {
+					wantExpr = "(" + filter + ") and " + wantExpr
+				}
+				s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+					s.Equal(wantExpr, req.GetExpr())
+					return &milvuspb.QueryResults{Status: merr.Success()}, nil
+				}).Once()
+				_, err = iter.Next(ctx)
+				s.ErrorIs(err, io.EOF)
+			})
+		}
+	}
+}
+
 func (s *QueryIteratorSuite) TestQueryIteratorWithFilter() {
 	ctx := context.Background()
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
