@@ -194,14 +194,11 @@ func (r *CompactionTargetReconciler) selectableStorageRewrites(ctx context.Conte
 	if Params.CommonCfg.UseLoonFFI.GetAsBool() {
 		version = storage.StorageV3
 	}
-	formatEnabled := auto && Params.DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
 	var formatProperties map[string]string
 	if version == storage.StorageV3 {
 		format := Params.DataNodeCfg.StorageFormat.GetValue()
 		if validStorageFormat(format) {
 			formatProperties = map[string]string{storageFormatConditionKey: format}
-		} else if formatEnabled {
-			mlog.RatedWarn(ctx, 1, "invalid storage compaction writer format", mlog.String("format", format))
 		}
 	}
 
@@ -241,6 +238,10 @@ func (r *CompactionTargetReconciler) selectableStorageRewrites(ctx context.Conte
 				mlog.Stringer("family", record.GetIntent()), mlog.Err(err))
 		}
 		matches = append(matches, observation.match...)
+	}
+	if len(records) != 0 && version == storage.StorageV3 && formatProperties == nil {
+		mlog.RatedWarn(ctx, 1, "storage compaction is waiting for a valid V3 writer format")
+		return nil
 	}
 	if len(matches) == 0 || !r.storageCompactionReady(ctx) {
 		return nil
