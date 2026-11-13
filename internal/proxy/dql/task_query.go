@@ -1037,8 +1037,11 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
-	// Extract physical time for entity-level TTL (issue #47413)
-	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	// The entity TTL cutoff is the request's own time, like the collection TTL
+	// cutoff below. The guarantee timestamp only says how fresh the view must be:
+	// under Eventually it is the last DDL and under Session the client's last
+	// write, so a cutoff taken from it leaves expired rows visible (#55069).
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(t.GetBase().GetTimestamp())
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator {
