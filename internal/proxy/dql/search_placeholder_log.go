@@ -136,9 +136,17 @@ func (s searchPlaceholderStringer) String() string {
 	return w.finish()
 }
 
+// unmarshalPlaceholderGroup decodes a placeholder group. It is a package-level
+// variable so tests can observe placeholder decoding without patching the hot
+// proto.Unmarshal function, which races with the config-refresher goroutine
+// started by paramtable.Init (see TestLogSearchPlaceholders).
+var unmarshalPlaceholderGroup = func(data []byte, group *commonpb.PlaceholderGroup) error {
+	return proto.Unmarshal(data, group)
+}
+
 func writePlaceholderGroup(w *placeholderLogWriter, data []byte) {
 	var group commonpb.PlaceholderGroup
-	if err := proto.Unmarshal(data, &group); err != nil {
+	if err := unmarshalPlaceholderGroup(data, &group); err != nil {
 		w.write("<invalid placeholder group>")
 		return
 	}
