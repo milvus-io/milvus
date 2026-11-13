@@ -599,9 +599,8 @@ func DeriveEndpoint(cloudProvider, region string) string {
 		if strings.HasPrefix(r, "usgov") || strings.HasPrefix(r, "usdod") {
 			return "core.usgovcloudapi.net"
 		}
-		if strings.HasPrefix(r, "germany") {
-			return "core.cloudapi.de"
-		}
+		// Microsoft Cloud Germany (core.cloudapi.de) closed in October 2021;
+		// germanywestcentral and germanynorth are public Azure regions.
 		return "core.windows.net"
 	}
 	return ""
