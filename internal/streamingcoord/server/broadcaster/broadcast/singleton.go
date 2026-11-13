@@ -96,6 +96,13 @@ func GetPendingSchemaFileResources() map[int64][]int64 {
 	return singleton.Get().GetPendingSchemaFileResources()
 }
 
+func GetPendingSchemaTarget(collectionID int64) (*broadcaster.SchemaTarget, error) {
+	if !singleton.Ready() {
+		return nil, merr.WrapErrServiceNotReadyMsg("schema target recovery is not ready")
+	}
+	return singleton.Get().GetPendingSchemaTarget(collectionID)
+}
+
 // Release releases the broadcaster.
 func Release() {
 	if !singleton.Ready() {

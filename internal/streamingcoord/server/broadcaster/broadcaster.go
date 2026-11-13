@@ -48,6 +48,9 @@ type Broadcaster interface {
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
 
+	// GetPendingSchemaTarget returns the earliest unfinished durable schema ALTER.
+	GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error)
+
 	// TryLockResourceKeys orders local work against broadcasts without starting
 	// one. A nil release with no error means the requested keys are busy.
 	TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (release func(), err error)
