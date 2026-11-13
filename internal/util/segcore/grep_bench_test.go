@@ -104,7 +104,7 @@ func BenchmarkGrepJSON(b *testing.B) {
 				ExecutionLimits: native.ExecutionLimits{BatchSize: 128, MaxResultBytes: 32 << 20},
 			}
 			runner := segcore.NewGrepSegment(segment)
-			probe, err := runner.ScanGrep(ctx, offsets, request)
+			probe, err := scanGrepOffsets(runner, ctx, offsets, request)
 			require.NoError(b, err)
 			require.Len(b, probe.Positions, tc.hits)
 			require.Equal(b, arrow.BINARY, probe.Details.DataType().ID())
@@ -142,7 +142,7 @@ func BenchmarkGrepJSON(b *testing.B) {
 				b.SetBytes(int64(rows * len(tc.text)))
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					result, err := runner.ScanGrep(ctx, offsets, request)
+					result, err := scanGrepOffsets(runner, ctx, offsets, request)
 					if err != nil {
 						result.Release()
 						b.Fatal(err)

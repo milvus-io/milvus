@@ -35,8 +35,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -312,9 +315,26 @@ func TestQueryScanMergedFrameOwnsComputedRows(t *testing.T) {
 		)}))
 		require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{values.NewArray()}))
 		values.Release()
+		lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+		for row := 0; row < 2; row++ {
+			lists.Append(true)
+			lists.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{int32(i), int32(row + 3)}, nil)
+		}
+		require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{lists.NewArray()}))
+		lists.Release()
 		frames = append(frames, builder.Build())
 		builder.Release()
 	}
+	// A document cap of two retains two complete lists (four elements),
+	// leaving exact element trimming to the downstream page operator.
+	capped, err := mergeQueryScanResults(frames, 2, reduce.IReduceNoOrder)
+	require.NoError(t, err)
+	cappedResult, err := chain.ToRetrieveResults(capped.Frame)
+	require.NoError(t, err)
+	capped.Frame.Release()
+	require.Equal(t, []int64{1, 2}, cappedResult.Ids.GetIntId().Data)
+	require.Equal(t, []int32{0, 3}, cappedResult.ElementIndices[0].Indices)
+	require.Equal(t, []int32{1, 3}, cappedResult.ElementIndices[1].Indices)
 	columnOrders := make([][]string, len(frames))
 	for i, frame := range frames {
 		columnOrders[i] = append([]string(nil), frame.ColumnNames()...)
@@ -331,6 +351,11 @@ func TestQueryScanMergedFrameOwnsComputedRows(t *testing.T) {
 	result, err := chain.ToRetrieveResults(merged.Frame)
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2, 3}, result.Ids.GetIntId().Data)
+	require.True(t, result.ElementLevel)
+	require.Len(t, result.ElementIndices, 3)
+	require.Equal(t, []int32{0, 3}, result.ElementIndices[0].Indices)
+	require.Equal(t, []int32{1, 3}, result.ElementIndices[1].Indices)
+	require.Equal(t, []int32{1, 4}, result.ElementIndices[2].Indices)
 	require.Len(t, result.FieldsData, 1)
 	require.Equal(t, []int64{1, 2, 2}, result.FieldsData[0].GetScalars().GetLongData().Data)
 	require.Equal(t, schemapb.DataType_JSON, result.ComputedResults[0].Type)
@@ -349,18 +374,20 @@ func TestQueryScanEmptyFramePreservesColumns(t *testing.T) {
 			computed := arrow.NewSchema([]arrow.Field{{Name: "matches", Type: arrow.BinaryTypes.Binary, Metadata: arrow.NewMetadata(
 				[]string{chain.ArrowDataTypeMetadataKey}, []string{fmt.Sprint(int(schemapb.DataType_JSON))},
 			)}}, nil)
-			frame, err := emptyQueryFrame(schema, []*schemapb.FieldSchema{pk, vector}, computed)
+			frame, err := emptyQueryFrame(schema, []*schemapb.FieldSchema{pk, vector}, computed, true)
 			require.NoError(t, err)
 			defer frame.Release()
 			require.Zero(t, frame.NumRows())
 			require.False(t, frame.Schema().Field(frame.Schema().FieldIndices("matches")[0]).Nullable)
-			require.ElementsMatch(t, []string{"$id", "$timestamp", "pk", "vector", "matches"}, frame.ColumnNames())
+			require.ElementsMatch(t, []string{"$id", "$timestamp", "pk", "vector", "matches", types.QueryElementIndicesFieldName}, frame.ColumnNames())
 			for _, name := range frame.ColumnNames() {
 				require.NotEqual(t, arrow.NULL, frame.Column(name).DataType().ID())
 				require.Empty(t, frame.Column(name).Chunks())
 			}
 			result, err := chain.ToRetrieveResults(frame)
 			require.NoError(t, err)
+			require.True(t, result.ElementLevel)
+			require.Empty(t, result.ElementIndices)
 			if pkType == schemapb.DataType_Int64 {
 				require.NotNil(t, result.Ids.GetIntId())
 			} else {
@@ -501,4 +528,78 @@ func TestQueryScanOutputEstimateBeforeMaterialization(t *testing.T) {
 		result := &queryScanMergeResult{Frame: plain, Selections: []OffsetSelection{{Offset: 0}, {Offset: 1}}}
 		check(t, result, 100, 100)
 	})
+}
+
+// A per-segment element quota cannot replace the document cap without a refill
+// contract: another segment can replace a selected version with fewer elements.
+func TestQueryScanElementLimitAfterVersionReplacement(t *testing.T) {
+	for _, truncateOldSegment := range []bool{false, true} {
+		name := "complete candidates fill page"
+		if truncateOldSegment {
+			name = "element cap without refill underfills page"
+		}
+		t.Run(name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer pool.AssertSize(t, 0)
+			makeFrame := func(offsets, pks, timestamps []int64, elements [][]int32, details []int64) *chain.DataFrame {
+				record := scanIdentityRecord(pool, offsets, pks, timestamps, false)
+				base := scanFrameFromRecord(t, record)
+				record.Release()
+				defer base.Release()
+				builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{int64(len(pks))})
+				defer builder.Release()
+				for _, name := range base.ColumnNames() {
+					require.NoError(t, builder.AddColumnFrom(base, name))
+				}
+				lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+				defer lists.Release()
+				for _, indices := range elements {
+					lists.Append(true)
+					lists.ValueBuilder().(*array.Int32Builder).AppendValues(indices, nil)
+				}
+				require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{lists.NewArray()}))
+				values := array.NewInt64Builder(pool)
+				defer values.Release()
+				values.AppendValues(details, nil)
+				require.NoError(t, builder.SetComputedField(arrow.Field{Name: "matches", Type: arrow.PrimitiveTypes.Int64}))
+				require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{values.NewArray()}))
+				return builder.Build()
+			}
+			offsets, pks, timestamps := []int64{10, 20}, []int64{1, 2}, []int64{10, 10}
+			elements, details := [][]int32{{0, 1, 2, 3}, {1, 3, 5}}, []int64{100, 200}
+			if truncateOldSegment {
+				// Simulate stopping Grep after PK 1 alone contributes four elements.
+				offsets, pks, timestamps = offsets[:1], pks[:1], timestamps[:1]
+				elements, details = elements[:1], details[:1]
+			}
+			old := makeFrame(offsets, pks, timestamps, elements, details)
+			newer := makeFrame([]int64{30}, []int64{1}, []int64{20}, [][]int32{{7}}, []int64{101})
+			defer old.Release()
+			defer newer.Release()
+			merged, err := mergeQueryScanResults([]*chain.DataFrame{old, newer}, 4, reduce.IReduceNoOrder)
+			require.NoError(t, err)
+			defer merged.Frame.Release()
+			exported, err := chain.ToRetrieveResults(merged.Frame)
+			require.NoError(t, err)
+			reply := &internalpb.RetrieveResults{Ids: exported.Ids, FieldsData: exported.FieldsData,
+				ComputedResults: exported.ComputedResults, ElementLevel: exported.ElementLevel,
+				ElementIndices: convertSegcoreElementIndicesToInternal(exported.ElementIndices)}
+			out, err := queryutil.NewSortAndCheckPKPageOperator(reduce.IReduceNoOrder, nil, 4, 0).Run(context.Background(), nil, []*internalpb.RetrieveResults{reply})
+			require.NoError(t, err)
+			page := out[0].(*internalpb.RetrieveResults)
+			require.True(t, page.ElementLevel)
+			require.Equal(t, []int32{7}, page.ElementIndices[0].Indices)
+			actualDetails := page.ComputedResults[0].GetScalars().GetLongData().Data
+			if truncateOldSegment {
+				require.Equal(t, []int64{1}, page.Ids.GetIntId().Data)
+				require.Equal(t, []int64{101}, actualDetails)
+			} else {
+				require.Equal(t, []int64{1, 2}, page.Ids.GetIntId().Data)
+				require.Equal(t, []int32{1, 3, 5}, page.ElementIndices[1].Indices)
+				require.Equal(t, []int64{101, 200}, actualDetails)
+				require.Equal(t, 4, len(page.ElementIndices[0].Indices)+len(page.ElementIndices[1].Indices))
+				require.Equal(t, []OffsetSelection{{SegmentIndex: 1, Offset: 30}, {SegmentIndex: 0, Offset: 20}}, merged.Selections)
+			}
+		})
+	}
 }

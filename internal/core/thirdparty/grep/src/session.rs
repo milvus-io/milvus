@@ -1,4 +1,6 @@
 use std::{
+    cell::Cell,
+    fmt,
     mem::size_of,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
@@ -8,8 +10,11 @@ use std::{
 };
 
 use grep::{
-    matcher::{Match, Matcher, NoCaptures},
+    matcher::{LineMatchKind, LineTerminator, Match, Matcher, NoCaptures},
     regex::RegexMatcher,
+    searcher::{
+        BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkError, SinkMatch,
+    },
 };
 
 use crate::{BatchResult, Error, InputKind, LimitKind, Line, Plan, Span, TextResult};
@@ -34,17 +39,28 @@ pub struct Session {
     // session clones the matcher to get its own regex engine cache pool.
     _plan: Plan,
     matcher: RegexMatcher,
-    max_count: Option<u64>,
+    searcher: Searcher,
     cancellation: CancellationToken,
     poisoned: bool,
 }
 
 impl Session {
     pub fn new(plan: &Plan) -> Self {
+        let (before, after) = plan.context();
+        let searcher = SearcherBuilder::new()
+            .before_context(before.min(usize::MAX as u64) as usize)
+            .after_context(after.min(usize::MAX as u64) as usize)
+            .max_matches(plan.max_count())
+            .line_number(true)
+            .multi_line(false)
+            .binary_detection(BinaryDetection::none())
+            .encoding(None)
+            .bom_sniffing(false)
+            .build();
         Self {
             _plan: plan.clone(),
             matcher: plan.matcher(),
-            max_count: plan.max_count(),
+            searcher,
             cancellation: CancellationToken::default(),
             poisoned: false,
         }
@@ -67,7 +83,7 @@ impl Session {
         self.guarded(|session| session.execute(inputs, max_result_bytes, overhead))
     }
 
-    fn guarded<T>(&mut self, f: impl FnOnce(&Self) -> Result<T, Error>) -> Result<T, Error> {
+    fn guarded<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, Error>) -> Result<T, Error> {
         if self.poisoned {
             return Err(Error::Internal("session is poisoned"));
         }
@@ -83,7 +99,7 @@ impl Session {
     }
 
     fn execute(
-        &self,
+        &mut self,
         inputs: &[&[u8]],
         max_result_bytes: u64,
         overhead: ResultOverhead,
@@ -121,60 +137,21 @@ impl Session {
         let matcher = CheckedMatcher {
             inner: &self.matcher,
             control: &control,
+            failure: Cell::new(None),
         };
         for text in validated {
             control.check()?;
             let mut lines = Vec::new();
-            let mut start = 0;
-            let mut line_number = 1;
-            // Empty text has no logical lines. A terminal LF does not create
-            // another line. CR, NUL and BOM are never normalized away.
-            while start < text.len() && self.max_count.is_none_or(|max| (lines.len() as u64) < max)
-            {
-                let end = line_end(text.as_bytes(), start, &control)?;
-                let content = &text[start..end];
-                let mut spans = Vec::new();
-                matcher.try_find_iter_at(content.as_bytes(), 0, |m| -> Result<bool, Error> {
-                    control.check()?;
-                    if !content.is_char_boundary(m.start()) || !content.is_char_boundary(m.end()) {
-                        if m.is_empty() {
-                            return Ok(true);
-                        }
-                        return Err(Error::Internal(
-                            "engine returned non-UTF-8 match boundaries",
-                        ));
-                    }
-                    if spans.is_empty() {
-                        budget.charge(size_of::<Line>())?;
-                        budget.charge(overhead.line)?;
-                        budget.charge(content.len())?;
-                    }
-                    budget.charge(size_of::<Span>())?;
-                    budget.charge(overhead.span)?;
-                    spans.try_reserve(1)?;
-                    spans.push(Span {
-                        start: m.start() as u64,
-                        end: m.end() as u64,
-                    });
-                    Ok(true)
-                })??;
-                if !spans.is_empty() {
-                    let mut owned = String::new();
-                    owned.try_reserve_exact(content.len())?;
-                    owned.push_str(content);
-                    lines.try_reserve(1)?;
-                    lines.push(Line {
-                        line_number,
-                        line_start_offset: start as u64,
-                        content: owned.into_boxed_str(),
-                        spans: spans.into_boxed_slice(),
-                    });
-                }
-                control.check()?;
-                // Avoid adding one past the end for an unterminated line.
-                start = if end == text.len() { end } else { end + 1 };
-                line_number += 1;
-            }
+            matcher.search(
+                &mut self.searcher,
+                text.as_bytes(),
+                ResultSink {
+                    matcher: &matcher,
+                    lines: &mut lines,
+                    budget: &mut budget,
+                    overhead,
+                },
+            )?;
             texts.push(TextResult {
                 lines: lines.into_boxed_slice(),
             });
@@ -187,6 +164,32 @@ impl Session {
         control.check()?;
         Ok(result)
     }
+}
+
+// Charge context and matching lines identically before copying their content.
+fn push_line(
+    lines: &mut Vec<Line>,
+    content: &str,
+    line_number: u64,
+    start: u64,
+    spans: Vec<Span>,
+    budget: &mut ResultBudget,
+    overhead: ResultOverhead,
+) -> Result<(), Error> {
+    budget.charge(size_of::<Line>())?;
+    budget.charge(overhead.line)?;
+    budget.charge(content.len())?;
+    let mut owned = String::new();
+    owned.try_reserve_exact(content.len())?;
+    owned.push_str(content);
+    lines.try_reserve(1)?;
+    lines.push(Line {
+        line_number,
+        line_start_offset: start,
+        content: owned.into_boxed_str(),
+        spans: spans.into_boxed_slice(),
+    });
+    Ok(())
 }
 
 struct Control<'a> {
@@ -202,41 +205,173 @@ impl Control<'_> {
     }
 }
 
-// Finding a line boundary is itself a scan. Bound this scan between checks;
-// a single regex call and a single UTF-8 validation remain non-preemptible.
-fn line_end(bytes: &[u8], start: usize, control: &Control<'_>) -> Result<usize, Error> {
-    let mut offset = start;
-    for chunk in bytes[start..].chunks(64 * 1024) {
-        control.check()?;
-        if let Some(i) = memchr::memchr(b'\n', chunk) {
-            return Ok(offset + i);
-        }
-        offset += chunk.len();
-    }
-    Ok(bytes.len())
+// Searcher owns line traversal, context windows, deduplication, -m and offsets.
+// This Sink only builds the Milvus result and accounts for its allocations.
+struct ResultSink<'a, 'b, 'c> {
+    matcher: &'a CheckedMatcher<'b, 'c>,
+    lines: &'a mut Vec<Line>,
+    budget: &'a mut ResultBudget,
+    overhead: ResultOverhead,
 }
 
-// Use the upstream Matcher iterator (including its empty-match suppression),
-// but check around every find_at call, not just callbacks for successful hits.
+impl ResultSink<'_, '_, '_> {
+    fn emit(
+        &mut self,
+        bytes: &[u8],
+        line_number: Option<u64>,
+        offset: u64,
+        matched: bool,
+    ) -> Result<bool, Error> {
+        self.matcher.control.check()?;
+        let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+        // The full input was already validated; BOM sniffing/transcoding is off.
+        let content = std::str::from_utf8(bytes)
+            .map_err(|_| Error::Internal("searcher returned an invalid UTF-8 line"))?;
+        let line_number = line_number.ok_or(Error::Internal("searcher omitted line number"))?;
+        let mut spans = Vec::new();
+        if matched {
+            self.matcher
+                .try_find_iter_at(bytes, 0, |m| -> Result<bool, Error> {
+                    self.budget.charge(size_of::<Span>())?;
+                    self.budget.charge(self.overhead.span)?;
+                    spans.try_reserve(1)?;
+                    spans.push(Span {
+                        start: m.start() as u64,
+                        end: m.end() as u64,
+                    });
+                    Ok(true)
+                })
+                .map_err(|_| self.matcher.take_error())??;
+            if spans.is_empty() {
+                return Err(Error::Internal(
+                    "searcher returned a line without valid matches",
+                ));
+            }
+        }
+        push_line(
+            self.lines,
+            content,
+            line_number,
+            offset,
+            spans,
+            self.budget,
+            self.overhead,
+        )?;
+        self.matcher.control.check()?;
+        Ok(true)
+    }
+}
+
+impl Sink for ResultSink<'_, '_, '_> {
+    type Error = Error;
+    fn matched(&mut self, _: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Error> {
+        self.emit(
+            mat.bytes(),
+            mat.line_number(),
+            mat.absolute_byte_offset(),
+            true,
+        )
+    }
+    fn context(&mut self, _: &Searcher, context: &SinkContext<'_>) -> Result<bool, Error> {
+        self.emit(
+            context.bytes(),
+            context.line_number(),
+            context.absolute_byte_offset(),
+            false,
+        )
+    }
+}
+
+impl SinkError for Error {
+    fn error_message<T: fmt::Display>(_: T) -> Self {
+        // search_slice has fixed configuration and performs no external I/O.
+        // Typed matcher errors are recovered by CheckedMatcher::search instead
+        // of inferring their category from this upstream formatted message.
+        Error::Internal("grep searcher failed")
+    }
+}
+
+#[derive(Debug)]
+struct MatcherFailure;
+impl fmt::Display for MatcherFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("grep matcher failed")
+    }
+}
+
+// Preserve the existing per-line anchor/UTF-8 contract and cooperative cancel
+// checks while delegating line scanning and context handling to Searcher.
 struct CheckedMatcher<'a, 'b> {
     inner: &'a RegexMatcher,
     control: &'a Control<'b>,
+    failure: Cell<Option<Error>>,
+}
+
+impl CheckedMatcher<'_, '_> {
+    fn capture<T>(&self, result: Result<T, Error>) -> Result<T, MatcherFailure> {
+        result.map_err(|error| {
+            self.failure.set(Some(error));
+            MatcherFailure
+        })
+    }
+    fn take_error(&self) -> Error {
+        self.failure
+            .take()
+            .unwrap_or(Error::Internal("missing matcher error"))
+    }
+    fn search<S: Sink<Error = Error>>(
+        &self,
+        searcher: &mut Searcher,
+        bytes: &[u8],
+        sink: S,
+    ) -> Result<(), Error> {
+        searcher
+            .search_slice(self, bytes, sink)
+            .map_err(|error| self.failure.take().unwrap_or(error))
+    }
 }
 
 impl Matcher for CheckedMatcher<'_, '_> {
     type Captures = NoCaptures;
-    type Error = Error;
-    fn find_at(&self, haystack: &[u8], at: usize) -> Result<Option<Match>, Error> {
-        self.control.check()?;
-        let found = self
-            .inner
-            .find_at(haystack, at)
-            .map_err(|_| Error::Internal("infallible regex matcher returned an error"))?;
-        self.control.check()?;
-        Ok(found)
+    type Error = MatcherFailure;
+    fn find_at(&self, haystack: &[u8], mut at: usize) -> Result<Option<Match>, MatcherFailure> {
+        self.capture((|| loop {
+            self.control.check()?;
+            let found = self
+                .inner
+                .find_at(haystack, at)
+                .map_err(|_| Error::Internal("infallible regex matcher returned an error"))?;
+            self.control.check()?;
+            let Some(m) = found else { return Ok(None) };
+            let boundary = |i: usize| i == haystack.len() || haystack[i] & 0xc0 != 0x80;
+            if boundary(m.start()) && boundary(m.end()) {
+                return Ok(Some(m));
+            }
+            if !m.is_empty() {
+                return Err(Error::Internal(
+                    "engine returned non-UTF-8 match boundaries",
+                ));
+            }
+            at = m.end() + 1;
+        })())
     }
-    fn new_captures(&self) -> Result<NoCaptures, Error> {
+    fn new_captures(&self) -> Result<NoCaptures, MatcherFailure> {
         Ok(NoCaptures::new())
+    }
+    fn line_terminator(&self) -> Option<LineTerminator> {
+        Some(LineTerminator::byte(b'\n'))
+    }
+    fn find_candidate_line(
+        &self,
+        haystack: &[u8],
+    ) -> Result<Option<LineMatchKind>, MatcherFailure> {
+        // Ask Searcher to verify each complete line. Delegating this to the
+        // regex's whole-buffer fast path would change existing \A/\z semantics.
+        self.capture(
+            self.control
+                .check()
+                .map(|()| (!haystack.is_empty()).then_some(LineMatchKind::Candidate(0))),
+        )
     }
 }
 
@@ -314,13 +449,26 @@ mod tests {
         let matcher = CheckedMatcher {
             inner: &session.matcher,
             control: &control,
+            failure: Cell::new(None),
+        };
+        assert!(matcher.find_at(b"no hits", 0).is_err());
+        assert!(matches!(matcher.take_error(), Error::Cancelled));
+        let mut searcher = SearcherBuilder::new()
+            .before_context(1)
+            .after_context(1)
+            .build();
+        let mut lines = Vec::new();
+        let mut budget = ResultBudget {
+            remaining: 1_000_000,
+        };
+        let sink = ResultSink {
+            matcher: &matcher,
+            lines: &mut lines,
+            budget: &mut budget,
+            overhead: ResultOverhead::default(),
         };
         assert!(matches!(
-            matcher.find_at(b"no hits", 0),
-            Err(Error::Cancelled)
-        ));
-        assert!(matches!(
-            line_end(b"no newline", 0, &control),
+            matcher.search(&mut searcher, b"no hits", sink),
             Err(Error::Cancelled)
         ));
     }

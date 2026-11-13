@@ -1159,6 +1159,34 @@ struct QueryScanColumns : milvus::segcore::ProtoStorageOwner {
     std::vector<std::string> names;
 };
 
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildQueryElementIndices(const milvus::proto::segcore::RetrieveResults& results,
+                         int64_t rows) {
+    AssertInfo(results.element_indices_size() == rows,
+               "candidate element list count differs from offsets");
+    auto values = std::make_shared<arrow::Int32Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), values);
+    ARROW_RETURN_NOT_OK(builder.Reserve(rows));
+    int64_t count = 0;
+    for (const auto& list : results.element_indices()) {
+        AssertInfo(list.indices_size() > 0,
+                   "candidate document has no selected elements");
+        AssertInfo(
+            list.indices_size() <= std::numeric_limits<int32_t>::max() - count,
+            "candidate element values exceed Arrow List capacity");
+        count += list.indices_size();
+    }
+    ARROW_RETURN_NOT_OK(values->Reserve(count));
+    for (const auto& list : results.element_indices()) {
+        ARROW_RETURN_NOT_OK(builder.Append());
+        for (auto index : list.indices()) {
+            AssertInfo(index >= 0, "negative candidate element index");
+            ARROW_RETURN_NOT_OK(values->Append(index));
+        }
+    }
+    return builder.Finish();
+}
+
 CRetrieveArrowResult*
 ExportQueryScanResult(
     std::unique_ptr<milvus::proto::segcore::RetrieveResults> results,
@@ -1172,7 +1200,7 @@ ExportQueryScanResult(
         owner->columns.emplace_back();
         return owner->columns.back();
     };
-    auto& offsets = add("$seg_offset");
+    auto& offsets = add(milvus::segcore::kSegOffsetFieldName);
     offsets.set_type(milvus::proto::schema::DataType::Int64);
     offsets.mutable_scalars()->mutable_long_data()->mutable_data()->Swap(
         results->mutable_offset());
@@ -1225,6 +1253,23 @@ ExportQueryScanResult(
             milvus::DataArray released;
             released.Swap(&owner->columns[i]);
         }
+    }
+    if (results->element_level()) {
+        auto lists = BuildQueryElementIndices(*results, rows);
+        if (!lists.ok()) {
+            ThrowInfo(milvus::segcore::ArrowExportErrorCode(lists.status()),
+                      "failed to build QueryScan element indices: {}",
+                      lists.status().ToString());
+        }
+        arrays.push_back(std::move(lists).ValueOrDie());
+        fields.push_back(
+            arrow::field(milvus::segcore::kQueryElementIndicesFieldName,
+                         arrow::list(arrow::int32()),
+                         false));
+        results->clear_element_indices();
+    } else {
+        AssertInfo(results->element_indices_size() == 0,
+                   "document candidate result contains element indices");
     }
     auto batch = arrow::RecordBatch::Make(
         arrow::schema(std::move(fields)), rows, std::move(arrays));

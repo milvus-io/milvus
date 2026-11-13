@@ -5,7 +5,7 @@ pub struct Span {
     pub end: u64,
 }
 
-/// An entire matching line, excluding only its terminal LF. Spans never refer
+/// A matching or context line, excluding only its terminal LF. Spans never refer
 /// to the original field coordinates. An empty match is represented explicitly.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Line {
@@ -14,6 +14,7 @@ pub struct Line {
     /// Zero-based UTF-8 byte offset of this line in the original field.
     pub line_start_offset: u64,
     pub content: Box<str>,
+    /// Empty for context; nonempty for a matching line (including zero-width hits).
     pub spans: Box<[Span]>,
 }
 

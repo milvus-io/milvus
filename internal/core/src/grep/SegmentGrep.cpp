@@ -9,6 +9,7 @@
 #include "grep/segment_grep_c.h"
 #include <arrow/api.h>
 #include <algorithm>
+#include <chrono>
 #include <arrow/c/bridge.h>
 #include <folly/ScopeGuard.h>
 #include <fmt/format.h>
@@ -19,6 +20,7 @@
 #include "common/CGoCatch.h"
 #include "grep/Grep.h"
 #include "grep/IndexCondition.h"
+#include "log/Log.h"
 #include "index/contracts/query/INgramReader.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -53,9 +55,23 @@ CheckResultBudget(uint64_t total_bytes, uint64_t limit) {
 // Builds the Arrow output and counts its bytes across all input batches.
 class GrepResultBuilder {
  public:
+    explicit GrepResultBuilder(const arrow::ListArray* elements = nullptr)
+        : elements_(elements) {
+    }
+
     int64_t
-    Count() const {
-        return positions_.length();
+    Contribution(int64_t position) const {
+        if (!elements_)
+            return 1;
+        const auto count = elements_->value_length(position);
+        AssertInfo(!elements_->IsNull(position) && count > 0,
+                   "grep candidate must have selected elements");
+        return count;
+    }
+
+    int64_t
+    MatchedUnits() const {
+        return matched_units_;
     }
 
     uint64_t
@@ -110,6 +126,9 @@ class GrepResultBuilder {
             CheckArrow(positions_.Append(input_positions[i]));
             CheckArrow(details_.Append(document));
             total_bytes_ += 16 + document.size();
+            const auto count = Contribution(input_positions[i]);
+            matched_units_ += std::min(
+                count, std::numeric_limits<int64_t>::max() - matched_units_);
         }
     }
 
@@ -133,6 +152,8 @@ class GrepResultBuilder {
     }
 
  private:
+    const arrow::ListArray* elements_;
+    int64_t matched_units_ = 0;
     uint64_t total_bytes_ = 0;
     arrow::BinaryBuilder details_;
     arrow::Int64Builder positions_;
@@ -505,14 +526,17 @@ MatchGrepBatch(const GrepInputBatch& batch,
     std::vector<std::string_view> texts;
     std::vector<int64_t> input_positions;
     int64_t consumed = 0;
-    while (consumed < batch.count && output.Count() < opt.limit) {
+    while (consumed < batch.count && output.MatchedUnits() < opt.limit) {
         texts.clear();
         input_positions.clear();
-        const auto quota = opt.limit - output.Count();
+        const auto quota = opt.limit - output.MatchedUnits();
+        int64_t potential_units = 0;
+        // Bound the group by possible contributions, so a document with many
+        // elements can satisfy the quota without matching the rest of the batch.
+        // Only selected documents are charged by Append; misses consume no quota.
         // Matching groups are bounded by the read batch and remaining quota.
         // Prefetched rows stay owned/pinned until this read batch ends.
-        while (consumed < batch.count &&
-               static_cast<int64_t>(texts.size()) < quota) {
+        while (consumed < batch.count && potential_units < quota) {
             auto text = batch.Text(consumed++);
             if (!text) {
                 continue;
@@ -521,6 +545,9 @@ MatchGrepBatch(const GrepInputBatch& batch,
             input_positions.push_back(original_positions
                                           ? original_positions[consumed - 1]
                                           : begin + consumed - 1);
+            potential_units +=
+                std::min(output.Contribution(input_positions.back()),
+                         quota - potential_units);
         }
         if (texts.empty())
             continue;
@@ -544,9 +571,14 @@ std::shared_ptr<arrow::RecordBatch>
 ExecuteGrepScan(const SegmentInternalInterface* segment,
                 const int64_t* offsets,
                 int64_t size,
+                const arrow::ListArray* elements,
                 const CGrepScanOptions& opt,
                 const std::vector<std::string_view>& patterns,
                 const folly::CancellationToken& cancel_token) {
+    const bool debug_enabled = VLOG_IS_ON(GLOG_DEBUG);
+    const auto started = debug_enabled
+                             ? std::chrono::steady_clock::now()
+                             : std::chrono::steady_clock::time_point{};
     AssertInfo(size >= 0 && (size == 0 || offsets), "invalid grep offsets");
     AssertInfo(opt.batch_size > 0 && opt.limit > 0 && opt.max_regex_bytes > 0 &&
                    opt.max_dfa_cache_bytes > 0 && opt.max_result_bytes > 0,
@@ -579,7 +611,9 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
          static_cast<grep::CaseMode>(opt.case_mode),
          static_cast<grep::Boundary>(opt.boundary),
          opt.has_max_count ? std::optional<uint64_t>(opt.max_count)
-                           : std::nullopt},
+                           : std::nullopt,
+         opt.before_context,
+         opt.after_context},
         {opt.max_regex_bytes, opt.max_dfa_cache_bytes});
     if (opt.has_max_count && opt.max_count == 0) {
         // Compile first so -m 0 does not hide invalid patterns. No postings or
@@ -621,6 +655,7 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                      ? kProbeMaxRows
                      : std::max(kProbeMinRows, 2 * opt.limit));
     GrepProbeBudget probe{probe_row_budget};
+    const bool probe_started = mode == GrepMode::Probe;
     std::optional<TargetBitmap> candidates;
     if (mode == GrepMode::Index) {
         candidates = BuildGrepCandidates(*index, offsets, size, rows);
@@ -629,10 +664,10 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     const auto* read_column =
         (use_views || borrow_inline_text) ? view_column : nullptr;
     std::vector<int64_t> selected_offsets, original_positions;
-    GrepResultBuilder output;
+    GrepResultBuilder output(elements);
     int64_t begin = 0;
     int64_t window_end = 0;
-    while (begin < size && output.Count() < opt.limit) {
+    while (begin < size && output.MatchedUnits() < opt.limit) {
         check();
         if (begin == window_end) {
             // Validate the original window before any smaller probe reads.
@@ -652,10 +687,11 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                 *index, offsets + begin, size - begin, rows);
             index.reset();
         }
-        auto input_count = mode == GrepMode::Probe
-                               ? probe.NextReadCount(window_end - begin,
-                                                     opt.limit - output.Count())
-                               : window_end - begin;
+        auto input_count =
+            mode == GrepMode::Probe
+                ? probe.NextReadCount(window_end - begin,
+                                      opt.limit - output.MatchedUnits())
+                : window_end - begin;
         const int64_t* read_offsets = offsets + begin;
         int64_t read_count = input_count;
         if (candidates) {
@@ -697,26 +733,43 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
             mode = GrepMode::Index;
         }
     }
-    return output.Finish();
+    auto result = output.Finish();
+    if (debug_enabled) {
+        const auto elapsed = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - started)
+                                 .count();
+        LOG_DEBUG(
+            "grep execution finished: segmentID={}, fieldID={}, path={}, "
+            "inputRows={}, selectedRows={}, elapsedMs={}",
+            segment->get_segment_id(),
+            opt.field_id,
+            candidates ? (probe_started ? "probe_then_index" : "index_only")
+                       : (probe_started ? "probe_only" : "scan"),
+            size,
+            result->num_rows(),
+            elapsed * 1000);
+    }
+    return result;
 }
 }  // namespace
 }  // namespace milvus::grep
 
 CStatus
-ScanGrepByOffsets(void* segment,
-                  const int64_t* offsets,
-                  int64_t size,
-                  const CGrepScanOptions* options,
-                  const uint8_t* patterns,
-                  uint64_t pattern_bytes,
-                  const uint64_t* lengths,
-                  uint32_t pattern_count,
-                  ArrowSchema* out_schema,
-                  ArrowArray* out_array,
-                  void* cancellation_source) {
+ScanGrep(void* segment,
+         struct ArrowSchema* input_schema,
+         struct ArrowArray* input_array,
+         const CGrepScanRequest* request,
+         ArrowSchema* out_schema,
+         ArrowArray* out_array,
+         void* cancellation_source) {
     try {
-        AssertInfo(segment && options && out_schema && out_array,
+        AssertInfo(segment && request && out_schema && out_array,
                    "null grep argument");
+        const auto* options = &request->options;
+        const auto* patterns = request->patterns;
+        const auto pattern_bytes = request->pattern_bytes;
+        const auto* lengths = request->lengths;
+        const auto pattern_count = request->pattern_count;
         AssertInfo(!out_schema->release && !out_array->release,
                    "grep outputs must be empty");
         auto cleanup = folly::makeGuard([&] {
@@ -741,6 +794,39 @@ ScanGrepByOffsets(void* segment,
             consumed += lengths[i];
         }
         AssertInfo(consumed == pattern_bytes, "grep pattern bytes mismatch");
+        AssertInfo(input_schema && input_array, "null grep input record");
+        auto imported = arrow::ImportRecordBatch(input_array, input_schema);
+        if (!imported.ok()) {
+            ThrowInfo(milvus::segcore::ArrowExportErrorCode(imported.status()),
+                      "import grep input record: {}",
+                      imported.status().ToString());
+        }
+        auto input = std::move(imported).ValueOrDie();
+        const auto columns = input->schema()->GetAllFieldIndices(
+            milvus::segcore::kSegOffsetFieldName);
+        AssertInfo(columns.size() == 1,
+                   "grep input requires one {} column",
+                   milvus::segcore::kSegOffsetFieldName);
+        auto offsets = std::dynamic_pointer_cast<arrow::Int64Array>(
+            input->column(columns[0]));
+        AssertInfo(
+            offsets && offsets->null_count() == 0 &&
+                offsets->length() == input->num_rows(),
+            "grep offsets must be non-null Int64 aligned with input rows");
+        const auto element_columns = input->schema()->GetAllFieldIndices(
+            milvus::segcore::kQueryElementIndicesFieldName);
+        AssertInfo(element_columns.size() <= 1,
+                   "duplicate grep element column");
+        std::shared_ptr<arrow::ListArray> elements;
+        if (!element_columns.empty()) {
+            elements = std::dynamic_pointer_cast<arrow::ListArray>(
+                input->column(element_columns[0]));
+            AssertInfo(elements &&
+                           elements->value_type()->id() == arrow::Type::INT32 &&
+                           elements->length() == input->num_rows(),
+                       "grep element column must be List<Int32> aligned with "
+                       "input rows");
+        }
         auto token =
             cancellation_source
                 ? static_cast<folly::CancellationSource*>(cancellation_source)
@@ -751,8 +837,9 @@ ScanGrepByOffsets(void* segment,
             scan_result = milvus::grep::ExecuteGrepScan(
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment),
-                offsets,
-                size,
+                offsets->raw_values(),
+                input->num_rows(),
+                elements.get(),
                 *options,
                 views,
                 token);

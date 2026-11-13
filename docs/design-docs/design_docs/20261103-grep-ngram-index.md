@@ -184,7 +184,8 @@ These budgets are C++ implementation constants, not paramtable settings or RPC/C
 - The Index path collects candidate offsets per window rather than materializing every candidate offset at once. Ordinary Scan/Index raw reads still use window-sized batches and are not uniformly capped by the remaining limit; Rust matching stops according to the remaining quota.
 - Owned TEXT reads deduplicate repeated physical offsets within a batch, then map the fetched values back to all input positions.
 - After candidate generation, `index.reset()` releases the reader pin while the candidate bitmap remains independently owned. RAII releases resources on early return or exceptions; the sealed read lease continues to cover raw reads.
-- `-m` caps matching lines per record, not index candidate count or the Query limit. `-m 0` returns an empty result after validating and compiling the pattern, without index lookup or raw reads. Positive values retain the routing described above.
+- `-m` caps matching lines that open context windows per record, not index candidate count or the Query limit. Matches in pending after-context retain spans without extending the window. `-m 0` returns an empty result after validating and compiling the pattern, without index lookup or raw reads. Positive values retain the routing described above.
+- `-A/-B/-C` only expand the returned lines within matching documents. They do not change necessary conditions, NGRAM candidate selection or Probe eligibility. Context is read from each candidate's original text and charged to the existing output budget. See [Grep context lines](20261111-grep-context-lines.md).
 
 Code: [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
 

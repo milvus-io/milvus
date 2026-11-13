@@ -40,6 +40,23 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		return nil, err
 	}
 	spec := &Spec{}
+	var before, after *uint64
+	var contextLines uint64
+	setContext := func(flag byte, value string) error {
+		count, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("grep context count must be an unsigned decimal integer in [0, 18446744073709551615], got %q", value)
+		}
+		switch flag {
+		case 'A':
+			after = &count
+		case 'B':
+			before = &count
+		case 'C':
+			contextLines = count
+		}
+		return nil
+	}
 	setMaxCount := func(value string) error {
 		count, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
@@ -81,6 +98,25 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		if strings.HasPrefix(value, "--") {
 			// Value-taking flags consume the next token even if it resembles an option.
 			name, attached, hasValue := strings.Cut(value, "=")
+			if name == "--after-context" || name == "--before-context" || name == "--context" {
+				if !hasValue {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option %s requires a count", name)
+					}
+					i++
+					attached = tokens[i].value
+				}
+				flag := byte('C')
+				if name == "--after-context" {
+					flag = 'A'
+				} else if name == "--before-context" {
+					flag = 'B'
+				}
+				if err := setContext(flag, attached); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if name == "--max-count" {
 				if !hasValue {
 					if i+1 >= len(tokens) {
@@ -135,6 +171,17 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		}
 		for j := 1; j < len(value); j++ {
 			switch value[j] {
+			case 'A', 'B', 'C':
+				count := value[j+1:]
+				if count == "" {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option -%c requires a count", value[j])
+					}
+					i++
+					count = tokens[i].value
+				}
+				err = setContext(value[j], count)
+				j = len(value)
 			case 'F':
 				spec.patternKind = PatternLiteral
 			case 'i':
@@ -174,6 +221,15 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 	}
 	if len(spec.patterns) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("grep requires at least one -e/--regexp pattern")
+	}
+	// Explicit -A/-B override their side of -C regardless of argument order,
+	// including an explicitly supplied zero (ripgrep context precedence).
+	spec.beforeContext, spec.afterContext = contextLines, contextLines
+	if before != nil {
+		spec.beforeContext = *before
+	}
+	if after != nil {
+		spec.afterContext = *after
 	}
 	return spec, nil
 }

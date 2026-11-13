@@ -7,7 +7,7 @@
 int main() {
     const uint8_t pattern[] = {'a'};
     MgGrepBytes p{pattern, 1};
-    MgGrepSpecView spec{&p, 1, {MG_GREP_PATTERN_LITERAL, MG_GREP_CASE_SENSITIVE, MG_GREP_BOUNDARY_NONE, 0, 0}};
+    MgGrepSpecView spec{&p, 1, {MG_GREP_PATTERN_LITERAL, MG_GREP_CASE_SENSITIVE, MG_GREP_BOUNDARY_NONE, 0, 0, 0, 0}};
     MgGrepCompileLimits limits{1048576, 1048576};
     MgGrepPlan* raw = nullptr;
     assert(mg_grep_compile(&spec, &limits, &raw, nullptr) == MG_GREP_OK);
@@ -25,7 +25,7 @@ int main() {
 
     const std::string binary_pattern = R"(a\x00b)";
     MgGrepBytes binary{reinterpret_cast<const uint8_t*>(binary_pattern.data()), binary_pattern.size()};
-    MgGrepSpecView binary_spec{&binary, 1, {MG_GREP_PATTERN_REGEX, MG_GREP_CASE_SENSITIVE, MG_GREP_BOUNDARY_NONE, 0, 0}};
+    MgGrepSpecView binary_spec{&binary, 1, {MG_GREP_PATTERN_REGEX, MG_GREP_CASE_SENSITIVE, MG_GREP_BOUNDARY_NONE, 0, 0, 0, 0}};
     assert(mg_grep_compile(&binary_spec, &limits, &raw, nullptr) == MG_GREP_OK);
     plan.reset(raw);
     MgGrepBytes view;

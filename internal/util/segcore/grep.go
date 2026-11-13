@@ -27,9 +27,11 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/grep/native"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,9 +44,9 @@ func NewGrepSegment(segment CSegment) native.Segment {
 
 type grepSegment struct{ segment CSegment }
 
-func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
-	if ctx == nil || s == nil || s.segment == nil || s.segment.RawPointer() == nil || offsets == nil {
-		return nil, merr.WrapErrServiceInternalMsg("grep requires context, segment and offsets")
+func (s *grepSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	if ctx == nil || s == nil || s.segment == nil || s.segment.RawPointer() == nil || input == nil {
+		return nil, merr.WrapErrServiceInternalMsg("grep requires context, segment and input record")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -53,6 +55,14 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 	if req.Limit <= 0 || c.MaxRegexBytes == 0 || c.MaxDFACacheBytes == 0 ||
 		e.BatchSize <= 0 || e.MaxResultBytes == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("invalid prepared grep budgets, limit or offsets")
+	}
+	indices := input.Schema().FieldIndices(types.SegOffsetFieldName)
+	if len(indices) != 1 {
+		return nil, merr.WrapErrServiceInternalMsg("grep input requires one %s column", types.SegOffsetFieldName)
+	}
+	offsets, ok := input.Column(indices[0]).(*array.Int64)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be non-null Int64")
 	}
 	if offsets.NullN() != 0 {
 		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be non-null Int64")
@@ -73,30 +83,43 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 		pattern_kind: C.uint32_t(req.Spec.PatternKind()), case_mode: C.uint32_t(req.Spec.CaseMode()), boundary: C.uint32_t(req.Spec.Boundary()),
 		max_regex_bytes: C.uint64_t(c.MaxRegexBytes), max_dfa_cache_bytes: C.uint64_t(c.MaxDFACacheBytes),
 		max_result_bytes: C.uint64_t(e.MaxResultBytes),
+		before_context:   C.uint64_t(req.Spec.BeforeContext()), after_context: C.uint64_t(req.Spec.AfterContext()),
 	}
 	if count, present := req.Spec.MaxCount(); present {
 		options.has_max_count = 1
 		options.max_count = C.uint64_t(count)
 	}
 	var patterns *C.uint8_t
+	// The request contains Go pointers, so pin both backing buffers throughout
+	// the synchronous native call. No native handle retains the request.
+	var pins runtime.Pinner
+	defer pins.Unpin()
+	pins.Pin(&lengths[0])
 	if len(blob) > 0 {
+		pins.Pin(&blob[0])
 		patterns = (*C.uint8_t)(unsafe.Pointer(&blob[0]))
 	}
-	values := offsets.Int64Values()
-	var positions *C.int64_t
-	if len(values) > 0 {
-		positions = (*C.int64_t)(unsafe.Pointer(&values[0]))
+	request := C.CGrepScanRequest{
+		options: options, patterns: patterns, pattern_bytes: C.uint64_t(len(blob)),
+		lengths: &lengths[0], pattern_count: C.uint32_t(patternCount),
 	}
+	var inputSchema C.struct_ArrowSchema
+	var inputArray C.struct_ArrowArray
+	cdata.ExportArrowRecordBatch(input,
+		(*cdata.CArrowArray)(unsafe.Pointer(&inputArray)),
+		(*cdata.CArrowSchema)(unsafe.Pointer(&inputSchema)))
+	defer C.MilvusGoArrowSchemaRelease(&inputSchema)
+	defer C.MilvusGoArrowArrayRelease(&inputArray)
 	var schema C.struct_ArrowSchema
 	var data C.struct_ArrowArray
 	defer C.MilvusGoArrowSchemaRelease(&schema)
 	defer C.MilvusGoArrowArrayRelease(&data)
 	guard := NewCancellationGuard(ctx)
 	defer guard.Close()
-	status := C.ScanGrepByOffsets(unsafe.Pointer(s.segment.RawPointer()), positions, C.int64_t(len(values)), &options,
-		patterns, C.uint64_t(len(blob)), &lengths[0], C.uint32_t(patternCount), &schema, &data, guard.Source())
+	status := C.ScanGrep(unsafe.Pointer(s.segment.RawPointer()), &inputSchema, &inputArray,
+		&request, &schema, &data, guard.Source())
 	runtime.KeepAlive(s.segment)
-	runtime.KeepAlive(offsets)
+	runtime.KeepAlive(input)
 	runtime.KeepAlive(blob)
 	runtime.KeepAlive(lengths)
 	err := ConsumeCStatusIntoError(&status)

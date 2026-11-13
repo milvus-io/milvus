@@ -20,6 +20,7 @@ package chain
 
 import (
 	"cmp"
+	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -64,6 +65,53 @@ func pickByIndices[T any, A typedArray[T], B typedBuilder[T]](arr A, builder B, 
 	return builder.NewArray(), nil
 }
 
+// pickInt32Lists preserves both list and child validity, including sliced inputs.
+// Copy only selected values rather than using Arrow v17's generic Take path.
+func pickInt32Lists(pool memory.Allocator, arr *array.List, indices []int) (arrow.Array, error) {
+	values, ok := arr.ListValues().(*array.Int32)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T with child type %s", arr, arr.ListValues().DataType())
+	}
+	var count int64
+	for _, idx := range indices {
+		if idx < 0 || idx >= arr.Len() {
+			return nil, merr.WrapErrServiceInternalMsg("index out of bounds: %d (array length: %d)", idx, arr.Len())
+		}
+		if !arr.IsNull(idx) {
+			start, end := arr.ValueOffsets(idx)
+			if end-start > math.MaxInt32-count {
+				return nil, merr.WrapErrServiceInternalMsg("selected List<Int32> values exceed Arrow list offset capacity")
+			}
+			count += end - start
+		}
+	}
+	builder := array.NewListBuilderWithField(pool, arr.DataType().(*arrow.ListType).ElemField())
+	defer builder.Release()
+	builder.Reserve(len(indices))
+	child := builder.ValueBuilder().(*array.Int32Builder)
+	child.Reserve(int(count))
+	for _, idx := range indices {
+		if arr.IsNull(idx) {
+			builder.AppendNull()
+			continue
+		}
+		builder.Append(true)
+		start, end := arr.ValueOffsets(idx)
+		if values.NullN() == 0 {
+			child.AppendValues(values.Int32Values()[start:end], nil)
+			continue
+		}
+		for i := start; i < end; i++ {
+			if values.IsNull(int(i)) {
+				child.AppendNull()
+			} else {
+				child.Append(values.Value(int(i)))
+			}
+		}
+	}
+	return builder.NewArray(), nil
+}
+
 // compareTyped compares two values in a typed array using cmp.Ordered.
 func compareTyped[T cmp.Ordered, A typedArray[T]](arr A, i, j int) int {
 	return cmp.Compare(arr.Value(i), arr.Value(j))
@@ -100,6 +148,8 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 		return pickByIndices(arr, array.NewFloat64Builder(pool), indices)
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
+	case *array.List:
+		return pickInt32Lists(pool, arr, indices)
 	case *array.Binary:
 		return pickByIndices(arr, array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary), indices)
 	default:
