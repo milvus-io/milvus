@@ -26,11 +26,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -56,6 +58,8 @@ type StatsTask struct {
 	handler       meta.Handler
 	allocator     allocator.Allocator
 	ievm          index.IndexEngineVersionManager
+
+	resource taskresource.Cache
 }
 
 var _ globalTask.Task = (*StatsTask)(nil)
@@ -95,6 +99,28 @@ func (st *StatsTask) GetTaskType() taskcommon.Type {
 
 func (st *StatsTask) GetTaskState() taskcommon.State {
 	return st.GetState()
+}
+
+// GetTaskResource prices a stats task by the fields its sub job reads
+// (taskresource.StatsInputSize). Without a cached schema the fields cannot be
+// told apart, so the whole segment is charged and the answer is not cached:
+// the schema arriving later must be able to shrink the price.
+func (st *StatsTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return st.resource.Get(func() (taskcommon.Resource, bool) {
+		segment := st.Meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
+		if segment == nil {
+			return taskresource.Default(), false
+		}
+		var schema *schemapb.CollectionSchema
+		if coll := st.Meta.GetCollection(segment.GetCollectionID()); coll != nil {
+			schema = coll.Schema
+		}
+		size := taskresource.StatsInputSize(segment, schema, st.GetSubJobType())
+		if size <= 0 {
+			return taskresource.Default(), false
+		}
+		return taskresource.Stats(size), schema != nil
+	})
 }
 
 func (st *StatsTask) GetTaskSlot() int64 {
@@ -217,7 +243,8 @@ func (st *StatsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		}
 	}()
 	// Execute task creation
-	if err = cluster.CreateStats(nodeID, req); err != nil {
+	resource, _ := st.GetTaskResource()
+	if err = cluster.CreateStats(nodeID, req, resource); err != nil {
 		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
 		return
 	}

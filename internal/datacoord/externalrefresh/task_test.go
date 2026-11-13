@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -68,13 +69,15 @@ func (s *stubAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, e
 // stubCluster is a simple stub implementation of Cluster for testing
 type stubCluster struct {
 	session.Cluster
-	refreshReq    *datapb.RefreshExternalCollectionTaskRequest
-	droppedNodeID int64
-	droppedTaskID int64
+	refreshReq      *datapb.RefreshExternalCollectionTaskRequest
+	refreshResource taskcommon.Resource
+	droppedNodeID   int64
+	droppedTaskID   int64
 }
 
-func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
+func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource) error {
 	s.refreshReq = req
+	s.refreshResource = resource
 	return nil
 }
 
@@ -644,6 +647,8 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster.refreshReq.GetClusterID())
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
+		// The request carries the task's price so the worker books it.
+		assert.Equal(t, taskresource.ExternalRefresh(), cluster.refreshResource)
 	})
 
 	t.Run("legacy_task", func(t *testing.T) {

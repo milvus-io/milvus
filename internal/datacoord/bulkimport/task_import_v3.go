@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -91,6 +92,18 @@ func (t *importTaskV3) GetTaskSlot() int64 {
 }
 
 func (t *importTaskV3) GetTaskVersion() int64 { return t.task.Load().GetRunId() }
+
+// GetTaskResource prices the final merge on the same reshardmem working set
+// the slot charge is derived from (importV3WorkingSet), so the two never
+// disagree. A job that is gone is priced at the floor so the task can be
+// retired.
+func (t *importTaskV3) GetTaskResource() (taskcommon.Resource, bool) {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default(), false
+	}
+	return taskresource.ImportV3(importV3WorkingSet(len(t.task.Load().GetFragments()), getImportV3Config(), job.GetSchema())), true
+}
 
 func (t *importTaskV3) SetTaskTime(tt taskcommon.TimeType, tm time.Time) { t.times.SetTaskTime(tt, tm) }
 
@@ -195,7 +208,8 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		mlog.Warn(context.TODO(), "persist import v3 task running state failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic

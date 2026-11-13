@@ -31,9 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -63,6 +65,8 @@ type indexBuildTask struct {
 	handler                   meta.Handler
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	resource taskresource.Cache
 }
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
@@ -112,6 +116,65 @@ func NewIndexBuildTask(segIndex *model.SegmentIndex,
 
 func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
+}
+
+// GetTaskResource prices the build by the bytes of the indexed field. It walks
+// meta once and caches the answer only when the answer is exact.
+//
+// The distinction that matters is transient-vs-permanent. A collection whose
+// schema is not cached yet, or an index whose params have not been read back
+// yet, are both states that resolve on their own, and both would otherwise be
+// cached as a wrong answer for the task's lifetime: without a schema
+// taskresource.EstimateFieldSize cannot tell the indexed field from any other and charges
+// the whole segment (10-50x for one field of a wide collection), and without an
+// index type a vector build would be frozen at the scalar CPU request. So those
+// two states answer with the whole segment, which bounds any one field of it,
+// and do not cache: the exact field size replaces the bound next round.
+//
+// The whole-segment bound is deliberately an over-estimate rather than the
+// floor. The task is placed on whatever this returns, so the fallback must err
+// towards refusing a worker, never towards a worker accepting more than it can
+// hold. Only an input that is gone for good answers with the floor: such a task
+// is retired by CreateTaskOnWorker, so its price only has to let it get there.
+func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return it.resource.Get(func() (taskcommon.Resource, bool) {
+		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
+		if segment == nil {
+			return taskresource.Default(), false
+		}
+		// GetIndexType answers the invalidIndex sentinel, not "", when the params
+		// carry no index_type -- which is exactly what an index whose params have
+		// not been read back yet looks like.
+		indexParams := it.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
+		indexType := meta.GetIndexType(indexParams)
+		coll := it.meta.GetCollection(it.CollectionID)
+		if coll == nil || coll.Schema == nil {
+			if indexType == indexparamcheck.IndexFMINDEX {
+				// The index params do not need the schema. An FM-index peaks at
+				// several times its field, above the generic factor on the whole
+				// segment, so bound it with the FM-index model on the field's
+				// upper bound without a schema: its recorded size, or the whole
+				// segment.
+				fieldID := it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+				bound := taskresource.EstimateFieldSize(segment, nil, fieldID)
+				return taskresource.FMIndex(EstimateFMIndexBuildPeakBytes(bound, segment.GetNumOfRows(), indexParams)), false
+			}
+			return taskresource.Index(taskresource.EstimateSegmentSize(segment, nil), false), false
+		}
+		if len(indexParams) == 0 || indexType == "" || indexType == meta.InvalidIndexType {
+			return taskresource.Index(taskresource.EstimateSegmentSize(segment, coll.Schema), false), false
+		}
+		isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+		fieldID := it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+		fieldSize := taskresource.EstimateFieldSize(segment, coll.Schema, fieldID)
+		if fieldSize <= 0 {
+			return taskresource.Default(), false
+		}
+		if indexType == indexparamcheck.IndexFMINDEX {
+			return taskresource.FMIndex(EstimateFMIndexBuildPeakBytes(fieldSize, segment.GetNumOfRows(), indexParams)), true
+		}
+		return taskresource.Index(fieldSize, isVectorIndex), true
+	})
 }
 
 func (it *indexBuildTask) GetTaskSlot() int64 {
@@ -448,7 +511,8 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}()
 
 	// Send request to worker
-	if err = cluster.CreateIndex(nodeID, req); err != nil {
+	resource, _ := it.GetTaskResource()
+	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
 		if metautil.IsSegmentRooted(req.GetIndexStorePathVersion()) && errors.Is(err, merr.ErrServiceUnimplemented) {
 			if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {

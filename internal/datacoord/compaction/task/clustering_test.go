@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -126,7 +127,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Maybe()
-	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	task.CreateTaskOnWorker(1, cluster)
 
 	seg11 := s.meta.GetSegment(context.TODO(), 101)
@@ -500,7 +501,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Maybe()
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
@@ -1179,8 +1180,8 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 			seq = append(seq, "drop")
 			return nil
 		})
-		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).RunAndReturn(
-			func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 				seq = append(seq, "create")
 				return nil
 			})
@@ -1215,7 +1216,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		// The create still proceeds; if it lands on another node the stale
 		// entry is harmless, if it is rejected as a duplicate retryOnError
 		// brings the task back for another attempt.
-		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		s.NoError(task.doCompact(9, cluster))
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
@@ -1244,7 +1245,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		// as a duplicate. The previous node must survive in the meta.
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(errors.New("rpc blip")).Once()
-		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything).
+		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything, mock.Anything).
 			Return(merr.WrapErrCompactionPlanConflict("duplicated plan")).Once()
 		s.Error(task.doCompact(7, cluster))
 		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
@@ -1253,7 +1254,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		// Attempt 2: because the node was kept, the drop runs again; this time
 		// it succeeds and so does the resubmission.
 		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(nil).Once()
-		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything).Return(nil).Once()
+		cluster.EXPECT().CreateCompaction(int64(7), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		s.NoError(task.doCompact(7, cluster))
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
@@ -1282,7 +1283,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropCompaction(int64(7), int64(1)).Return(nil).Once()
-		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil).Once()
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		s.NoError(task.doCompact(9, cluster))
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
@@ -1311,7 +1312,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 
 		cluster := session.NewMockCluster(s.T())
 		// No DropCompaction expectation: mockery fails the test if one fires.
-		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		s.NoError(task.doCompact(9, cluster))
 	})
 }

@@ -144,6 +144,8 @@ func (w *fragmentWriter) Err() error {
 // wait joins every detached write and returns the first write error, if any.
 func (w *fragmentWriter) wait() error {
 	if err := conc.AwaitAll(w.futures...); err != nil {
+		w.cancel()
+		_ = conc.BlockOnAll(w.futures...)
 		return err
 	}
 	return w.Err()

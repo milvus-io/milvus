@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -157,6 +158,41 @@ func (t *Task) setStatsSegmentIDs(segmentIDs []UniqueID) {
 	t.Task.Load().SortedSegmentIDs = segmentIDs
 }
 
+// GetTaskResource prices an import by one read buffer per file, mirroring
+// what the worker allocates (taskresource.Import). A snapshot-source task is
+// priced on what its readers reserve, delete budgets included
+// (snapshotImportBufferBytes), from the same formula as its slot; the memory
+// factor applies to its row buffers only. It is not cached, and does not need
+// to be: the inputs are the task's file stats and three cheap job fields, so
+// re-reading them every round costs nothing a cache would save, and a job
+// amended between enqueue and dispatch is priced on what it will actually run
+// with.
+func (t *Task) GetTaskResource() (taskcommon.Resource, bool) {
+	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default(), false
+	}
+	perFile := importFileBufferSize(t, job)
+	if rowBytes, deleteBytes, ok := snapshotImportBufferBytes(t, job, perFile); ok {
+		return taskresource.Import(rowBytes, deleteBytes), true
+	}
+	return taskresource.Import(taskresource.ImportBufferedBytes(t.GetFileStats(), perFile), 0), true
+}
+
+// NodeMemoryShare implements task.NodeMemoryBounded. Every reader of a
+// non-L0 import reserves its buffer from the worker's import allocator, so the
+// task's read buffers never exceed the allocator's share of the node; the
+// hashed batches waiting for sync come on top and are covered by the import
+// memory factor (taskresource.ImportTaskNodeMemoryShare). An L0 import does
+// not go through that allocator and is not bounded.
+func (t *Task) NodeMemoryShare() float64 {
+	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil || importutilv2.IsL0Import(job.GetOptions()) {
+		return 0
+	}
+	return taskresource.ImportTaskNodeMemoryShare()
+}
+
 func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
@@ -184,7 +220,8 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		t.retryTimes++
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++
@@ -397,4 +434,25 @@ func acceptImportSegmentOperator(segmentID int64) meta.UpdateOperator {
 				"import segment is "+segment.GetState().String()+", its result is not accepted"))
 		}
 	}
+}
+
+// importFileBufferSize mirrors importv2.ImportTask.GetBufferSize on the worker:
+// the base buffer per (vchannel, partition) pair of the request; an L0 import
+// uses the base buffer as is (importv2.L0ImportTask.GetBufferSize).
+//
+// The partitions are the ones the request carries (importTaskPartitionIDs),
+// not the job's: a snapshot-source task imports into a single target
+// partition, and the worker sizes its buffer from the request.
+//
+// It is deliberately NOT capped at the largest file. GetBufferSize reads a
+// largest-file cap from the task's own ImportTaskV2.FileStats, but the worker
+// never fills that field for an import task (NewImportTask leaves it nil), so
+// the cap never fires there and capping here would under-price every import.
+// The worker's remaining clamp, a percentage of its machine, is not applied.
+func importFileBufferSize(task ImportTask, job ImportJob) int64 {
+	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return base
+	}
+	return base * int64(len(job.GetVchannels())) * int64(len(importTaskPartitionIDs(task, job)))
 }

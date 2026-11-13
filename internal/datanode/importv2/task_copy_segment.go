@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -45,6 +46,7 @@ type CopySegmentTask struct {
 	state          datapb.ImportTaskStateV2            // Current task state (Pending/InProgress/Completed/Failed)
 	reason         string                              // Failure reason if state is Failed
 	slots          int64                               // Resource slots allocated for this task
+	resource       taskcommon.Resource                 // cpu/memory estimated by DataCoord
 	segmentResults map[int64]*datapb.CopySegmentResult // Results for each target segment
 	req            *datapb.CopySegmentRequest          // Original request with source/target pairs
 	manager        TaskManager                         // Task manager for state updates and coordination
@@ -70,6 +72,7 @@ func NewCopySegmentTask(
 	copier storage.CrossBucketCopier,
 	sourceBucket string,
 	targetBucket string,
+	resource taskcommon.Resource,
 ) Task {
 	ctx, cancel := context.WithCancel(parentCtx)
 
@@ -117,6 +120,7 @@ func NewCopySegmentTask(
 		state:          datapb.ImportTaskStateV2_Pending,
 		reason:         "",
 		slots:          req.GetTaskSlot(),
+		resource:       resource,
 		segmentResults: segmentResults,
 		req:            req,
 		manager:        manager,
@@ -177,6 +181,10 @@ func (t *CopySegmentTask) GetSlots() int64 {
 	return t.slots
 }
 
+func (t *CopySegmentTask) GetResource() taskcommon.Resource {
+	return t.resource
+}
+
 func (t *CopySegmentTask) GetBufferSize() int64 {
 	return 0 // Copy task doesn't use memory buffer (direct file copy)
 }
@@ -208,6 +216,7 @@ func (t *CopySegmentTask) Clone() Task {
 		state:          t.state,
 		reason:         t.reason,
 		slots:          t.slots,
+		resource:       t.resource,
 		segmentResults: results,
 		req:            t.req,
 		manager:        t.manager,

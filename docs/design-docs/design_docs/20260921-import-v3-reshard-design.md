@@ -400,14 +400,15 @@ job, and committed vchannels are never rolled back.
 
 ## DataNode Worker Scheduling
 
-- **Slot scheduler** (`internal/datanode/importv3/scheduler.go`) owns both the
-  admission policy and the run registry, so `Submit`/`Query`/`Drop` and the
-  DataCoord-facing answers all read one place. Admission is pure: a submitted
-  task queues until `used + slot <= capacity`; queued slots count as used in
-  `QuerySlot` so DataCoord stops water-filling the node. A queued task answers
-  `Pending` (never "not found"), so DataCoord waits for its slot instead of
-  retrying elsewhere. A task whose own slot exceeds capacity runs alone once the
-  node is otherwise idle.
+- The scheduler (`internal/datanode/importv3/scheduler.go`) owns admission and
+  the run registry. CPU/memory-aware DataNodes share an atomic execution-memory
+  budget with index/stats/analyze. A task's immutable accepted memory price is
+  reserved when it is admitted and returned only when its pool closure exits.
+  Pending resources remain visible in QuerySlot but do not consume execution
+  reservations, so queued work cannot prevent its own execution. With unknown
+  memory capacity, the original scalar slot admission remains. Direct legacy
+  requests use a slot-derived memory share. The existing idle-worker oversized
+  progress rule remains local; coordinator placement is strictly memory-bounded.
 - The registry holds every run in one insertion-ordered map keyed by
   `(task_id, run_id)` and fences by `run_id`: same run ⇒ idempotent; older run ⇒
   stale no-op; newer run ⇒ cancel/replace (the superseded run stays in the
@@ -415,10 +416,11 @@ job, and committed vchannels are never rolled back.
   charging). Worker errors map to `Retry` (ctx canceled or non-terminal) or
   `Failed` (terminal denylist `common.IsTerminalImportV3Err`), classified once
   at the worker; DataCoord trusts the state and never reinterprets `reason`.
-- An admission pass takes one lock: it reads the used slots, picks the pending
+- An admission pass takes the registry lock and atomically reserves shared
+  execution memory (legacy: slots), picking the pending
   runs that fit (in Submit order), marks them running and computes the
   queue/state gauges under that lock, then hands them to the executor pool
-  outside it, so a full pool never stalls the loop. The loop is level-triggered
+  outside it, so a blocked pool submission does not hold up registry RPCs. The loop is level-triggered
   (a one-second ticker plus a coalescing wakeup), so a missed or duplicated
   wakeup cannot corrupt the outcome.
 

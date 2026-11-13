@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -72,7 +73,8 @@ type ClusteringCompactionTask struct {
 
 	maxRetryTimes int32
 
-	times *taskcommon.Times
+	times    *taskcommon.Times
+	resource taskresource.Cache
 }
 
 func (t *ClusteringCompactionTask) GetTaskID() int64 {
@@ -85,6 +87,19 @@ func (t *ClusteringCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *ClusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource: a clustering compaction buckets its input in memory up to
+// a share of the worker, so it is priced by its input with that share as the
+// cap (see taskresource.ClusteringCompaction).
+func (t *ClusteringCompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return taskresource.Default(), false
+		}
+		return taskresource.ClusteringCompaction(inputSize), true
+	})
 }
 
 func (t *ClusteringCompactionTask) GetTaskSlot() int64 {
@@ -874,7 +889,8 @@ func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 				mlog.Err(dropErr))
 		}
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

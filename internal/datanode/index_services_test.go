@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -151,7 +152,7 @@ func TestQuerySlotCountsTaskWaitingForBuildAdmission(t *testing.T) {
 		IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
 		TypeParams:    []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
 		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
-	}, nil, node.taskManager, nil)
+	}, nil, node.taskManager, nil, taskcommon.Resource{})
 	require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
 	select {
 	case <-builder.waiting:
@@ -214,7 +215,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 		Dim:           8,
 		PluginContext: requestContext,
 		StorageConfig: &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
@@ -239,7 +240,7 @@ func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)
@@ -302,7 +303,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
@@ -328,7 +329,7 @@ func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)

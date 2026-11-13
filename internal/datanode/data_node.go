@@ -234,6 +234,7 @@ func (node *DataNode) Init() error {
 			return node.compactionExecutor.Slots() + node.importScheduler.Slots() +
 				node.importV3Scheduler.Slots() + node.importV3Scheduler.QueuedSlots()
 		})
+		node.initTaskMemoryAdmission()
 
 		err := index.InitSegcore(serverID)
 		if err != nil {
@@ -249,6 +250,18 @@ func (node *DataNode) Init() error {
 		log.Info(node.ctx, "init datanode done", mlog.String("Address", node.address))
 	})
 	return initError
+}
+
+// initTaskMemoryAdmission wires the same capacities and other-executor
+// bookings used by QuerySlot into shared index/stats/analyze and V3 admission.
+func (node *DataNode) initTaskMemoryAdmission() {
+	budget := node.taskScheduler.SetMemoryAdmission(func() int64 {
+		return nodeTaskCapacity().Memory
+	}, func() int64 {
+		return node.compactionExecutor.Resource().Memory + node.importScheduler.Resource().Memory +
+			node.externalCollectionManager.Resource().Memory
+	})
+	node.importV3Scheduler.SetMemoryAdmission(budget)
 }
 
 func (node *DataNode) registerMetricsRequest() {

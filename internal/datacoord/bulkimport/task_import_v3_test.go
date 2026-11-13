@@ -238,7 +238,7 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
 	task.CreateTaskOnWorker(7, cluster)
 
@@ -270,7 +270,7 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
 	task.CreateTaskOnWorker(8, cluster)
 
@@ -309,7 +309,7 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 
 	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Maybe()
 	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
 	task.CreateTaskOnWorker(7, cluster)
 

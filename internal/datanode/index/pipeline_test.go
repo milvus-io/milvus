@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -91,6 +92,7 @@ func TestPipelineWaitingBuildRetainsSlots(t *testing.T) {
 type pipelineTestTask struct {
 	id         string
 	slots      int64
+	resource   taskcommon.Resource
 	ctx        context.Context
 	state      atomic.Int32
 	prepare    func()
@@ -119,6 +121,7 @@ func (t *pipelineTestTask) GetSlot() int64 {
 func (t *pipelineTestTask) Ctx() context.Context             { return t.ctx }
 func (t *pipelineTestTask) Name() string                     { return t.id }
 func (t *pipelineTestTask) IsVectorIndex() bool              { return true }
+func (t *pipelineTestTask) GetResource() taskcommon.Resource { return t.resource }
 func (t *pipelineTestTask) OnEnqueue(context.Context) error  { return nil }
 func (t *pipelineTestTask) PreExecute(context.Context) error { return nil }
 func (t *pipelineTestTask) SetState(state indexpb.JobState, _ string) {
@@ -287,8 +290,8 @@ func TestPipelineTaskOrderRetainsSlotsUntilCompletion(t *testing.T) {
 	awaitPipeline(t, downloading)
 	require.NoError(t, sched.TaskQueue.Enqueue(second))
 	require.Eventually(t, func() bool {
-		sched.slotMu.Lock()
-		defer sched.slotMu.Unlock()
+		sched.resourceMu.Lock()
+		defer sched.resourceMu.Unlock()
 		return len(sched.pendingTasks) == 2 && sched.pendingTasks[0].name == first.Name()
 	}, 5*time.Second, time.Millisecond)
 	// The earlier task retains priority when switching from download to build.
@@ -354,12 +357,12 @@ func TestPipelineBuildAdmissionPreservesTaskOrder(t *testing.T) {
 			require.Eventually(t, func() bool {
 				return attempts.Load() >= 2 && sched.TaskQueue.GetUsingSlot() == 128
 			}, 5*time.Second, time.Millisecond)
-			sched.slotMu.Lock()
+			sched.resourceMu.Lock()
 			names := make([]string, 0, len(sched.pendingTasks))
 			for _, pending := range sched.pendingTasks {
 				names = append(names, pending.name)
 			}
-			sched.slotMu.Unlock()
+			sched.resourceMu.Unlock()
 			require.Equal(t, []string{"first", "second"}, names)
 			require.Zero(t, nextAttempts.Load(), "busy builds must retain their place")
 			switch outcome {
@@ -392,7 +395,7 @@ func TestPipelineBuildAdmissionPreservesTaskOrder(t *testing.T) {
 	}
 }
 
-func TestPipelineBuildDoesNotReacquireSlots(t *testing.T) {
+func TestPipelineBuildDoesNotReacquireResources(t *testing.T) {
 	paramtable.Init()
 	sched := NewTaskScheduler(context.Background())
 	sched.totalSlots = func() int64 { return 128 }
@@ -453,8 +456,8 @@ func TestPipelineWaitingBuildIsNotOvertaken(t *testing.T) {
 			awaitPipeline(t, downloading)
 			releaseDownload()
 			require.Eventually(t, func() bool {
-				sched.slotMu.Lock()
-				defer sched.slotMu.Unlock()
+				sched.resourceMu.Lock()
+				defer sched.resourceMu.Unlock()
 				return attempts.Load() != 0 && len(sched.pendingTasks) == 1 && sched.pendingTasks[0].name == first.Name()
 			}, 5*time.Second, time.Millisecond)
 			second := &pipelineTestTask{
@@ -495,19 +498,19 @@ func TestPipelineSlotsAndTaskOrderHaveSeparateLifetimes(t *testing.T) {
 	sched.totalSlots = func() int64 { return 128 }
 	first := &pipelineTestTask{id: "first", ctx: context.Background()}
 	second := &pipelineTestTask{id: "second", ctx: context.Background()}
-	require.True(t, sched.acquireSlots(first))
-	require.True(t, sched.acquireSlots(second))
+	require.True(t, sched.acquireResources(first, sched.taskResource(first).Memory))
+	require.True(t, sched.acquireResources(second, sched.taskResource(second).Memory))
 	require.True(t, sched.isBuildTurn(first))
 	require.False(t, sched.isBuildTurn(second))
 	// Build admission advances FIFO without returning either task's slots.
-	sched.finishAdmission(first.Name())
+	sched.finishAdmission(first)
 	require.True(t, sched.isBuildTurn(second))
 	require.EqualValues(t, 128, sched.TaskQueue.GetUsingSlot())
-	sched.finishAdmission(second.Name())
+	sched.finishAdmission(second)
 	require.Empty(t, sched.pendingTasks)
 	require.EqualValues(t, 128, sched.TaskQueue.GetUsingSlot())
-	sched.releaseSlots(first.Name())
-	sched.releaseSlots(second.Name())
+	sched.releaseResources(first)
+	sched.releaseResources(second)
 	require.Zero(t, sched.TaskQueue.GetUsingSlot())
 }
 
@@ -518,19 +521,19 @@ func TestPipelineSharesExistingNodeSlots(t *testing.T) {
 	var otherSlots int64 = 128
 	sched.SetExternalSlotUsage(func() int64 { return otherSlots })
 	task := &pipelineTestTask{id: "index", ctx: context.Background()}
-	require.False(t, sched.acquireSlots(task))
+	require.False(t, sched.acquireResources(task, sched.taskResource(task).Memory))
 	otherSlots = 64
-	require.True(t, sched.acquireSlots(task))
-	sched.finishAdmission(task.Name())
-	sched.releaseSlots(task.Name())
+	require.True(t, sched.acquireResources(task, sched.taskResource(task).Memory))
+	sched.finishAdmission(task)
+	sched.releaseResources(task)
 	require.EqualValues(t, 64, otherSlots)
 	// Oversized index tasks wait for other work to release its slots.
 	large := &pipelineTestTask{id: "large", slots: 256, ctx: context.Background()}
-	require.False(t, sched.acquireSlots(large))
+	require.False(t, sched.acquireResources(large, sched.taskResource(large).Memory))
 	otherSlots = 0
-	require.True(t, sched.acquireSlots(large))
-	sched.finishAdmission(large.Name())
-	sched.releaseSlots(large.Name())
+	require.True(t, sched.acquireResources(large, sched.taskResource(large).Memory))
+	sched.finishAdmission(large)
+	sched.releaseResources(large)
 	require.Zero(t, sched.TaskQueue.GetUsingSlot())
 	require.Empty(t, sched.pendingTasks)
 }
@@ -662,20 +665,20 @@ func TestPipelineReducedTaskLimitPreservesTaskOrder(t *testing.T) {
 	otherSlots.Store(64)
 	sched.SetExternalSlotUsage(otherSlots.Load)
 	building := &pipelineTestTask{id: "building", ctx: context.Background()}
-	require.True(t, sched.acquireSlots(building))
+	require.True(t, sched.acquireResources(building, sched.taskResource(building).Memory))
 	queued := &pipelineTestTask{id: "queued", slots: 128, ctx: context.Background()}
 	require.NoError(t, sched.TaskQueue.Enqueue(queued))
 	require.Nil(t, sched.TaskQueue.PopUnissuedTask(true))
 	// Reducing whole-task concurrency must not discard either task's position.
 	require.Nil(t, sched.TaskQueue.PopUnissuedTask(false))
-	sched.finishAdmission(building.Name())
-	sched.releaseSlots(building.Name())
+	sched.finishAdmission(building)
+	sched.releaseResources(building)
 	require.Len(t, sched.pendingTasks, 1)
 	require.Equal(t, queued.Name(), sched.pendingTasks[0].name)
 	otherSlots.Store(0)
 	require.Equal(t, queued, sched.TaskQueue.PopUnissuedTask(true))
-	sched.finishAdmission(queued.Name())
-	sched.releaseSlots(queued.Name())
+	sched.finishAdmission(queued)
+	sched.releaseResources(queued)
 	require.Empty(t, sched.pendingTasks)
 }
 
@@ -827,8 +830,8 @@ func TestPipelineNonVectorTasksBypassWaitingVectors(t *testing.T) {
 				// Let the slot-blocked vector enter the pending admission list.
 				if blockedBy == "slots" {
 					require.Eventually(t, func() bool {
-						sched.slotMu.Lock()
-						defer sched.slotMu.Unlock()
+						sched.resourceMu.Lock()
+						defer sched.resourceMu.Unlock()
 						return len(sched.pendingTasks) == 1
 					}, 5*time.Second, time.Millisecond)
 				}
@@ -864,7 +867,7 @@ func TestPipelineNonVectorBypassStillRequiresSlots(t *testing.T) {
 	t.Cleanup(sched.Close)
 	sched.totalSlots = func() int64 { return 128 }
 	running := &pipelineTestTask{id: "running", slots: 128, ctx: context.Background()}
-	require.True(t, sched.acquireSlots(running))
+	require.True(t, sched.acquireResources(running, sched.taskResource(running).Memory))
 	vector := &pipelineTestTask{id: "vector", slots: 64, ctx: context.Background()}
 	scalar := &scalarPipelineTestTask{&pipelineTestTask{
 		id: "scalar", slots: 64, ctx: context.Background(),
@@ -873,16 +876,16 @@ func TestPipelineNonVectorBypassStillRequiresSlots(t *testing.T) {
 	require.NoError(t, sched.TaskQueue.Enqueue(scalar))
 	require.Nil(t, sched.TaskQueue.PopUnissuedTask(false))
 	require.EqualValues(t, 128, sched.TaskQueue.GetUsingSlot())
-	sched.finishAdmission(running.Name())
-	sched.releaseSlots(running.Name())
+	sched.finishAdmission(running)
+	sched.releaseResources(running)
 	require.Same(t, scalar, sched.TaskQueue.PopUnissuedTask(false))
 	require.True(t, sched.isBuildTurn(scalar))
 	require.Empty(t, sched.pendingTasks)
 	require.EqualValues(t, 64, sched.TaskQueue.GetUsingSlot())
-	sched.releaseSlots(scalar.Name())
+	sched.releaseResources(scalar)
 	require.Same(t, vector, sched.TaskQueue.PopUnissuedTask(true))
-	sched.finishAdmission(vector.Name())
-	sched.releaseSlots(vector.Name())
+	sched.finishAdmission(vector)
+	sched.releaseResources(vector)
 }
 
 func TestPipelineCancelsQueuedTaskWithoutWaitingForTaskPermit(t *testing.T) {

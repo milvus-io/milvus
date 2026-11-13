@@ -100,7 +100,7 @@ func (sched *TaskScheduler) pipelineLoop() {
 				sched.finishTask(exec, err)
 				continue
 			}
-			sched.finishAdmission(t.Name())
+			sched.finishAdmission(t)
 			running++
 			go func() {
 				err := sched.executeTask(exec)

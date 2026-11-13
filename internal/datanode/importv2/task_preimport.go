@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -49,6 +50,7 @@ type PreImportTask struct {
 	schema       *schemapb.CollectionSchema
 	options      []*commonpb.KeyValuePair
 	req          *datapb.PreImportRequest
+	resource     taskcommon.Resource
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -57,6 +59,7 @@ type PreImportTask struct {
 func NewPreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -68,6 +71,13 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 	// the primary key from the binlog should be used instead of being reassigned.
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
+	}
+	// A snapshot-source pre-import reserves every reader from the import
+	// allocator (reserveSnapshotRead / AllocateSnapshotTask), so it never holds
+	// more than the allocator's limit; it syncs nothing, so nothing comes on
+	// top. A plain pre-import reads without the allocator.
+	if isSnapshotPreImport(req) {
+		resource = boundByImportMemoryLimit(resource, 1)
 	}
 	return &PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
@@ -84,9 +94,18 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		schema:       req.GetSchema(),
 		options:      req.GetOptions(),
 		req:          req,
+		resource:     resource,
 		manager:      manager,
 		cm:           cm,
 	}
+}
+
+// isSnapshotPreImport reports whether req reads snapshot sources, the
+// pre-imports whose readers reserve from the import allocator.
+func isSnapshotPreImport(req *datapb.PreImportRequest) bool {
+	return req.GetSnapshotL0Source() != nil || lo.ContainsBy(req.GetImportFiles(), func(f *internalpb.ImportFile) bool {
+		return f.GetSnapshotSource() != nil
+	})
 }
 
 func (t *PreImportTask) GetPartitionIDs() []int64 {
@@ -107,6 +126,10 @@ func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *PreImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+func (t *PreImportTask) GetResource() taskcommon.Resource {
+	return t.resource
 }
 
 // PreImportTask buffer size is fixed
@@ -132,6 +155,7 @@ func (t *PreImportTask) Clone() Task {
 		schema:        t.GetSchema(),
 		options:       t.options,
 		req:           t.req,
+		resource:      t.resource,
 		manager:       t.manager,
 		cm:            t.cm,
 	}
