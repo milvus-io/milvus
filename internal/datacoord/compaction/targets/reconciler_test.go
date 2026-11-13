@@ -78,7 +78,7 @@ func TestCompactionTargetReconcilerSatisfiedTargetEmitsNoWork(t *testing.T) {
 	events, err := newCompactionTargetReconcilerForTest(mt).Reconcile(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[policy.TriggerTypeSingle])
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -213,7 +213,7 @@ func TestCompactionTargetReconcilerInactivatesRewriteTargetWhenNoMatchRemains(t 
 	events, err := newCompactionTargetReconcilerForTest(mt).Reconcile(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[policy.TriggerTypeSingle])
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -239,7 +239,7 @@ func TestCompactionTargetReconcilerIgnoresDroppedSegmentsForSatisfaction(t *test
 	events, err := newCompactionTargetReconcilerForTest(mt).Reconcile(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[policy.TriggerTypeSingle])
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 

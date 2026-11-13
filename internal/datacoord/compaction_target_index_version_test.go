@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -344,9 +345,14 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{confirmed, sortTarget}, nil)
-	catalog.EXPECT().LoadCompactionTarget(mock.Anything, confirmed.GetTargetID()).Return(confirmed, nil)
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(merr.ErrIoFailed).Once()
-	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	next := proto.CloneOf(confirmed)
+	next.ConditionRevision++
+	next.Properties["vector_version"] = "2"
+	previousCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, confirmed) })
+	nextCondition := mock.MatchedBy(func(record *datapb.CompactionTarget) bool { return proto.Equal(record, next) })
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, confirmed.GetTargetID()).Return(confirmed, nil).Times(3)
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, previousCondition, nextCondition).Return(nil).Once()
 	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
 
 	for _, seg := range []*datapb.SegmentInfo{
@@ -372,15 +378,28 @@ func TestStandingIndexVersionCompactionTargetSaveFailureIsIsolated(t *testing.T)
 		require.Equal(t, rows, resp.GetTarget().GetRemainingRows())
 	}
 
+	checkPlanInputs := func(pools []view.TargetView, want ...int64) {
+		t.Helper()
+		var inputs []int64
+		for _, pool := range pools {
+			plans, err := pool.Plan()
+			require.NoError(t, err)
+			for _, plan := range plans {
+				inputs = append(inputs, plan.GetInputSegments()...)
+			}
+		}
+		require.ElementsMatch(t, want, inputs)
+	}
+
 	events, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
-	require.Empty(t, events[policy.TriggerTypeSingle])
-	require.Len(t, events[policy.TriggerTypeSort], 1)
+	checkPlanInputs(events[policy.TriggerTypeSingle])
+	checkPlanInputs(events[policy.TriggerTypeSort], 101)
 	checkDescribe("1", 0)
 
 	events, err = reconciler.Reconcile(ctx)
 	require.NoError(t, err)
-	require.Len(t, events[policy.TriggerTypeSingle], 1)
-	require.Len(t, events[policy.TriggerTypeSort], 1)
+	checkPlanInputs(events[policy.TriggerTypeSingle], 100)
+	checkPlanInputs(events[policy.TriggerTypeSort], 101)
 	checkDescribe("2", 7)
 }
