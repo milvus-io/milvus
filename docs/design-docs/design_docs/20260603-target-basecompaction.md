@@ -62,6 +62,15 @@ segment ID preserve its previous timestamp. Explicit roots follow retained
 compaction lineage as the original segments are replaced. Each observation
 deduplicates current matching segments.
 
+Storage Version and Storage Format keep separate cluster-wide Targets.
+Version compares the published segment storage version. Format reads the
+insert-group formats of the published V3 manifest revision through the
+3.0 storage library. Reads share a connection-bounded budget and reuse
+successful observations of the same revision. A missing or unreadable
+manifest leaves the format observation incomplete. Version work can still
+proceed, subject to writer and QueryNode capability. TEXT collections retain
+V3 storage when the desired version changes to V2.
+
 Reconciliation first checks semantic progress and then applies execution
 gates, including snapshot protection, occupancy, and index readiness. Shared
 matches contribute one physical input per round. Before persisting

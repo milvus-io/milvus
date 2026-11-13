@@ -75,8 +75,9 @@ type CompactionTriggerManager struct {
 	handler   meta.Handler
 	allocator allocator.Allocator
 
-	meta      *meta.Meta
-	indexMeta *index.IndexMeta
+	meta           *meta.Meta
+	indexMeta      *index.IndexMeta
+	versionManager index.IndexEngineVersionManager
 
 	policies map[TickerType]policy.CompactionPolicy
 
@@ -97,11 +98,12 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	versionManager index.IndexEngineVersionManager,
 ) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator: alloc,
-		handler:   handler,
-		inspector: inspector,
-		meta:      mt,
-		indexMeta: indexMeta,
+		allocator:      alloc,
+		handler:        handler,
+		inspector:      inspector,
+		meta:           mt,
+		indexMeta:      indexMeta,
+		versionManager: versionManager,
 
 		policies: make(map[TickerType]policy.CompactionPolicy),
 	}
@@ -128,6 +130,7 @@ func (m *CompactionTriggerManager) SetCompactionTargetMeta(targetMeta *targets.C
 	if targetMeta != nil {
 		m.singlePolicy.StandingSort = true
 		m.targetReconciler = targets.NewCompactionTargetReconciler(m.meta, m.indexMeta, targetMeta, m.handler, m.allocator, collectionAvailable)
+		m.targetReconciler.SetIndexVersionManager(m.versionManager)
 	}
 }
 
@@ -191,7 +194,9 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, TargetTicker)
 			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTicker.C:
-			m.handleTicker(ctx, StorageVersionTicker)
+			if m.targetReconciler == nil {
+				m.handleTicker(ctx, StorageVersionTicker)
+			}
 		case <-bumpSchemaVersionTicker.C:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
 		case segID := <-meta.GetStatsTaskChSingleton():
