@@ -221,7 +221,15 @@ func (p *nodePicker) remaining() []nodeRemaining {
 // drain like the heap's: a task asking for more than is left takes what is left.
 func (n *resourceNode) charge(taskSlot int64, req taskcommon.Resource) {
 	n.availableCPU -= req.CPU
-	n.availableMemory -= req.Memory
+	if req.IsZero() && taskSlot > 0 {
+		// The worker converts an unpriced task's slots to a memory booking.
+		// QuerySlot does not report total slots, so we cannot mirror that
+		// conversion here. Reserve the remaining memory until the next report
+		// instead of offering the same bytes again to priced tasks this round.
+		n.availableMemory = 0
+	} else {
+		n.availableMemory -= req.Memory
+	}
 	if taskSlot > 0 {
 		n.availableSlots -= min(taskSlot, n.availableSlots)
 	}

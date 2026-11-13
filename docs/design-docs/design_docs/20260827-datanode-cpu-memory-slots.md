@@ -378,6 +378,11 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
 - A task without a resource price retains scalar slot admission and ranking,
   including on upgraded workers. Every current DataCoord task family floors
   its memory at `minTaskMemory`, so this is a compatibility fallback.
+  After an unpriced placement, reserve the worker's remaining offered memory
+  for this round: its actual slot-derived booking is unknown until the next
+  report, and must not be offered again to priced tasks. Further unpriced
+  tasks retain slot placement. A fresh report restores actual available
+  memory for priced placement, regardless of scalar slot exhaustion.
 - Workers without a resource report use the existing slot max-heap. If no
   reporting worker fits, try that compatibility tier before returning
   `NullNodeID`.
