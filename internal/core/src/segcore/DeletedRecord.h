@@ -111,7 +111,21 @@ class DeletedRecord {
 
         std::vector<Timestamp> sorted_timestamps;
         timestamps = SortByTimestamp(pks, timestamps, sorted_timestamps);
-        auto max_deleted_ts = InternalPush(pks, timestamps);
+        LoadPush(pks, timestamps, search_pk_func_);
+    }
+
+    // Prepared batches must have ascending timestamps within each PK. The
+    // caller binds lookup to the same published state used for ordering.
+    // The callback runs synchronously and is not retained by DeletedRecord.
+    template <typename SearchPk>
+    void
+    LoadPush(const std::vector<PkType>& pks,
+             const Timestamp* timestamps,
+             const SearchPk& search_pk) {
+        if (pks.empty()) {
+            return;
+        }
+        auto max_deleted_ts = InternalPush(pks, timestamps, search_pk).second;
 
         if (max_deleted_ts > max_load_timestamp_) {
             max_load_timestamp_ = max_deleted_ts;
@@ -128,9 +142,21 @@ class DeletedRecord {
 
         std::vector<Timestamp> sorted_timestamps;
         timestamps = SortByTimestamp(pks, timestamps, sorted_timestamps);
-        InternalPush(pks, timestamps);
+        StreamPush(pks, timestamps, search_pk_func_);
+    }
 
-        bool can_dump = timestamps[0] >= max_load_timestamp_;
+    // Same per-PK ordering requirement as the prepared LoadPush overload.
+    template <typename SearchPk>
+    void
+    StreamPush(const std::vector<PkType>& pks,
+               const Timestamp* timestamps,
+               const SearchPk& search_pk) {
+        if (pks.empty()) {
+            return;
+        }
+        auto min_ts = InternalPush(pks, timestamps, search_pk).first;
+
+        bool can_dump = min_ts >= max_load_timestamp_;
         if (can_dump) {
             DumpSnapshot();
         }
@@ -174,12 +200,25 @@ class DeletedRecord {
         return sorted.data();
     }
 
-    // timestamps must be sorted
+    // Matches for each row must be reported in ascending timestamp order.
     Timestamp
     InternalPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        return InternalPush(pks, timestamps, search_pk_func_).second;
+    }
+
+    template <typename SearchPk>
+    std::pair<Timestamp, Timestamp>
+    InternalPush(const std::vector<PkType>& pks,
+                 const Timestamp* timestamps,
+                 const SearchPk& search_pk) {
         int64_t removed_num = 0;
         int64_t mem_add = 0;
-        Timestamp max_timestamp = timestamps[pks.size() - 1];
+        Timestamp min_timestamp = std::numeric_limits<Timestamp>::max();
+        Timestamp max_timestamp = 0;
+        for (size_t i = 0; i < pks.size(); ++i) {
+            min_timestamp = std::min(min_timestamp, timestamps[i]);
+            max_timestamp = std::max(max_timestamp, timestamps[i]);
+        }
         // keep counters right if the push throws part way
         auto account = folly::makeGuard([&] {
             n_.fetch_add(removed_num);
@@ -192,8 +231,8 @@ class DeletedRecord {
 
         SortedDeleteList::Accessor accessor(deleted_lists_);
 
-        // search_pk_func_ reports the matches of a row in input order, so a
-        // row's first match in this push is its earliest delete in this push.
+        // search_pk reports each row's matches in ascending timestamp order,
+        // so its first match is its earliest effective delete in this push.
         //
         // A row's effective delete timestamp is its earliest one. Deletes can
         // arrive out of timestamp order across pushes (e.g. persisted deltalogs
@@ -214,7 +253,7 @@ class DeletedRecord {
             }
             settled[row_id] = true;
         };
-        search_pk_func_(
+        search_pk(
             pks,
             timestamps,
             [&](const SegOffset offset, const Timestamp delete_ts) {
@@ -324,7 +363,7 @@ class DeletedRecord {
             // within the growing segment.
         }
 
-        return max_timestamp;
+        return {min_timestamp, max_timestamp};
     }
 
     // Earliest delete timestamp of a deleted row. The index is built from the

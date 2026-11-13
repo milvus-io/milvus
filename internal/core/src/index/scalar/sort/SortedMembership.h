@@ -25,6 +25,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "common/GallopingSearch.h"
+
 namespace milvus::index::detail {
 
 // Queries must be sorted and distinct, and indexed values must be ordered by
@@ -42,26 +44,7 @@ VisitOrderedMatches(size_t size,
         if (cursor == size) {
             break;
         }
-        if (value_at(cursor) < value) {
-            const size_t remaining = size - cursor;
-            size_t lo = 1;
-            size_t hi = 1;
-            while (hi < remaining && value_at(cursor + hi) < value) {
-                lo = hi + 1;
-                hi = hi > remaining / 2 ? remaining : hi * 2;
-            }
-            // Lower bound inside the galloped bracket. Never subtract values:
-            // signed extremes and infinities are ordinary comparison operands.
-            while (lo < hi) {
-                const size_t mid = lo + (hi - lo) / 2;
-                if (value_at(cursor + mid) < value) {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
-                }
-            }
-            cursor += lo;
-        }
+        cursor = GallopingLowerBound(size, cursor, value, value_at);
         while (cursor != size && continue_matching(value, value_at(cursor))) {
             match(cursor, value);
             ++cursor;

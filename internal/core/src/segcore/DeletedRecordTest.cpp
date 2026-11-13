@@ -48,6 +48,93 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
+TEST(DeleteMVCC, PerBatchLookupDoesNotReplaceDefaultLookup) {
+    std::vector<int64_t> selected;
+    auto lookup = [&](int64_t row,
+                      const std::vector<PkType>&,
+                      const Timestamp* timestamps,
+                      const auto& callback) {
+        selected.push_back(row);
+        callback(SegOffset(row), timestamps[0]);
+    };
+    DeletedRecord<true> record(
+        nullptr,
+        [&](const auto& pks, const Timestamp* ts, const auto& cb) {
+            lookup(0, pks, ts, cb);
+        },
+        0);
+    record.set_sealed_row_count(3);
+    const std::vector<PkType> pks{int64_t{7}};
+    const Timestamp timestamps[]{50};
+    record.LoadPush(
+        pks,
+        timestamps,
+        [&](const auto& batch, const Timestamp* ts, const auto& cb) {
+            lookup(1, batch, ts, cb);
+        });
+    record.StreamPush(
+        pks,
+        timestamps,
+        [&](const auto& batch, const Timestamp* ts, const auto& cb) {
+            lookup(2, batch, ts, cb);
+        });
+    record.StreamPush(pks, timestamps);
+    EXPECT_EQ(selected, (std::vector<int64_t>{1, 2, 0}));
+    EXPECT_EQ(record.size(), 3);
+    BitsetType bitmap(3, false);
+    BitsetTypeView view(bitmap);
+    record.Query(view, 3, 50);
+    EXPECT_EQ(bitmap.count(), 3);
+}
+
+TEST(DeleteMVCC, PkOrderedBatchUsesMinimumTimestampForSnapshotGate) {
+    const auto old_batch_size = DELETE_DUMP_BATCH_SIZE.exchange(2);
+    auto restore =
+        folly::makeGuard([&] { DELETE_DUMP_BATCH_SIZE.store(old_batch_size); });
+    DeletedRecord<true> record(
+        nullptr,
+        [](const std::vector<PkType>& pks,
+           const Timestamp* timestamps,
+           std::function<void(SegOffset, Timestamp)> callback) {
+            for (size_t i = 0; i < pks.size(); ++i) {
+                callback(SegOffset(std::get<int64_t>(pks[i])), timestamps[i]);
+            }
+        },
+        0);
+    record.set_sealed_row_count(8);
+    const std::vector<PkType> loaded_pks{int64_t{5}};
+    const Timestamp loaded_ts[]{50};
+    record.LoadPush(loaded_pks, loaded_ts);
+
+    const std::vector<PkType> pks{int64_t{0}, int64_t{1}, int64_t{2}};
+    const Timestamp timestamps[]{60, 20, 30};
+    record.StreamPush(
+        pks,
+        timestamps,
+        [](const auto& batch, const Timestamp* ts, const auto& callback) {
+            for (size_t i = 0; i < batch.size(); ++i) {
+                callback(SegOffset(std::get<int64_t>(batch[i])), ts[i]);
+            }
+        });
+    EXPECT_EQ(record.size(), 4);
+    EXPECT_TRUE(record.get_snapshots().empty());
+
+    const std::vector<PkType> next_pks{int64_t{3}};
+    const Timestamp next_ts[]{70};
+    record.StreamPush(next_pks, next_ts);
+    EXPECT_FALSE(record.get_snapshots().empty());
+    const std::vector<Timestamp> expected{60, 20, 30, 70, 0, 50, 0, 0};
+    for (Timestamp ts = 0; ts <= 80; ++ts) {
+        BitsetType bitmap(8, false);
+        BitsetTypeView view(bitmap);
+        record.Query(view, 8, ts);
+        for (size_t row = 0; row < expected.size(); ++row) {
+            EXPECT_EQ(bitmap[row], expected[row] != 0 && expected[row] <= ts)
+                << "query_ts=" << ts << " row=" << row;
+        }
+    }
+}
+
 TEST(DeleteMVCC, common_case) {
     milvus::exec::expression::FunctionFactory& factory =
         milvus::exec::expression::FunctionFactory::Instance();
@@ -1592,6 +1679,43 @@ TEST(DeleteMVCC, RetryAfterPushThrowsPartWay) {
 
     EXPECT_EQ(QueryDeletedRows(record, 3, 600), std::vector<bool>({1, 1, 1}));
     EXPECT_EQ(QueryDeletedRows(record, 3, 150), std::vector<bool>({1, 0, 0}));
+    EXPECT_EQ(record.deleted_row_count(), 3);
+}
+
+TEST(DeleteMVCC, PreparedBatchRetryPreservesFailureCleanup) {
+    const auto saved =
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(true);
+    auto restore = folly::makeGuard(
+        [&] { ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(saved); });
+    bool fail_after_match = false;
+    const auto lookup = [&](const std::vector<PkType>& pks,
+                            const Timestamp* timestamps,
+                            const auto& callback) {
+        for (size_t i = 0; i < pks.size(); ++i) {
+            callback(SegOffset(std::get<int64_t>(pks[i]) - 1), timestamps[i]);
+            if (fail_after_match) {
+                throw std::runtime_error("chunk load failed");
+            }
+        }
+    };
+    DeletedRecord<true> record(nullptr, lookup, 0);
+    record.set_sealed_row_count(3);
+    const std::vector<PkType> first_pks{int64_t{1}, int64_t{3}};
+    const Timestamp first_ts[]{100, 500};
+    record.LoadPush(first_pks, first_ts, lookup);
+
+    const std::vector<PkType> pks{int64_t{2}};
+    const Timestamp timestamps[]{200};
+    fail_after_match = true;
+    EXPECT_ANY_THROW(record.LoadPush(pks, timestamps, lookup));
+    EXPECT_EQ(QueryDeletedRows(record, 3, 600), std::vector<bool>({1, 1, 1}));
+    EXPECT_EQ(record.deleted_row_count(), 3);
+
+    fail_after_match = false;
+    record.LoadPush(pks, timestamps, lookup);
+    EXPECT_EQ(QueryDeletedRows(record, 3, 150), std::vector<bool>({1, 0, 0}));
+    EXPECT_EQ(QueryDeletedRows(record, 3, 250), std::vector<bool>({1, 1, 0}));
+    EXPECT_EQ(QueryDeletedRows(record, 3, 600), std::vector<bool>({1, 1, 1}));
     EXPECT_EQ(record.deleted_row_count(), 3);
 }
 
