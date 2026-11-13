@@ -6362,6 +6362,7 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		DefaultValue: "256",
 		Doc:          "Shared compaction task token bucket capacity and number of tokens replenished per refill interval",
 		Export:       true,
+		Sensitivity:  NonSensitive,
 	}
 	p.CompactionRateLimitTokens.Init(base.mgr)
 
