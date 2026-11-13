@@ -1,22 +1,46 @@
 use std::fs;
 use std::path::PathBuf;
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use std::env;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use std::error::Error;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use std::io::{self, Cursor, Read, Write};
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use std::path::Path;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use std::time::Instant;
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use flate2::read::GzDecoder;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use fs2::FileExt;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use tar::Archive;
 
 use lindera::dictionary::Dictionary;
@@ -24,36 +48,63 @@ use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
 use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
 use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
 use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::DictionaryBuilder;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use log::{error, info, warn};
 #[cfg(feature = "analyzer-remote-tls")]
 use md5::Context;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 #[cfg(feature = "analyzer-remote-tls")]
 use reqwest::Client;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use tokio::runtime::Runtime;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use tokio::time::sleep;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use tokio::time::Duration;
 
 use super::common;
 use crate::error::TantivyBindingError;
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 const MAX_ROUND: usize = 3;
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 pub struct FileMutexGuard {
     file: Option<fs::File>,
     path: PathBuf,
 }
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 impl FileMutexGuard {
     fn build(path: PathBuf) -> io::Result<FileMutexGuard> {
         let flock = fs::File::create(&path)?;
@@ -65,7 +116,10 @@ impl FileMutexGuard {
     }
 }
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 impl Drop for FileMutexGuard {
     fn drop(&mut self) {
         if let Some(file) = self.file.take() {
@@ -77,7 +131,13 @@ impl Drop for FileMutexGuard {
 }
 
 // Only lindera_dir/output_dir are read when online download is compiled out.
-#[cfg_attr(not(feature = "analyzer-remote-tls"), allow(dead_code))]
+#[cfg_attr(
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
+    allow(dead_code)
+)]
 pub struct FetchParams {
     pub lindera_dir: String,
 
@@ -96,11 +156,23 @@ pub struct FetchParams {
     /// URLs from which to fetch the asset
     pub download_urls: Vec<String>,
 
-    /// MD5 hash of the file
+    /// MD5 hash of the file, checked by the analyzer-remote-tls download
+    #[cfg_attr(not(feature = "analyzer-remote-tls"), allow(dead_code))]
     pub md5_hash: String,
+
+    /// SHA-256 hash of the file, checked by the analyzer-remote-tls-openssl
+    /// download
+    #[cfg_attr(not(feature = "analyzer-remote-tls-openssl"), allow(dead_code))]
+    pub sha256_hash: String,
 }
 
-#[cfg(all(feature = "analyzer-remote-tls", not(target_os = "windows")))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    not(target_os = "windows")
+))]
 fn empty_directory(dir: &Path) -> Result<(), Box<dyn Error>> {
     if dir.is_dir() {
         for entry in std::fs::read_dir(dir)? {
@@ -116,7 +188,13 @@ fn empty_directory(dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[cfg(all(feature = "analyzer-remote-tls", target_os = "windows"))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    target_os = "windows"
+))]
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn Error>> {
     if !dst.exists() {
         std::fs::create_dir(dst)?;
@@ -137,11 +215,75 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(feature = "analyzer-remote-tls")]
+type HttpClient = Client;
+
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+type HttpClient = super::fetch_openssl::Client;
+
+#[cfg(feature = "analyzer-remote-tls")]
+fn http_client() -> Result<HttpClient, Box<dyn Error>> {
+    Ok(Client::builder()
+        .user_agent(format!("Lindera/{}", env!("CARGO_PKG_VERSION")))
+        .build()?)
+}
+
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+fn http_client() -> Result<HttpClient, Box<dyn Error>> {
+    HttpClient::new(format!("Lindera/{}", env!("CARGO_PKG_VERSION")))
+}
+
+/// GETs `url` and returns the body, or a log-ready message naming `url`.
+#[cfg(feature = "analyzer-remote-tls")]
+async fn http_get(client: &HttpClient, url: &str) -> Result<Vec<u8>, String> {
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(c) => Ok(c.to_vec()),
+            Err(e) => Err(format!("Failed to read body from {}: {}", url, e)),
+        },
+        Ok(resp) => Err(format!(
+            "HTTP download failed from {}: HTTP {}",
+            url,
+            resp.status()
+        )),
+        Err(e) => Err(format!("Request error from {}: {}", url, e)),
+    }
+}
+
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+async fn http_get(client: &HttpClient, url: &str) -> Result<Vec<u8>, String> {
+    client.get(url).await
+}
+
+/// Checks the downloaded file against the pinned hash.
+#[cfg(feature = "analyzer-remote-tls")]
+fn check_digest(content: &[u8], params: &FetchParams, url: &str) -> Result<(), String> {
+    let mut context = Context::new();
+    context.consume(content);
+    let actual_md5 = format!("{:x}", context.compute());
+    if actual_md5 == params.md5_hash {
+        Ok(())
+    } else {
+        Err(format!(
+            "MD5 mismatch from {}! Expected {}, got {}",
+            url, params.md5_hash, actual_md5
+        ))
+    }
+}
+
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+fn check_digest(content: &[u8], params: &FetchParams, url: &str) -> Result<(), String> {
+    super::fetch_openssl::check_sha256(content, &params.sha256_hash, url)
+}
+
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 async fn download_with_retry(
-    client: &Client,
+    client: &HttpClient,
     download_urls: Vec<&str>,
     max_rounds: usize,
-    expected_md5: &str,
+    params: &FetchParams,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     if download_urls.is_empty() {
         return Err("No download URLs provided".into());
@@ -154,39 +296,14 @@ async fn download_with_retry(
         urls.shuffle(&mut rng);
 
         for url in urls {
-            match client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let content = match resp.bytes().await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            warn!("Failed to read body from {}: {}", url, e);
-                            continue;
-                        }
-                    };
-
-                    // Calculate MD5 hash
-                    let mut context = Context::new();
-                    context.consume(&content);
-                    let actual_md5 = format!("{:x}", context.compute());
-
-                    if actual_md5 == expected_md5 {
-                        return Ok(content.to_vec());
-                    } else {
-                        warn!(
-                            "MD5 mismatch from {}! Expected {}, got {}",
-                            url, expected_md5, actual_md5
-                        );
-                        // continue to next url
-                    }
-                }
-                Ok(resp) => {
-                    warn!("HTTP download failed from {}: HTTP {}", url, resp.status());
+            match http_get(client, url).await {
+                Ok(content) => match check_digest(&content, params, url) {
+                    Ok(()) => return Ok(content),
                     // continue to next url
-                }
-                Err(e) => {
-                    warn!("Request error from {}: {}", url, e);
-                    // continue to next url
-                }
+                    Err(msg) => warn!("{}", msg),
+                },
+                // continue to next url
+                Err(msg) => warn!("{}", msg),
             }
         }
 
@@ -197,7 +314,10 @@ async fn download_with_retry(
     Err("Failed to download a valid file from all sources".into())
 }
 
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 pub fn build(
     params: &FetchParams,
     builder: impl DictionaryBuilder,
@@ -220,9 +340,7 @@ pub fn build(
     let tmp_path = Path::new(&build_dir).join(params.file_name.to_owned() + ".download");
 
     // Download a tarball
-    let client = Client::builder()
-        .user_agent(format!("Lindera/{}", env!("CARGO_PKG_VERSION")))
-        .build()?;
+    let client = http_client()?;
 
     let mut dest = fs::File::create(tmp_path.as_path())?;
 
@@ -231,7 +349,7 @@ pub fn build(
         &client,
         params.download_urls.iter().map(|s| s.as_str()).collect(),
         MAX_ROUND,
-        params.md5_hash.as_str(),
+        params,
     ))?;
 
     io::copy(&mut Cursor::new(content.as_slice()), &mut dest)?;
@@ -319,7 +437,10 @@ pub fn build(
 }
 
 /// Fetch the necessary assets and then build the dictionary using `builder`
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 pub fn fetch(params: &FetchParams, builder: impl DictionaryBuilder) -> Result<(), Box<dyn Error>> {
     let build_dir = PathBuf::from(params.lindera_dir.as_str());
     std::fs::create_dir_all(&build_dir)?;
@@ -359,7 +480,10 @@ pub fn fetch(params: &FetchParams, builder: impl DictionaryBuilder) -> Result<()
 
 /// Used when online download is compiled out: succeed only if the dictionary
 /// was already built under `lindera_dir` (e.g. baked into the image).
-#[cfg(not(feature = "analyzer-remote-tls"))]
+#[cfg(not(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+)))]
 pub fn ensure_prebuilt(params: &FetchParams, dict: &str) -> Result<(), TantivyBindingError> {
     let dict_dir = PathBuf::from(&params.lindera_dir).join(&params.output_dir);
     if dict_dir.is_dir() {
@@ -404,4 +528,99 @@ pub fn load(params: &FetchParams) -> Result<lindera::dictionary::Dictionary, Tan
         })?,
     };
     Ok(dict)
+}
+
+#[cfg(all(test, feature = "analyzer-remote-tls-openssl"))]
+mod openssl_download_tests {
+    use super::super::fetch_openssl::tests::{ok, serve, sha256_hex, Pki};
+    use super::*;
+    use flate2::{write::GzEncoder, Compression};
+    use std::sync::atomic::Ordering;
+
+    fn tar_gz(content: &[u8]) -> Vec<u8> {
+        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, "dict/matrix.def", content)
+            .unwrap();
+        tar.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn params(urls: Vec<String>, archive: &[u8]) -> FetchParams {
+        FetchParams {
+            lindera_dir: String::new(),
+            file_name: "dict.tar.gz".into(),
+            input_dir: "dict".into(),
+            output_dir: "lindera-dict".into(),
+            dummy_input: String::new(),
+            download_urls: urls,
+            md5_hash: "not checked by this feature".into(),
+            sha256_hash: sha256_hex(archive),
+        }
+    }
+
+    async fn run(p: &FetchParams, client: &HttpClient) -> Result<Vec<u8>, String> {
+        download_with_retry(
+            client,
+            p.download_urls.iter().map(|s| s.as_str()).collect(),
+            MAX_ROUND,
+            p,
+        )
+        .await
+        .map_err(|e| e.to_string())
+    }
+
+    #[tokio::test]
+    async fn accepts_matching_sha256() {
+        let pki = Pki::new();
+        let archive = tar_gz(b"1 1\n0 0 0\n");
+        let (r, b) = ok(&archive);
+        let (port, _) = serve(Some((&pki.server, None)), vec![("/d.tar.gz", r, b)]).await;
+        let p = params(vec![format!("https://localhost:{port}/d.tar.gz")], &archive);
+        assert_eq!(run(&p, &pki.client()).await.unwrap(), archive);
+    }
+
+    #[tokio::test]
+    async fn rejects_wrong_sha256_and_tries_next_mirror() {
+        let pki = Pki::new();
+        let archive = tar_gz(b"1 1\n0 0 0\n");
+        let tampered = tar_gz(b"1 1\n0 0 9\n");
+        let (good_r, good_b) = ok(&archive);
+        let (bad_r, bad_b) = ok(&tampered);
+        let (good, good_hits) = serve(
+            Some((&pki.server, None)),
+            vec![("/d.tar.gz", good_r, good_b)],
+        )
+        .await;
+        let (bad, bad_hits) =
+            serve(Some((&pki.server, None)), vec![("/d.tar.gz", bad_r, bad_b)]).await;
+        let good_url = format!("https://localhost:{good}/d.tar.gz");
+        let bad_url = format!("https://localhost:{bad}/d.tar.gz");
+        let client = pki.client();
+
+        // The mirror order is shuffled, so try both orders; in one of them the
+        // tampered mirror comes first and must be skipped.
+        for urls in [
+            vec![bad_url.clone(), good_url.clone()],
+            vec![good_url.clone(), bad_url.clone()],
+        ] {
+            assert_eq!(
+                run(&params(urls, &archive), &client).await.unwrap(),
+                archive
+            );
+        }
+        assert!(bad_hits.load(Ordering::SeqCst) >= 1);
+        assert_eq!(good_hits.load(Ordering::SeqCst), 2);
+
+        // With only the tampered mirror, every round fails.
+        let err = run(&params(vec![bad_url], &archive), &client)
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("Failed to download"),
+            "unexpected error: {err}"
+        );
+    }
 }

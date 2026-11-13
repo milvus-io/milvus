@@ -1,14 +1,27 @@
 use super::fetch;
 use crate::error::Result;
-#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ipadic"))]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl",
+    feature = "lindera-ipadic"
+))]
 use crate::error::TantivyBindingError;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::ipadic::IpadicBuilder;
 
 #[cfg(feature = "lindera-ipadic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-ipadic")))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    not(feature = "lindera-ipadic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, IpadicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -20,7 +33,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
 
 // Online download is compiled out; only a dictionary already built under
 // `build_dir` can be used.
-#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-ipadic")))]
+#[cfg(all(
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
+    not(feature = "lindera-ipadic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::ensure_prebuilt(params, "ipadic")
 }
@@ -42,6 +61,7 @@ pub fn load_ipadic(
             "https://Lindera.dev/mecab-ipadic-2.7.0-20070801.tar.gz".to_string(),
         ],
         md5_hash: "3311c7c71a869ca141e1b8bde0c8666c".to_string(),
+        sha256_hash: "099e46e80d55e7c0d6906783aff713748e1ae90f46c5ef96ec153bbf09bf5550".to_string(),
     };
     if download_url.len() > 0 {
         params.download_urls = download_url
@@ -63,7 +83,14 @@ pub fn load_ipadic(
     })
 }
 
-#[cfg(all(test, any(feature = "lindera-ipadic", feature = "analyzer-remote-tls")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "lindera-ipadic",
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )
+))]
 mod tests {
     use super::load_ipadic;
     use env_logger;
@@ -80,7 +107,10 @@ mod tests {
 
 #[cfg(all(
     test,
-    not(feature = "analyzer-remote-tls"),
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
     not(feature = "lindera-ipadic")
 ))]
 mod remote_tls_disabled_tests {
