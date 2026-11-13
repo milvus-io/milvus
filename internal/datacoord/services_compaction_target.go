@@ -278,6 +278,10 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingStorage(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
 		rows, observationErr = targets.ObserveStorage(ctx, s.meta, s.handler, record)
 		observed = true
+	case targets.HasStandingCondition(record) && record.GetIntent() == datapb.TargetIntent_INTENT_SCHEMA_VERSION &&
+		record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		rows, observationErr = targets.ObserveSchemaVersion(ctx, s.meta, s.handler)
+		observed = true
 	}
 	if observed && observationErr == nil {
 		target.RemainingRows = proto.Int64(rows)

@@ -67,6 +67,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	sortMatches := reconciler.observeStandingSort(ctx)
 	auto := paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool()
 	segments := standingSegments(ctx, reconciler.meta)
+	schemaUpdates := reconciler.selectableSchemaUpdates(ctx, auto, segments)
 	standingRewrites := reconciler.selectableStorageRewrites(ctx, auto, segments)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
@@ -123,6 +124,11 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 	}
 	rewriteSelectable = deduplicateSegments(rewriteSelectable)
+	requiredRewrites := make(map[int64]*meta.SegmentInfo, len(rewriteSelectable))
+	for _, segment := range rewriteSelectable {
+		requiredRewrites[segment.GetID()] = segment
+	}
+	events[policy.TriggerTypeBumpSchemaVersion] = allocateSchemaViews(schemaUpdates, allocated, requiredRewrites)
 	if len(sortMatches) > len(sortSelectable) || len(matches) > len(rewriteSelectable) {
 		mlog.RatedInfo(ctx, rate.Limit(1), "compaction target inputs awaiting selection",
 			mlog.Int("sortMatches", len(sortMatches)), mlog.Int("sortSelectable", len(sortSelectable)),

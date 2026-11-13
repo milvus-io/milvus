@@ -39,6 +39,7 @@ func (m *CompactionTriggerManager) reconcileTargets(ctx context.Context) {
 		return
 	}
 	views := append(events[policy.TriggerTypeSort], events[policy.TriggerTypeSingle]...)
+	views = append(views, events[policy.TriggerTypeBumpSchemaVersion]...)
 	m.submitTargetViews(ctx, views)
 }
 
