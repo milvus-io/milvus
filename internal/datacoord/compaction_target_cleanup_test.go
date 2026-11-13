@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -158,9 +157,8 @@ func TestStandingCleanupMatchSurvivesSelectionBlockers(t *testing.T) {
 		require.NoError(t, Params.Save(key, value))
 		t.Cleanup(func() { Params.Reset(key) })
 	}
-	now := time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC)
-	mockey.PatchConvey("stable observation clock", t, func() {
-		mockey.Mock(time.Now).Return(now).Build()
+	t.Run("selection and observation", func(t *testing.T) {
+		now := time.Now()
 		catalog, _ := targets.NewCompactionTargetTestCatalog(t)
 		s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
 		s.indexMeta = index.NewSegmentIndexMeta(catalog)
@@ -201,30 +199,30 @@ func TestStandingCleanupMatchSurvivesSelectionBlockers(t *testing.T) {
 		add(12, 1, 7, l2, func(seg *datapb.SegmentInfo) {
 			seg.IsSorted = false
 			seg.Deltalogs = delta(3, 1, 1)
-			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-2*time.Hour - time.Millisecond)
+			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-2*time.Hour - 10*time.Minute)
 		})
 		add(13, 1, 11, l1, func(seg *datapb.SegmentInfo) {
 			seg.IsSorted = false
 			seg.Deltalogs = delta(1, 101, 1)
-			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-2 * time.Hour)
+			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-2*time.Hour + 10*time.Minute)
 		})
 		add(14, 2, 13, l1, func(seg *datapb.SegmentInfo) { seg.Deltalogs = delta(1, 101, 1) })
 		add(15, 3, 17, l1, func(seg *datapb.SegmentInfo) { seg.Deltalogs = delta(1, 101, 1) })
 		add(16, 1, 19, l0, func(seg *datapb.SegmentInfo) { seg.Deltalogs = delta(1, 101, 1) })
 		add(17, 1, 23, l1, func(seg *datapb.SegmentInfo) {
-			seg.CommitTimestamp = ts(-time.Hour)
+			seg.CommitTimestamp = ts(-time.Hour + 10*time.Minute)
 			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-4 * time.Hour)
 			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampTo = ts(-4 * time.Hour)
 		})
 		add(18, 1, 29, l1, func(seg *datapb.SegmentInfo) {
-			seg.CommitTimestamp = ts(-time.Hour - time.Millisecond)
+			seg.CommitTimestamp = ts(-time.Hour - 10*time.Minute)
 			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampFrom = ts(-4 * time.Hour)
 			seg.GetBinlogs()[0].GetBinlogs()[0].TimestampTo = ts(-4 * time.Hour)
 		})
 		s.meta.SetSegmentCompacting(18, true)
 		add(19, 4, 31, l2, func(seg *datapb.SegmentInfo) {
 			seg.IsInvisible = true
-			seg.ExpirQuantiles = []int64{now.UnixMicro()}
+			seg.ExpirQuantiles = []int64{now.Add(-10 * time.Minute).UnixMicro()}
 		})
 
 		r := targets.NewCompactionTargetReconciler(s.meta, s.indexMeta, s.compactionTargetMeta, meta.NewMockHandlerWithMeta(s.meta), s.allocator)
@@ -327,8 +325,10 @@ func TestStandingCleanupKeepsConfirmedConditionOnSaveFailure(t *testing.T) {
 		})
 
 	s, _ := newTargetRPCServer(t, catalog, meta.NewMockAllocator(t))
-	s.meta.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{},
-		Properties: map[string]string{common.CollectionTTLConfigKey: "3600"}})
+	s.meta.AddCollection(&meta.CollectionInfo{
+		ID: 1, Schema: &schemapb.CollectionSchema{},
+		Properties: map[string]string{common.CollectionTTLConfigKey: "3600"},
+	})
 	now := time.Now()
 	for _, input := range []*datapb.SegmentInfo{
 		{ID: 10, Level: datapb.SegmentLevel_L2, NumOfRows: 7, Deltalogs: []*datapb.FieldBinlog{{
