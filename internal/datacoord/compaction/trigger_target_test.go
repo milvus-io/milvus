@@ -168,6 +168,7 @@ func TestTargetSubmissionRotatesIndependentPlansAfterFailure(t *testing.T) {
 		&view.SortView{RewriteInputs: pool(2, 1, 21, 22)},
 	}
 	inspector.EXPECT().attemptLimit(mock.Anything, ProducerTBC, 6).Return(5, admissionRateLimit).Once()
+	inspector.EXPECT().recordAdmissionDeferral(ProducerTBC, admissionRateLimit).Once()
 	var attempted []int64
 	inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTBC}).
 		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {

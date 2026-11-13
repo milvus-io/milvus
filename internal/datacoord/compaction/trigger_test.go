@@ -85,6 +85,8 @@ func (h *spyCompactionInspector) attemptLimit(_ context.Context, _ Producer, pla
 	return plans, ""
 }
 
+func (h *spyCompactionInspector) recordAdmissionDeferral(Producer, string) {}
+
 func (h *spyCompactionInspector) EnqueueCompaction(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 	t := ctask.NewMixCompactionTask(task, nil, h.meta, nil, index.NewTestVersionManager())
 	alloc := newMock0Allocator(h.t)

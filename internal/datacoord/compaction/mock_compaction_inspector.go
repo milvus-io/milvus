@@ -428,6 +428,40 @@ func (_c *MockCompactionInspector_isFull_Call) RunAndReturn(run func() bool) *Mo
 	return _c
 }
 
+// recordAdmissionDeferral provides a mock function with given fields: producer, reason
+func (_m *MockCompactionInspector) recordAdmissionDeferral(producer meta.CompactionProducer, reason string) {
+	_m.Called(producer, reason)
+}
+
+// MockCompactionInspector_recordAdmissionDeferral_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'recordAdmissionDeferral'
+type MockCompactionInspector_recordAdmissionDeferral_Call struct {
+	*mock.Call
+}
+
+// recordAdmissionDeferral is a helper method to define mock.On call
+//   - producer meta.CompactionProducer
+//   - reason string
+func (_e *MockCompactionInspector_Expecter) recordAdmissionDeferral(producer interface{}, reason interface{}) *MockCompactionInspector_recordAdmissionDeferral_Call {
+	return &MockCompactionInspector_recordAdmissionDeferral_Call{Call: _e.mock.On("recordAdmissionDeferral", producer, reason)}
+}
+
+func (_c *MockCompactionInspector_recordAdmissionDeferral_Call) Run(run func(producer meta.CompactionProducer, reason string)) *MockCompactionInspector_recordAdmissionDeferral_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(meta.CompactionProducer), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockCompactionInspector_recordAdmissionDeferral_Call) Return() *MockCompactionInspector_recordAdmissionDeferral_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactionInspector_recordAdmissionDeferral_Call) RunAndReturn(run func(meta.CompactionProducer, string)) *MockCompactionInspector_recordAdmissionDeferral_Call {
+	_c.Run(run)
+	return _c
+}
+
 // NewMockCompactionInspector creates a new instance of MockCompactionInspector. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCompactionInspector(t interface {

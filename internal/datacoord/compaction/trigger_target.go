@@ -78,6 +78,9 @@ func (m *CompactionTriggerManager) submitTargetViews(ctx context.Context, views 
 	if planCount == 0 {
 		return
 	}
+	if planCount > limit {
+		defer m.inspector.recordAdmissionDeferral(ProducerTBC, reason)
+	}
 	if limit == 0 {
 		for _, group := range byGroup {
 			for node := group.pools.Front(); node != nil; node = node.Next() {

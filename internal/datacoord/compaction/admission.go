@@ -176,10 +176,13 @@ func (a *compactionAdmission) attemptLimit(ctx context.Context, producer Produce
 		return 0, ""
 	}
 	limit, reason := a.available(now, producer, capacity)
-	if plans > limit && reason != admissionCapacityLimit {
-		a.service[producer].deferredAt = now
-	}
 	return min(plans, limit), reason
+}
+
+func (a *compactionAdmission) recordDeferral(producer Producer) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.service[producer].deferredAt = a.now()
 }
 
 func (a *compactionAdmission) acquire(ctx context.Context, producer Producer, capacity int) (*admissionPermit, string) {

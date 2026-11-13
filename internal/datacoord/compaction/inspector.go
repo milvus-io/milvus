@@ -65,6 +65,7 @@ type CompactionInspector interface {
 	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
 	attemptLimit(ctx context.Context, producer Producer, plans int) (int, string)
+	recordAdmissionDeferral(producer Producer, reason string)
 	// get compaction tasks by signal id
 	GetCompactionTasksNumBySignalID(signalID int64) int
 	GetCompactionInfo(ctx context.Context, signalID int64) *policy.CompactionInfo
@@ -770,6 +771,12 @@ func (c *Inspector) attemptLimit(ctx context.Context, producer Producer, plans i
 		return min(capacity, plans), admissionCapacityLimit
 	}
 	return c.admission.attemptLimit(ctx, producer, capacity, plans)
+}
+
+func (c *Inspector) recordAdmissionDeferral(producer Producer, reason string) {
+	if c.admission != nil && (reason == admissionRateLimit || reason == admissionShareLimit) {
+		c.admission.recordDeferral(producer)
+	}
 }
 
 func (c *Inspector) admissionLimited(ctx context.Context, task *datapb.CompactionTask, producer Producer, reason string) error {

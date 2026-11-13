@@ -920,6 +920,8 @@ func (s *CompactionPlanHandlerSuite) TestAdmissionAlternatesContendedPartialRefi
 	s.Require().ErrorIs(submit(4, ProducerTBC), ErrAdmissionLimited)
 	s.Require().NoError(submit(5, ProducerRestore))
 	clock = clock.Add(time.Second)
+	limit, _ := inspector.attemptLimit(ctx, ProducerTBC, 2)
+	s.Equal(1, limit)
 	s.Require().NoError(submit(4, ProducerTBC))
 }
 
