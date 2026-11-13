@@ -112,6 +112,7 @@ var Params = paramtable.Get()
 type Server struct {
 	compactionTargetCollection       func(context.Context, int64) (*datapb.CompactionTargetResource, bool, error)
 	checkCompactionTargetReplication func(context.Context) error
+	targetCompactionEnabled          bool
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -249,6 +250,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		metricsCacheManager:              metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:                   metricsinfo.NewMetricsRequest(),
 		checkCompactionTargetReplication: validateCompactionTargetReplication,
+		targetCompactionEnabled:          Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 
 	for _, opt := range opts {
@@ -354,6 +356,11 @@ func (s *Server) initDataCoord() error {
 	}
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
+	if err = retry.Do(s.ctx, func() error {
+		return s.recoverCompactionTargetScopes(s.ctx)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
 
 	s.initAnalyzeInspector()
 	mlog.Info(s.ctx, "init analyze inspector done")
@@ -716,9 +723,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = meta.NewMeta(s.ctx, catalog, chunkManager, s.broker, loadDomainMetas(catalog, chunkManager, &s.domainMetas))
+		s.meta, err = meta.NewMeta(s.ctx, catalog, chunkManager, s.broker, loadDomainMetas(catalog, chunkManager, &s.domainMetas, s.targetCompactionEnabled))
 		if err != nil {
 			return err
+		}
+		if s.compactionTargetMeta != nil {
+			s.compactionTargetMeta.SetCollectionScopeGuard(s.tryLockCompactionTargetScope)
 		}
 		// Load collection information asynchronously
 		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
@@ -808,6 +818,10 @@ func (s *Server) startServerLoop() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.startCompaction()
 	}
+	if s.compactionTargetMeta != nil {
+		s.serverLoopWg.Add(1)
+		go s.collectExpiredCompactionTargets(s.serverLoopCtx)
+	}
 
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
@@ -828,6 +842,20 @@ func (s *Server) startServerLoop() {
 	}
 
 	s.garbageCollector.Start()
+}
+
+func (s *Server) collectExpiredCompactionTargets(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	ticker := time.NewTicker(Params.DataCoordCfg.CompactionGCIntervalInSeconds.GetAsDuration(time.Second))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.compactionTargetMeta.CollectExpired(ctx, time.Now())
+		}
+	}
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -1386,7 +1414,7 @@ type domainMetas struct {
 }
 
 // loadDomainMetas returns a DomainMetaLoader that builds every domain meta in parallel into out and returns the index catalog and the compaction protection.
-func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas) meta.DomainMetaLoader {
+func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas, targetCompactionEnabled bool) meta.DomainMetaLoader {
 	return func(ctx context.Context, collectionIDs []int64, g *errgroup.Group) func() (meta.SegmentIndexCatalog, meta.CompactionProtection) {
 		g.Go(func() error {
 			var err error
@@ -1436,7 +1464,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 			return err
 		})
 
-		if Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		if targetCompactionEnabled {
 			g.Go(func() error {
 				var err error
 				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)

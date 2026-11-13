@@ -31,6 +31,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -5933,6 +5934,7 @@ type dataCoordConfig struct {
 
 	// compaction
 	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
+	CompactionTargetRetentionSeconds       ParamItem `refreshable:"true"`
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
@@ -6322,6 +6324,24 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		Export:       true,
 	}
 	p.EnableTargetBasedCompaction.Init(base.mgr)
+
+	p.CompactionTargetRetentionSeconds = ParamItem{
+		Key:          "dataCoord.compaction.target.retentionSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "604800",
+		Doc:          "Retention in seconds for inactive compaction targets, independently of task history.",
+		Export:       true,
+		Formatter: func(value string) string {
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
+				mlog.RatedWarn(context.TODO(), rate.Limit(1), "invalid compaction target retention, using default",
+					mlog.String("configured", value))
+				return "604800"
+			}
+			return value
+		},
+	}
+	p.CompactionTargetRetentionSeconds.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",

@@ -290,9 +290,9 @@ func (_c *DataCoordCatalog_ChannelExists_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// CreateCompactionTarget provides a mock function with given fields: ctx, record
-func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (bool, error) {
-	ret := _m.Called(ctx, record)
+// CreateCompactionTarget provides a mock function with given fields: ctx, record, scope
+func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion) (bool, error) {
+	ret := _m.Called(ctx, record, scope)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCompactionTarget")
@@ -300,17 +300,17 @@ func (_m *DataCoordCatalog) CreateCompactionTarget(ctx context.Context, record *
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget) (bool, error)); ok {
-		return rf(ctx, record)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) (bool, error)); ok {
+		return rf(ctx, record, scope)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget) bool); ok {
-		r0 = rf(ctx, record)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) bool); ok {
+		r0 = rf(ctx, record, scope)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget) error); ok {
-		r1 = rf(ctx, record)
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) error); ok {
+		r1 = rf(ctx, record, scope)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -326,13 +326,14 @@ type DataCoordCatalog_CreateCompactionTarget_Call struct {
 // CreateCompactionTarget is a helper method to define mock.On call
 //   - ctx context.Context
 //   - record *datapb.CompactionTarget
-func (_e *DataCoordCatalog_Expecter) CreateCompactionTarget(ctx interface{}, record interface{}) *DataCoordCatalog_CreateCompactionTarget_Call {
-	return &DataCoordCatalog_CreateCompactionTarget_Call{Call: _e.mock.On("CreateCompactionTarget", ctx, record)}
+//   - scope *metastore.CompactionTargetCollectionVersion
+func (_e *DataCoordCatalog_Expecter) CreateCompactionTarget(ctx interface{}, record interface{}, scope interface{}) *DataCoordCatalog_CreateCompactionTarget_Call {
+	return &DataCoordCatalog_CreateCompactionTarget_Call{Call: _e.mock.On("CreateCompactionTarget", ctx, record, scope)}
 }
 
-func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget)) *DataCoordCatalog_CreateCompactionTarget_Call {
+func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Run(run func(ctx context.Context, record *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion)) *DataCoordCatalog_CreateCompactionTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTarget), args[2].(*metastore.CompactionTargetCollectionVersion))
 	})
 	return _c
 }
@@ -342,7 +343,7 @@ func (_c *DataCoordCatalog_CreateCompactionTarget_Call) Return(mayHaveCommitted 
 	return _c
 }
 
-func (_c *DataCoordCatalog_CreateCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget) (bool, error)) *DataCoordCatalog_CreateCompactionTarget_Call {
+func (_c *DataCoordCatalog_CreateCompactionTarget_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTarget, *metastore.CompactionTargetCollectionVersion) (bool, error)) *DataCoordCatalog_CreateCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4246,7 +4247,8 @@ func (_c *DataCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, .
 func NewDataCoordCatalog(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *DataCoordCatalog {
+},
+) *DataCoordCatalog {
 	mock := &DataCoordCatalog{}
 	mock.Mock.Test(t)
 

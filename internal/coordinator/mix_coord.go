@@ -1473,6 +1473,10 @@ func (s *mixCoordImpl) DropSnapshot(ctx context.Context, req *datapb.DropSnapsho
 	return s.datacoordServer.DropSnapshot(ctx, req)
 }
 
+func (s *mixCoordImpl) DropCollectionCompactionTargets(ctx context.Context, id int64) error {
+	return s.datacoordServer.DropCollectionCompactionTargets(ctx, id)
+}
+
 func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
 	return s.datacoordServer.DescribeSnapshot(ctx, req)
 }

@@ -47,9 +47,7 @@ func (reconciler *CompactionTargetReconciler) Enable() bool {
 	return reconciler != nil &&
 		reconciler.meta != nil &&
 		reconciler.CompactionTargetMeta != nil &&
-		reconciler.collectionAvailable != nil &&
-		paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() &&
-		paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.GetAsBool()
+		reconciler.collectionAvailable != nil
 }
 
 func (reconciler *CompactionTargetReconciler) Name() string {

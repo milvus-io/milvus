@@ -48,6 +48,10 @@ type Broadcaster interface {
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
 
+	// TryLockResourceKeys orders local work against broadcasts without starting
+	// one. A nil release with no error means the requested keys are busy.
+	TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (release func(), err error)
+
 	// Close closes the broadcaster.
 	Close()
 }

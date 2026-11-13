@@ -29,9 +29,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore"
+	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -65,14 +69,19 @@ func (s *CatalogCompactionTargetSuite) TestCreateListStopAndRemove() {
 		ActivatedAtTS: 301,
 	}
 
-	_, err := s.catalog.CreateCompactionTarget(s.ctx, record)
+	const revision = 40
+	scope := &metastore.CompactionTargetCollectionVersion{DatabaseID: util.DefaultDBID, Revision: revision}
+	value, err := proto.Marshal(&etcdpb.CollectionInfo{ID: 100, UpdateTimestamp: revision})
+	s.Require().NoError(err)
+	s.Require().NoError(s.metakv.Save(s.ctx, rootcatalog.BuildCollectionKey(util.NonDBID, 100), string(value)))
+	_, err = s.catalog.CreateCompactionTarget(s.ctx, record, scope)
 	s.Require().NoError(err)
 	s.True(proto.Equal(record, s.loadRecord(10)))
 
 	unknownTarget := proto.Clone(record).(*datapb.CompactionTarget)
 	unknownTarget.TargetID = 11
 	unknownTarget.Intent = datapb.TargetIntent(999)
-	_, err = s.catalog.CreateCompactionTarget(s.ctx, unknownTarget)
+	_, err = s.catalog.CreateCompactionTarget(s.ctx, unknownTarget, scope)
 	s.Require().NoError(err)
 
 	records, err := s.catalog.ListCompactionTargets(s.ctx)
@@ -81,8 +90,10 @@ func (s *CatalogCompactionTargetSuite) TestCreateListStopAndRemove() {
 	s.Equal(datapb.TargetIntent_INTENT_REWRITE, records[0].GetIntent())
 	s.Equal(datapb.TargetIntent(999), records[1].GetIntent())
 
-	stop := &datapb.CompactionTarget{TargetID: 10, State: datapb.TargetState_TARGET_STATE_INACTIVE,
-		InactivatedAtTS: 500, StopReason: "operator_dropped"}
+	stop := &datapb.CompactionTarget{
+		TargetID: 10, State: datapb.TargetState_TARGET_STATE_INACTIVE,
+		InactivatedAtTS: 500, StopReason: "operator_dropped",
+	}
 	updated, changed, err := s.catalog.StopCompactionTarget(s.ctx, stop)
 	s.Require().NoError(err)
 	s.True(changed)
@@ -188,7 +199,7 @@ func TestCompactionTargetCreateClassifiesBackendWriteOutcome(t *testing.T) {
 				err:                             merr.WrapErrIoFailedErr(test.err, "execute etcd txn"),
 			}
 			catalog := NewCatalog(backend, rootPath, "")
-			unknown, err := catalog.CreateCompactionTarget(t.Context(), &datapb.CompactionTarget{TargetID: 100})
+			unknown, err := catalog.CreateCompactionTarget(t.Context(), &datapb.CompactionTarget{TargetID: 100}, nil)
 			require.ErrorIs(t, err, merr.ErrIoFailed)
 			require.Equal(t, test.ambiguous, unknown)
 		})

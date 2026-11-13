@@ -26,6 +26,15 @@ func GetWithContext(ctx context.Context) (broadcaster.Broadcaster, error) {
 	return singleton.GetWithContext(ctx)
 }
 
+// TryLockResourceKeys shares the recovered broadcaster's locks with local
+// work. It leaves both WAL and broadcast state unchanged.
+func TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (func(), error) {
+	if !singleton.Ready() {
+		return nil, merr.WrapErrServiceNotReadyMsg("broadcaster recovery is not ready")
+	}
+	return singleton.Get().TryLockResourceKeys(ctx, resourceKeys...)
+}
+
 // StartBroadcastWithResourceKeys starts a broadcast with resource keys.
 // Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {

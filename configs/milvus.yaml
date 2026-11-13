@@ -851,6 +851,8 @@ dataCoord:
   enableCompaction: true
   compaction:
     enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    target:
+      retentionSeconds: 604800 # Retention in seconds for inactive compaction targets.
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true

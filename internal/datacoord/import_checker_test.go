@@ -87,7 +87,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	s.NoError(err)
 
 	importMeta, err := bulkimport.NewImportMeta(context.TODO(), catalog, s.alloc, mt)
@@ -2053,7 +2053,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	importMeta, err := bulkimport.NewImportMeta(context.TODO(), catalog, alloc, mt)

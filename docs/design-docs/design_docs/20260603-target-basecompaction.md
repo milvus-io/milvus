@@ -67,8 +67,14 @@ gates, including snapshot protection, occupancy, and index readiness. Shared
 matches contribute one physical input per round. Before persisting
 satisfaction, DataCoord repeats the full observation and checks relevant
 in-flight inputs while serializing new task admission for the collection.
+The final check also acquires the collection's existing DDL resource guards.
+During DropCollection the control-channel acknowledgment saves the collection
+tombstone and then closes its active Targets with `scope_dropped`. The DDL
+guard covers this interval, including any early data channel cleanup. On
+startup, a recovered Target whose scope has been deleted gets the same outcome.
 
-The target catalog uses an insert-if-absent transaction for Create and a
+The target catalog guards the current collection revision in the same
+insert-if-absent transaction for Create and uses a
 conditional update for terminal transitions. If a Create write may have
 committed, DataCoord reads the same candidate ID to confirm it. An
 unconfirmed result is reported as an unknown Create outcome. The Go SDK and
@@ -82,6 +88,11 @@ compaction disabled, target metadata is left in place and the legacy manual
 path remains active. With it enabled, ordinary manual and target-size
 requests direct callers to the Target API. L0, Clustering, and old task-state
 queries continue to use the existing paths.
+
+`dataCoord.compaction.target.retentionSeconds` controls inactive Target
+retention independently of task history. The default is seven days. While a
+record is retained, Describe and Drop preserve its durable lifecycle. After
+collection of the record, both report TargetNotFound.
 
 This slice implements manual REWRITE on standalone clusters without a CDC
 topology. OPTIMIZE and Standing sources require their own implementation
@@ -103,6 +114,8 @@ before they can be enabled.
 - Exercise Go SDK and REST against a 3.0 deployment. Confirm that a published
   replacement retains the requested lineage, and that releasing snapshot
   protection lets a previously blocked REWRITE reach satisfaction.
+- Delete a collection while its REWRITE is active. Verify `scope_dropped`
+  after the DDL succeeds, and exercise recovery after deletion in legacy mode.
 
 ## Rejected Alternatives
 

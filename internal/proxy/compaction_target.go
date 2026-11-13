@@ -50,7 +50,7 @@ func (node *Proxy) compactionTargetSubject(ctx context.Context) (rbacSubject, er
 			return subject, err
 		}
 	}
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() || !Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+	if !node.targetCompactionEnabled {
 		return subject, merr.WrapErrOperationNotSupportedMsg("target-based compaction is disabled")
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {

@@ -37,6 +37,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type collectionCompactionTargetDropper interface {
+	DropCollectionCompactionTargets(ctx context.Context, collectionID int64) error
+}
+
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
 	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -125,6 +129,11 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return merr.Wrap(err, "failed to drop collection")
+			}
+			if dropper, ok := c.mixCoord.(collectionCompactionTargetDropper); ok {
+				if err := dropper.DropCollectionCompactionTargets(ctx, collectionID); err != nil {
+					return merr.Wrap(err, "failed to close compaction targets for dropped collection")
+				}
 			}
 			continue
 		}

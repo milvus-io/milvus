@@ -163,7 +163,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -183,7 +183,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -225,7 +225,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.NoError(err)
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0", "legacy"), 1)
@@ -246,7 +246,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -265,7 +265,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -284,7 +284,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -303,7 +303,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -322,7 +322,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -341,7 +341,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.Error(err)
 	})
 
@@ -384,7 +384,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				}, nil
 			})
 
-		mt, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm))
+		mt, err := meta.NewMeta(ctx, suite.catalog, nil, brk, loadDomainMetas(suite.catalog, nil, dm, false))
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := mt.GetSegmentsOfCollection(ctx, collectionID)
@@ -3556,7 +3556,7 @@ func TestMeta_Basic(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 
 		err = mt.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{}))
@@ -3571,7 +3571,7 @@ func TestMeta_Basic(t *testing.T) {
 		metakv2.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		metakv2.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed"))
 		catalog = datacoord.NewCatalog(metakv2, "", "")
-		mt, err = meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err = meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 		// nil, since no segment yet
 		err = mt.DropSegment(context.TODO(), 0)
@@ -3584,7 +3584,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
-		mt, err = meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err = meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 		assert.NotNil(t, mt)
 	})
@@ -4084,7 +4084,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 
 		segmentInfo := &meta.SegmentInfo{

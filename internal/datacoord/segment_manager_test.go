@@ -80,7 +80,7 @@ func TestLastExpireReset(t *testing.T) {
 			},
 		},
 	}, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
@@ -134,7 +134,7 @@ func TestLastExpireReset(t *testing.T) {
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := meta.NewMeta(context.TODO(), newCatalog, nil, broker, loadDomainMetas(newCatalog, nil, dm))
+	restartedMeta, err := meta.NewMeta(context.TODO(), newCatalog, nil, broker, loadDomainMetas(newCatalog, nil, dm, false))
 	restartedMeta.AddCollection(&meta.CollectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := segment.NewSegmentManager(restartedMeta, mockAllocator)
@@ -338,7 +338,7 @@ func TestTryToSealSegment(t *testing.T) {
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 
 		schema := meta.NewTestSchema()
@@ -369,7 +369,7 @@ func TestTryToSealSegment(t *testing.T) {
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+		mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 		assert.NoError(t, err)
 
 		schema := meta.NewTestSchema()

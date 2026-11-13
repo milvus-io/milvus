@@ -26,8 +26,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore"
+	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -78,7 +82,7 @@ func (kc *Catalog) loadCompactionTarget(ctx context.Context, targetID int64) (*d
 	return record, value, nil
 }
 
-func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (bool, error) {
+func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion) (bool, error) {
 	key, value, err := buildCompactionTargetKV(record)
 	if err != nil {
 		return false, err
@@ -86,7 +90,37 @@ func (kc *Catalog) CreateCompactionTarget(ctx context.Context, record *datapb.Co
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.KeyNotExist(key))
+	guards := []predicates.Predicate{predicates.KeyNotExist(key)}
+	if id := record.GetCollectionID(); id != 0 {
+		if scope == nil {
+			return false, merr.WrapErrServiceInternalMsg("compaction target creation is missing the collection version")
+		}
+		collectionKey := rootcatalog.BuildCollectionKey(scope.DatabaseID, id)
+		raw, err := kc.MetaKv.Load(ctx, collectionKey)
+		if scope.DatabaseID == util.DefaultDBID && errors.Is(err, merr.ErrIoKeyNotFound) {
+			// Collections that predate database namespaces keep their legacy
+			// row. RootCoord reports the default DB for their public identity.
+			collectionKey = rootcatalog.BuildCollectionKey(util.NonDBID, id)
+			raw, err = kc.MetaKv.Load(ctx, collectionKey)
+			guards = append(guards, predicates.KeyNotExist(rootcatalog.BuildCollectionKey(scope.DatabaseID, id)))
+		}
+		if errors.Is(err, merr.ErrIoKeyNotFound) || (err == nil && rootcatalog.IsTombstone(raw)) {
+			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+		}
+		if err != nil {
+			return false, merr.Wrap(err, "load collection for compaction target creation")
+		}
+		current := &etcdpb.CollectionInfo{}
+		if err := proto.Unmarshal([]byte(raw), current); err != nil {
+			return false, merr.Wrap(err, "decode collection for compaction target creation")
+		}
+		if current.GetID() != id || current.GetState() != etcdpb.CollectionState_CollectionCreated ||
+			current.GetUpdateTimestamp() != scope.Revision {
+			return false, merr.WrapErrServiceUnavailableMsg("collection changed during compaction target creation")
+		}
+		guards = append(guards, predicates.ValueEqual(collectionKey, raw))
+	}
+	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, guards...)
 	return targetCreateMayHaveCommitted(err), err
 }
 

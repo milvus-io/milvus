@@ -182,6 +182,13 @@ func (m *BinlogsIncrement) cloneBinlogs(binlogs []*datapb.FieldBinlog) []*datapb
 	return res
 }
 
+// CompactionTargetCollectionVersion identifies the live collection row guarded
+// by the same transaction that admits a collection-scoped Target.
+type CompactionTargetCollectionVersion struct {
+	DatabaseID int64
+	Revision   uint64
+}
+
 //go:generate mockery --name=DataCoordCatalog --with-expecter
 type DataCoordCatalog interface {
 	ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error)
@@ -256,7 +263,7 @@ type DataCoordCatalog interface {
 
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
 	LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error)
-	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) (mayHaveCommitted bool, err error)
+	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, scope *CompactionTargetCollectionVersion) (mayHaveCommitted bool, err error)
 	StopCompactionTarget(ctx context.Context, stopped *datapb.CompactionTarget) (*datapb.CompactionTarget, bool, error)
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 
