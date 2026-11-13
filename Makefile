@@ -444,8 +444,10 @@ run-test-cpp:
 	@echo $(PWD)/scripts/run_cpp_unittest.sh arg=${filter}
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh arg=${filter})
 
+# The plan parser is a second Go binary (c-shared), so it needs the same
+# GOEXPERIMENT as bin/milvus: BoringCrypto when MILVUS_FIPS_ENABLED=ON.
 plan-parser-lib:
-	@(env bash $(PWD)/scripts/build_plan_parser.sh)
+	@(env $(GOEXPERIMENT_FLAG) bash $(PWD)/scripts/build_plan_parser.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp
