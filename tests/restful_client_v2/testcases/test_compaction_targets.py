@@ -103,7 +103,10 @@ class TestCompactionTargets(TestBase):
         assert sort["collectionId"] == "0"
         assert sort["state"] == "COMPACTION_TARGET_STATE_ACTIVE"
         assert sort["other"]["clusterWide"]
-        assert sort["other"]["parameters"] in ([{"key": "enabled", "value": "true"}], [{"key": "enabled", "value": "false"}])
+        assert sort["other"]["parameters"] in (
+            [{"key": "enabled", "value": "true"}],
+            [{"key": "enabled", "value": "false"}],
+        )
         assert "remainingRows" not in sort
 
         target_id = sort["targetId"]
