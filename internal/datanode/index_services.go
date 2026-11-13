@@ -194,10 +194,11 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	defer node.lifetime.Done()
 
 	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
+		totalSlots               = index.CalculateNodeSlots()
+		indexActive, indexQueued = node.taskScheduler.TaskQueue.GetSlotUsage()
+		indexStatsUsed           = indexActive + indexQueued
+		compactionUsed           = node.compactionExecutor.Slots()
+		importUsed               = node.importScheduler.Slots()
 	)
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed

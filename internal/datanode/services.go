@@ -800,12 +800,13 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	}
 
 	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importV2Used   = node.importScheduler.Slots()
-		importV3Used   = node.importV3Scheduler.Slots()
-		queueUsed      = node.importV3Scheduler.QueuedSlots()
+		totalSlots               = index.CalculateNodeSlots()
+		indexActive, indexQueued = node.taskScheduler.TaskQueue.GetSlotUsage()
+		indexStatsUsed           = indexActive + indexQueued
+		compactionUsed           = node.compactionExecutor.Slots()
+		importV2Used             = node.importScheduler.Slots()
+		importV3Used             = node.importV3Scheduler.Slots()
+		queueUsed                = node.importV3Scheduler.QueuedSlots()
 	)
 	importUsed := importV2Used + importV3Used
 

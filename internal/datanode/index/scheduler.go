@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -39,34 +40,37 @@ type TaskQueue interface {
 	utEmpty() bool
 	utFull() bool
 	addUnissuedTask(t Task) error
-	PopUnissuedTask() Task
+	PopUnissuedTask(allowVector bool) Task
 	AddActiveTask(t Task)
-	PopActiveTask(tName string) Task
+	PopActiveTask(t Task) Task
 	ReleaseResource(t Task)
 	Enqueue(t Task) error
 	GetTaskNum() (int, int)
-	GetUsingResource() taskcommon.Resource
 	GetUsingSlot() int64
+	GetUsingResource() taskcommon.Resource
+	GetSlotUsage() (int64, int64)
 	GetActiveSlot() int64
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
 type IndexTaskQueue struct {
 	unissuedTasks *list.List
-	activeTasks   map[string]Task
+	activeTasks   map[Task]struct{}
+	bookings      map[Task]taskcommon.Resource // protected by utLock
 	utLock        sync.Mutex
 	atLock        sync.Mutex
+	queuedSlot    int64 // protected by utLock; only unissued tasks
+	queuedMemory  int64 // protected by utLock; not execution reservations
 
 	// maxTaskNum should keep still
 	maxTaskNum int64
 
 	utBufChan chan struct{} // to block scheduler
-	usingSlot atomic.Int64
 
 	// Cpu/memory booked for enqueued and active tasks, the two-dimensional
 	// counterpart of the slot accounting above. DataCoord estimates both and
-	// QuerySlot reports them; nothing on this node admits by them, so they sit
-	// beside the slot ledger rather than inside the admission path.
+	// QuerySlot reports all accepted work, including the queue. Execution
+	// admission uses a separate ledger so waiting tasks cannot block themselves.
 	usingCPU    atomic.Int64
 	usingMemory atomic.Int64
 
@@ -89,17 +93,30 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
-	if queue.utFull() {
+	if queue.sched.ctx.Err() != nil {
+		return errCancel
+	}
+	slots := max(t.GetSlot(), 0)
+	res := queue.sched.taskResource(t)
+	var full bool
+	if memory := queue.sched.memoryCapacity(); memory > 0 {
+		full = queue.queuedMemory >= memory || res.Memory > memory-queue.queuedMemory
+	}
+	// Bound waiting work separately from execution. An empty queue accepts one
+	// oversized task so it can eventually run alone.
+	if queue.utFull() || (!queue.utEmpty() && full) {
 		return merr.Wrap(merr.ErrServiceResourceInsufficient, "index task queue is full")
 	}
 	// Book cpu/memory before the task becomes visible to the scheduler: once
 	// it is in unissuedTasks it can be popped, run and released by
 	// ReleaseResource at any time, and a release that ran ahead of its booking
 	// would leave the ledger briefly below zero -- reported as an idle node.
-	res := t.GetResource()
+	queue.bookings[t] = res
 	queue.usingCPU.Add(res.CPU)
 	queue.usingMemory.Add(res.Memory)
 	queue.unissuedTasks.PushBack(t)
+	queue.queuedSlot += slots
+	queue.queuedMemory += res.Memory
 	select {
 	case queue.utBufChan <- struct{}{}:
 	default:
@@ -108,7 +125,31 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 }
 
 func (queue *IndexTaskQueue) GetUsingSlot() int64 {
-	return queue.usingSlot.Load()
+	return queue.sched.usingSlot.Load()
+}
+
+// GetUsingResource returns the cpu/memory booked by enqueued and active tasks.
+//
+// A task is booked before it can be released (addUnissuedTask), so the
+// counters do not go negative in normal operation. They are plain atomics,
+// though, where the other two executors clamp at zero
+// (taskcommon.Resource.Sub), and a negative figure here is the unsafe
+// direction: QuerySlot computes available = total - used, so a negative "used"
+// reports more free than the node has. It is clamped at zero on the way out so
+// the three ledgers behave the same.
+func (queue *IndexTaskQueue) GetUsingResource() taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    max(queue.usingCPU.Load(), 0),
+		Memory: max(queue.usingMemory.Load(), 0),
+	}
+}
+
+// GetSlotUsage snapshots held and queued slots together, including the transfer
+// from queued demand to execution slots during dispatch.
+func (queue *IndexTaskQueue) GetSlotUsage() (int64, int64) {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+	return queue.sched.usingSlot.Load(), queue.queuedSlot
 }
 
 func (queue *IndexTaskQueue) GetActiveSlot() int64 {
@@ -116,25 +157,38 @@ func (queue *IndexTaskQueue) GetActiveSlot() int64 {
 	defer queue.atLock.Unlock()
 
 	slots := int64(0)
-	for _, t := range queue.activeTasks {
-		slots += t.GetSlot()
+	for task := range queue.activeTasks {
+		slots += queue.sched.taskSlots(task)
 	}
 	return slots
 }
 
-// PopUnissuedTask pops a task from tasks queue.
-func (queue *IndexTaskQueue) PopUnissuedTask() Task {
+// PopUnissuedTask preserves vector queue order while allowing non-vector tasks
+// to use spare memory (legacy: slots) while a vector waits for capacity or a permit.
+func (queue *IndexTaskQueue) PopUnissuedTask(allowVector bool) Task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
-	if queue.unissuedTasks.Len() <= 0 {
-		return nil
+	for item := queue.unissuedTasks.Front(); item != nil; item = item.Next() {
+		t := item.Value.(Task)
+		if queue.sched.ctx.Err() == nil && t.Ctx().Err() == nil {
+			if t.IsVectorIndex() && !allowVector {
+				continue
+			}
+			if !queue.sched.acquireResources(t, queue.bookings[t].Memory) {
+				if t.IsVectorIndex() {
+					// Later vectors cannot bypass the first blocked vector.
+					allowVector = false
+				}
+				continue
+			}
+		}
+		queue.unissuedTasks.Remove(item)
+		queue.queuedSlot -= max(t.GetSlot(), 0)
+		queue.queuedMemory -= queue.bookings[t].Memory
+		return t
 	}
-
-	ft := queue.unissuedTasks.Front()
-	queue.unissuedTasks.Remove(ft)
-
-	return ft.Value.(Task)
+	return nil
 }
 
 // AddActiveTask adds a task to activeTasks.
@@ -142,43 +196,41 @@ func (queue *IndexTaskQueue) AddActiveTask(t Task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 
-	tName := t.Name()
-	_, ok := queue.activeTasks[tName]
+	_, ok := queue.activeTasks[t]
 	if ok {
-		mlog.Debug(context.TODO(), "task already in active task list", mlog.String("TaskID", tName))
+		mlog.Debug(t.Ctx(), "task already in active task list", mlog.String("TaskID", t.Name()))
 	}
 
-	queue.activeTasks[tName] = t
+	queue.activeTasks[t] = struct{}{}
 }
 
-// PopActiveTask pops a task from activateTask and the task will be executed.
-func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
+// PopActiveTask removes the execution from the registry. Its owner returns
+// reservations separately, after task cleanup has actually finished.
+func (queue *IndexTaskQueue) PopActiveTask(t Task) Task {
 	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
 
-	t, ok := queue.activeTasks[tName]
+	_, ok := queue.activeTasks[t]
 	if ok {
-		delete(queue.activeTasks, tName)
-		queue.usingSlot.Sub(t.GetSlot())
+		delete(queue.activeTasks, t)
+		queue.atLock.Unlock()
 		return t
 	}
-	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", tName))
+	queue.atLock.Unlock()
+	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", t.Name()))
 	return nil
 }
 
-// ReleaseResource returns the cpu/memory that addUnissuedTask booked for t.
-//
-// It is released per task, not per name as the slots are: a dropped task
-// whose native build ignores cancellation keeps running while DataCoord
-// dispatches the same clusterID/taskID again. Both executions are booked,
-// and AddActiveTask keeps only the newer one under the name, so a release
-// through activeTasks would return one booking and leak the other. Each
-// enqueued task has one execution, and processTask releases it once, so the
-// ledger returns exactly what was booked.
+// ReleaseResource returns the immutable booking for this execution. Cleanup
+// may reset task fields, and a canceled native call may overlap a retry with
+// the same name; neither may release another execution's budget.
 func (queue *IndexTaskQueue) ReleaseResource(t Task) {
-	res := t.GetResource()
-	queue.usingCPU.Sub(res.CPU)
-	queue.usingMemory.Sub(res.Memory)
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+	if res, ok := queue.bookings[t]; ok {
+		delete(queue.bookings, t)
+		queue.usingCPU.Sub(res.CPU)
+		queue.usingMemory.Sub(res.Memory)
+	}
 }
 
 // Enqueue adds a task to TaskQueue.
@@ -187,12 +239,7 @@ func (queue *IndexTaskQueue) Enqueue(t Task) error {
 	if err != nil {
 		return err
 	}
-	if err = queue.addUnissuedTask(t); err != nil {
-		return err
-	}
-
-	queue.usingSlot.Add(t.GetSlot())
-	return nil
+	return queue.addUnissuedTask(t)
 }
 
 func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
@@ -204,7 +251,7 @@ func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
 	utNum := queue.unissuedTasks.Len()
 	atNum := 0
 	// remove the finished task
-	for _, task := range queue.activeTasks {
+	for task := range queue.activeTasks {
 		if task.GetState() != indexpb.JobState_JobStateFinished && task.GetState() != indexpb.JobState_JobStateFailed {
 			atNum++
 		}
@@ -216,35 +263,139 @@ func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
 func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 	return &IndexTaskQueue{
 		unissuedTasks: list.New(),
-		activeTasks:   make(map[string]Task),
+		activeTasks:   make(map[Task]struct{}),
+		bookings:      make(map[Task]taskcommon.Resource),
 		maxTaskNum:    1024,
 
-		utBufChan: make(chan struct{}, 1024),
+		utBufChan: make(chan struct{}, 1), // coalesced; the loop drains admissible work
 		sched:     sched,
-
-		usingSlot: atomic.Int64{},
 	}
 }
 
-// TaskScheduler is a scheduler of indexing tasks.
+// TaskScheduler admits index, stats and analyze work before preparation.
+// Accepted bookings include waiting tasks; execution reservations do not.
 type TaskScheduler struct {
-	TaskQueue TaskQueue
-
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	TaskQueue       TaskQueue
+	wg              sync.WaitGroup
+	taskWg          sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wake            chan struct{}
+	resourceMu      sync.Mutex
+	heldSlots       map[Task]int64
+	heldMemory      map[Task]int64
+	usingSlot       atomic.Int64
+	usingMemory     atomic.Int64
+	totalSlots      func() int64
+	totalMemory     func() int64
+	memoryAdmission *taskcost.MemoryAdmission
+	heldReleases    map[Task]func()
 }
 
-// NewTaskScheduler creates a new task scheduler of indexing tasks.
+// NewTaskScheduler creates the index, stats and analyze scheduler.
 func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:          ctx1,
+		cancel:       cancel,
+		wake:         make(chan struct{}, 1),
+		heldSlots:    make(map[Task]int64),
+		heldMemory:   make(map[Task]int64),
+		heldReleases: make(map[Task]func()),
+		totalSlots:   CalculateNodeSlots,
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
-
 	return s
+}
+
+// SetMemoryAdmission connects local execution to the node's memory capacity.
+// Call before Start. Other executors' accepted work shares this budget; this
+// scheduler's waiting bookings are excluded so they cannot block themselves.
+// When memory capacity is unknown, retain 3.0's existing execution-pool behavior.
+// The returned budget can also admit import V3 without double-booking memory.
+func (sched *TaskScheduler) SetMemoryAdmission(capacity, externalUsage func() int64) *taskcost.MemoryAdmission {
+	sched.totalMemory = capacity
+	sched.memoryAdmission = taskcost.NewMemoryAdmission(capacity, externalUsage)
+	return sched.memoryAdmission
+}
+
+func (sched *TaskScheduler) memoryCapacity() int64 {
+	if sched.totalMemory == nil {
+		return 0
+	}
+	return max(sched.totalMemory(), 0)
+}
+
+func (sched *TaskScheduler) taskResource(t Task) taskcommon.Resource {
+	res := t.GetResource()
+	if res.Memory > 0 {
+		return res
+	}
+	if capacity := sched.memoryCapacity(); capacity > 0 {
+		// Direct legacy index RPCs carry no estimate. Preserve their slot share
+		// instead of letting zero-priced work bypass memory admission.
+		res.Memory = taskcost.ResourceFromSlot(t.GetSlot(), sched.totalSlots(),
+			taskcommon.Resource{Memory: capacity}).Memory
+		if res.Memory <= 0 {
+			res.Memory = max(paramtable.Get().DataCoordCfg.TaskResourceMinTaskMemory.GetAsSize(), 1)
+		}
+	}
+	return res
+}
+
+func (sched *TaskScheduler) acquireResources(t Task, memory int64) bool {
+	sched.resourceMu.Lock()
+	defer sched.resourceMu.Unlock()
+	if _, ok := sched.heldSlots[t]; ok {
+		return true
+	}
+	if t.Ctx().Err() != nil {
+		return false
+	}
+
+	if sched.memoryAdmission != nil {
+		release, ok := sched.memoryAdmission.TryAcquire(memory)
+		if !ok {
+			return false
+		}
+		sched.heldReleases[t] = release
+	}
+
+	slots := max(t.GetSlot(), 0)
+	sched.heldSlots[t] = slots
+	sched.heldMemory[t] = memory
+	sched.usingSlot.Add(slots)
+	sched.usingMemory.Add(memory)
+	return true
+}
+
+func (sched *TaskScheduler) notify() {
+	select {
+	case sched.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (sched *TaskScheduler) releaseResources(t Task) {
+	sched.resourceMu.Lock()
+	if slots, ok := sched.heldSlots[t]; ok {
+		delete(sched.heldSlots, t)
+		sched.usingSlot.Sub(slots)
+		sched.usingMemory.Sub(sched.heldMemory[t])
+		delete(sched.heldMemory, t)
+		if release := sched.heldReleases[t]; release != nil {
+			release()
+			delete(sched.heldReleases, t)
+		}
+	}
+	sched.resourceMu.Unlock()
+	sched.notify()
+}
+
+func (sched *TaskScheduler) taskSlots(t Task) int64 {
+	sched.resourceMu.Lock()
+	defer sched.resourceMu.Unlock()
+	return sched.heldSlots[t]
 }
 
 func getStateFromError(err error) indexpb.JobState {
@@ -276,9 +427,21 @@ func getStateFromError(err error) indexpb.JobState {
 	return indexpb.JobState_JobStateRetry
 }
 
+// finishTask releases native owners before making execution memory reusable.
+// Registry readers must stop before Reset invalidates the task's state fields.
+func (sched *TaskScheduler) finishTask(t Task) {
+	sched.TaskQueue.PopActiveTask(t)
+	t.Reset()
+	debug.FreeOSMemory()
+	sched.releaseResources(t)
+	sched.TaskQueue.ReleaseResource(t)
+}
+
 func (sched *TaskScheduler) processTask(t Task) {
 	wrap := func(fn func(ctx context.Context) error) error {
 		select {
+		case <-sched.ctx.Done():
+			return errCancel
 		case <-t.Ctx().Done():
 			return errCancel
 		default:
@@ -286,13 +449,8 @@ func (sched *TaskScheduler) processTask(t Task) {
 		}
 	}
 
-	defer func() {
-		t.Reset()
-		debug.FreeOSMemory()
-	}()
 	sched.TaskQueue.AddActiveTask(t)
-	defer sched.TaskQueue.PopActiveTask(t.Name())
-	defer sched.TaskQueue.ReleaseResource(t)
+	defer sched.finishTask(t)
 	var (
 		indexTask  *indexBuildTask
 		costCPUNum int64
@@ -341,42 +499,75 @@ func (sched *TaskScheduler) processTask(t Task) {
 func (sched *TaskScheduler) indexBuildLoop() {
 	mlog.Debug(sched.ctx, "TaskScheduler start build loop ...")
 	defer sched.wg.Done()
+	defer func() {
+		// Cancellation bypasses admission so every accepted queued task is
+		// retired and returns its booking even if it never started.
+		for t := sched.TaskQueue.PopUnissuedTask(true); t != nil; t = sched.TaskQueue.PopUnissuedTask(true) {
+			sched.processTask(t)
+		}
+	}()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	var runningVectors atomic.Int64
 	for {
+		for sched.ctx.Err() == nil {
+			limit := max(GetVecIndexBuildPool().Cap(), 1)
+			task := sched.TaskQueue.PopUnissuedTask(runningVectors.Load() < int64(limit))
+			if task == nil {
+				break
+			}
+			if sched.ctx.Err() != nil || task.Ctx().Err() != nil {
+				// A canceled queued vector owns no native work. Retire it
+				// immediately instead of waiting for a full vector pool.
+				sched.processTask(task)
+				continue
+			}
+			vector := task.IsVectorIndex()
+			if vector {
+				runningVectors.Inc()
+			}
+			sched.taskWg.Add(1)
+			go func() {
+				defer sched.taskWg.Done()
+				if !vector {
+					sched.processTask(task)
+					return
+				}
+				defer func() { runningVectors.Dec(); sched.notify() }()
+				started := false
+				_, err := GetVecIndexBuildPool().Submit(func() (any, error) {
+					started = true
+					sched.processTask(task)
+					return nil, nil
+				}).Await()
+				if err != nil && !started {
+					// A rejected pool submission never runs processTask's
+					// cleanup. Retire its accepted booking and reservation here.
+					task.SetState(getStateFromError(err), err.Error())
+					sched.finishTask(task)
+				}
+			}()
+		}
 		select {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.TaskQueue.utChan():
-			t := sched.TaskQueue.PopUnissuedTask()
-			go func(t Task) {
-				if t.IsVectorIndex() {
-					GetVecIndexBuildPool().Submit(func() (any, error) {
-						sched.processTask(t)
-						return nil, nil
-					})
-				} else {
-					sched.processTask(t)
-				}
-			}(t)
+		case <-sched.wake:
+		case <-ticker.C:
 		}
 	}
 }
 
-// Start stats the task scheduler of indexing tasks.
+// Start starts the index, stats and analyze scheduler.
 func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.indexBuildLoop()
 	return nil
 }
 
-// Close closes the task scheduler of indexing tasks.
+// Close waits for cancellation, native execution and cleanup to finish.
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
-}
-
-func (queue *IndexTaskQueue) GetUsingResource() taskcommon.Resource {
-	return taskcommon.Resource{
-		CPU:    max(queue.usingCPU.Load(), 0),
-		Memory: max(queue.usingMemory.Load(), 0),
-	}
+	sched.taskWg.Wait()
 }

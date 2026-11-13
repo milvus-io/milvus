@@ -49,7 +49,7 @@ type Task interface {
 	GetSlot() int64
 	// GetResource is the cpu/memory DataCoord estimated for this task. The
 	// worker never computes it; it books it on enqueue and releases it when
-	// the task leaves the active set. Zero when the coordinator predates the
+	// native execution and input cleanup finish. Zero when the coordinator predates the
 	// field.
 	GetResource() taskcommon.Resource
 	IsVectorIndex() bool

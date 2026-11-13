@@ -4,17 +4,11 @@ Date: 2026-08-27
 Issue: #52180. Master PR #52561; the 3.0 PR #52982 is its cherry-pick.
 This replaces the DataNode-side admission design #52561 started from.
 
-This 3.0 implementation follows master PR #52561 at `ea88813f4c`, including
-the review clarifications; its runtime implementation is unchanged from the
-port of `5258b69502`. It uses
-3.0's collection cache and task execution lifecycle. Master-only FM-index
-pricing and restore-L0 target selection are absent because those task paths do
-not exist on 3.0. QuerySlot tags 4 and 5 are reserved for master's index
-capabilities; resource fields use the same tags 6-10 on both branches. The 3.0
-index scheduler retains its existing execution pools and slot accounting; the
-CPU/memory booking is released by `processTask`'s defer for each execution.
-Master's separate index build admission/pipeline change (#54296) is not
-backported here.
+This 3.0 port uses its collection cache and existing index execution pools.
+Master-only FM-index pricing, restore-L0 selection and the separate index
+build/download pipeline are absent. Local index/stats/analyze memory admission
+is connected to the same shared execution budget as import V3 on both branches.
+QuerySlot capability tags 4 and 5 remain reserved; resource fields use tags 6-10.
 
 ## Goal
 
@@ -22,14 +16,13 @@ Extend the single scalar "slot" DataCoord uses to place tasks on DataNodes into
 two dimensions, CPU and memory, so a memory-heavy task is never placed on a
 worker that cannot hold it and compute-heavy tasks are spread instead of packed.
 
-Non-goals:
+Scope:
 
-- DataNode does not estimate anything and gains no admission gate. Its
-  execution limits (compaction pool, `buildParallel`, import pool) are
-  unchanged. The index scheduler retains 3.0's execution pools and slot
-  accounting. DataCoord's picker still honours a
-  worker's `available_slots` on the two-dimensional tier, so it does not send
-  work the worker would reject.
+- DataNode books supplied estimates and reserves memory before local execution.
+  Index/stats/analyze and import V3 share one atomic execution budget; CPU and
+  scalar slots do not gate that budget. Existing vector and import execution
+  pool limits remain. Unknown memory capacity retains the branch's legacy
+  scheduling behavior.
 - The existing scalar slot path is not removed. It stays as the compatibility
   tier for workers or coordinators that predate this change.
 - No rollback switch: the two-dimensional path only engages when both sides
@@ -47,9 +40,9 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 
 - Estimation lives only in DataCoord: every task family implements
   `GetTaskResource() (taskcommon.Resource, bool)` next to the existing `GetTaskSlot()`.
-- DataNode only does bookkeeping: whatever cpu/memory the CreateTask properties
-  carry is added on accept and subtracted on completion, at exactly the points
-  where the scalar `usingSlots` is added and subtracted today. The worker never
+- DataNode books the CPU/memory carried by CreateTask on acceptance and returns
+  exactly that immutable booking after cleanup. Local execution separately
+  reserves accepted memory before starting work. The worker never
   recomputes an estimate, and never reads one off the request payload — the
   handler resolves it once and passes it down as a parameter. A request without
   the properties (old coordinator) books the share of the node its scalar
@@ -312,17 +305,37 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   scheduler (summed over queued + running runs, the same scope its
   `Slots()+QueuedSlots()` covers). One shared ledger keyed by task ID would
   have duplicated four lifecycles that already exist.
-- The index task queue books a task's cpu/memory when it is enqueued and
-  releases it once per execution in the defer of `processTask`, which every
-  popped task reaches -- the same span the queue's slot accounting covers. It is released
-  per execution, not per task name through `activeTasks`: a dropped build
-  whose native call ignores cancellation keeps running while DataCoord
-  dispatches the same `clusterID/taskID` again, `AddActiveTask` keeps only the
-  newer one under the name, and a release by name would return one booking
-  and leak the other until restart. Tasks waiting in the queue or execution
-  pools stay booked, so DataCoord keeps seeing their cpu/memory and stops
-  placing once the worker's memory is spoken for. This change retains the
-  existing execution pools and adds no gate of its own.
+- The index queue snapshots each accepted price before exposing the task.
+  Registry entries, reservations and releases use execution identity, so a
+  canceled native call can overlap a retry with the same name. Remove registry
+  readers before Reset invalidates state fields; keep memory reserved through
+  native cleanup. Releases are idempotent and use the captured booking.
+- Index/stats/analyze reserve memory before preparation and download. The queue
+  separately limits waiting work to one node's memory and 1024 tasks. Vector
+  FIFO and the existing vector concurrency cap remain; a scalar task can bypass
+  a blocked vector if it fits. With unavailable memory capacity, 3.0 keeps its
+  existing pool behavior. Old index RPCs without a price use their scalar share
+  as memory, or the configured memory floor when that share is unavailable.
+- `taskcost.MemoryAdmission` is shared by index/stats/analyze and import V3.
+  Its capacity is `nodeTaskCapacity().Memory`. Its external usage includes
+  compaction, import V2 and external refresh only; participating schedulers
+  reserve their running work atomically through this budget. Their pending
+  bookings must not enter its external usage, which would let queues block
+  themselves or each other. No callback reads a participating scheduler while
+  the shared budget is locked.
+- Import V3 captures an immutable price at Submit. Pending work remains in
+  `Resource()` for QuerySlot, but acquires execution memory only on admission.
+  Drop/replacement keeps admitted memory reserved until the closure exits.
+  Rejected pool submissions return their reservation and become Retry. V3
+  preimport cancels and joins every file future on failure; reshard cleanup
+  likewise joins detached fragment writes before memory is returned. Direct
+  legacy V3 requests without a price book their scalar share of node memory.
+  If memory capacity is unavailable, V3 keeps its original slot admission;
+  reservations still track explicit prices for capacity recovery.
+- The existing local progress rule remains: an otherwise idle worker can run
+  one oversized estimate alone. Coordinator placement has no oversized
+  exception and never intentionally dispatches such a priced task. Scalar
+  compatibility reports still include queued and admitted slot demand.
 - The external-collection refresh task runs through its own manager rather
   than one of the four executors. The manager books the estimate when it
   accepts the task (queued in its pool included, a duplicate dispatch books
@@ -417,14 +430,11 @@ answer, not a miss: it is priced at the whole segment (conservative) and cached.
   protocol violation, so it must not be reported as one — unlike `task_slot`,
   a missing `task_cpu` never fails the task. A key that is present but
   unparsable is a real error and does fail the `CreateTask` call.
-- The pre-`CreateTask` RPCs (`PreImport`, `ImportV2`, `CompactionV2`,
-  `PreImportV3`, `CreateJob`, `CreateJobV2`) carry no properties at all and
-  currently book zero CPU/memory. They do not reach `CreateTask`'s slot-share
-  fallback. Current DataCoord dispatch uses `CreateTask`; accounting for direct
-  legacy-RPC callers is outside this change. A pool serving such callers
-  alongside resource-priced tasks does not account for the legacy tasks in its
-  CPU/memory ledger. The compatibility guarantee above covers keyless
-  `CreateTask` requests, not every historical RPC.
+- Direct legacy index RPCs (`CreateJob`, `CreateJobV2`) and import V3 RPCs
+  without resource properties use their scalar share as memory for execution
+  admission. Other direct historical RPCs (`PreImport`, `ImportV2`,
+  `CompactionV2`) still book zero CPU/memory; those callers remain outside this
+  accounting guarantee. Current DataCoord dispatch uses CreateTask.
 - Scheduling semantics are those of the slot heap: a task that does not fit
   ends the round (see the `NullNodeID` rule above). What changes is when a
   task fits: on a dimensioned worker that is memory, not only slots.

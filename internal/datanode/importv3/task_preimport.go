@@ -49,7 +49,7 @@ type preImportTask struct {
 }
 
 // NewPreImportTask builds the count-only preimport task. The Scheduler admits
-// it once the node has free slots.
+// it once execution memory (legacy: slots) is available.
 func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager, resource taskcommon.Resource) Task {
 	return &preImportTask{
 		workerTaskBase: workerTaskBase{
@@ -66,9 +66,9 @@ func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager, res
 func (t *preImportTask) Kind() string { return "preimport" }
 
 func (t *preImportTask) Execute(ctx context.Context) (any, error) {
-	// A single file failure short-circuits AwaitAll; cancel the shared ctx so
-	// the remaining per-file count tasks stop instead of scanning on after this
-	// task has reported failure and freed its slot.
+	// A file failure cancels sibling readers, but cancellation alone cannot
+	// prove that their buffers are free. Drain every file future before the
+	// scheduler returns this run's execution-memory reservation.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	bufferSize := int(paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64())
@@ -109,6 +109,8 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 		futures = append(futures, f)
 	}
 	if err := conc.AwaitAll(futures...); err != nil {
+		cancel()
+		_ = conc.BlockOnAll(futures...)
 		return nil, err
 	}
 	return stats, nil

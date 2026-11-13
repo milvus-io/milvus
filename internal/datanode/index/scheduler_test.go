@@ -345,15 +345,22 @@ func TestIndexTaskQueue_Resource(t *testing.T) {
 	// accepts it, which is what the coordinator subtracts from. It is booked
 	// inside addUnissuedTask, before the scheduler can see the task, so a
 	// release can never run ahead of it.
-	assert.Equal(t, int64(1), queue.GetUsingSlot())
+	assert.Zero(t, queue.GetUsingSlot())
+	used, queued := queue.GetSlotUsage()
+	assert.EqualValues(t, 0, used)
+	assert.EqualValues(t, 1, queued)
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 
+	assert.Same(t, task, queue.PopUnissuedTask(true))
 	queue.AddActiveTask(task)
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 
 	// Leaving the active list returns the slots but not the cpu/memory: that
 	// booking belongs to the execution and is returned by ReleaseResource.
-	queue.PopActiveTask(task.Name())
+	queue.PopActiveTask(task)
+	// Registry removal does not release native execution reservations.
+	assert.EqualValues(t, 1, queue.GetUsingSlot())
+	sched.releaseResources(task)
 	assert.Equal(t, int64(0), queue.GetUsingSlot())
 	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 	queue.ReleaseResource(task)
@@ -394,12 +401,12 @@ func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {
 			require.Equal(t, older.Name(), newer.Name())
 
 			require.NoError(t, queue.Enqueue(older))
-			require.Same(t, older, queue.PopUnissuedTask())
+			require.Same(t, older, queue.PopUnissuedTask(true))
 			queue.AddActiveTask(older)
 			olderExec := older
 
 			require.NoError(t, queue.Enqueue(newer))
-			require.Same(t, newer, queue.PopUnissuedTask())
+			require.Same(t, newer, queue.PopUnissuedTask(true))
 			queue.AddActiveTask(newer)
 			newerExec := newer
 			assert.Equal(t, taskcommon.Resource{CPU: 2, Memory: 200}, queue.GetUsingResource())
@@ -408,11 +415,13 @@ func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {
 			if newerFirst {
 				first, second = newerExec, olderExec
 			}
-			queue.PopActiveTask(first.Name())
+			queue.PopActiveTask(first)
+			sched.releaseResources(first)
 			queue.ReleaseResource(first)
 			first.Reset()
 			assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
-			queue.PopActiveTask(second.Name())
+			queue.PopActiveTask(second)
+			sched.releaseResources(second)
 			queue.ReleaseResource(second)
 			second.Reset()
 			assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
