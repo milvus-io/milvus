@@ -944,6 +944,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 
 	t.Run("azure_workload_identity", func(t *testing.T) {
 		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
+			"access_key_id":  "mystorageacct",
 			"use_iam":        "true",
 			"cloud_provider": "azure",
 		})
@@ -988,6 +989,131 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "only valid for GCP")
 	})
+}
+
+func TestValidateSourceAndSpec_AzureWorkloadIdentity(t *testing.T) {
+	for _, format := range []string{FormatParquet, FormatIcebergTable} {
+		t.Run(format, func(t *testing.T) {
+			for _, source := range []string{
+				"azure://core.windows.net/container/path",
+				"azure://container/path",
+			} {
+				t.Run(source, func(t *testing.T) {
+					spec := `{"format":"` + format + `","extfs":{"cloud_provider":"azure","region":"public","use_iam":"true","access_key_id":"mystorageacct"}}`
+					require.NoError(t, ValidateSourceAndSpec(source, spec))
+				})
+			}
+		})
+	}
+
+	tests := []struct {
+		name   string
+		extfs  map[string]string
+		errMsg string
+	}{
+		{
+			name:   "missing_account_name",
+			extfs:  map[string]string{"cloud_provider": "azure", "use_iam": "true"},
+			errMsg: "extfs.access_key_id is required as the storage account name for Azure workload identity",
+		},
+		{
+			name:   "key_without_account_name",
+			extfs:  map[string]string{"cloud_provider": "azure", "use_iam": "true", "access_key_value": "key"},
+			errMsg: "extfs.access_key_id is required as the storage account name for Azure workload identity",
+		},
+		{
+			name:   "shared_key_conflicts_with_workload_identity",
+			extfs:  map[string]string{"cloud_provider": "azure", "use_iam": "true", "access_key_id": "mystorageacct", "access_key_value": "key"},
+			errMsg: "credential modes are mutually exclusive",
+		},
+		{
+			name:   "anonymous_conflicts_with_workload_identity",
+			extfs:  map[string]string{"cloud_provider": "azure", "use_iam": "true", "access_key_id": "mystorageacct", "anonymous": "true"},
+			errMsg: "credential modes are mutually exclusive",
+		},
+		{
+			name:   "account_name_without_iam",
+			extfs:  map[string]string{"cloud_provider": "azure", "access_key_id": "mystorageacct"},
+			errMsg: "must be set together",
+		},
+		{
+			name:   "account_name_with_iam_disabled",
+			extfs:  map[string]string{"cloud_provider": "azure", "use_iam": "false", "access_key_id": "mystorageacct"},
+			errMsg: "must be set together",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(ExternalSpec{Format: FormatParquet, Extfs: tt.extfs})
+			require.NoError(t, err)
+			require.ErrorContains(t, ValidateSourceAndSpec("azure://core.windows.net/container/path", string(data)), tt.errMsg)
+		})
+	}
+
+	// Account names become part of the Blob/DFS host, so URL delimiters and
+	// encoded or non-ASCII variants must be rejected before native I/O.
+	for _, account := range []string{
+		"ab", strings.Repeat("a", 25), "Storageaccount", "evil.example.com/",
+		"account?query", "account#fragment", "user@account", "account:443",
+		"account name", "account.name", "account-name", "account_name",
+		"account%2fpath", "account\\path", "account\n", "account\x00", "accöunt",
+	} {
+		t.Run("invalid_account/"+account, func(t *testing.T) {
+			for _, format := range []string{FormatParquet, FormatIcebergTable} {
+				for _, source := range []string{"azure://core.windows.net/container/path", "azure://container/path"} {
+					data, err := json.Marshal(ExternalSpec{Format: format, Extfs: map[string]string{
+						"cloud_provider": "azure", "region": "public", "use_iam": "true", "access_key_id": account,
+					}})
+					require.NoError(t, err)
+					err = ValidateSourceAndSpec(source, string(data))
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.ErrorContains(t, err, "3-24 lowercase letters or digits")
+				}
+			}
+		})
+	}
+
+	// Other providers still require paired access keys even with IAM enabled.
+	for _, provider := range []string{CloudProviderAWS, CloudProviderGCP, CloudProviderAliyun, CloudProviderTencent, CloudProviderHuawei, CloudProviderMinIO} {
+		t.Run(provider, func(t *testing.T) {
+			spec := `{"format":"parquet","extfs":{"cloud_provider":"` + provider + `","region":"us-east-1","use_iam":"true","access_key_id":"account"}}`
+			require.ErrorContains(t, ValidateSourceAndSpec("s3://bucket/path", spec), "must be set together")
+		})
+	}
+}
+
+func TestValidateExtfsComplete_AzureAccountName(t *testing.T) {
+	for mode, credentials := range map[string]map[string]string{
+		"iam":        {"use_iam": "true"},
+		"shared_key": {"access_key_value": "key"},
+		"broker": { //nolint:gosec // synthetic test values, not credentials
+			"azure_client_id": "client", "azure_tenant_id": "tenant",
+			"credential_endpoint": "https://broker.example.com/v1/credentials/sas",
+		},
+	} {
+		t.Run(mode, func(t *testing.T) {
+			extfs := map[string]string{"cloud_provider": "azure", "region": "public"}
+			for key, value := range credentials {
+				extfs[key] = value
+			}
+			for _, account := range []string{"abc", "123", "storage123", strings.Repeat("a", 24)} {
+				extfs["access_key_id"] = account
+				require.NoError(t, ValidateExtfsComplete("azure://core.windows.net/container/path", extfs), account)
+			}
+			for _, account := range []string{"ab", strings.Repeat("a", 25), "Storageaccount", "evil.example.com/"} {
+				extfs["access_key_id"] = account
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid, account)
+				require.ErrorContains(t, err, "3-24 lowercase letters or digits")
+			}
+		})
+	}
+
+	// The Azure naming rule must not restrict access key IDs for other providers.
+	require.NoError(t, ValidateExtfsComplete("s3://bucket/path", map[string]string{
+		"cloud_provider": "aws", "region": "us-east-1",
+		"access_key_id": "AKIA_EXAMPLE", "access_key_value": "key",
+	}))
 }
 
 func TestParseExternalSpec_SnapshotID(t *testing.T) {
