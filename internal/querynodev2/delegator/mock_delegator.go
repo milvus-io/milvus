@@ -1056,6 +1056,51 @@ func (_c *MockShardDelegator_ReleaseSegments_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// ReplicaID provides a mock function with no fields
+func (_m *MockShardDelegator) ReplicaID() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicaID")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ReplicaID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplicaID'
+type MockShardDelegator_ReplicaID_Call struct {
+	*mock.Call
+}
+
+// ReplicaID is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) ReplicaID() *MockShardDelegator_ReplicaID_Call {
+	return &MockShardDelegator_ReplicaID_Call{Call: _e.mock.On("ReplicaID")}
+}
+
+func (_c *MockShardDelegator_ReplicaID_Call) Run(run func()) *MockShardDelegator_ReplicaID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ReplicaID_Call) Return(_a0 int64) *MockShardDelegator_ReplicaID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ReplicaID_Call) RunAndReturn(run func() int64) *MockShardDelegator_ReplicaID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RunAnalyzer provides a mock function with given fields: ctx, req
 func (_m *MockShardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	ret := _m.Called(ctx, req)

@@ -192,6 +192,19 @@ func (action *SegmentAction) String() string {
 
 type ChannelAction struct {
 	*BaseAction
+	// copyVersion is, for a reduce, the version of the delegator it removes, as
+	// the distribution reported it when the reduce was planned; 0 removes
+	// whichever delegator is present.
+	copyVersion int64
+}
+
+// NewChannelReduceAction removes the delegator of version copyVersion. QueryNode
+// keeps a newer one, so an unsubscribe that arrives after the node watched the
+// channel again cannot remove it.
+func NewChannelReduceAction(nodeID typeutil.UniqueID, channelName string, copyVersion int64) *ChannelAction {
+	action := NewChannelAction(nodeID, ActionTypeReduce, channelName)
+	action.copyVersion = copyVersion
+	return action
 }
 
 func NewChannelAction(nodeID typeutil.UniqueID, typ ActionType, channelName string) *ChannelAction {
@@ -211,6 +224,10 @@ func NewChannelAction(nodeID typeutil.UniqueID, typ ActionType, channelName stri
 
 func (action *ChannelAction) ChannelName() string {
 	return action.Shard
+}
+
+func (action *ChannelAction) CopyVersion() int64 {
+	return action.copyVersion
 }
 
 func (action *ChannelAction) Desc() string {

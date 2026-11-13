@@ -80,6 +80,7 @@ const (
 // ShardDelegator is the interface definition.
 type ShardDelegator interface {
 	Collection() int64
+	ReplicaID() int64
 	Version() int64
 	UpdateVersion(version int64) bool
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
@@ -382,6 +383,12 @@ func (sd *shardDelegator) Start() {
 // Collection returns delegator collection id.
 func (sd *shardDelegator) Collection() int64 {
 	return sd.collectionID
+}
+
+// ReplicaID returns the replica the delegator was created for. Its routes
+// point at that replica's workers for the delegator's whole lifetime.
+func (sd *shardDelegator) ReplicaID() int64 {
+	return sd.replicaID
 }
 
 // Version returns delegator version.

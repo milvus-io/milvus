@@ -622,6 +622,27 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	suite.ob.LoadCollection(context.Background(), collection)
 }
 
+// A delegator that another replica left on a node does not load the channel
+// for the node's replica.
+func (suite *CollectionObserverSuite) TestChannelStatusSkipsLeftoverDelegator() {
+	const collection = int64(100)
+	replicas := suite.meta.GetByCollection(suite.ctx, collection)
+	suite.Require().Len(replicas, 1)
+	delegator := func(node, replicaID int64, channel string) *meta.DmChannel {
+		return &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collection, ChannelName: channel},
+			Node:         node,
+			ReplicaID:    replicaID,
+			View:         &meta.LeaderView{ID: node, CollectionID: collection, Channel: channel},
+		}
+	}
+	suite.dist.ChannelDistManager.Update(1, delegator(1, replicas[0].GetID(), "100-dmc0"))
+	suite.dist.ChannelDistManager.Update(2, delegator(2, replicas[0].GetID()+1, "100-dmc1"))
+	targets, loaded := suite.ob.observeChannelStatus(suite.ctx, collection)
+	suite.Equal(2, targets)
+	suite.Equal(1, loaded)
+}
+
 func TestCollectionObserver(t *testing.T) {
 	suite.Run(t, new(CollectionObserverSuite))
 }
