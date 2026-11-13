@@ -32,11 +32,11 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -156,8 +156,8 @@ func CreateTestSnapshotMeta(t *testing.T) *SnapshotMeta {
 		SnapshotPendingCollections:   typeutil.NewUniqueSet(),
 		loaderCtx:                    loaderCtx,
 		LoaderCancel:                 loaderCancel,
-		reader:                       snapshotstorage.NewSnapshotReader(tempChunkManager),
-		writer:                       snapshotstorage.NewSnapshotWriter(tempChunkManager),
+		reader:                       sharedsnapshot.NewSnapshotReader(tempChunkManager),
+		writer:                       sharedsnapshot.NewSnapshotWriter(tempChunkManager),
 	}
 }
 

@@ -33,10 +33,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -2960,9 +2960,21 @@ func TestMakePropertiesFromStorageConfig_AllFields(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
-	assert.Equal(t, "237", loonPropertyString(props, PropertyFSMaxConnections))
-	assert.Equal(t, "1.3", loonPropertyString(props, PropertyFSTLSMinVersion))
-	assert.Equal(t, "true", loonPropertyString(props, PropertyFSUseCRC32CChecksum))
+	for key, want := range map[string]string{
+		PropertyFSAddress: "localhost:9000", PropertyFSBucketName: "test-bucket",
+		PropertyFSAccessKeyID: "access-key", PropertyFSAccessKeyValue: "secret-key",
+		PropertyFSRootPath: "/data", PropertyFSStorageType: "minio",
+		PropertyFSCloudProvider: "aws", PropertyFSIAMEndpoint: "http://iam.example.com",
+		PropertyFSRegion: "us-east-1", PropertyFSSSLCACert: "cert-content",
+		PropertyFSGCPCredentialJSON: `{"type":"service_account"}`,
+		PropertyFSUseSSL:            "true", PropertyFSUseIAM: "true", PropertyFSUseVirtualHost: "true",
+		PropertyFSRequestTimeoutMS: "5000", PropertyFSMaxConnections: "237",
+		PropertyFSTLSMinVersion: "1.3", PropertyFSUseCRC32CChecksum: "true",
+		PropertyFSS3UseCRT:            "false",
+		PropertyFSUseCustomPartUpload: "true", PropertyFSLogLevel: "warn",
+	} {
+		assert.Equal(t, want, loonPropertyString(props, key), key)
+	}
 }
 
 // An unset MaxConnections must leave the key absent, not emit "0".

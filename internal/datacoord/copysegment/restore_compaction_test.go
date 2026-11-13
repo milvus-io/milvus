@@ -34,11 +34,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/snapshotio"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotresolver "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -350,11 +351,11 @@ func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
 				JobId: 100, External: true, SnapshotS3Location: uri, SnapshotFingerprint: fingerprint,
 				State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			}))
-			resolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm}, nil).Build()
+			resolve := mockey.Mock(snapshotresolver.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm}, nil).Build()
 			defer resolve.UnPatch()
 			source := &restoreSnapshotSource{}
 			externalRead := mockey.Mock((*restoreSnapshotSource).ReadExternalSnapshotDataWithChunkManager).To(
-				func(_ *restoreSnapshotSource, ctx context.Context, cm storage.ChunkManager, location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+				func(_ *restoreSnapshotSource, ctx context.Context, cm snapshotstorage.ChunkManager, location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 					return snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, location, includeSegments)
 				}).Build()
 			defer externalRead.UnPatch()
