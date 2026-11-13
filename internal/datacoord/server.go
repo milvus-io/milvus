@@ -803,7 +803,7 @@ func (s *Server) initCompaction() error {
 		s.compactionTargetTopology = view.NewMetricsNodeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	}
 	trigger := compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
-	trigger.SetStandingSize(s.targetCompactionEnabled)
+	trigger.SetStandingMix(s.targetCompactionEnabled)
 	s.compactionTrigger = trigger
 	return nil
 }

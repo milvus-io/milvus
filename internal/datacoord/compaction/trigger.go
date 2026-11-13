@@ -129,7 +129,7 @@ type compactionTrigger struct {
 	closeWaiter   sync.WaitGroup
 
 	indexEngineVersionManager index.IndexEngineVersionManager
-	standingSize              bool
+	standingMix               bool
 
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
@@ -157,19 +157,23 @@ func NewCompactionTrigger(
 	}
 }
 
-// SetStandingSize gives the target reconciler ownership of automatic sizing.
-func (t *compactionTrigger) SetStandingSize(enabled bool) {
-	t.standingSize = enabled
+// SetStandingMix gives the target reconciler ownership of automatic Mix work.
+func (t *compactionTrigger) SetStandingMix(enabled bool) {
+	t.standingMix = enabled
 }
 
 func (t *compactionTrigger) Start() {
-	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
-	t.closeWaiter.Add(2)
+	t.closeWaiter.Add(1)
 	go func() {
 		defer t.closeWaiter.Done()
 		t.work()
 	}()
 
+	if t.standingMix {
+		return
+	}
+	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	t.closeWaiter.Add(1)
 	go func() {
 		defer t.closeWaiter.Done()
 		t.schedule()
@@ -265,6 +269,9 @@ func getCompactTime(ts Timestamp, coll *meta.CollectionInfo) (*view.CompactTime,
 // however, when the `isForce` flag is true, the `manualSignals` channel will be used to skip the queueing
 // since manual signals shall have higher priority.
 func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *CompactionSignal) (signalID UniqueID, err error) {
+	if t.standingMix && !signal.isForce {
+		return -1, nil
+	}
 	// If AutoCompaction disabled, flush request will not trigger compaction
 	if !paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetAsBool() && !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
 		return -1, nil
@@ -460,19 +467,6 @@ type compactionBucket struct {
 }
 
 func (t *compactionTrigger) generatePlans(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64) []*compactionBucket {
-	if t.standingSize && !signal.isForce {
-		// Standalone rewrite policies are still handled here until they have
-		// their own Standing source. Their plans do not pull in size inputs.
-		var plans []*compactionBucket
-		for _, segment := range segments {
-			if t.ShouldDoSingleCompaction(segment, compactTime) {
-				plans = append(plans, &compactionBucket{
-					segments: []*meta.SegmentInfo{segment}, totalRows: segment.GetNumOfRows(), maxSize: expectedSize,
-				})
-			}
-		}
-		return plans
-	}
 	if Params.DataCoordCfg.TwoTierCompaction.GetAsBool() {
 		return t.generatePlansTwoTier(segments, signal, compactTime, expectedSize)
 	}
