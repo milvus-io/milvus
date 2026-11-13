@@ -25,10 +25,14 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-var _ ObjectStorage = (*MinioObjectStorage)(nil)
+var (
+	_ ObjectStorage     = (*MinioObjectStorage)(nil)
+	_ BulkObjectStorage = (*MinioObjectStorage)(nil)
+)
 
 // minio-go caps a single CopyObject request at 5 GiB, regardless of the configured threshold.
 const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
@@ -142,6 +146,84 @@ func isDeleteSucceededWithOK(err error) bool {
 		return false
 	}
 	return minio.ToErrorResponse(err).StatusCode == http.StatusOK
+}
+
+// RemoveObjects removes objects with the S3 Multi-Delete API and returns one
+// result per input object. The MinIO SDK splits the input into requests of at
+// most 1,000 objects. A response without an object name has an unknown scope,
+// so the whole caller batch fails closed.
+func (minioObjectStorage *MinioObjectStorage) RemoveObjects(ctx context.Context, bucketName string, objectNames []string) []RemoveResult {
+	results := make([]RemoveResult, len(objectNames))
+	if len(objectNames) == 0 {
+		return results
+	}
+	positions := make(map[string][]int, len(objectNames))
+	uniqueNames := make([]string, 0, len(objectNames))
+	for i, objectName := range objectNames {
+		results[i].Path = objectName
+		if _, ok := positions[objectName]; !ok {
+			uniqueNames = append(uniqueNames, objectName)
+		}
+		positions[objectName] = append(positions[objectName], i)
+	}
+
+	// The SDK may reject a request before consuming objects (for example, an
+	// invalid bucket name). Use a derived context so the producer cannot be left
+	// blocked after the result channel closes.
+	submitCtx, cancelSubmit := context.WithCancel(ctx)
+	defer cancelSubmit()
+	objects := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(objects)
+		for _, objectName := range uniqueNames {
+			select {
+			case objects <- minio.ObjectInfo{Key: objectName}:
+			case <-submitCtx.Done():
+				return
+			}
+		}
+	}()
+
+	resolved := make([]bool, len(objectNames))
+	var batchErr error
+	resultCh := minioObjectStorage.RemoveObjectsWithResult(ctx, bucketName, objects, minio.RemoveObjectsOptions{})
+	for result := range resultCh {
+		if result.ObjectName == "" {
+			if result.Err != nil {
+				batchErr = merr.Combine(batchErr, mapObjectStorageError(bucketName, result.Err))
+			}
+			continue
+		}
+
+		indexes, ok := positions[result.ObjectName]
+		if !ok {
+			if result.Err != nil {
+				batchErr = merr.Combine(batchErr, mapObjectStorageError(result.ObjectName, result.Err))
+			}
+			continue
+		}
+		mappedErr := mapObjectStorageError(result.ObjectName, result.Err)
+		for _, index := range indexes {
+			resolved[index] = true
+			if mappedErr != nil {
+				results[index].Err = merr.Combine(results[index].Err, mappedErr)
+			}
+		}
+	}
+
+	for i := range results {
+		switch {
+		case batchErr != nil:
+			results[i].Err = merr.Wrapf(batchErr, "bulk remove result is unknown for %s", results[i].Path)
+		case resolved[i]:
+		case ctx.Err() != nil:
+			results[i].Err = mapObjectStorageError(results[i].Path, ctx.Err())
+		default:
+			results[i].Err = merr.WrapErrIoFailedMsg("bulk remove returned no result for object %s", results[i].Path)
+		}
+	}
+
+	return results
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {

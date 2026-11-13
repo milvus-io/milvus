@@ -900,6 +900,53 @@ func (_c *DataCoordCatalog_DropIndex_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// DropIndexes provides a mock function with given fields: ctx, indexes
+func (_m *DataCoordCatalog) DropIndexes(ctx context.Context, indexes []*model.Index) error {
+	ret := _m.Called(ctx, indexes)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropIndexes")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*model.Index) error); ok {
+		r0 = rf(ctx, indexes)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropIndexes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropIndexes'
+type DataCoordCatalog_DropIndexes_Call struct {
+	*mock.Call
+}
+
+// DropIndexes is a helper method to define mock.On call
+//   - ctx context.Context
+//   - indexes []*model.Index
+func (_e *DataCoordCatalog_Expecter) DropIndexes(ctx interface{}, indexes interface{}) *DataCoordCatalog_DropIndexes_Call {
+	return &DataCoordCatalog_DropIndexes_Call{Call: _e.mock.On("DropIndexes", ctx, indexes)}
+}
+
+func (_c *DataCoordCatalog_DropIndexes_Call) Run(run func(ctx context.Context, indexes []*model.Index)) *DataCoordCatalog_DropIndexes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*model.Index))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropIndexes_Call) Return(_a0 error) *DataCoordCatalog_DropIndexes_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropIndexes_Call) RunAndReturn(run func(context.Context, []*model.Index) error) *DataCoordCatalog_DropIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropPreImportTask provides a mock function with given fields: ctx, taskID
 func (_m *DataCoordCatalog) DropPreImportTask(ctx context.Context, taskID int64) error {
 	ret := _m.Called(ctx, taskID)
@@ -1181,6 +1228,100 @@ func (_c *DataCoordCatalog_DropSegmentIndex_Call) Return(_a0 error) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_DropSegmentIndex_Call) RunAndReturn(run func(context.Context, int64, int64, int64, int64) error) *DataCoordCatalog_DropSegmentIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSegmentIndexes provides a mock function with given fields: ctx, indexes
+func (_m *DataCoordCatalog) DropSegmentIndexes(ctx context.Context, indexes []*model.SegmentIndex) error {
+	ret := _m.Called(ctx, indexes)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSegmentIndexes")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*model.SegmentIndex) error); ok {
+		r0 = rf(ctx, indexes)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropSegmentIndexes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentIndexes'
+type DataCoordCatalog_DropSegmentIndexes_Call struct {
+	*mock.Call
+}
+
+// DropSegmentIndexes is a helper method to define mock.On call
+//   - ctx context.Context
+//   - indexes []*model.SegmentIndex
+func (_e *DataCoordCatalog_Expecter) DropSegmentIndexes(ctx interface{}, indexes interface{}) *DataCoordCatalog_DropSegmentIndexes_Call {
+	return &DataCoordCatalog_DropSegmentIndexes_Call{Call: _e.mock.On("DropSegmentIndexes", ctx, indexes)}
+}
+
+func (_c *DataCoordCatalog_DropSegmentIndexes_Call) Run(run func(ctx context.Context, indexes []*model.SegmentIndex)) *DataCoordCatalog_DropSegmentIndexes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*model.SegmentIndex))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentIndexes_Call) Return(_a0 error) *DataCoordCatalog_DropSegmentIndexes_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentIndexes_Call) RunAndReturn(run func(context.Context, []*model.SegmentIndex) error) *DataCoordCatalog_DropSegmentIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSegments provides a mock function with given fields: ctx, segments
+func (_m *DataCoordCatalog) DropSegments(ctx context.Context, segments []*datapb.SegmentInfo) error {
+	ret := _m.Called(ctx, segments)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSegments")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*datapb.SegmentInfo) error); ok {
+		r0 = rf(ctx, segments)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegments'
+type DataCoordCatalog_DropSegments_Call struct {
+	*mock.Call
+}
+
+// DropSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segments []*datapb.SegmentInfo
+func (_e *DataCoordCatalog_Expecter) DropSegments(ctx interface{}, segments interface{}) *DataCoordCatalog_DropSegments_Call {
+	return &DataCoordCatalog_DropSegments_Call{Call: _e.mock.On("DropSegments", ctx, segments)}
+}
+
+func (_c *DataCoordCatalog_DropSegments_Call) Run(run func(ctx context.Context, segments []*datapb.SegmentInfo)) *DataCoordCatalog_DropSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*datapb.SegmentInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegments_Call) Return(_a0 error) *DataCoordCatalog_DropSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegments_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo) error) *DataCoordCatalog_DropSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -272,14 +272,14 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 		<-release
 		return false
 	}).Build()
+	planned := make(chan string, 1)
+	plan := mockey.Mock((*GarbageCollector).buildDroppedSegmentFilePlan).To(func(_ *GarbageCollector, segment *meta.SegmentInfo, _ map[string]struct{}) (droppedSegmentFilePlan, error) {
+		planned <- segment.GetManifestPath()
+		return droppedSegmentFilePlan{}, merr.ErrIoTooManyRequests
+	}).Build()
+	t.Cleanup(func() { plan.UnPatch() })
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	deleted := make(chan string, 1)
-	deletePatch := mockey.Mock((*GarbageCollector).RemoveDroppedSegmentFiles).To(
-		func(_ *GarbageCollector, _ context.Context, segment *meta.SegmentInfo, _ map[string]struct{}) error {
-			deleted <- segment.GetManifestPath()
-			return merr.ErrIoTooManyRequests
-		}).Build()
 	rolled := make(chan error, 1)
 	var workers sync.WaitGroup
 	workers.Add(1)
@@ -292,7 +292,6 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 		once.Do(func() { close(release) })
 		workers.Wait()
 		patch.UnPatch()
-		deletePatch.UnPatch()
 	})
 	select {
 	case <-entered:
@@ -305,14 +304,14 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 		gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), meta.RestartSegID)
 	}()
 	select {
-	case <-deleted:
-		t.Fatal("GC deleted the prefix while rollback was creating a revision")
+	case <-planned:
+		t.Fatal("GC planned deletion while rollback was creating a revision")
 	case <-time.After(50 * time.Millisecond):
 	}
 	once.Do(func() { close(release) })
 	require.NoError(t, <-rolled)
 	select {
-	case pointer := <-deleted:
+	case pointer := <-planned:
 		assert.Equal(t, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), pointer)
 		assert.NotEqual(t, before.GetManifestPath(), pointer)
 	case <-time.After(5 * time.Second):

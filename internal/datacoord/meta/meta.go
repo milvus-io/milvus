@@ -606,6 +606,54 @@ func (m *Meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	return nil
 }
 
+// DropSegments deletes GC candidates under master segment writer locks. A
+// candidate is current only while its immutable proto is still installed.
+// The catalog removes binlog prefixes before segment records, in bounded
+// batches. Publish no in-memory removal on error, so partial durable cleanup
+// remains discoverable and can be retried idempotently.
+func (m *Meta) DropSegments(ctx context.Context, candidates []*SegmentInfo) (int, error) {
+	maxBatchSize := Params.MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if maxBatchSize <= 0 {
+		maxBatchSize = 64
+	}
+	if len(candidates) > maxBatchSize {
+		return 0, merr.WrapErrServiceInternalMsg("segment metadata batch size %d exceeds metastore transaction limit %d", len(candidates), maxBatchSize)
+	}
+	ids := make([]int64, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate != nil {
+			ids = append(ids, candidate.GetID())
+		}
+	}
+	defer m.LockSegments(ids...)()
+	seen := typeutil.NewSet[int64]()
+	records := make([]*datapb.SegmentInfo, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == nil || seen.Contain(candidate.GetID()) {
+			continue
+		}
+		seen.Insert(candidate.GetID())
+		current := m.Segments.GetSegment(candidate.GetID())
+		if current == nil || current.SegmentInfo != candidate.SegmentInfo || current.GetState() != commonpb.SegmentState_Dropped {
+			continue
+		}
+		records = append(records, current.SegmentInfo)
+	}
+	if len(records) == 0 {
+		return 0, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := m.Catalog.DropSegments(ctx, records); err != nil {
+		return 0, err
+	}
+	for _, record := range records {
+		m.Segments.DropSegment(record.GetID())
+	}
+	return len(records), nil
+}
+
 // GetHealthySegment returns segment info with provided id
 // if not segment is found, nil will be returned
 func (m *Meta) GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentInfo {

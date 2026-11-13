@@ -74,7 +74,20 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				return original(im, id)
 			}).Build()
 			defer hook.UnPatch()
+			// The index is dropped while GC refreshes the task, after the scan
+			// that admits candidates: the scan must see it already gone.
+			var originalExists func(*index.IndexMeta, int64, int64) bool
+			scanned := false
+			scan := mockey.Mock((*index.IndexMeta).IsIndexExist).Origin(&originalExists).To(func(im *index.IndexMeta, collID, indexID int64) bool {
+				if !scanned {
+					scanned = true
+					return false
+				}
+				return originalExists(im, collID, indexID)
+			}).Build()
+			defer scan.UnPatch()
 			gc.RecycleUnusedSegIndexes(ctx, nil)
+			scan.UnPatch()
 			hook.UnPatch()
 			require.True(t, injected)
 			pointer := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()

@@ -420,6 +420,29 @@ func TestLocalCM(t *testing.T) {
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		}
+
+		multiPrefixFiles := []string{
+			path.Join(localPath, testRemoveRoot, "multi_prefix_a", "file"),
+			path.Join(localPath, testRemoveRoot, "multi_prefix_b", "file"),
+		}
+		for _, filePath := range multiPrefixFiles {
+			require.NoError(t, testCM.Write(ctx, filePath, []byte("value")))
+		}
+		prefixes := []string{
+			path.Join(localPath, testRemoveRoot, "multi_prefix_a"),
+			path.Join(localPath, testRemoveRoot, "multi_prefix_b"),
+		}
+		results := testCM.MultiRemoveWithPrefix(ctx, prefixes)
+		require.Len(t, results, len(prefixes))
+		for i, result := range results {
+			assert.Equal(t, prefixes[i], result.Prefix)
+			assert.Equal(t, 1, result.Listed)
+			assert.Equal(t, 1, result.Removed)
+			assert.NoError(t, result.Err)
+			exists, err := testCM.Exist(ctx, multiPrefixFiles[i])
+			require.NoError(t, err)
+			assert.False(t, exists)
+		}
 	})
 
 	t.Run("test ReadAt", func(t *testing.T) {

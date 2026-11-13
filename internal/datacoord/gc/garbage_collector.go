@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1133,50 +1134,153 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 	io := packed.NewManifestIOContext(1)
 	defer io.Close()
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
-	for segmentID, segment := range drops {
+	candidateStart := time.Now()
+	processedDroppedSegments := 0
+	defer func() {
+		log.Info(ctx, "recycleDroppedSegments candidates done",
+			mlog.Int("droppedSegments", len(drops)),
+			mlog.Int("processedDroppedSegments", processedDroppedSegments),
+			mlog.Duration("timeCost", time.Since(candidateStart)))
+	}()
+	processedDroppedSegments = gc.recycleDroppedSegmentsInBatches(ctx, signal, io, drops, compactTo, indexedSet,
+		channelCPs, loadedSegments, protected)
+}
+
+// isDroppedSegmentGCCandidate applies the per-segment protections of dropped
+// segment GC.
+func (gc *GarbageCollector) isDroppedSegmentGCCandidate(
+	ctx context.Context,
+	segment *meta.SegmentInfo,
+	compactTo map[int64]*meta.SegmentInfo,
+	indexedSet typeutil.UniqueSet,
+	checkpoint Timestamp,
+	loadedSegments typeutil.Set[int64],
+) bool {
+	segmentID := segment.GetID()
+	if loadedSegments.Contain(segmentID) {
+		mlog.RatedInfo(ctx, rate.Limit(1), "skip GC segment since it is loaded", mlog.FieldSegmentID(segmentID))
+		return false
+	}
+
+	// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
+	// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
+	// a separate loaded-state probe.
+	if snapshotMeta := gc.Option.SnapshotMeta; snapshotMeta != nil &&
+		snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segmentID) {
+		mlog.RatedInfo(ctx, rate.Limit(1), "skip GC segment since it is protected by snapshot",
+			mlog.FieldCollectionID(segment.GetCollectionID()),
+			mlog.FieldPartitionID(segment.GetPartitionID()),
+			mlog.FieldVChannel(segment.GetInsertChannel()),
+			mlog.FieldSegmentID(segmentID))
+		return false
+	}
+
+	return gc.checkDroppedSegmentGC(segment, compactTo[segmentID], indexedSet, checkpoint)
+}
+
+// recycleDroppedSegmentsInBatches recycles the GC candidates among drops in
+// batches bounded by segment count and by the number of object paths.
+//
+// A batch drops the candidates of collections paused by the time it starts,
+// and a pause is acknowledged only outside a batch, so once a pause is
+// acknowledged no deletion of the collection is in flight or starts later.
+func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
+	ctx context.Context,
+	signal <-chan gcCmd,
+	io *packed.ManifestIOContext,
+	drops map[int64]*meta.SegmentInfo,
+	compactTo map[int64]*meta.SegmentInfo,
+	indexedSet typeutil.UniqueSet,
+	channelCPs map[string]uint64,
+	loadedSegments typeutil.Set[int64],
+	protected map[int64]struct{},
+) int {
+	batchSize := Params.DataCoordCfg.GCDroppedSegmentBatchSize.GetAsInt()
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	processed := 0
+	batchWeight := 0
+	batch := make([]*droppedSegmentGCBatchCandidate, 0, batchSize)
+	flush := func() bool {
+		gc.ackSignal(signal)
+		active := make([]*droppedSegmentGCBatchCandidate, 0, len(batch))
+		for _, candidate := range batch {
+			if !gc.collectionGCPaused(candidate.segment.GetCollectionID()) {
+				active = append(active, candidate)
+			}
+		}
+		if len(active) > 0 {
+			gc.recycleDroppedSegmentBatch(ctx, active)
+		}
+		batch = batch[:0]
+		batchWeight = 0
+		gc.ackSignal(signal)
+		return ctx.Err() == nil
+	}
+
+	for _, segment := range drops {
+		processed++
 		if ctx.Err() != nil {
-			// process canceled, stop.
-			return
+			return processed
 		}
 
 		gc.ackSignal(signal)
 
-		if _, referenced := protected[segmentID]; referenced {
+		if _, referenced := protected[segment.GetID()]; referenced {
 			continue
 		}
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
-			log.Info(ctx, "skip GC segment since collection is paused", mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
+			mlog.RatedInfo(ctx, rate.Limit(1), "skip GC segment since collection is paused",
+				mlog.FieldSegmentID(segment.GetID()), mlog.FieldCollectionID(segment.GetCollectionID()))
+			continue
+		}
+		// A PChannel without a readable physical checkpoint keeps its segments.
+		checkpoint, ok := channelCPs[funcutil.ToPhysicalChannel(segment.GetInsertChannel())]
+		if !ok || !gc.isDroppedSegmentGCCandidate(ctx, segment, compactTo, indexedSet, checkpoint, loadedSegments) {
+			continue
+		}
+		candidate, err := gc.prepareDroppedSegmentGCBatchCandidate(ctx, io, segment.GetID(), segment)
+		if err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment failed to plan file deletion",
+				mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
+			continue
+		}
+		if candidate == nil {
 			continue
 		}
 
-		log := mlog.With(mlog.Int64("segmentID", segmentID))
-		segInsertChannel := segment.GetInsertChannel()
-		if loadedSegments.Contain(segmentID) {
-			log.Info(ctx, "skip GC segment since it is loaded", mlog.Int64("segmentID", segmentID))
-			continue
+		weight := len(candidate.exactFiles)
+		if candidate.prefix != "" {
+			weight++
 		}
-
-		// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
-		// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
-		// a separate loaded-state probe.
-		if snapshotMeta := gc.Option.SnapshotMeta; snapshotMeta != nil {
-			if snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segmentID) {
-				log.Info(ctx, "skip GC segment since it is protected by snapshot",
-					mlog.Int64("collectionID", segment.GetCollectionID()),
-					mlog.Int64("partitionID", segment.GetPartitionID()),
-					mlog.String("channel", segInsertChannel),
-					mlog.Int64("segmentID", segmentID))
-				continue
-			}
+		weight = max(1, weight)
+		if len(batch) > 0 && batchWeight+weight > batchSize && !flush() {
+			return processed
 		}
-
-		checkpoint, ok := channelCPs[funcutil.ToPhysicalChannel(segInsertChannel)]
-		if !ok || !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, checkpoint) {
-			continue
+		batch = append(batch, candidate)
+		batchWeight += weight
+		if (len(batch) >= batchSize || batchWeight >= batchSize) && !flush() {
+			return processed
 		}
+	}
+	flush()
+	return processed
+}
 
-		gc.RecycleDroppedSegment(ctx, io, segmentID)
+// RecycleDroppedSegment recycles one dropped segment through the batch pipeline.
+func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) {
+	if ctx.Err() != nil {
+		return
+	}
+	candidate, err := gc.prepareDroppedSegmentGCBatchCandidate(ctx, io, segmentID, nil)
+	if err != nil {
+		mlog.Warn(ctx, "GC segment failed to plan file deletion", mlog.FieldSegmentID(segmentID), mlog.Err(err))
+		return
+	}
+	if candidate != nil {
+		gc.recycleDroppedSegmentBatch(ctx, []*droppedSegmentGCBatchCandidate{candidate})
 	}
 }
 
@@ -1212,88 +1316,323 @@ func (gc *GarbageCollector) dataViewCompactionProtection(segments []*meta.Segmen
 	return protected
 }
 
-// recycleDroppedSegment marks its index tasks deleted before removing a
-// dropped segment's files, segment-index records, and finally segment record.
-//
-// Persisted task markers keep a retained compaction ancestor from appearing
-// ready after partial file cleanup or a failed catalog deletion, including
-// across restart. Keep the marked records and their file keys until cleanup
-// completes so subsequent GC cycles can retry the same files.
-//
-// This path can race with recycleUnusedSegIndexes on the same BuildID
-// whenever a dropped segment's parent field index has also been marked
-// IsDeleted — both paths call removeObjectFiles for the same index files
-// and call indexMeta.RemoveSegmentIndex(buildID). The races are safe today
-// only because two invariants hold elsewhere:
-//
-//  1. removeObjectFiles swallows merr.ErrIoKeyNotFound (see the loop in
-//     removeObjectFiles below), so a double file delete is a no-op for the
-//     loser.
-//  2. indexMeta.RemoveSegmentIndex acquires a per-buildID keyLock and
-//     returns nil when segmentBuildInfo.Get(buildID) is !ok (see
-//     index_meta.go), so a double catalog delete is a no-op for the loser.
-//
-// Any future refactor on either side — tightening removeObjectFiles to
-// surface NotFound, or batching RemoveSegmentIndex past the per-buildID
-// keyLock — must preserve these invariants, otherwise dropped-segment GC
-// will silently break under load.
-func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) {
-	// Rollback may advance a retained Dropped segment's manifest while keeping
-	// its files. Serialize prefix deletion with that metadata transfer.
+// droppedSegmentGCBatchCandidate is a dropped segment admitted to a GC batch
+// together with the deletion plan derived from it.
+type droppedSegmentGCBatchCandidate struct {
+	// segment is the cached value the plan is derived from. Its record is
+	// dropped only while the cache still holds this value.
+	segment    *meta.SegmentInfo
+	segIndexes []*model.SegmentIndex
+	exactFiles []string
+	// prefix is the V3 segment directory.
+	prefix string
+}
+
+// prepareDroppedSegmentGCBatchCandidate plans the deletion of a dropped
+// segment. It returns nil when the segment must be kept for now.
+func (gc *GarbageCollector) prepareDroppedSegmentGCBatchCandidate(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, observed *meta.SegmentInfo) (*droppedSegmentGCBatchCandidate, error) {
+	// Observe the segment and index placements together. Rollback publishes both
+	// under this lock, and batch execution rechecks this revision before deletion.
 	locks := gc.Meta.GetSegmentManifestLocks()
 	locks.Lock(segmentID)
 	defer locks.Unlock(segmentID)
 	segment := gc.Meta.GetSegment(ctx, segmentID)
-	if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped {
-		return
+	if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped ||
+		(observed != nil && segment.SegmentInfo != observed.SegmentInfo) {
+		return nil, nil
 	}
-	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
-
-	if ctx.Err() != nil {
-		return
-	}
-
 	segIndexes, indexFiles, blockReason := gc.GetDroppedSegmentIndexFiles(ctx, io, segmentID)
 	switch blockReason {
 	case gcBlockedBySnapshot:
-		log.Info(ctx, "skip GC segment since segment index is protected by snapshot",
-			mlog.Int("segmentIndexes", len(segIndexes)))
-		return
+		mlog.RatedInfo(ctx, rate.Limit(1), "skip GC segment since segment index is protected by snapshot",
+			mlog.FieldSegmentID(segmentID), mlog.Int("segmentIndexes", len(segIndexes)))
+		return nil, nil
 	case gcBlockedByManifest:
 		// The class-specific message (transient read failure vs invalid
 		// entry) is logged where the manifest error is classified.
+		return nil, nil
+	}
+
+	plan, err := gc.buildDroppedSegmentFilePlan(segment.Clone(), indexFiles)
+	if err != nil {
+		return nil, err
+	}
+	exactFiles := make([]string, 0, len(plan.exactFiles))
+	for filePath := range plan.exactFiles {
+		exactFiles = append(exactFiles, filePath)
+	}
+	return &droppedSegmentGCBatchCandidate{
+		segment:    segment,
+		segIndexes: segIndexes,
+		exactFiles: exactFiles,
+		prefix:     plan.prefix,
+	}, nil
+}
+
+// lockGCManifests follows the publication lock order and releases each ID once.
+func (gc *GarbageCollector) lockGCManifests(ctx context.Context, ids []int64) (func(), error) {
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	locks := gc.Meta.GetSegmentManifestLocks()
+	if err := meta.AcquireSegmentManifestLocks(ctx, locks, ids); err != nil {
+		return nil, err
+	}
+	return func() { locks.UnlockMany(ids) }, nil
+}
+
+// recycleDroppedSegmentBatch recycles dropped segments in stages, each stage
+// admitting only the segments whose previous stages fully succeeded: index
+// task deletion markers, the exact files of all segments, the V3 segment
+// directories, SegmentIndex records and finally the segment records. A failed
+// stage leaves the segment's later state in place for the next GC cycle.
+//
+// This path can race with recycleUnusedSegIndexes on the same BuildID
+// whenever a dropped segment's parent field index has also been marked
+// IsDeleted — both paths remove the same index files and the same
+// SegmentIndex record. The races are safe only because two invariants hold:
+//
+//  1. Object removal treats merr.ErrIoKeyNotFound as removed, so a double
+//     file delete is a no-op for the loser.
+//  2. indexMeta.RemoveSegmentIndexes holds the per-buildID keyLock and skips
+//     a record that is gone or changed, so a double catalog delete is a
+//     no-op for the loser.
+//
+// Any future refactor on either side must preserve these invariants,
+// otherwise dropped-segment GC will silently break under load.
+func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batch []*droppedSegmentGCBatchCandidate) {
+	ids := make([]int64, 0, len(batch))
+	for _, candidate := range batch {
+		ids = append(ids, candidate.segment.GetID())
+	}
+	unlock, err := gc.lockGCManifests(ctx, ids)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	// Persisted task markers keep a retained compaction ancestor from
+	// appearing ready after partial file cleanup or a failed catalog deletion,
+	// including across restart. The marked records and their file keys stay
+	// until cleanup completes, so later cycles retry the same files.
+	marked := make([]*droppedSegmentGCBatchCandidate, 0, len(batch))
+	filePaths := make([]string, 0, len(batch))
+	for _, candidate := range batch {
+		current := gc.Meta.GetSegment(ctx, candidate.segment.GetID())
+		if current == nil || current.SegmentInfo != candidate.segment.SegmentInfo || current.GetState() != commonpb.SegmentState_Dropped {
+			continue
+		}
+		if err := gc.markSegmentIndexesDeleted(ctx, candidate.segIndexes); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment index tasks failed to mark deleted, wait to retry",
+				mlog.FieldSegmentID(candidate.segment.GetID()), mlog.Err(err))
+			continue
+		}
+		marked = append(marked, candidate)
+		filePaths = append(filePaths, candidate.exactFiles...)
+	}
+	if len(marked) == 0 || ctx.Err() != nil {
 		return
 	}
 
-	if err := gc.markSegmentIndexesDeleted(ctx, segIndexes); err != nil {
-		log.Warn(ctx, "GC segment index tasks failed to mark deleted, wait to retry", mlog.Err(err))
-		return
+	var outcomes map[string]removeOutcome
+	var batchErr error
+	if len(filePaths) > 0 {
+		outcomes, batchErr = collectBatchRemoveOutcomes(filePaths, gc.removeObjectFilesWithResult(ctx, filePaths))
+	}
+	filesRemoved := make([]*droppedSegmentGCBatchCandidate, 0, len(marked))
+	prefixes := make([]string, 0, len(marked))
+	for _, candidate := range marked {
+		if err := batchRemoveError(candidate.exactFiles, outcomes, batchErr); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment remove files failed",
+				mlog.FieldSegmentID(candidate.segment.GetID()),
+				mlog.Int("exactFiles", len(candidate.exactFiles)),
+				mlog.Err(err))
+			continue
+		}
+		filesRemoved = append(filesRemoved, candidate)
+		if candidate.prefix != "" {
+			prefixes = append(prefixes, candidate.prefix)
+		}
 	}
 
-	cloned := segment.Clone()
-	if err := gc.RemoveDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
-		log.Warn(ctx, "GC segment remove files failed", mlog.Err(err))
-		return
+	// A V3 segment directory goes after the segment's index files: the
+	// manifest naming them lives inside it, so a partial failure above leaves
+	// the manifest for the next cycle to re-derive the survivors from.
+	var prefixOutcomes map[string]removeOutcome
+	var prefixErr error
+	if len(prefixes) > 0 {
+		prefixOutcomes, prefixErr = collectBatchRemoveOutcomes(prefixes, gc.removePrefixesWithResult(ctx, prefixes))
 	}
-
+	removed := make([]*droppedSegmentGCBatchCandidate, 0, len(filesRemoved))
+	segmentIndexes := make([]*model.SegmentIndex, 0)
+	for _, candidate := range filesRemoved {
+		if candidate.prefix != "" {
+			if err := batchRemoveError([]string{candidate.prefix}, prefixOutcomes, prefixErr); err != nil {
+				mlog.RatedWarn(ctx, rate.Limit(1), "GC V3 segment remove basePath failed",
+					mlog.FieldSegmentID(candidate.segment.GetID()),
+					mlog.String("basePath", candidate.prefix),
+					mlog.Err(err))
+				continue
+			}
+		}
+		removed = append(removed, candidate)
+		segmentIndexes = append(segmentIndexes, candidate.segIndexes...)
+	}
 	if ctx.Err() != nil {
 		return
 	}
 
-	if err := gc.removeDroppedSegmentIndexMeta(ctx, segIndexes); err != nil {
-		log.Warn(ctx, "GC segment index meta failed, wait to retry", mlog.Err(err))
-		return
-	}
-
+	gc.removeSegmentIndexesInBatches(ctx, segmentIndexes)
 	if ctx.Err() != nil {
 		return
 	}
 
-	if err := gc.Meta.DropSegment(ctx, cloned.GetID()); err != nil {
-		log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
-		return
+	// The segment record is the final marker of its GC: drop it only once all
+	// of its SegmentIndex records are gone.
+	segments := make([]*meta.SegmentInfo, 0, len(removed))
+	for _, candidate := range removed {
+		if gc.segmentIndexesRemoved(candidate.segIndexes) {
+			segments = append(segments, candidate.segment)
+		}
 	}
-	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
+	metadataBatchSize := metastoreTxnBatchSize()
+	for start := 0; start < len(segments); start += metadataBatchSize {
+		if ctx.Err() != nil {
+			return
+		}
+		end := min(start+metadataBatchSize, len(segments))
+		if _, err := gc.Meta.DropSegments(ctx, segments[start:end]); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment meta failed to drop segments, wait to retry",
+				mlog.Int("segments", end-start), mlog.Err(err))
+		}
+	}
+}
+
+// metastoreTxnBatchSize is the number of records one metastore transaction may
+// remove.
+func metastoreTxnBatchSize() int {
+	if size := Params.MetaStoreCfg.MaxEtcdTxnNum.GetAsInt(); size > 0 {
+		return size
+	}
+	return 64
+}
+
+// removeSegmentIndexesInBatches removes SegmentIndex records in metastore
+// transaction sized chunks. A failed chunk keeps its records for the next GC
+// cycle.
+func (gc *GarbageCollector) removeSegmentIndexesInBatches(ctx context.Context, segmentIndexes []*model.SegmentIndex) {
+	batchSize := metastoreTxnBatchSize()
+	for start := 0; start < len(segmentIndexes); start += batchSize {
+		if ctx.Err() != nil {
+			return
+		}
+		end := min(start+batchSize, len(segmentIndexes))
+		if _, err := gc.Option.IndexMeta.RemoveSegmentIndexes(ctx, segmentIndexes[start:end]); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "delete index meta from etcd failed, wait to retry",
+				mlog.Int("segmentIndexes", end-start), mlog.Err(err))
+		}
+	}
+}
+
+func (gc *GarbageCollector) segmentIndexesRemoved(segIndexes []*model.SegmentIndex) bool {
+	for _, segIdx := range segIndexes {
+		if _, exists := gc.Option.IndexMeta.GetIndexJob(segIdx.BuildID); exists {
+			return false
+		}
+	}
+	return true
+}
+
+type removeOutcome struct {
+	seen bool
+	err  error
+}
+
+// collectBatchRemoveOutcomes indexes per-path removal results. An error that
+// names no path, or a path that was not requested, applies to the whole batch.
+func collectBatchRemoveOutcomes(expectedPaths []string, results []storage.RemoveResult) (map[string]removeOutcome, error) {
+	expected := make(map[string]struct{}, len(expectedPaths))
+	for _, filePath := range expectedPaths {
+		expected[filePath] = struct{}{}
+	}
+	outcomes := make(map[string]removeOutcome, len(expected))
+	var batchErr error
+	for _, result := range results {
+		if _, ok := expected[result.Path]; !ok {
+			if result.Err != nil {
+				batchErr = merr.Combine(batchErr, result.Err)
+			}
+			continue
+		}
+		outcome := outcomes[result.Path]
+		outcome.seen = true
+		if result.Err != nil && !errors.Is(result.Err, merr.ErrIoKeyNotFound) {
+			outcome.err = merr.Combine(outcome.err, result.Err)
+		}
+		outcomes[result.Path] = outcome
+	}
+	return outcomes, batchErr
+}
+
+// batchRemoveError returns the first error among filePaths. A path without a
+// result counts as failed.
+func batchRemoveError(filePaths []string, outcomes map[string]removeOutcome, batchErr error) error {
+	if len(filePaths) > 0 && batchErr != nil {
+		return batchErr
+	}
+	for _, filePath := range filePaths {
+		outcome := outcomes[filePath]
+		if !outcome.seen {
+			return merr.WrapErrIoFailedMsg("batch delete returned no result for %s", filePath)
+		}
+		if outcome.err != nil {
+			return outcome.err
+		}
+	}
+	return nil
+}
+
+// removeObjectFilesWithResult removes files and reports one result per path.
+// Backends with per-path batch results use their native implementation; any
+// other ChunkManager removes the files one by one in the removal pool.
+func (gc *GarbageCollector) removeObjectFilesWithResult(ctx context.Context, filePaths []string) []storage.RemoveResult {
+	if len(filePaths) == 0 {
+		return nil
+	}
+	if batchRemover, ok := gc.Option.Cli.(storage.BatchRemoveChunkManager); ok {
+		return batchRemover.MultiRemoveWithResult(ctx, filePaths)
+	}
+
+	results := make([]storage.RemoveResult, len(filePaths))
+	futures := make([]*conc.Future[struct{}], 0, len(filePaths))
+	for i, filePath := range filePaths {
+		futures = append(futures, gc.Option.RemoveObjectPool.Submit(func() (struct{}, error) {
+			err := gc.Option.Cli.Remove(ctx, filePath)
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				err = nil
+			}
+			results[i] = storage.RemoveResult{Path: filePath, Err: err}
+			return struct{}{}, nil
+		}))
+	}
+	_ = conc.BlockOnAll(futures...)
+	return results
+}
+
+// removePrefixesWithResult removes every object under each prefix and reports
+// one result per prefix. An absent local directory counts as removed.
+func (gc *GarbageCollector) removePrefixesWithResult(ctx context.Context, prefixes []string) []storage.RemoveResult {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	prefixResults := gc.Option.Cli.MultiRemoveWithPrefix(ctx, prefixes)
+	results := make([]storage.RemoveResult, len(prefixResults))
+	for i, result := range prefixResults {
+		err := result.Err
+		if err != nil && copysegment.IsAbsentLocalPrefix(gc.Option.Cli, result.Prefix, err) {
+			err = nil
+		}
+		results[i] = storage.RemoveResult{Path: result.Prefix, Err: err}
+	}
+	return results
 }
 
 // gcBlockReason says why getDroppedSegmentIndexFiles refused to release a
@@ -1483,59 +1822,34 @@ func (gc *GarbageCollector) v3SegmentGCPrefix(basePath string, segment *meta.Seg
 	return basePath + "/", nil
 }
 
-func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, cloned *meta.SegmentInfo, indexFiles map[string]struct{}) error {
-	log := mlog.With(mlog.Int64("segmentID", cloned.GetID()))
+// droppedSegmentFilePlan lists what a dropped segment leaves in object
+// storage: exact file keys, and for a V3 segment the directory holding its
+// data and manifest.
+type droppedSegmentFilePlan struct {
+	prefix     string
+	exactFiles map[string]struct{}
+}
 
+func (gc *GarbageCollector) buildDroppedSegmentFilePlan(cloned *meta.SegmentInfo, indexFiles map[string]struct{}) (droppedSegmentFilePlan, error) {
 	// V3 segment data lives under the manifest base path. Segment index files
-	// still live under index file prefixes outside it, while the manifest that
-	// names them lives inside it: index files go first, so a partial deletion
-	// failure leaves the manifest for the next cycle to re-derive the
-	// survivors from (re-deleting removed keys is a no-op - removeObjectFiles
-	// swallows NotFound), and the basePath prefix goes last.
+	// still live under index file prefixes outside it.
 	if cloned.GetStorageVersion() == storage.StorageV3 {
 		// An empty ManifestPath means the segment was allocated but never
 		// accepted (import retry, failure, or cleanup), so there are no data
 		// files to remove; still delete any recorded index files, then proceed
 		// to the meta drop instead of erroring.
 		if cloned.GetManifestPath() == "" {
-			if len(indexFiles) == 0 {
-				log.Info(ctx, "GC V3 segment files done")
-				return nil
-			}
-			if err := gc.RemoveObjectFiles(ctx, indexFiles); err != nil {
-				log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
-				return err
-			}
-			log.Info(ctx, "GC V3 segment files done")
-			return nil
+			return droppedSegmentFilePlan{exactFiles: indexFiles}, nil
 		}
 		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
 		if err != nil {
-			log.Warn(ctx, "GC V3 segment failed to parse manifest path",
-				mlog.String("manifestPath", cloned.GetManifestPath()),
-				mlog.Err(err))
-			return err
+			return droppedSegmentFilePlan{}, merr.Wrapf(err, "failed to parse manifest path of GC V3 segment %d", cloned.GetID())
 		}
-		basePath, err = gc.v3SegmentGCPrefix(basePath, cloned)
+		prefix, err := gc.v3SegmentGCPrefix(basePath, cloned)
 		if err != nil {
-			return err
+			return droppedSegmentFilePlan{}, err
 		}
-		log.Info(ctx, "GC V3 segment start, removing basePath...",
-			mlog.String("basePath", basePath),
-			mlog.Int("indexFiles", len(indexFiles)))
-		if err := gc.RemoveObjectFiles(ctx, indexFiles); err != nil {
-			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
-			return err
-		}
-		prefix := strings.TrimSuffix(basePath, "/") + "/"
-		if err := gc.Option.Cli.RemoveWithPrefix(ctx, prefix); err != nil && !copysegment.IsAbsentLocalPrefix(gc.Option.Cli, prefix, err) {
-			log.Warn(ctx, "GC V3 segment remove basePath failed",
-				mlog.String("basePath", basePath),
-				mlog.Err(err))
-			return err
-		}
-		log.Info(ctx, "GC V3 segment files done")
-		return nil
+		return droppedSegmentFilePlan{prefix: prefix, exactFiles: indexFiles}, nil
 	}
 
 	binlog.DecompressBinLogs(cloned.SegmentInfo)
@@ -1549,6 +1863,39 @@ func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, clone
 	for key := range indexFiles {
 		logs[key] = struct{}{}
 	}
+	return droppedSegmentFilePlan{exactFiles: logs}, nil
+}
+
+func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, cloned *meta.SegmentInfo, indexFiles map[string]struct{}) error {
+	log := mlog.With(mlog.Int64("segmentID", cloned.GetID()))
+	plan, err := gc.buildDroppedSegmentFilePlan(cloned, indexFiles)
+	if err != nil {
+		log.Warn(ctx, "GC segment failed to plan file deletion", mlog.Err(err))
+		return err
+	}
+
+	// The manifest naming the index files lives inside the V3 segment
+	// directory: index files go first, so a partial deletion failure leaves
+	// the manifest for the next cycle to re-derive the survivors from
+	// (re-deleting removed keys is a no-op - removeObjectFiles swallows
+	// NotFound), and the directory goes last.
+	if plan.prefix != "" {
+		log.Info(ctx, "GC V3 segment start, removing basePath...",
+			mlog.String("basePath", plan.prefix),
+			mlog.Int("indexFiles", len(indexFiles)))
+		if err := gc.RemoveObjectFiles(ctx, plan.exactFiles); err != nil {
+			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
+			return err
+		}
+		if err := gc.Option.Cli.RemoveWithPrefix(ctx, plan.prefix); err != nil && !copysegment.IsAbsentLocalPrefix(gc.Option.Cli, plan.prefix, err) {
+			log.Warn(ctx, "GC V3 segment remove basePath failed",
+				mlog.String("basePath", plan.prefix),
+				mlog.Err(err))
+			return err
+		}
+		log.Info(ctx, "GC V3 segment files done")
+		return nil
+	}
 
 	log.Info(ctx, "GC segment start...", mlog.Int("insert_logs", len(cloned.GetBinlogs())),
 		mlog.Int("delta_logs", len(cloned.GetDeltalogs())),
@@ -1557,21 +1904,9 @@ func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, clone
 		mlog.Int("text_logs", len(cloned.GetTextStatsLogs())),
 		mlog.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
 		mlog.Int("index_files", len(indexFiles)))
-	if err := gc.RemoveObjectFiles(ctx, logs); err != nil {
+	if err := gc.RemoveObjectFiles(ctx, plan.exactFiles); err != nil {
 		log.Warn(ctx, "GC segment remove logs failed", mlog.Err(err))
 		return err
-	}
-	return nil
-}
-
-func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
-	if len(segIndexes) == 0 {
-		return nil
-	}
-	for _, segIdx := range segIndexes {
-		if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1850,22 +2185,31 @@ func (gc *GarbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 	}()
 
 	deletedIndexes := gc.Option.IndexMeta.GetDeletedIndexes()
-	for _, idx := range deletedIndexes {
+	batchSize := metastoreTxnBatchSize()
+	for offset := 0; offset < len(deletedIndexes); offset += batchSize {
 		if ctx.Err() != nil {
 			// process canceled.
 			return
 		}
-		if gc.collectionGCPaused(idx.CollectionID) {
-			continue
-		}
+		// Filter against the pause records after acknowledging, so a removal
+		// of a paused collection never starts after its pause is acknowledged.
 		gc.ackSignal(signal)
-
-		log := mlog.With(mlog.Int64("collectionID", idx.CollectionID), mlog.Int64("fieldID", idx.FieldID), mlog.Int64("indexID", idx.IndexID))
-		if err := gc.Option.IndexMeta.RemoveIndex(ctx, idx.CollectionID, idx.IndexID); err != nil {
-			log.Warn(ctx, "remove index on collection fail", mlog.Err(err))
+		end := min(offset+batchSize, len(deletedIndexes))
+		candidates := make([]*model.Index, 0, end-offset)
+		for _, index := range deletedIndexes[offset:end] {
+			if !gc.collectionGCPaused(index.CollectionID) {
+				candidates = append(candidates, index)
+			}
+		}
+		if len(candidates) == 0 {
 			continue
 		}
-		log.Info(ctx, "remove index on collection done")
+		removed, err := gc.Option.IndexMeta.RemoveIndexes(ctx, candidates)
+		if err != nil {
+			log.Warn(ctx, "remove index on collection fail", mlog.Int("indexes", len(candidates)), mlog.Err(err))
+			continue
+		}
+		log.Info(ctx, "remove index on collection done", mlog.Int("indexes", removed))
 	}
 }
 
@@ -1875,14 +2219,16 @@ type manifestIndexIdentity struct {
 }
 
 type segmentIndexGCItem struct {
-	segIdx *model.SegmentIndex
-	files  map[string]struct{}
+	observed *meta.SegmentInfo
+	segIdx   *model.SegmentIndex
+	files    map[string]struct{}
 }
 
 // recycleUnusedSegIndexes removes segment indexes whose index definition or
 // segment is gone. Candidates are grouped by segment so one manifest read and
 // one manifest revision can retire every eligible entry in a transaction-sized
-// chunk, while record-only indexes keep the legacy path.
+// chunk, while the files and records of record-only indexes are removed in
+// batches across segments.
 func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
@@ -1893,45 +2239,77 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 
 	io := packed.NewManifestIOContext(1)
 	defer io.Close()
+	// Only a record whose segment or index definition is gone can be recycled:
+	// group those without materializing every SegmentIndex.
 	groups := make(map[int64][]*model.SegmentIndex)
 	segmentOrder := make([]int64, 0)
-	for _, candidate := range gc.Option.IndexMeta.GetAllSegIndexes() {
+	gc.Option.IndexMeta.RangeSegmentIndexes(func(candidate *model.SegmentIndex) bool {
 		if candidate == nil {
-			continue
+			return true
+		}
+		if gc.Meta.GetSegment(ctx, candidate.SegmentID) != nil &&
+			gc.Option.IndexMeta.IsIndexExist(candidate.CollectionID, candidate.IndexID) {
+			return true
 		}
 		if _, ok := groups[candidate.SegmentID]; !ok {
 			segmentOrder = append(segmentOrder, candidate.SegmentID)
 		}
 		groups[candidate.SegmentID] = append(groups[candidate.SegmentID], candidate)
+		return ctx.Err() == nil
+	})
+
+	batchSize := Params.DataCoordCfg.GCIndexFileBatchSize.GetAsInt()
+	if batchSize <= 0 {
+		batchSize = 1000
 	}
+	pending := make([]segmentIndexGCItem, 0)
+	pendingFiles := 0
 	for _, segmentID := range segmentOrder {
 		if ctx.Err() != nil {
 			return
 		}
-		gc.recycleUnusedSegIndexesForSegment(ctx, io, segmentID, groups[segmentID], signal)
+		for _, item := range gc.recycleUnusedSegIndexesForSegment(ctx, io, segmentID, groups[segmentID], signal) {
+			// An index without files still costs a record removal.
+			weight := max(1, len(item.files))
+			if len(pending) > 0 && pendingFiles+weight > batchSize {
+				gc.recycleRecordOnlySegmentIndexes(ctx, signal, pending)
+				pending, pendingFiles = pending[:0], 0
+			}
+			pending = append(pending, item)
+			pendingFiles += weight
+			if len(pending) >= batchSize || pendingFiles >= batchSize {
+				gc.recycleRecordOnlySegmentIndexes(ctx, signal, pending)
+				pending, pendingFiles = pending[:0], 0
+			}
+		}
+	}
+	if ctx.Err() == nil {
+		gc.recycleRecordOnlySegmentIndexes(ctx, signal, pending)
 	}
 }
 
+// recycleUnusedSegIndexesForSegment recycles the manifest-resident indexes of
+// one segment and returns the record-only ones for batch removal.
 func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64,
 	candidates []*model.SegmentIndex, signal <-chan gcCmd,
-) {
+) []segmentIndexGCItem {
 	segment := gc.Meta.GetSegment(ctx, segmentID)
 	items := make([]segmentIndexGCItem, 0, len(candidates))
 	for _, candidate := range candidates {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
-		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
-		// before making deletion decisions so GC does not act on stale task state
-		// or stale index file keys.
+		// The scan is not a consistent snapshot. Refresh by buildID before
+		// making deletion decisions so GC does not act on stale task state or
+		// stale index file keys.
 		segIdx, ok := gc.getLatestSegmentIndexForGC(candidate)
 		if !ok {
 			continue
 		}
-		if gc.collectionGCPaused(segIdx.CollectionID) {
+		gc.ackSignal(signal)
+		if gc.IsPaused(segIdx.CollectionID) {
 			continue
 		}
-		gc.ackSignal(signal)
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
@@ -1962,7 +2340,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getRetainedIndexFilesOfIndex(segIdx)})
 	}
 	if len(items) == 0 {
-		return
+		return nil
 	}
 
 	// Task refresh can observe a completion published after the initial segment
@@ -1981,7 +2359,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		if err != nil {
 			mlog.Warn(ctx, "failed to read segment manifest index metadata, wait to retry",
 				mlog.Int64("segmentID", segmentID), mlog.Err(err))
-			return
+			return nil
 		}
 		for _, idx := range indexes {
 			key := manifestIndexIdentity{indexID: idx.IndexID, buildID: idx.BuildID}
@@ -1997,6 +2375,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		key := manifestIndexIdentity{indexID: item.segIdx.IndexID, buildID: item.segIdx.BuildID}
 		entry, matched := manifestEntries[key]
 		if !matched {
+			item.observed = segment
 			legacyItems = append(legacyItems, item)
 			continue
 		}
@@ -2014,43 +2393,84 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		manifestItems = append(manifestItems, item)
 	}
 
-	for _, item := range legacyItems {
-		gc.recycleRecordOnlySegmentIndex(ctx, segment, item)
+	if len(manifestItems) > 0 {
+		// Preserve master's record-before-manifest order for mixed ownership.
+		// Publishing our own retraction first would invalidate the observed
+		// revision and unnecessarily defer the record-only siblings a cycle.
+		gc.recycleRecordOnlySegmentIndexes(ctx, signal, legacyItems)
+		gc.recycleManifestSegmentIndexes(ctx, manifestItems)
+		return nil
 	}
-	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
+	return legacyItems
 }
 
-func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, observed *meta.SegmentInfo, item segmentIndexGCItem) {
-	// Keep record-only cleanup ordered with publication. Selection may have
-	// read an index-free revision just before backfill installed this build.
-	// Recheck that observation under the manifest lock before deleting bytes
-	// or the record that drives manifest retraction on the next GC cycle.
-	locks := gc.Meta.GetSegmentManifestLocks()
-	locks.Lock(item.segIdx.SegmentID)
-	defer locks.Unlock(item.segIdx.SegmentID)
-	current := gc.Meta.GetSegment(ctx, item.segIdx.SegmentID)
-	if current != nil && (meta.IsSegmentHealthy(current) || meta.IsSegmentIndexRollbackRetained(current)) &&
-		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
-			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
-		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
-			mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+// recycleRecordOnlySegmentIndexes removes the files of record-only segment
+// indexes in one batch, then the records whose files are all gone. The items
+// were admitted before earlier pause acknowledgements, so they are filtered
+// again here.
+func (gc *GarbageCollector) recycleRecordOnlySegmentIndexes(ctx context.Context, signal <-chan gcCmd, items []segmentIndexGCItem) {
+	gc.ackSignal(signal)
+	if len(items) == 0 || ctx.Err() != nil {
 		return
 	}
-	log := segmentIndexGCLog(item)
-	log.Info(ctx, "GC Segment Index file start...")
-	if err := gc.RemoveObjectFiles(ctx, item.files); err != nil {
-		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.segIdx.SegmentID)
+	}
+	unlock, err := gc.lockGCManifests(ctx, ids)
+	if err != nil {
 		return
 	}
-	if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
-		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
+	defer unlock()
+	active := make([]segmentIndexGCItem, 0, len(items))
+	filePaths := make([]string, 0, len(items))
+	for _, item := range items {
+		if gc.IsPaused(item.segIdx.CollectionID) {
+			continue
+		}
+		// A concurrent backfill may have published the files selected for removal.
+		current := gc.Meta.GetSegment(ctx, item.segIdx.SegmentID)
+		if current != nil && (meta.IsSegmentHealthy(current) || meta.IsSegmentIndexRollbackRetained(current)) &&
+			(item.observed == nil || current.GetManifestPath() != item.observed.GetManifestPath() ||
+				current.GetManifestHasIndex() != item.observed.GetManifestHasIndex()) {
+			mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
+				mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+			continue
+		}
+		active = append(active, item)
+		for file := range item.files {
+			filePaths = append(filePaths, file)
+		}
+	}
+	if len(active) == 0 {
 		return
 	}
-	log.Info(ctx, "index meta recycle success")
+
+	var outcomes map[string]removeOutcome
+	var batchErr error
+	if len(filePaths) > 0 {
+		outcomes, batchErr = collectBatchRemoveOutcomes(filePaths, gc.removeObjectFilesWithResult(ctx, filePaths))
+	}
+	ready := make([]*model.SegmentIndex, 0, len(active))
+	for _, item := range active {
+		if err := batchRemoveError(lo.Keys(item.files), outcomes, batchErr); err != nil {
+			segmentIndexGCLog(item).RatedWarn(ctx, rate.Limit(1), "fail to remove index files for index", mlog.Err(err))
+			continue
+		}
+		ready = append(ready, item.segIdx)
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	gc.removeSegmentIndexesInBatches(ctx, ready)
 }
 
 func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, items []segmentIndexGCItem) {
-	if len(items) == 0 {
+	// All items belong to one segment. Candidate selection and the record-only
+	// batch may have acknowledged a pause since these items were admitted.
+	// Recheck before starting deletion; do not acknowledge again until the
+	// manifest files and metadata have finished retiring.
+	if len(items) == 0 || ctx.Err() != nil || gc.IsPaused(items[0].segIdx.CollectionID) {
 		return
 	}
 	var manifestUpdates []*meta.SegmentInfo
