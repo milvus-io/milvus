@@ -342,6 +342,7 @@ func (p *advancedTaskProvider) releaseCount(fieldID int64) int {
 }
 
 type advancedScheduler struct {
+	Scheduler
 	mu        sync.Mutex
 	executed  []int64
 	failField int64

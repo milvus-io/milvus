@@ -48,7 +48,8 @@ existing Proxy query path:
 3. Replace only the raw execution currently driven by `t.lb.Execute`.
 4. Return `[]*internalpb.SearchResults` and `[]*internalpb.RetrieveResults`
    directly to Proxy.
-5. Let Search requery reuse QueryOnView with the original View and MVCC.
+5. Let Search requery reuse QueryOnView, or eligible MaterializeOnView refill,
+   with the original View, Schema, dual MVCC and worker selections.
 
 ## 3. Non-goals
 
@@ -85,12 +86,15 @@ type ViewQueryClient interface {
 }
 ```
 
-The legacy domain itself is raw-result oriented:
+The relevant execution methods of the legacy domain are raw-result oriented:
 
 ```go
 type LegacyClient interface {
     Search(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error)
     Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error)
+    Materialize(ctx context.Context, req *LegacyQueryRequest, fingerprint uint64,
+        maxOutputSize int64,
+        consume func(ShardPlan, qviews.WorkNode, *internalpb.MaterializeResults) error) error
 }
 ```
 
@@ -201,6 +205,23 @@ Legacy().Query
 
 The returned raw results are equivalent to what the old proxy query path puts
 into `queryTask.resultBuf`.
+
+### 6.3 Retained Materialize refill
+
+```text
+Legacy().Materialize (non-nil retained Plans required)
+  -> for each original shard and work node:
+       -> MaterializeOnView(query_by_pk, ipc_options)
+       -> validate worker result and shard input budget
+       -> consume(plan, worker, result)
+  -> join all workers before returning
+```
+
+This path does not resolve shards or execute Phase 1. `consume` is a concurrent
+local callback that transfers body ownership to Proxy's existing field fill.
+Materialize returns worker IPC responses rather than one reduced retrieve
+message per shard. The Proxy fill performs cross-worker PK/TS selection. See
+[Materialize](materialize.md) for IPC options, budget and whole-refill fallback.
 
 ## 7. Collector Semantics
 
@@ -332,7 +353,8 @@ page's SessionTs. It continues to derive:
 - top-k and recall-evaluation flags from raw results.
 
 The QueryView path does not fill `queryChannelsNode` with old QueryNode leader
-information. Search requery executes Query against the retained Search plans.
+information. Search requery executes Query, or eligible Materialize when enabled,
+against the retained Search plans.
 
 ## 9. Requery Behavior
 
@@ -350,6 +372,14 @@ SearchPipeline binds internal requery to the parent's schema and `ShardPlan`s.
 nodes, View versions and MVCCs without Phase 1. It then performs the same
 shard-local Query reduction. Failure aborts the parent operation; this path
 cannot silently switch to a newer schema or snapshot.
+
+When `proxy.materialize.enabled` is true and the requery shape and fields support
+IPC, `QueryTask` first attempts `Legacy().Materialize` on these same plans.
+Unsupported execution or the pre-deduplication input budget causes a whole-refill
+fallback to retained `Legacy().Query` after all Materialize bodies are discarded.
+Ordinary Query/Get continues to use Query. Both paths reacquire and pin resources
+through `AcquireQuerySegmentTasks`; neither reruns the original vector pruning.
+See [Materialize snapshot and pruning](materialize.md#snapshot-and-pruning).
 
 ## 10. Error Handling
 

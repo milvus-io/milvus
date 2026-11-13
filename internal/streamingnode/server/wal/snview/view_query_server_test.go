@@ -172,6 +172,7 @@ func (t *fakeViewQueryQueryTasks) Release() {
 }
 
 type fakeViewQueryScheduler struct {
+	viewquery.Scheduler
 	searchResult *internalpb.SearchResults
 	queryResult  *internalpb.RetrieveResults
 }

@@ -6,16 +6,49 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	querytasks "github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestMaterializeUsesPinnedHistoricalSnapshot(t *testing.T) {
+	executor := NewDirectSegmentTaskExecutor(100)
+	req := &internalpb.RetrieveRequest{CollectionID: 10, SchemaVersion: 7, MvccTimestamp: 999}
+	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99}
+	selected := []qnview.QNQuerySegmentTask{
+		{Handle: fakeSealedSegmentHandle{id: 42, segment: fakeReadableSegment{id: 42, vchannel: "v1"}}, Request: req, MVCC: mvcc},
+	}
+	patch := mockey.Mock(querytasks.ExecuteMaterializeOnSegments).To(func(_ context.Context, _ *segments.Collection, pinned []segments.Segment, query *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+		require.Len(t, pinned, 1)
+		require.Equal(t, []int64{42}, query.SegmentIDs)
+		require.Equal(t, querypb.DataScope_Historical, query.Scope)
+		require.EqualValues(t, 99, query.Req.MvccTimestamp)
+		require.EqualValues(t, 7, query.Req.SchemaVersion)
+		require.EqualValues(t, 321, query.MaterializeSchemaFingerprint)
+		require.EqualValues(t, 1, query.MaterializeFormatVersion)
+		return &internalpb.MaterializeResults{}, nil
+	}).Build()
+	defer patch.UnPatch()
+	_, err := NewScheduler(executor).Materialize(t.Context(), &sharedviewquery.MaterializeTasksWithOptions{QuerySegmentTasks: qnview.NewQNQuerySegmentTasks(selected), Options: &viewpb.MaterializeIPCOptions{SchemaFingerprint: 321, FormatVersion: 1}})
+	require.NoError(t, err)
+	require.EqualValues(t, 999, req.MvccTimestamp)
+	_, err = NewScheduler(executor).Materialize(t.Context(), snview.NewSNQuerySegmentTasks([]snview.SNQuerySegmentTask{{}}))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	selected[0].Handle = fakeSealedSegmentHandle{id: 42, segment: fakeTransformOnlySegment{id: 42}}
+	_, err = executor.Materialize(t.Context(), selected, &viewpb.MaterializeIPCOptions{})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
 
 func TestDirectSegmentTaskExecutorSearchBuildsHistoricalRequestFromHandles(t *testing.T) {
 	runner := &fakeSearchTaskRunner{result: &internalpb.SearchResults{NumQueries: 10}}

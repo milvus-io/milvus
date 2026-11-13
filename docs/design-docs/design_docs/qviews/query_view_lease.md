@@ -22,8 +22,9 @@ its shard handlers. Non-positive durations disable timed retention while
 preserving active call references. A duration is not a maximum request execution
 time.
 
-Successful acquisition of an Up view through GetQueryPlan, SearchOnView, or
-QueryOnView renews its local deadline to `max(deadline, now + duration)`.
+Successful acquisition of an Up view through GetQueryPlan, SearchOnView,
+QueryOnView, or MaterializeOnView renews its local deadline to
+`max(deadline, now + duration)`.
 GetQueryPlan renews again immediately before a successful return so time spent
 planning does not consume the entire inter-phase window. Failed acquisition,
 Coord state pushes, and repeated Down requests do not renew the deadline.
@@ -140,6 +141,8 @@ Once Down completes, the existing Dropping/resource cleanup protocol runs.
 Execution handles retain their resources through actual native completion and
 conversion; an operation guard delays View resource cleanup until those handles
 are returned. The control never clears operation references.
+Materialize uses the same Query task acquisition and retains these protections
+through [IPC encoding](query/materialize.md#parallel-node-execution-and-ownership).
 
 Empty control preserves normal handoff. Older workers ignoring the optional
 control keep their existing lease delay. Verify freshly renewed long leases,

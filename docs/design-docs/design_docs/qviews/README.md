@@ -36,6 +36,8 @@ For VChannel replica discovery from StreamingNode, see
 For node-side Phase 1 planning and Phase 2 execution, see
 [Query Plan Node-Side Design](query/query_plan.md) and
 [Query Execution Node-Side Design](query/query_execution.md).
+For retained search refill over Arrow IPC, see
+[QueryView Materialize](query/materialize.md).
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
    - Includes MVCC
@@ -54,7 +56,7 @@ For node-side Phase 1 planning and Phase 2 execution, see
   `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
   [consistency-level discussion](#13-consistency-implementation-consistency-level)
   for the current routing limits.
-- **Phase 2:** `SearchOnView` and `QueryOnView` acquire the explicit Up version,
+- **Phase 2:** `SearchOnView`, `QueryOnView` and `MaterializeOnView` acquire the explicit Up version,
   wait for Growing/Transform MVCC, and pin segments selected by DataVersion and
   partition scope. The [serving lease](query_view_lease.md) protects the view
   during acquisition; handles retain resources during execution.
@@ -71,8 +73,12 @@ For node-side Phase 1 planning and Phase 2 execution, see
   Boost scorers follow the same ownership rule: SN adapters borrow the pinned
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
-- **Scope:** retained requery uses `QueryOnView` with the original View, Schema and MVCC.
-  Production Proxy routing is wired. See [plan/schema/snapshot contracts](query/query_plan.md).
+- **Scope:** retained requery uses `QueryOnView`, or eligible
+  [MaterializeOnView](query/materialize.md) refill when enabled, with the original
+  View, Schema, dual MVCC and worker selections. Materialize directly fans out to
+  SN/QN, reuses local PK/TS reduction and IPC encoding, and falls back as one
+  refill on those same plans. Production Proxy routing is wired. See
+  [plan/schema/snapshot contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,

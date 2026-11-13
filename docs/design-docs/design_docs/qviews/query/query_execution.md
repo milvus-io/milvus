@@ -53,8 +53,9 @@ QN loaders, ReadState management and native preparation are described below.
 
 - Phase 1: QueryPlanService returns actual shard identity, View version,
   QueryPlanMVCC, optimized request and work nodes.
-- Phase 2: ViewQueryService accepts SearchOnView / QueryOnView with those same
-  identities. QN implementation must wait and execute on the bound resources.
+- Phase 2: ViewQueryService accepts SearchOnView / QueryOnView / MaterializeOnView
+  with those same identities. QN implementation must wait and execute on the
+  bound resources.
 - Fixed-snapshot coverage: TimeTickSyncInspector.EnsureBarrier certifies
   publication of an ordered complete WAL prefix after request-scoped TSO
   admission. The query runtime must then apply the fixed Growing/Transform
@@ -67,9 +68,9 @@ QN loaders, ReadState management and native preparation are described below.
   preloading does not remove that field from the logical query scope.
   The integrated coordinator supplies this metadata.
 
-Retained requery uses QueryOnView with the original plan, workers, Schema and
-MVCC. It does not select new resources through Phase 1 or use a separate requery
-RPC.
+Retained requery uses QueryOnView, or eligible [MaterializeOnView](materialize.md)
+refill when enabled, with the original plan, workers, Schema, dual MVCC and
+selections. Neither path selects new resources through Phase 1.
 
 ## Error and validation boundary
 
@@ -260,8 +261,9 @@ type ViewQueryTaskProvider interface {
 ```
 
 `AcquireRequerySegmentTasks` is not a separate provider API. Retained requery
-uses `QueryOnView` with the original View, MVCC and recorded worker selection;
-client-side requery orchestration remains outside this extraction.
+uses `AcquireQuerySegmentTasks` through QueryOnView or MaterializeOnView with the
+original View, MVCC and recorded worker selection; client-side requery
+orchestration remains outside this extraction.
 
 SN and QN provide this interface through their local QueryView handlers:
 
@@ -316,6 +318,23 @@ QueryOnView
   -> scheduler.Query(ctx, tasks)
   -> return node-local reduced RetrieveResults
 ```
+
+Materialize flow:
+
+```text
+MaterializeOnView
+  -> validate query_by_pk implementation, retrieve shape and IPC options
+  -> tasks := provider.AcquireQuerySegmentTasks(...)
+  -> defer tasks.Release()
+  -> scheduler.Materialize(ctx, MaterializeTasksWithOptions{tasks, ipc_options})
+  -> local native PK/TS reduce and IPC encoding on the pinned tasks
+  -> return internal.MaterializeResults
+```
+
+Materialize is a parallel method on the existing scheduler/executor interfaces.
+Its options wrapper borrows the same query owner; there is no separate acquisition
+or optional scheduler interface. See [Materialize](materialize.md) for the request,
+Proxy assembly, input budget and retained Query fallback.
 
 The service does not access QueryView state machines, runtime managers, segment
 managers, or raw physical segment handles directly.
@@ -513,7 +532,8 @@ Scheduler non-responsibilities:
 SN and QN may use different concrete scheduler adapters because their resource
 handles and execution paths are different. The shared contract is that they
 execute ready Search/Query segment tasks and reduce results locally before
-returning to Proxy.
+returning to Proxy. `Scheduler.Materialize` uses the same ready Query tasks and
+direct SN/QN execution adapters, retaining their owner through IPC encoding.
 
 ## 10. Release and Failure Cleanup
 
@@ -556,8 +576,12 @@ Requery sends `QueryOnView` requests for the reduced PKs to the original plan's
 work nodes, retaining its QueryView version, exact Schema and MVCC. Requery may
 add output/render fields supported by that View and its LoadScope without declaring
 them during Phase 1. Field errors fail the operation without replanning only the
-refill, which would mix snapshots. There is no separate requery
-RPC or node-side stub. Existing local PK pruning and Query reduction apply.
+refill, which would mix snapshots. Existing local PK pruning and Query reduction
+apply. Eligible Proxy requery can instead send `MaterializeOnView` with that same
+PK expression and retained selection, using the same provider and native reduce
+before IPC encoding. This is an alternative refill transport, not a new planning
+round. Unsupported Materialize falls back as a whole to retained Query. See
+[Materialize](materialize.md).
 
 ## 12. Error Semantics
 
@@ -661,3 +685,4 @@ before reporting OnDropped. Closing the serving lease does not cancel already ad
 tasks retain their resources through
 actual native future completion and result conversion. QN retains its existing
 View/base operation-reference and closing-incarnation completion contract.
+Materialize shares these handles and keeps their ownership through IPC encoding.
