@@ -196,7 +196,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
             params={"nlist": 128},
         )
         index_params.add_index(field_name=self.inverted_string_field, index_type="INVERTED")
-        index_params.add_index(field_name=self.indexed_json_field, index_type="INVERTED", json_cast_type="json")
+        for key, cast in [("number", "DOUBLE"), ("string", "VARCHAR")]:
+            index_params.add_index(field_name=self.indexed_json_field, index_type="INVERTED",
+                                   params={"json_path": f'{self.indexed_json_field}["{key}"]',
+                                           "json_cast_type": cast})
         self.create_index(client, self.collection_name, index_params=index_params)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.bfloat16_vector_field_name)

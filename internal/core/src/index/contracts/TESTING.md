@@ -62,7 +62,7 @@ only checking that a call returned.
 | `IPatternMatchReader` | Each operator, literal escaping, exact versus candidate result, and per call routing guard |
 | `ITextMatchReader` | Match, phrase and fuzzy semantics, analyzer variants, null exclusion, result size |
 | `INgramReader`, `ISpatialReader` | Eligible calls return candidate supersets, never drop true rows, retain Count/domain, and require consumer refinement |
-| `IJsonIndexReader`, `JsonResolvedReader` | Path/cast vocabulary, unsupported versus absent path, owns or borrows resolved reader, moved handle lifetime, ordinary predicate behavior after resolution |
+| `IJsonIndexReader`, `JsonResolvedReader` | Path/cast vocabulary, unsupported versus absent path, borrows resolved child reader, moved handle lifetime, ordinary predicate behavior after resolution |
 | `IVectorReader` | Search and filtered logical IDs, metadata, nullable mapping, owned value retrieval, prepared parameters, and empty physical state; per operation support checked for iterators, refine, sparse and embedding lists |
 | `IGrowingIndex`, `GrowingIndexSnapshotPin`, `IAppendable` | Empty and published pin distinction, immutable published count/coverage, copy/move lifetime, monotonic replacement, failure preservation, append input ownership, query commit, and flush |
 
@@ -80,7 +80,7 @@ only checking that a call returned.
 | `INgramReader::CanHandle`, `Candidates` | Literal length threshold, pattern operation, UTF-8, empty input, initial mask, candidate superset and repeated AND idempotence |
 | `INgramReader::CanHandleConditionTree`, `ConditionTreeCandidates` | Decoded necessary-condition trees, AND/OR, Unicode/NUL, planner fallback, caller-side malformed/version errors before reader calls, and candidate supersets checked against the Rust matcher |
 | `ISpatialReader::Candidates` | Each spatial relation, MBR superset retains true hits, null rows, empty candidate result, result size and repeatability |
-| `IJsonIndexReader::CastTypesOf`, `Resolve`, `Exists`; `JsonResolvedReader` | Supported versus unsupported path/cast, escaped path, supported but absent path, null comparable values, owned/borrowed/empty handles, simultaneous resolves and move lifetime |
+| `IJsonIndexReader::CastTypesOf`, `Resolve`, `Exists`; `JsonResolvedReader` | Supported versus unsupported path/cast, escaped path, supported but absent path, null comparable values, borrowed/empty handles, simultaneous resolves and move lifetime |
 | `IIndexReaderBase` getters and `ReaderCaps` | Metadata-derived versus opened caps, mixin consistency, row/element count, value type, repeated resource reads, single row/multibatch/all-null profiles |
 | `IVectorReader::Search`, `Iterators`, `CalcDistByIDs` | Logical IDs, nullable masking, explicit filter, zero topk/wrong dimension rejection, prepared params, supported result shape or explicit runtime unsupported, empty physical index |
 | `IVectorReader::GetVector`, `GetSparseVector`, `GetEmbListByIds` | Dense/sparse owned retrieval, empty requests, unsupported cross-type request, null-only index, list terminal offset and valid empty list versus null parent |

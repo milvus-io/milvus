@@ -171,11 +171,13 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs .
 	if len(indexIDs) == 0 {
 		return s.queryViewCollectionIndexInfos(collectionID)
 	}
-	return packQueryViewCollectionIndexInfos(s.indexMeta.GetIndexesByID(collectionID, indexIDs))
+	indexes := s.indexMeta.GetIndexesByID(collectionID, indexIDs)
+	isFlat := s.indexMeta.JSONFlatIndexFilter(collectionID)
+	return packQueryViewCollectionIndexInfos(lo.Filter(indexes, func(index *model.Index, _ int) bool { return !isFlat(index) }))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	indexes := s.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := s.indexMeta.GetPhysicalIndexesForCollection(collectionID)
 	return packQueryViewCollectionIndexInfos(indexes)
 }
 

@@ -224,7 +224,6 @@ const (
 	FeatureScalarIndexInverted
 	FeatureScalarIndexRtree
 	FeatureScalarIndexNgram
-	FeatureScalarIndexJSONFlat
 	FeatureScalarIndexFmindex
 	FeatureFilterIndexDeclined
 	FeatureExprCacheHit
@@ -430,7 +429,6 @@ var featureNames = [numFeatures]string{
 	FeatureScalarIndexInverted:      "scalar_index_type=INVERTED",
 	FeatureScalarIndexRtree:         "scalar_index_type=RTREE",
 	FeatureScalarIndexNgram:         "scalar_index_type=NGRAM",
-	FeatureScalarIndexJSONFlat:      "scalar_index_type=json_flat",
 	FeatureScalarIndexFmindex:       "scalar_index_type=FMINDEX",
 	FeatureFilterIndexDeclined:      "filter_index_declined",
 	FeatureExprCacheHit:             "expr_cache_hit",

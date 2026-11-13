@@ -2004,6 +2004,57 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestCreateIndexSuccessHints(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	for _, collectionCreate := range []bool{false, true} {
+		for _, withHints := range []bool{false, true} {
+			t.Run(fmt.Sprintf("collection=%t/hints=%t", collectionCreate, withHints), func(t *testing.T) {
+				mp := mocks.NewMockProxy(t)
+				mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+					if withHints {
+						return merr.Success("JSON flat index ignored"), nil
+					}
+					return merr.Success(), nil
+				}).Twice()
+				body := map[string]interface{}{
+					"collectionName": DefaultCollectionName,
+					"indexParams": []map[string]interface{}{
+						{"fieldName": "metadata", "indexName": "metadata_flat", "indexType": "INVERTED", "params": map[string]string{"json_cast_type": "JSON"}},
+						{"fieldName": "attributes", "indexName": "attributes_flat", "indexType": "INVERTED", "params": map[string]string{"json_cast_type": "JSON"}},
+					},
+				}
+				path := versionalV2(IndexCategory, CreateAction)
+				if collectionCreate {
+					path = versionalV2(CollectionCategory, CreateAction)
+					mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+					mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+					body["schema"] = map[string]interface{}{"fields": []map[string]interface{}{
+						{"fieldName": "id", "dataType": "Int64", "isPrimary": true},
+						{"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": map[string]int{"dim": 2}},
+						{"fieldName": "metadata", "dataType": "JSON"},
+						{"fieldName": "attributes", "dataType": "JSON"},
+					}}
+				}
+				payload, err := json.Marshal(body)
+				require.NoError(t, err)
+				w := httptest.NewRecorder()
+				initHTTPServerV2(mp, false).ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload)))
+				require.Equal(t, http.StatusOK, w.Code)
+				require.Equal(t, int64(0), gjson.GetBytes(w.Body.Bytes(), HTTPReturnCode).Int())
+				message := gjson.GetBytes(w.Body.Bytes(), HTTPReturnMessage)
+				if withHints {
+					assert.Equal(t, `field "metadata", index "metadata_flat": JSON flat index ignored; field "attributes", index "attributes_flat": JSON flat index ignored`, message.String())
+				} else {
+					assert.False(t, message.Exists())
+				}
+			})
+		}
+	}
+}
+
 func TestCompact(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

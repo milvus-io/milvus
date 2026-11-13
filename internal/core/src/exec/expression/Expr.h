@@ -3227,29 +3227,11 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
-    enum class IndexValidityMode {
-        Default,
-        JsonExactPath,
-    };
-
     // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, nullptr, values...);
-    }
-
-    // Execute an index query once for the whole segment and gather only the
-    // requested rows. JSON path readers also return a full bitmap in their
-    // declared coordinate domain.
-    template <typename T, typename FUNC, typename... ValTypes>
-    VectorPtr
-    ProcessIndexChunksAndGatherByOffsets(FUNC func,
-                                         const OffsetVector& offsets,
-                                         const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, &offsets, values...);
+        return ProcessIndexChunksImpl<T>(func, false, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -3257,11 +3239,8 @@ class SegmentExpr : public Expr {
     //   (used when func already handles element-to-row conversion internally)
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunksWithRowLevel(FUNC func,
-                                   IndexValidityMode validity_mode,
-                                   const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, true, validity_mode, nullptr, values...);
+    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, values...);
     }
 
     TargetBitmap
@@ -3313,8 +3292,6 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
-                           IndexValidityMode validity_mode,
-                           const OffsetVector* offsets,
                            const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1,
                    "scalar index should have exactly 1 chunk, got {}",
@@ -3323,9 +3300,6 @@ class SegmentExpr : public Expr {
 
         // Cache index result (execute only once)
         if (cached_index_chunk_id_ != 0) {
-            const auto json_pointer = field_type_ == DataType::JSON
-                                          ? milvus::Json::pointer(nested_path_)
-                                          : std::string();
             cached_is_nested_index_ = selected_element_level_result_;
 
             auto cached = ExprCacheHelper::GetOrCompute(
@@ -3336,76 +3310,7 @@ class SegmentExpr : public Expr {
                     TargetBitmap res = func(predicate, values...);
 
                     TargetBitmap valid_res;
-                    const bool multi_path_json =
-                        json_reader_ != nullptr &&
-                        selected_index_entry_.has_value() &&
-                        selected_index_entry_->caps.json_paths &&
-                        selected_index_entry_->value_type == DataType::JSON;
-                    if (multi_path_json) {
-                        const bool exact_path =
-                            validity_mode == IndexValidityMode::JsonExactPath;
-                        auto family = static_cast<unsigned int>(DataType::JSON);
-                        if (!exact_path) {
-                            if constexpr (std::is_same_v<T, bool>) {
-                                family =
-                                    static_cast<unsigned int>(DataType::BOOL);
-                            } else if constexpr (std::is_integral_v<T> ||
-                                                 std::is_floating_point_v<T>) {
-                                family =
-                                    static_cast<unsigned int>(DataType::DOUBLE);
-                            } else if constexpr (std::is_same_v<T,
-                                                                std::string> ||
-                                                 std::is_same_v<
-                                                     T,
-                                                     std::string_view>) {
-                                family = static_cast<unsigned int>(
-                                    DataType::VARCHAR);
-                            }
-                        }
-                        const auto signature = [&]() {
-                            return fmt::format(
-                                "json-flat-validity:field={}:path-length={}:"
-                                "path={}:family={}",
-                                field_id_.get(),
-                                json_pointer.size(),
-                                json_pointer,
-                                family);
-                        };
-                        const auto compute_validity = [&]() {
-                            if (!exact_path) {
-                                return null_reader_->IsNotNull();
-                            }
-                            // EXISTS includes descendants of an object path.
-                            // CONTAINS needs values at this exact path, of any
-                            // primitive family, independent of its literals.
-                            TargetBitmap validity(active_count_, false);
-                            for (const auto* cast :
-                                 {"BOOL", "DOUBLE", "VARCHAR"}) {
-                                auto resolved = json_reader_->Resolve(
-                                    json_pointer,
-                                    JsonCastType::FromString(cast));
-                                const auto* nulls =
-                                    dynamic_cast<const index::INullReader*>(
-                                        resolved.get());
-                                AssertInfo(nulls != nullptr,
-                                           "JSON flat path lacks {} validity",
-                                           cast);
-                                validity |= nulls->IsNotNull();
-                            }
-                            return validity;
-                        };
-                        if (ExprResCacheManager::IsEnabled()) {
-                            auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_,
-                                signature,
-                                active_count_,
-                                compute_validity);
-                            valid_res = std::move(*validity);
-                        } else {
-                            valid_res = compute_validity();
-                        }
-                    } else if (cached_is_nested_index_ &&
-                               func_returns_row_level) {
+                    if (cached_is_nested_index_ && func_returns_row_level) {
                         valid_res = GetFieldRowValidity(active_count_);
                     } else {
                         AssertInfo(
@@ -3426,19 +3331,6 @@ class SegmentExpr : public Expr {
         const bool need_element_slicing =
             cached_is_nested_index_ && !func_returns_row_level;
 
-        if (offsets != nullptr) {
-            AssertInfo(!need_element_slicing,
-                       "cannot gather row offsets from an element-level "
-                       "index result");
-            AssertInfo(cached_index_chunk_res_->size() ==
-                           static_cast<size_t>(active_count_),
-                       "index result size {} does not match row count {}",
-                       cached_index_chunk_res_->size(),
-                       active_count_);
-            return GatherCachedResultByOffsets(*cached_index_chunk_res_,
-                                               *cached_index_chunk_valid_res_,
-                                               *offsets);
-        }
         return SliceCachedIndexResult(need_element_slicing);
     }
 
@@ -3744,9 +3636,6 @@ class SegmentExpr : public Expr {
             case DataType::TEXT:
                 cast = "VARCHAR";
                 break;
-            case DataType::JSON:
-                cast = "JSON";
-                break;
             default:
                 return std::nullopt;
         }
@@ -3919,11 +3808,6 @@ class SegmentExpr : public Expr {
                     exec_path_ = ExprExecPath::RawData;
                     return false;
                 }
-                // By design, JsonFlat indexes array elements at the same path
-                // as scalar values, so scalar predicates may match array
-                // elements (e.g. a == 1 matches {"a": [1, 2]}). Preserve this
-                // index behavior rather than forcing raw JSON evaluation to
-                // distinguish scalar and array shapes.
                 selected_json_view_ =
                     json_reader_->Resolve(req.json_path, *cast);
                 if (!selected_json_view_) {
@@ -4047,16 +3931,6 @@ class SegmentExpr : public Expr {
             .accepts_candidates = true,
             .has_offset_input = has_offset_input_,
         };
-    }
-
-    bool
-    SelectedJsonIndexIsFlat() const {
-        // Typed projections also route paths, but retain their scalar value
-        // type. Only a field-level JSON reader exposes JsonFlat's numeric
-        // predicates for both int64 and double.
-        return field_type_ == DataType::JSON &&
-               selected_index_entry_.has_value() &&
-               index_path_detail::IsFlatJsonIndex(*selected_index_entry_);
     }
 
     static bool
@@ -4291,13 +4165,7 @@ class SegmentExpr : public Expr {
             if (field_type_ != DataType::JSON) {
                 return true;
             }
-            if (registration.json_cast_type.data_type() ==
-                    JsonCastType::DataType::JSON &&
-                index_path_detail::IsPathPrefix(registration.json_path, path)) {
-                return true;
-            }
-            if (!registration.json_path.empty() &&
-                registration.json_path == path) {
+            if (registration.json_path == path) {
                 return true;
             }
         }
@@ -4306,19 +4174,15 @@ class SegmentExpr : public Expr {
 
     // The family of the selected scalar index, from the segment's index
     // metadata rather than anything the user wrote. The family is the
-    // canonical registry key (index/Families.h): a JSON flat index is an
-    // INVERTED index underneath but registers as its own family, and the
-    // HYBRID selector has none, having resolved to bitmap or inverted at
-    // load.
+    // canonical registry key (index/Families.h). The HYBRID selector has
+    // resolved to a concrete family at load.
     void
     RecordScalarIndexFamily(FeatureRecorder* recorder) const {
         if (!selected_index_entry_.has_value()) {
             return;
         }
         const auto& family = selected_index_entry_->family;
-        if (family == index::families::kJsonFlat) {
-            recorder->Mark(FeatureBit::ScalarIndexJsonFlat);
-        } else if (family == index::families::kBitmap) {
+        if (family == index::families::kBitmap) {
             recorder->Mark(FeatureBit::ScalarIndexBitmap);
         } else if (family == index::families::kSort) {
             recorder->Mark(FeatureBit::ScalarIndexStlSort);

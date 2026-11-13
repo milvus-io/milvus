@@ -244,8 +244,8 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 
 			if typeutil.IsJSONType(cit.fieldSchema.DataType) && indexType == indexparamcheck.IndexHybrid {
-				// Full JSON cast is only implemented by the inverted JSON
-				// index; HYBRID supports typed JSON path indexes.
+				// Keep logical JSON flat definitions normalized to INVERTED;
+				// HYBRID represents physical typed JSON path indexes.
 				if castType, ok := indexParamsMap[common.JSONCastTypeKey]; ok && strings.EqualFold(castType, "JSON") {
 					indexType = indexparamcheck.IndexINVERTED
 				}

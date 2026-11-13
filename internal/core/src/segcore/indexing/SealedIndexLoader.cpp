@@ -58,7 +58,6 @@ UsesV1DiskLayout(const index::IndexFamily& family) {
            family == index::families::kInverted ||
            family == index::families::kNgram ||
            family == index::families::kRTree ||
-           family == index::families::kJsonFlat ||
            family == index::families::kHybrid;
 }
 
@@ -207,12 +206,10 @@ SealedIndexLoader::SealedIndexLoader(
             &metadata_ctx.ctx);
         resolved_family = index::ResolvePackedLoadFamily(
             adapted.family, packed_source->Metadata(), config_);
-        if (adapted.family != index::families::kJsonFlat) {
-            config_ = index::AnnotateJsonProjectionCompleteness(
-                std::move(config_),
-                packed_source->Directory(),
-                packed_source->Metadata());
-        }
+        config_ = index::AnnotateJsonProjectionCompleteness(
+            std::move(config_),
+            packed_source->Directory(),
+            packed_source->Metadata());
     } else {
         prepared_legacy_source_ = MakeRemoteSource(adapted.family,
                                                    file_manager_context_,
@@ -229,10 +226,8 @@ SealedIndexLoader::SealedIndexLoader(
             resolved_family =
                 index::ResolveLoadFamily(adapted.family, *source, config_);
         }
-        if (adapted.family != index::families::kJsonFlat) {
-            config_ = index::AnnotateJsonProjectionCompleteness(
-                std::move(config_), *source);
-        }
+        config_ = index::AnnotateJsonProjectionCompleteness(std::move(config_),
+                                                            *source);
     }
     const auto loader_entry =
         index::LoaderRegistry::Instance().Lookup(resolved_family);

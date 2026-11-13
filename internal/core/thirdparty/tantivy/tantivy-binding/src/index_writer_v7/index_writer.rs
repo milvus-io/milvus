@@ -4,10 +4,9 @@ use std::sync::Arc;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
-use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing,
-    TextOptions, FAST, STRING,
+    TextOptions, FAST,
 };
 use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
@@ -47,7 +46,6 @@ pub(crate) fn schema_builder_add_field(
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
         }
-        TantivyDataType::JSON => schema_builder.add_json_field(&field_name, STRING | FAST),
     }
 }
 
@@ -82,13 +80,6 @@ impl TantivyValue<TantivyDocument> for bool {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_bool(Field::from_field_id(field), *self);
-    }
-}
-
-impl TantivyValue<TantivyDocument> for serde_json::Value {
-    #[inline]
-    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_field_value(Field::from_field_id(field), self);
     }
 }
 
@@ -200,37 +191,6 @@ impl IndexWriterWrapperImpl {
         for i in 0..ptrs.len() {
             let data = ptr_len_to_str(ptrs[i], lens[i])?;
             document.add_field_value(self.field, data);
-        }
-
-        self.add_document(document, offset)
-    }
-
-    pub fn add_json(&mut self, data: &str, offset: u32) -> Result<()> {
-        let j = serde_json::from_str::<serde_json::Value>(data)?;
-        let mut document = TantivyDocument::default();
-        j.add_to_document(self.field.field_id(), &mut document);
-
-        self.add_document(document, offset)
-    }
-
-    /// Batch add multiple JSON documents, each as a separate document with sequential offsets.
-    pub fn add_json_batch(&mut self, datas: &[*const c_char], offset_begin: u32) -> Result<()> {
-        for (i, &data_ptr) in datas.iter().enumerate() {
-            let data = c_ptr_to_str(data_ptr)?;
-            let j = serde_json::from_str::<serde_json::Value>(data)?;
-            let mut document = TantivyDocument::default();
-            j.add_to_document(self.field.field_id(), &mut document);
-            self.add_document(document, offset_begin + i as u32)?;
-        }
-        Ok(())
-    }
-
-    pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for element in datas {
-            let data = c_ptr_to_str(*element)?;
-            let j = serde_json::from_str::<serde_json::Value>(data)?;
-            j.add_to_document(self.field.field_id(), &mut document);
         }
 
         self.add_document(document, offset)

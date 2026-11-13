@@ -7141,7 +7141,7 @@ ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
-    // JSON indexes (JsonFlatIndex + JSON-cast) remain distinct from the
+    // Typed JSON-path indexes remain distinct from the
     // scalar/vector/binlog readiness bitsets, but their ownership now follows
     // the published runtime snapshot.
     auto runtime = CaptureRuntimeResourceState();

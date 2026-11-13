@@ -43,7 +43,8 @@ var execBitFeatures = [...]Feature{
 	execBitRetired,
 	FeatureScalarIndexRtree,
 	FeatureScalarIndexNgram,
-	FeatureScalarIndexJSONFlat,
+	// Bit 13 was JSON flat indexing, which no longer has a physical reader.
+	execBitRetired,
 	FeatureFilterIndexDeclined,
 	FeatureExprCacheHit,
 	FeatureInterimIndexSearch,

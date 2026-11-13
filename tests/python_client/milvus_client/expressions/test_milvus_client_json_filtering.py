@@ -435,7 +435,7 @@ class TestJsonFilteringIndexedUnknownSemantics(JsonFilteringUnknownMixin, TestMi
     JSON UNKNOWN semantics across no-index, JSON path index, query, and search.
 
     When to add tests here:
-    - The test requires JSON path index or JSON flat index coverage.
+    - The test requires typed JSON path index coverage.
     - The first phase must cover DOUBLE and VARCHAR path-index cast types.
     - ARRAY_* cast types are L2 and should be added with dedicated array-path
       UNKNOWN assertions.
@@ -545,61 +545,6 @@ class TestJsonFilteringIndexedUnknownSemantics(JsonFilteringUnknownMixin, TestMi
 
         self._assert_query_and_search_cases(client, raw_collection, cases)
         self._assert_query_and_search_cases(client, indexed_collection, cases)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_json_flat_index_unknown_semantics_query(self):
-        """
-        target: JSON flat index preserves UNKNOWN semantics for comparable values
-        method: compare no-index and json_cast_type=json flat-index collections with 3000 rows
-        expected: flat-index and no-index results both match fixed expected IDs
-        """
-        client = self._client()
-        raw_collection = self._collection_name("flat_raw")
-        indexed_collection = self._collection_name("flat_idx")
-        json_indexes = [
-            {
-                "index_name": "idx_json_flat",
-                "index_type": "INVERTED",
-                "params": {"json_cast_type": "json"},
-            }
-        ]
-        cases = [
-            (f'{json_field}["a"] != 2', [5]),
-            (f'{json_field}["a"] not in [2]', [5]),
-            (f'{json_field}["s"] != "abc"', [12]),
-            (f'{json_field}["s"] not in ["abc"]', [12]),
-            (f'{json_field}["nested"]["age"] != 30', [16]),
-        ]
-        self._create_sealed_collection(client, raw_collection)
-        self._create_sealed_collection(client, indexed_collection, json_indexes=json_indexes)
-
-        self._assert_query_and_search_cases(client, raw_collection, cases)
-        self._assert_query_and_search_cases(client, indexed_collection, cases)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Known JSON flat index UNKNOWN mismatch: https://github.com/milvus-io/milvus/issues/51193")
-    def test_json_flat_index_array_scalar_comparison_unknown_semantics_query(self):
-        """
-        target: JSON flat index should preserve UNKNOWN for array-vs-scalar comparisons
-        method: compare no-index and json_cast_type=json flat-index collections with 3000 rows
-        expected: {"a": [2]} is UNKNOWN for scalar comparison and does not match outer NOT
-        """
-        client = self._client()
-        raw_collection = self._collection_name("flat_array_raw")
-        indexed_collection = self._collection_name("flat_array_idx")
-        json_indexes = [
-            {
-                "index_name": "idx_json_flat",
-                "index_type": "INVERTED",
-                "params": {"json_cast_type": "json"},
-            }
-        ]
-        cases = [(f'not ({json_field}["a"] > 2)', [4])]
-        self._create_sealed_collection(client, raw_collection)
-        self._create_sealed_collection(client, indexed_collection, json_indexes=json_indexes)
-
-        self._assert_query_cases(client, raw_collection, cases)
-        self._assert_query_cases(client, indexed_collection, cases)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_and_search_filter_consistency(self):

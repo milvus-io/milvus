@@ -28,12 +28,6 @@
 namespace milvus::index::test {
 namespace {
 
-void
-SetJsonDocumentMetadata(ScalarTestData<std::string_view>& data,
-                        std::string_view root = {}) {
-    data.metadata["json_path"] = root;
-}
-
 template <typename T>
 void
 SetProjectedMetadata(ScalarTestData<T>& data,
@@ -58,105 +52,6 @@ StringArray(std::initializer_list<std::string_view> values) {
         owned.emplace_back(value);
     }
     return OwnedArrayValue::FromStrings(DataType::VARCHAR, owned);
-}
-
-ScalarTestData<std::string_view>
-MakeJsonEmployees() {
-    ScalarTestData<std::string_view> data({
-        R"({"profile":{"name":{"first":"Alice","last":"Smith","preferred_name":"Al"},"team":{"name":"Engineering","supervisor":{"name":"Bob"}},"is_active":true,"employee_id":1001,"skills":["cpp","rust","python"],"scores":[95,88,92]}})",
-        R"({"profile":{"name":{"first":"Bob","last":"Johnson","preferred_name":null},"team":{"name":"Product","supervisor":{"name":"Charlie"}},"is_active":false,"employee_id":1002,"skills":["java","python"],"scores":[85,90]}})",
-        R"({"profile":{"name":{"first":"Charlie","last":"Williams"},"team":{"name":"Design","supervisor":{"name":"Alice"}},"is_active":true,"employee_id":1003,"skills":["python","javascript"],"scores":[87,91,89]}})",
-    });
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data);
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonTypeFamilies() {
-    ScalarTestData<std::string_view> data({
-        R"({"a":1})",
-        R"({"a":1.5})",
-        R"({"a":"one"})",
-        R"({"a":true})",
-        R"({"a":[2,3]})",
-        R"({"a":["two"]})",
-        R"({"a":[false]})",
-        R"({"a":{"b":1}})",
-        R"({"a":[]})",
-        R"({"a":null})",
-        R"({})",
-        R"({"a":"a\u0000b"})",
-        R"({"a":"猫"})",
-        R"({"a":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"})",
-    });
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data);
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonPrecision() {
-    ScalarTestData<std::string_view> data({
-        R"({"a":-10})",
-        R"({"a":1})",
-        R"({"a":10})",
-        R"({"a":10.5})",
-        R"({"a":9223372036854775808})",
-        R"({"a":18446744073709551615})",
-        R"({"a":"1"})",
-        R"({})",
-    });
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data);
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonFieldNullable() {
-    ScalarTestData<std::string_view> data({
-        R"({"a":"alpha"})",
-        R"({"a":"ignored"})",
-        R"({"a":"beta"})",
-        R"({"a":null})",
-        R"({})",
-    });
-    data.validity.reset(1);
-    data.batch_sizes = {0, 2, 0, 3, 0};
-    SetJsonDocumentMetadata(data);
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonRootPrefix() {
-    ScalarTestData<std::string_view> data({
-        R"({"profile":{"name":"Alice","active":true},"profiled":{"name":"wrong"}})",
-        R"({"profile":{"name":"Bob","active":false}})",
-        R"({"profile":{"name":"猫","active":true}})",
-    });
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data, "/profile");
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonEscapedPaths() {
-    ScalarTestData<std::string_view> data({
-        R"({"a/b":"slash","m~n":"tilde","a.b":"dot","a\\b":"backslash","empty":{"":"empty"},"arr":["zero","one"]})",
-        R"({"a/b":"other","m~n":1,"arr":[]})",
-        R"({})",
-    });
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data);
-    return data;
-}
-
-ScalarTestData<std::string_view>
-MakeJsonAllMissing() {
-    ScalarTestData<std::string_view> data({R"({"b":1})", R"({})", R"(42)"});
-    data.validity_present = false;
-    SetJsonDocumentMetadata(data);
-    return data;
 }
 
 ScalarTestData<double>
@@ -309,50 +204,6 @@ MakeProjectedArrayVarchar() {
 
 void
 RegisterJsonDataSets(DataCatalog& catalog) {
-    catalog.Add<std::string_view>({
-        .name = "JsonEmployees",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonEmployees,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonTypeFamilies",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonTypeFamilies,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonPrecision",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonPrecision,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonFieldNullable",
-        .requires_nullable = true,
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonFieldNullable,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonRootPrefix",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonRootPrefix,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonEscapedPaths",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonEscapedPaths,
-    });
-    catalog.Add<std::string_view>({
-        .name = "JsonAllMissing",
-        .input_shape = BackendInputShape::JsonDocument,
-        .logical_value_type = DataType::JSON,
-        .make_data = MakeJsonAllMissing,
-    });
-
     catalog.Add<double>({
         .name = "JsonProjectedDoubleTriState",
         .requires_nullable = true,

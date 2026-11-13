@@ -264,8 +264,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	schema := collection.Schema()
 	hasVirtualPK := typeutil.IsExternalCollection(schema) &&
 		(!typeutil.NewStorageColumnResolver(schema).IsMilvusTable() || !HasExternalPrimaryKey(schema))
-	for _, segment := range segments {
-		configureUseTakeForOutput(segment, collection.Schema())
+	for i, segment := range segments {
+		segments[i] = withoutJSONFlatIndexes(segment, schema)
+		configureUseTakeForOutput(segments[i], schema)
 	}
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
@@ -436,12 +437,28 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 // Call it before constructing a native segment or reopening it; neither the
 // coordinator's metadata nor a shared watch snapshot may be modified in place.
 func PrepareSegmentLoadInfo(info *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (*querypb.SegmentLoadInfo, error) {
-	prepared := proto.Clone(info).(*querypb.SegmentLoadInfo)
+	prepared := proto.Clone(withoutJSONFlatIndexes(info, schema)).(*querypb.SegmentLoadInfo)
 	configureUseTakeForOutput(prepared, schema)
 	if err := prepareIndexLoadParams(prepared.GetIndexInfos()); err != nil {
 		return nil, err
 	}
 	return prepared, nil
+}
+
+// withoutJSONFlatIndexes gives physical consumers a private view only when a
+// historical logical-only index needs removing; shared coordinator metadata stays intact.
+func withoutJSONFlatIndexes(info *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) *querypb.SegmentLoadInfo {
+	for _, index := range info.GetIndexInfos() {
+		if !indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, index.GetFieldID()).GetDataType(), index.GetIndexParams()) {
+			continue
+		}
+		filtered := proto.Clone(info).(*querypb.SegmentLoadInfo)
+		filtered.IndexInfos = lo.Filter(filtered.IndexInfos, func(index *querypb.FieldIndexInfo, _ int) bool {
+			return !indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, index.GetFieldID()).GetDataType(), index.GetIndexParams())
+		})
+		return filtered
+	}
+	return info
 }
 
 func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {
@@ -480,6 +497,21 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 }
 
 func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+	schemas := make(map[int64]*schemapb.CollectionSchema)
+	infos = lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		current := schema
+		if current == nil {
+			if cached, ok := schemas[info.GetCollectionID()]; ok {
+				current = cached
+			} else {
+				if collection := loader.manager.Collection.Get(info.GetCollectionID()); collection != nil {
+					current = collection.Schema()
+				}
+				schemas[info.GetCollectionID()] = current
+			}
+		}
+		return withoutJSONFlatIndexes(info, current)
+	})
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -1979,6 +2011,17 @@ func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	schemas := make(map[int64]*schemapb.CollectionSchema)
+	loadInfos = lo.Map(loadInfos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		schema, ok := schemas[info.GetCollectionID()]
+		if !ok {
+			if collection := loader.manager.Collection.Get(info.GetCollectionID()); collection != nil {
+				schema = collection.Schema()
+			}
+			schemas[info.GetCollectionID()] = schema
+		}
+		return withoutJSONFlatIndexes(info, schema)
+	})
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)

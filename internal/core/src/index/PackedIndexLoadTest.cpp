@@ -32,7 +32,6 @@
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/ISpatialReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
-#include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "storage/EntryStreamUtils.h"
@@ -340,42 +339,6 @@ TEST(ScalarIndexV3AsyncTest, TextMatchesAndNulls) {
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
         ASSERT_NE(nulls, nullptr);
         ExpectHits(nulls->IsNull(), 4, {3});
-    }
-}
-
-TEST(ScalarIndexV3AsyncTest, JsonPathsValuesAndNulls) {
-    for (const auto* name : {"JsonFlatV7", "JsonFlatV7Mmap"}) {
-        SCOPED_TRACE(name);
-        const auto& backend =
-            ScalarReaderBackends().Get<std::string_view>(name);
-        ScalarTestData<std::string_view> data({R"({"a":10})",
-                                               R"({"a":20})",
-                                               R"({"b":30})",
-                                               R"({"a":10})",
-                                               R"({"a":null})"});
-        data.validity.reset(3);
-        const ScalarTestInput<std::string_view> input(data);
-        auto artifact = backend.Build(input.View(), {.row_count = 5});
-        auto reader =
-            OpenV3(backend, SerializeV3(*artifact), {.row_count = 5}, true);
-        const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
-        ASSERT_NE(json, nullptr);
-        // Flat-index existence follows indexed values, excluding JSON null.
-        ExpectHits(json->Exists("/a"), 5, {0, 1});
-        auto resolved = json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
-        ASSERT_TRUE(resolved);
-        const auto* predicate =
-            dynamic_cast<const IScalarPredicateReader<double>*>(resolved.get());
-        ASSERT_NE(predicate, nullptr);
-        const double value = 10;
-        ExpectHits(predicate->In(1, &value), 5, {0});
-        const auto* path_nulls =
-            dynamic_cast<const INullReader*>(resolved.get());
-        ASSERT_NE(path_nulls, nullptr);
-        ExpectHits(path_nulls->IsNull(), 5, {2, 3, 4});
-        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
-        ASSERT_NE(nulls, nullptr);
-        ExpectHits(nulls->IsNull(), 5, {3});
     }
 }
 

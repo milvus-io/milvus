@@ -522,28 +522,6 @@ AddSpatialProfiles(BackendCatalog& catalog) {
     }
 }
 
-void
-AddJsonFlatProfile(BackendCatalog& catalog,
-                   std::string name,
-                   std::string nonnull_name,
-                   int engine_version,
-                   bool mmap) {
-    BackendSpec spec;
-    spec.family = families::kJsonFlat;
-    spec.build_params = {
-        {FIELD_ID, 101},
-        {SCALAR_INDEX_ENGINE_VERSION, engine_version},
-    };
-    spec.enable_mmap = mmap;
-    spec.input_shape = BackendInputShape::JsonDocument;
-    spec.field_type = DataType::JSON;
-    spec.value_type = DataType::JSON;
-    spec.complete_build_params = CompleteJsonParams("JSON", "", true);
-    spec.complete_load_params = CompleteJsonParams("JSON", "", false);
-    AddNullablePair<std::string_view>(
-        catalog, name, std::move(nonnull_name), std::move(spec));
-}
-
 Config
 ProjectedFamilyParams(const char* family, DataType value_type) {
     if (std::string_view(family) == families::kInverted) {
@@ -751,9 +729,6 @@ AddProjectedProfiles(BackendCatalog& catalog) {
 
 void
 AddJsonProfiles(BackendCatalog& catalog) {
-    AddJsonFlatProfile(catalog, "JsonFlatV7", "JsonFlatV7NonNull", 3, false);
-    AddJsonFlatProfile(
-        catalog, "JsonFlatV7Mmap", "JsonFlatV7NonNullMmap", 3, true);
     AddProjectedProfiles(catalog);
 }
 

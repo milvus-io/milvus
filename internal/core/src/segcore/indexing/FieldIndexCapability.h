@@ -100,7 +100,7 @@ struct IndexCapabilityEntry {
     JsonCastType json_cast_type{JsonCastType::UNKNOWN};
 
     // "inverted" / "bitmap" / "sort" / "marisa" / "fmindex" / "text" /
-    // "ngram" / "rtree" / "json_flat" ... — the canonical registry key.
+    // "ngram" / "rtree" ... — the canonical registry key.
     std::string family;
 
     // The value type indexed by the reader. ARRAY uses its element type; a JSON
