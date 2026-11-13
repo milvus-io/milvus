@@ -1573,6 +1573,10 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	// Refresh applies to new requests, not retries or Hybrid sub-searches.
 	allowStreaming := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() && t.supportsStreamingReduce()
 	chunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
+	if allowStreaming && chunkBytes <= 0 {
+		mlog.Warn(ctx, "invalid reduceStreamChunkBytes, falling back to Batch", mlog.Int("chunkBytes", chunkBytes))
+		allowStreaming = false
+	}
 	retryStreaming := allowStreaming
 	searchRequest := t.SearchRequest
 	if retryStreaming && len(t.orderByFields) > 0 &&
