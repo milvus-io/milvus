@@ -52,6 +52,20 @@ round before closing the TiKV client. Configuration refresh affects subsequent
 rounds. Disabling the worker cannot undo an already advanced safe point and
 does not interrupt a round already in progress.
 
+Retention and interval values are validated on each round, including refreshed
+configuration. Nonpositive, malformed or overflowing retention skips the round
+before any PD mutation or GC; a retention extending before the timestamp epoch
+is also rejected. Fractional retention is rounded up to TiKV's millisecond
+precision. An invalid interval uses the ten-minute default, including while GC
+is disabled, so it cannot create an immediate retry loop. Timestamp requests
+use the worker context and are canceled during shutdown.
+
+The worker remembers only candidates whose lock scan and GC update both
+succeeded. It still refreshes its service registration each round, but skips
+the scan if the capped candidate has not advanced. Failures remain retryable on
+the next round; a backup releasing its pin allows progress again. This local
+record is not persisted, so restarting the worker may repeat one scan.
+
 ## Verification
 
 Regression coverage includes empty-value predicates, guarded concurrent first

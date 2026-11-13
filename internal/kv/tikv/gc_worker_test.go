@@ -53,7 +53,7 @@ func TestGCWorkerAdvance(t *testing.T) {
 	client := newGCTestClient(t)
 
 	before := time.Now()
-	safePoint, err := advanceGCSafePoint(context.Background(), client)
+	safePoint, err := (&gcWorker{client: client}).advanceSafePoint(context.Background())
 	require.NoError(t, err)
 	assert.WithinDuration(t, before.Add(-time.Minute), oracle.GetTimeFromTS(safePoint), 5*time.Second)
 	assert.Equal(t, safePoint, gcSafePoint(t, client))
@@ -71,7 +71,8 @@ func TestGCWorkerAdvanceKeepsServiceSafePoint(t *testing.T) {
 	backup := oracle.GoTimeToTS(time.Now().Add(-time.Hour))
 	_, err := client.GetPDClient().UpdateServiceGCSafePoint(ctx, "backup", 3600, backup)
 	require.NoError(t, err)
-	safePoint, err := advanceGCSafePoint(ctx, client)
+	worker := &gcWorker{client: client}
+	safePoint, err := worker.advanceSafePoint(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, backup, safePoint)
 	assert.Equal(t, backup, gcSafePoint(t, client))
@@ -79,7 +80,7 @@ func TestGCWorkerAdvanceKeepsServiceSafePoint(t *testing.T) {
 	// once the backup releases its service safe point, the GC safe point moves on
 	_, err = client.GetPDClient().UpdateServiceGCSafePoint(ctx, "backup", 0, 0)
 	require.NoError(t, err)
-	safePoint, err = advanceGCSafePoint(ctx, client)
+	safePoint, err = worker.advanceSafePoint(ctx)
 	require.NoError(t, err)
 	assert.Greater(t, safePoint, backup)
 }

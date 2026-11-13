@@ -655,6 +655,39 @@ func TestCompareVersionAndSwapCreate(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
+func TestLegacyEmptyValueCodec(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/legacy_codec")
+	ctx := t.Context()
+	defer kv.Close()
+	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
+
+	// Write the historical representation directly, as an older Milvus would.
+	const legacyEmpty = "__milvus_reserved_empty_tikv_value_DO_NOT_USE"
+	txn, err := txnClient.Begin()
+	require.NoError(t, err)
+	require.NoError(t, txn.Set([]byte(kv.GetPath("empty")), []byte(legacyEmpty)))
+	require.NoError(t, txn.Commit(ctx))
+	const binary = "\x00\xffordinary\x00value"
+	require.NoError(t, kv.Save(ctx, "binary", binary))
+	value, err := kv.Load(ctx, "empty")
+	require.NoError(t, err)
+	require.Empty(t, value)
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"checked": "yes"}, nil, predicates.ValueEqual("empty", "")))
+	created, err := kv.CompareVersionAndSwap(ctx, "empty", 0, "replacement")
+	require.NoError(t, err)
+	require.False(t, created, "an empty logical value is still an existing key")
+
+	values := make(map[string]string)
+	require.NoError(t, kv.WalkWithPrefix(ctx, "", 1, func(key, value []byte) error {
+		values[string(key)] = string(value)
+		return nil
+	}))
+	require.Equal(t, map[string]string{
+		kv.GetPath("empty"): "", kv.GetPath("binary"): binary, kv.GetPath("checked"): "yes",
+	}, values)
+	require.ErrorIs(t, kv.Save(ctx, "reserved", legacyEmpty), merr.ErrParameterInvalid)
+}
+
 // Of concurrent creations of one key exactly one succeeds, and the key keeps
 // its value.
 func TestCompareVersionAndSwapConcurrentCreate(t *testing.T) {
