@@ -1611,6 +1611,10 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		return nil, err
 	}
 	httpReq := anyReq.(*QueryReqV2)
+	namespaced, formatErr := validateResponseFormat(c, httpReq.ResponseFormat)
+	if formatErr != nil {
+		return nil, formatErr
+	}
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -1665,10 +1669,8 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
-		if err == nil {
-			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
-		}
+		outputData, err := buildQueryRespWithMetadata(namespaced, queryResp.OutputFields, queryResp.FieldsData,
+			queryResultMetadata{queryOffsets: queryResp.GetElementIndices()}, allowJS, collSchema, httpReq.OutputFields, vectorEncoding)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -1705,6 +1707,10 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	httpReq := anyReq.(*CollectionIDReq)
+	namespaced, formatErr := validateResponseFormat(c, httpReq.ResponseFormat)
+	if formatErr != nil {
+		return nil, formatErr
+	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1742,7 +1748,8 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
+		outputData, err := buildQueryRespWithMetadata(namespaced, queryResp.OutputFields, queryResp.FieldsData,
+			queryResultMetadata{}, allowJS, collSchema, httpReq.OutputFields, vectorEncoding)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2142,6 +2149,15 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	httpReq := anyReq.(*SearchReqV2)
+	namespaced, formatErr := validateResponseFormat(c, httpReq.ResponseFormat)
+	if formatErr != nil {
+		return nil, formatErr
+	}
+	if namespaced && httpReq.SearchAggregation != nil {
+		err := merr.WrapErrParameterInvalidMsg("responseFormat namespaced is not supported with searchAggregation")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2415,10 +2431,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
-			if err == nil {
-				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
-			}
+			outputData, err := buildQueryRespWithMetadata(namespaced, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+				queryResultMetadata{ids: searchResp.Results.Ids, scores: searchResp.Results.Scores, searchOffsets: searchResp.Results.GetElementIndices()},
+				allowJS, collSchema, httpReq.OutputFields, vectorEncoding)
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2480,6 +2495,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		return nil, err
 	}
 	httpReq := anyReq.(*HybridSearchReq)
+	namespaced, formatErr := validateResponseFormat(c, httpReq.ResponseFormat)
+	if formatErr != nil {
+		return nil, formatErr
+	}
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2611,10 +2630,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
-			if err == nil {
-				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
-			}
+			outputData, err := buildQueryRespWithMetadata(namespaced, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+				queryResultMetadata{ids: searchResp.Results.Ids, scores: searchResp.Results.Scores, searchOffsets: searchResp.Results.GetElementIndices()},
+				allowJS, collSchema, httpReq.OutputFields, vectorEncoding)
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
