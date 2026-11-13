@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -649,4 +651,35 @@ func TestCompactionTargetReconcilerSatisfiesEmptyCollectionWithoutLocalCache(t *
 	require.NoError(t, err)
 	require.Empty(t, events)
 	require.Equal(t, StopSatisfied, targetMeta.GetCompactionTarget(100).GetStopReason())
+}
+
+func TestCompactionTargetReconcilerObservesFlushBeforeSatisfaction(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	record := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 200, TotalRows: proto.Int64(0),
+	}
+	targetMeta := NewLoadedCompactionTargetMeta(t, t.Context(), record)
+	segment := sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false)
+	segment.State = commonpb.SegmentState_Growing
+	fixture := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
+	observations := 0
+	reconciler := NewCompactionTargetReconciler(fixture.Meta, fixture.indexMeta, targetMeta, meta.NewMockHandlerWithMeta(fixture.Meta),
+		func(_ context.Context, id int64) (bool, error) {
+			observations++
+			if observations == 2 {
+				require.NoError(t, fixture.Meta.UpdateSegmentsInfo(t.Context(),
+					meta.UpdateStatusOperator(1, commonpb.SegmentState_Flushed)))
+			}
+			return id == 1, nil
+		})
+	fixture.Catalog = &datacoord.Catalog{MetaKv: meta.NewMetaMemoryKV()}
+
+	events, err := reconciler.Reconcile(t.Context())
+	require.NoError(t, err)
+	require.Len(t, events[policy.TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[policy.TriggerTypeSingle][0].GetSegmentsView()))
+	stored := targetMeta.GetCompactionTarget(100)
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, stored.GetState())
+	require.Zero(t, stored.GetTotalRows())
 }
