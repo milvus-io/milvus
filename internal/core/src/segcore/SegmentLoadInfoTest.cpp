@@ -4113,7 +4113,7 @@ TEST(SealedFieldLayoutTest, ExplicitEmptyScopeDoesNotLoadAllFields) {
     auto schema = std::make_shared<Schema>();
     auto id = schema->AddDebugField("value", DataType::INT64);
     SealedFieldLayout empty(schema, LoadScope({}));
-    SealedFieldLayout selected(schema, LoadScope({id.get()}));
+    SealedFieldLayout selected(schema, LoadScope({id.get()}, {id.get()}));
     EXPECT_FALSE(empty.IsFieldInLoadScope(id));
     EXPECT_FALSE(empty.ShouldLoadField(id));
     EXPECT_TRUE(selected.IsFieldInLoadScope(id));
@@ -4121,12 +4121,84 @@ TEST(SealedFieldLayoutTest, ExplicitEmptyScopeDoesNotLoadAllFields) {
     EXPECT_TRUE(schema->IsFieldInLoadScope(id));
 }
 
+TEST(SealedFieldLayoutTest, CopiedFieldDescriptionsOutliveSchemaAndLayouts) {
+    auto schema = std::make_shared<Schema>();
+    const auto a = schema->AddDebugField("a", DataType::INT64);
+    const auto b = schema->AddDebugField("b", DataType::INT64);
+    schema->set_schema_version(1);
+    auto first =
+        std::make_unique<SealedFieldLayout>(schema, LoadScope({a.get()}));
+    auto second = std::make_unique<SealedFieldLayout>(
+        schema, LoadScope({a.get(), b.get()}));
+    auto group_fields = second->get_field_metas({a});
+    auto column_field = group_fields.at(a);
+    const auto* name = &(*schema)[a].get_name();
+
+    EXPECT_EQ(&(*first)[a].get_name(), name);
+    EXPECT_EQ(&(*second)[a].get_name(), name);
+    EXPECT_EQ(&group_fields.at(a).get_name(), name);
+    EXPECT_EQ(&column_field.get_name(), name);
+    EXPECT_FALSE(first->has_field(b));
+    EXPECT_TRUE(second->has_field(b));
+
+    std::weak_ptr<Schema> weak_schema = schema;
+    schema.reset();
+    EXPECT_FALSE(weak_schema.expired());
+    EXPECT_EQ((*first)[a].get_data_type(), DataType::INT64);
+    EXPECT_EQ((*second)[b].get_name().get(), "b");
+    first.reset();
+    second.reset();
+    EXPECT_TRUE(weak_schema.expired());
+    EXPECT_EQ(column_field.get_name().get(), "a");
+}
+
+TEST(SealedFieldLayoutTest, LatePreparationUsesItsExactSchemaDescription) {
+    proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_version(1);
+    auto* pk = schema_proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(101);
+    field->set_name("b");
+    field->set_data_type(proto::schema::DataType::Int64);
+    field->mutable_default_value()->set_long_data(1);
+    auto old_schema = Schema::ParseFrom(schema_proto);
+    const FieldId b(101);
+    SealedFieldLayout old_layout(old_schema, LoadScope({b.get()}));
+
+    schema_proto.set_version(2);
+    field->mutable_default_value()->set_long_data(2);
+    auto* added = schema_proto.add_fields();
+    added->set_fieldid(102);
+    added->set_name("c");
+    added->set_data_type(proto::schema::DataType::Int64);
+    auto new_schema = Schema::ParseFrom(schema_proto);
+    const FieldId c(102);
+    SealedFieldLayout early(new_schema, LoadScope({b.get(), c.get()}));
+    old_schema.reset();
+    SealedFieldLayout late(new_schema, LoadScope({b.get(), c.get()}));
+
+    EXPECT_NE(&old_layout[b].get_name(), &early[b].get_name());
+    EXPECT_EQ(&early[b].get_name(), &late[b].get_name());
+    EXPECT_EQ(&(*new_schema)[b].get_name(), &late[b].get_name());
+    EXPECT_FALSE(old_layout.has_field(c));
+    EXPECT_TRUE(early.has_field(c));
+    EXPECT_TRUE(late.has_field(c));
+    new_schema.reset();
+    EXPECT_EQ(old_layout[b].default_value()->long_data(), 1);
+    EXPECT_EQ(early[b].default_value()->long_data(), 2);
+    EXPECT_EQ(late[b].default_value()->long_data(), 2);
+}
+
 TEST(SealedFieldLayoutTest, ExplicitScopeIsIndependentOfLegacySchemaScope) {
     auto schema = std::make_shared<Schema>();
     auto a = schema->AddDebugField("a", DataType::INT64);
     auto b = schema->AddDebugField("b", DataType::INT64);
     schema->UpdateLoadFields({a.get()});
-    SealedFieldLayout selected(schema, LoadScope({b.get()}));
+    SealedFieldLayout selected(schema, LoadScope({b.get()}, {b.get()}));
     EXPECT_FALSE(selected.IsFieldInLoadScope(a));
     EXPECT_FALSE(selected.has_field(a));
     EXPECT_EQ(selected.get_field_ids().size(), 1);
@@ -4134,21 +4206,22 @@ TEST(SealedFieldLayoutTest, ExplicitScopeIsIndependentOfLegacySchemaScope) {
     EXPECT_FALSE(schema->IsFieldInLoadScope(b));
 }
 
-TEST(SealedFieldLayoutTest, PhysicalDependenciesDoNotGrantLogicalAccess) {
+TEST(SealedFieldLayoutTest, PhysicalDependenciesDoNotExpandExplicitScope) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto ttl = schema->AddDebugField("expires", DataType::INT64);
     auto value = schema->AddDebugField("value", DataType::INT64);
     schema->set_primary_field_id(pk);
     schema->set_ttl_field_id(ttl);
-    auto scope = LoadScope({value.get()}).WithDependencies(*schema);
+    auto scope =
+        LoadScope({value.get()}, {value.get()}).WithDependencies(*schema);
     EXPECT_FALSE(scope.Contains(pk));
     EXPECT_FALSE(scope.Contains(ttl));
-    EXPECT_TRUE(scope.Requires(pk));
-    EXPECT_TRUE(scope.Requires(ttl));
+    EXPECT_FALSE(scope.Requires(pk));
+    EXPECT_FALSE(scope.Requires(ttl));
     SealedFieldLayout layout(schema, scope);
-    EXPECT_TRUE(layout.ShouldLoadField(pk));
-    EXPECT_TRUE(layout.ShouldLoadField(ttl));
+    EXPECT_FALSE(layout.ShouldLoadField(pk));
+    EXPECT_FALSE(layout.ShouldLoadField(ttl));
     EXPECT_TRUE(layout.ShouldLoadField(value));
 }
 
@@ -4176,4 +4249,15 @@ TEST_F(SegmentLoadInfoTest, PreparedInfoDoesNotRetainFieldLayout) {
     EXPECT_TRUE(target.HasFieldInSchema(FieldId(101)));
     EXPECT_TRUE(diff.indexes_to_load.empty());
     EXPECT_TRUE(diff.indexes_to_drop.empty());
+}
+
+TEST(SealedFieldLayoutTest, EmptyPreloadsKeepSelectedFieldsOnDemand) {
+    auto schema = std::make_shared<Schema>();
+    auto id = schema->AddDebugField("value", DataType::INT64);
+    SealedFieldLayout lazy(schema, LoadScope({id.get()}, {}));
+    EXPECT_TRUE(lazy.IsFieldInLoadScope(id));
+    EXPECT_FALSE(lazy.ShouldLoadField(id));
+    EXPECT_EQ(lazy.WarmupPolicy(id, false, false).second, "disable");
+    SealedFieldLayout legacy(schema, LoadScope::FromLegacySchema(*schema));
+    EXPECT_TRUE(legacy.ShouldLoadField(id));
 }

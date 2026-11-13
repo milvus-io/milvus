@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+const chunkReadConcurrency = 4
+
 // chunkIndex mirrors the retained manifest. Membership and snapshots are guarded
 // by Manager.mu; payloads have a separate lock so object I/O never holds it.
 type chunkIndex struct {
@@ -52,7 +54,7 @@ type chunkCache struct {
 }
 
 func newChunkIndex(capacity uint64) *chunkIndex {
-	return &chunkIndex{cache: chunkCache{capacity: capacity, loadSlots: make(chan struct{}, 4)}}
+	return &chunkIndex{cache: chunkCache{capacity: capacity, loadSlots: make(chan struct{}, chunkReadConcurrency)}}
 }
 
 func (i *chunkIndex) newChunk(index *streamingpb.PChannelSummaryChunkIndexEntry, payload *chunkPayload) *indexedChunk {
@@ -230,4 +232,20 @@ func (c *chunkCache) evictLocked(chunk *indexedChunk) {
 	c.bytes -= uint64(cap(chunk.payload.bytes))
 	c.recent.Remove(chunk.recent)
 	chunk.payload, chunk.recent = nil, nil
+}
+
+// retain restores admission/access order after a concurrent recovery batch.
+// The caller already owns this immutable payload under its read pin. Another
+// consumer may have evicted it while newer loads completed out of order.
+func (c *chunkCache) retain(chunk *indexedChunk, payload *chunkPayload) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if chunk.retired {
+		return
+	}
+	if chunk.payload != nil {
+		c.recent.MoveToFront(chunk.recent)
+		return
+	}
+	c.putLocked(chunk, payload)
 }

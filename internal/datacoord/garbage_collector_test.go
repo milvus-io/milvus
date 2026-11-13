@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -50,6 +51,7 @@ import (
 
 // TestGarbageCollector_recycleDroppedSegments_SnapshotReference tests that segments referenced by snapshots are not garbage collected
 func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T) {
+	checkpointCatalog := gc.MockCheckpointCatalog(t, 1000)
 	// Setup
 	ctx := context.Background()
 
@@ -73,13 +75,14 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 
 	// Create garbage collector
 	gcx := gc.NewGarbageCollector(mt, handler, gc.GcOption{
-		Cli:              cli,
-		Enabled:          true,
-		CheckInterval:    time.Millisecond * 10,
-		ScanInterval:     time.Hour * 7 * 24,
-		MissingTolerance: time.Hour * 24,
-		DropTolerance:    0, // Set to 0 to immediately consider segments for GC
-		SnapshotMeta:     smMeta,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		Enabled:              true,
+		CheckInterval:        time.Millisecond * 10,
+		ScanInterval:         time.Hour * 7 * 24,
+		MissingTolerance:     time.Hour * 24,
+		DropTolerance:        0, // Set to 0 to immediately consider segments for GC
+		SnapshotMeta:         smMeta,
 	})
 
 	// Add dropped segments to meta
@@ -135,9 +138,6 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 		return []*model.SegmentIndex{}, nil
 	}).Build()
 	defer mock6.UnPatch()
-
-	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
-	defer mock7.UnPatch()
 
 	dropSegmentCalled := false
 	var droppedSegment *datapb.SegmentInfo
@@ -456,6 +456,7 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan(t *testing.T) {
 
 // TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil tests that GC handles nil snapshotMeta gracefully
 func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
+	checkpointCatalog := gc.MockCheckpointCatalog(t, 1000)
 	// Setup
 	ctx := context.Background()
 
@@ -476,12 +477,13 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 
 	// Create garbage collector
 	gcx := gc.NewGarbageCollector(mt, handler, gc.GcTestDomainOption(&snapshot.SnapshotTestMetas{SnapshotMeta: sm}, gc.GcOption{
-		Cli:              cli,
-		Enabled:          true,
-		CheckInterval:    time.Millisecond * 10,
-		ScanInterval:     time.Hour * 7 * 24,
-		MissingTolerance: time.Hour * 24,
-		DropTolerance:    0, // Set to 0 to immediately consider segments for GC
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		Enabled:              true,
+		CheckInterval:        time.Millisecond * 10,
+		ScanInterval:         time.Hour * 7 * 24,
+		MissingTolerance:     time.Hour * 24,
+		DropTolerance:        0, // Set to 0 to immediately consider segments for GC
 	}))
 
 	// Add dropped segment to meta
@@ -510,9 +512,6 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 
 	mockListSegmentIndexes := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).Return([]*model.SegmentIndex{}, nil).Build()
 	defer mockListSegmentIndexes.UnPatch()
-
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
-	defer mockChannelExists.UnPatch()
 
 	dropSegmentCalled := false
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
@@ -1326,7 +1325,74 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_GlobalFormatPrefixOnce(t *
 	}, walkCalls)
 }
 
+// TestGarbageCollector_recycleUnusedJSONFiles_FailureLogFields tests that a failure while
+// clearing an old version logs exactly the segment and field it happened on.
+func TestGarbageCollector_recycleUnusedJSONFiles_FailureLogFields(t *testing.T) {
+	ctx := context.Background()
+	mt := &meta.Meta{
+		Catalog: &datacoord.Catalog{},
+		Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+			1002: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1002,
+					CollectionID: 100,
+					PartitionID:  10,
+					State:        commonpb.SegmentState_Flushed,
+					JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+						102: {FieldID: 102, Version: 2, BuildID: 402},
+					},
+				},
+			},
+		}),
+		MetaStore: metacache.NewMetaStore(nil),
+	}
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
+	gcx := gc.NewGarbageCollector(mt, &ServerHandler{}, gc.GcOption{Cli: cli})
+	defer gcx.Close()
+
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).Return(assert.AnError).Build()
+	defer mockRemove.UnPatch()
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			fn(&storage.ChunkObjectInfo{FilePath: prefix + "/old_file"})
+			return assert.AnError
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	testCases := []struct {
+		name           string
+		recycle        func()
+		walkFailureLog string
+	}{
+		{
+			name:           "stats",
+			recycle:        func() { gcx.RecycleUnusedJSONStatsFiles(ctx, nil) },
+			walkFailureLog: "json stats files recycle failed when walk with prefix",
+		},
+		{
+			name:           "index",
+			recycle:        func() { gcx.RecycleUnusedJSONIndexFiles(ctx, nil) },
+			walkFailureLog: "json index files recycle failed when walk with prefix",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+
+			tc.recycle()
+
+			logs := sink.String()
+			assert.Contains(t, logs, `["some task failure in remove object pool"] [segmentID=1002] [fieldID=102] [error=`)
+			assert.Contains(t, logs, `["`+tc.walkFailureLog+`"] [segmentID=1002] [fieldID=102] [error=`)
+		})
+	}
+}
+
 func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
+	checkpointCatalog := gc.MockCheckpointCatalog(t, 1000)
 	ctx := context.Background()
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -1383,12 +1449,13 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	m.Segments.SetSegment(2002, v1Segment)
 
 	gcx := gc.NewGarbageCollector(m, &ServerHandler{}, gc.GcTestDomainOption(&snapshot.SnapshotTestMetas{SnapshotMeta: sm}, gc.GcOption{
-		Cli:              cli,
-		Enabled:          true,
-		CheckInterval:    time.Millisecond * 10,
-		ScanInterval:     time.Hour * 7 * 24,
-		MissingTolerance: time.Hour * 24,
-		DropTolerance:    0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		Enabled:              true,
+		CheckInterval:        time.Millisecond * 10,
+		ScanInterval:         time.Hour * 7 * 24,
+		MissingTolerance:     time.Hour * 24,
+		DropTolerance:        0,
 	}))
 
 	// Track calls
@@ -1402,8 +1469,6 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
-	defer mockChannelExists.UnPatch()
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
 		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
 		return nil

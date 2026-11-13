@@ -44,7 +44,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
@@ -183,8 +185,6 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
-	defer node.updateDistributionModifyTS()
-
 	channel := req.GetInfos()[0]
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -208,28 +208,31 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	if !node.subscribingChannels.Insert(channel.GetChannelName()) {
-		msg := "channel subscribing..."
-		log.Warn(ctx,
-			msg)
-		return merr.Success(), nil
+	release, err := node.channelOperations.acquire(ctx, channel.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
 	}
-	defer node.subscribingChannels.Remove(channel.GetChannelName())
+	defer release()
 
-	// to avoid concurrent watch/unwatch
-	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
-		err := merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
-		log.Warn(ctx, "failed to unsubscribe channel", mlog.Err(err))
+	// Publish the distribution change before releasing the shared channel gate.
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
+	existing, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
+		// Replica reassignment does not require rebuilding a channel subscription.
+		// Only advance its generation and preserve live data and the query view;
+		// QueryCoord reconciles worker routes and target partitions separately.
+		if existing.UpdateVersion(req.GetVersion()) {
+			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+		}
 		log.Info(ctx, "channel already subscribed")
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	err = node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
@@ -374,7 +377,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
-	defer node.updateDistributionModifyTS()
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.String("channel", req.GetChannelName()),
@@ -389,61 +391,83 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	defer node.lifetime.Done()
 
-	node.unsubscribingChannels.Insert(req.GetChannelName())
-	defer node.unsubscribingChannels.Remove(req.GetChannelName())
-	_, ok := node.delegators.Get(req.GetChannelName())
-	if ok {
-		growingSegmentIDs := node.localGrowingSegmentIDs(req.GetChannelName(), nil)
-		prepared, err := node.prepareReleaseManualFlush(ctx, req.GetCollectionID(), req.GetChannelName(), growingSegmentIDs)
-		prepareSkipped := false
-		if err != nil {
-			if isReleaseManualFlushPrepareUnavailable(err) {
-				log.Warn(ctx, "release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
-					mlog.Int64s("segmentIDs", growingSegmentIDs),
-					mlog.Err(err))
-				prepared = false
-				prepareSkipped = true
-			} else {
-				log.Warn(ctx, "failed to prepare release manual flush before unsubscribing channel",
-					mlog.Int64s("segmentIDs", growingSegmentIDs),
-					mlog.Err(err))
-				return merr.Status(err), nil
-			}
-		}
-		if prepareSkipped {
-			log.Info(ctx, "release manual flush prepare skipped before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
-		} else {
-			log.Info(ctx, "release manual flush prepare result before unsubscribing channel",
-				mlog.Int64s("segmentIDs", growingSegmentIDs),
-				mlog.Bool("prepared", prepared))
-		}
+	release, err := node.channelOperations.acquire(ctx, req.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer release()
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
+		return merr.Status(err), nil
+	}
 
-		delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
-		if !ok {
-			log.Info(ctx, "channel already unsubscribed")
-			return merr.Success(), nil
-		}
-		node.pipelineManager.Remove(req.GetChannelName())
-		preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(req.GetChannelName())
-		// close the delegator first to block all coming query/search requests
-		delegator.Close()
-
-		if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
-			for _, segmentID := range preparedGrowingSourceSegments {
-				detacher.DetachStreaming(ctx, segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(req.GetChannelName(), segmentID)
-				syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(req.GetChannelName(), segmentID)
-			}
-		}
-		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Collection.Unref(req.GetCollectionID(), 1)
+	if err := node.unsubscribeChannelLocked(ctx, req.GetCollectionID(), req.GetChannelName()); err != nil {
+		return merr.Status(err), nil
 	}
 	node.distDeltaTracker.markChannelRemove(req.GetChannelName())
 	log.Info(ctx, "unsubscribed channel")
 
 	return merr.Success(), nil
+}
+
+// unsubscribeChannelLocked tears down the channel's delegator, pipeline and
+// growing segments. The caller must hold the channel's operation gate.
+func (node *QueryNode) unsubscribeChannelLocked(ctx context.Context, collectionID int64, channel string) error {
+	log := mlog.With(
+		mlog.Int64("collectionID", collectionID),
+		mlog.String("channel", channel),
+		mlog.Int64("currentNodeID", node.GetNodeID()),
+	)
+	if _, ok := node.delegators.Get(channel); !ok {
+		return nil
+	}
+	growingSegmentIDs := node.localGrowingSegmentIDs(channel, nil)
+	prepared, err := node.prepareReleaseManualFlush(ctx, collectionID, channel, growingSegmentIDs)
+	prepareSkipped := false
+	if err != nil {
+		if isReleaseManualFlushPrepareUnavailable(err) {
+			log.Warn(ctx, "release manual flush prepare unavailable before unsubscribing channel, continue unsubscribe",
+				mlog.Int64s("segmentIDs", growingSegmentIDs),
+				mlog.Err(err))
+			prepared = false
+			prepareSkipped = true
+		} else {
+			log.Warn(ctx, "failed to prepare release manual flush before unsubscribing channel",
+				mlog.Int64s("segmentIDs", growingSegmentIDs),
+				mlog.Err(err))
+			return err
+		}
+	}
+	if prepareSkipped {
+		log.Info(ctx, "release manual flush prepare skipped before unsubscribing channel",
+			mlog.Int64s("segmentIDs", growingSegmentIDs),
+			mlog.Bool("prepared", prepared))
+	} else {
+		log.Info(ctx, "release manual flush prepare result before unsubscribing channel",
+			mlog.Int64s("segmentIDs", growingSegmentIDs),
+			mlog.Bool("prepared", prepared))
+	}
+
+	delegator, ok := node.delegators.GetAndRemove(channel)
+	if !ok {
+		log.Info(ctx, "channel already unsubscribed")
+		return nil
+	}
+	node.pipelineManager.Remove(channel)
+	preparedGrowingSourceSegments := syncmgr.DefaultGrowingSourceRegistry().ReleasePreparedSegments(channel)
+	// close the delegator first to block all coming query/search requests
+	delegator.Close()
+
+	if detacher, ok := node.manager.Segment.(segmentDetacher); ok {
+		for _, segmentID := range preparedGrowingSourceSegments {
+			detacher.DetachStreaming(ctx, segmentID)
+			syncmgr.DefaultGrowingSourceRegistry().MarkReleaseDetached(channel, segmentID)
+			syncmgr.DefaultGrowingSourceRegistry().ClearReleasePrepared(channel, segmentID)
+		}
+	}
+	node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel), segments.WithType(segments.SegmentTypeGrowing))
+	node.manager.Collection.Unref(collectionID, 1)
+	return nil
 }
 
 func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
@@ -975,14 +999,23 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	return ret, nil
 }
 
-// only used for delegator query segments from worker
-func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	resp := &internalpb.RetrieveResults{
-		Status: merr.Success(),
-	}
-	msgID := req.Req.Base.GetMsgID()
+// workerTaskFunc builds a worker's query task (tasks.NewQueryTask,
+// tasks.NewMaterializeTask).
+type workerTaskFunc func(context.Context, *segments.Collection, *segments.Manager, *querypb.QueryRequest) *tasks.QueryTask
+
+// runWorkerQueryTask is the part shared by QuerySegments and
+// MaterializeSegments: lifetime, metrics, collection ref, scheduling and
+// waiting. It runs the task newTask builds; rpc names the RPC in the logs.
+// The caller shapes its own response from the finished task. A non-nil error
+// is the failure to report in the caller's status; the lifetime failure is
+// not counted as a failed query, as before.
+func (node *QueryNode) runWorkerQueryTask(ctx context.Context, req *querypb.QueryRequest, newTask workerTaskFunc, rpc string) (task *tasks.QueryTask, latency time.Duration, err error) {
+	msgID := req.GetReq().GetBase().GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
-	channel := req.GetDmlChannels()[0]
+	channel := ""
+	if len(req.GetDmlChannels()) > 0 {
+		channel = req.GetDmlChannels()[0]
+	}
 
 	queryLabel := req.GetReq().GetQueryLabel()
 	if queryLabel == "" {
@@ -996,24 +1029,23 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		mlog.String("channel", channel),
 		mlog.String("scope", req.GetScope().String()),
 		mlog.String("queryLabel", queryLabel),
+		mlog.String("rpc", rpc),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, 0, err
 	}
 	defer node.lifetime.Done()
 
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	defer func() {
-		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
 	}()
 
 	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, 0, err
 	}
 
 	log.Debug(ctx, "start do query segments", mlog.Int64s("segmentIDs", req.GetSegmentIDs()))
@@ -1022,28 +1054,24 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer cancel()
 
 	tr := timerecord.NewTimeRecorder("querySegments")
-	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn(ctx, "failed to query segments", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, 0, err
 	}
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
 	defer func() {
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
 	// Send task to scheduler and wait until it finished.
-	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
+	task = newTask(queryCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn(ctx, "failed to add query task into scheduler", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, 0, err
 	}
-	err := task.Wait()
-	if err != nil {
+	if err := task.Wait(); err != nil {
 		log.Warn(ctx, "failed to query channel", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, 0, err
 	}
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
@@ -1053,55 +1081,129 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	))
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
-	latency := tr.ElapseSpan()
+	latency = tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	return task, latency, nil
+}
+
+// only used for delegator query segments from worker
+func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	resp := &internalpb.RetrieveResults{
+		Status: merr.Success(),
+	}
+	task, latency, err := node.runWorkerQueryTask(ctx, req, tasks.NewQueryTask, "QuerySegments")
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	result := task.Result()
 	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
 	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
 	return result, nil
 }
 
+// Materialize serves the delegator side of the Materialize RPC: it relays
+// the channel's workers' replies, with no reduce, decode or merge (design
+// doc 20261019 §5).
+func (node *QueryNode) Materialize(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	release, err := node.admitDelegatorQuery(ctx, req)
+	if err != nil {
+		return materializeError(err), nil
+	}
+	defer release()
+	if err := checkMaterializeRequest(req); err != nil {
+		return materializeError(err), nil
+	}
+	channel := req.GetDmlChannels()[0]
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "MaterializeRequest")
+	defer tr.CtxElapse(ctx, fmt.Sprintf("do materialize with channel done, vChannel = %s, segmentIDs = %v",
+		channel,
+		req.GetSegmentIDs(),
+	))
+
+	r, err := node.beginDelegatorRead(ctx, req, channel, "Materialize")
+	if err != nil {
+		return materializeError(err), nil
+	}
+	defer func() { r.end(err) }()
+	results, err := r.sd.Materialize(r.queryCtx, req)
+	if err != nil {
+		r.log.Warn(r.ctx, "failed to materialize on delegator", mlog.Err(err))
+		return materializeError(err), nil
+	}
+	resp, err := delegator.AggregateMaterializeResults(results,
+		paramtable.GetNodeID(),
+		paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool(),
+		paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
+	if err != nil {
+		r.log.Warn(r.ctx, "failed to aggregate materialize results", mlog.Err(err))
+		return materializeError(err), nil
+	}
+	// The delegator fixed this snapshot before querying any segments.
+	resp.Header.MvccTimestamp = req.GetReq().GetMvccTimestamp()
+	return resp, nil
+}
+
+// MaterializeSegments serves the worker side of the Materialize RPC (spec §4).
+// It mirrors QuerySegments but replies with an Arrow batch.
+func (node *QueryNode) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	if err := checkMaterializeRequest(req); err != nil {
+		return materializeError(err), nil
+	}
+	// A materialize task: the segments take the Arrow path and the task
+	// replies with a batch (NewMaterializeTask).
+	task, latency, err := node.runWorkerQueryTask(ctx, req, tasks.NewMaterializeTask, "MaterializeSegments")
+	if err != nil {
+		return materializeError(err), nil
+	}
+	result := task.MaterializeResult()
+	result.GetHeader().GetCostAggregation().ResponseTime = latency.Milliseconds()
+	result.GetHeader().GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return result, nil
+}
+
+// checkMaterializeRequest rejects what this node cannot answer with an Arrow
+// batch; ErrServiceUnimplemented makes the proxy fall back to Query. The proxy
+// only routes unlimited requests without these (materializeInScope); this
+// guards a proxy of another version. A limited request can select the
+// ignore_non_pk pipeline, and the others stay off the Arrow path
+// (shouldUseArrowTransport): both have no batch to reply with.
+func checkMaterializeRequest(req *querypb.QueryRequest) error {
+	if v := req.GetMaterializeFormatVersion(); v != materialize.FormatVersion {
+		return merr.Wrapf(merr.ErrServiceUnimplemented, "materialize: format version %d, this node uses %d", v, materialize.FormatVersion)
+	}
+	r := req.GetReq()
+	switch {
+	case r.GetLimit() != typeutil.Unlimited:
+		return merr.Wrap(merr.ErrServiceUnimplemented, "materialize: limited requests are not supported")
+	case len(r.GetAggregates()) > 0, len(r.GetGroupByFieldIds()) > 0:
+		return merr.Wrap(merr.ErrServiceUnimplemented, "materialize: aggregation is not supported")
+	case len(r.GetOrderByFields()) > 0:
+		return merr.Wrap(merr.ErrServiceUnimplemented, "materialize: ORDER BY is not supported")
+	}
+	return nil
+}
+
+func materializeError(err error) *internalpb.MaterializeResults {
+	return &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{
+		Status:        merr.Status(err),
+		FormatVersion: materialize.FormatVersion,
+	}}
+}
+
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	log := mlog.With(
-		mlog.Int64("collectionID", req.GetReq().GetCollectionID()),
-		mlog.Strings("shards", req.GetDmlChannels()),
-	)
-	log.Debug(ctx, "received query request",
-		mlog.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
-		mlog.Int64s("segmentIDs", req.GetSegmentIDs()), // should be empty
-		mlog.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
-		mlog.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
-	)
-
-	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+	release, err := node.admitDelegatorQuery(ctx, req)
+	if err != nil {
 		return &internalpb.RetrieveResults{
 			Status: merr.Status(err),
 		}, nil
 	}
-	defer node.lifetime.Done()
+	defer release()
 	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
 		return &internalpb.RetrieveResults{
 			Status: merr.Status(err),
-		}, nil
-	}
-	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
-		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
-		log.Warn(ctx, "failed to query collection", mlog.Err(err))
-		return &internalpb.RetrieveResults{
-			Status: merr.Status(err),
-		}, nil
-	}
-	defer func() {
-		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
-	}()
-	if len(req.GetDmlChannels()) != 1 {
-		// internal protocol assertion: the proxy always targets exactly one
-		// channel per request, so a violation is a Milvus bug, not user input
-		return &internalpb.RetrieveResults{
-			Status: merr.Status(merr.WrapErrServiceInternalMsg("query request to querynode should "+
-				"only target at one channel, but got:%d", len(req.GetDmlChannels()))),
 		}, nil
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
@@ -1116,6 +1218,44 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	return res, nil
+}
+
+// admitDelegatorQuery runs the checks shared by the delegator-side Query and
+// Materialize RPCs: node health, collection loaded, exactly one channel. The
+// returned release must be called when the request is done.
+func (node *QueryNode) admitDelegatorQuery(ctx context.Context, req *querypb.QueryRequest) (release func(), err error) {
+	log := mlog.With(
+		mlog.Int64("collectionID", req.GetReq().GetCollectionID()),
+		mlog.Strings("shards", req.GetDmlChannels()),
+	)
+	log.Debug(ctx, "received query request",
+		mlog.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
+		mlog.Int64s("segmentIDs", req.GetSegmentIDs()), // should be empty
+		mlog.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		mlog.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
+	)
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return nil, err
+	}
+	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
+		node.lifetime.Done()
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn(ctx, "failed to query collection", mlog.Err(err))
+		return nil, err
+	}
+	release = func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+		node.lifetime.Done()
+	}
+	if len(req.GetDmlChannels()) != 1 {
+		release()
+		// internal protocol assertion: the proxy always targets exactly one
+		// channel per request, so a violation is a Milvus bug, not user input
+		return nil, merr.WrapErrServiceInternalMsg("query request to querynode should "+
+			"only target at one channel, but got:%d", len(req.GetDmlChannels()))
+	}
+	return release, nil
 }
 
 func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
@@ -1498,6 +1638,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 		segmentVersionInfos = append(segmentVersionInfos, buildSegmentVersionInfo(s))
 	}
+	var labels map[string]string
+	if node.session != nil {
+		labels = node.session.ServerLabels
+	}
 
 	buildLeaderView := func(key string, delegator delegator.ShardDelegator, sealedSegments map[int64]*querypb.SegmentDist, growing []delegator.SegmentEntry) *querypb.LeaderView {
 		numOfGrowingRows := int64(0)
@@ -1516,7 +1660,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		queryView := delegator.GetChannelQueryView()
 		leaderViewStatus := &querypb.LeaderViewStatus{
 			Serviceable:             queryView.Serviceable(),
-			CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
+			CatchingUpStreamingData: leaderViewCatchingUpStreamingData(labels, delegator.CatchingUpStreamingData()),
 		}
 		return &querypb.LeaderView{
 			Collection:             delegator.Collection(),
@@ -1571,6 +1715,14 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		TotalChannelCount:   int64(totalChannelCount),
 	}
 	return resp, nil
+}
+
+func leaderViewCatchingUpStreamingData(labels map[string]string, catchingUp bool) bool {
+	if labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1" ||
+		labels[sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode] == "1" {
+		return false
+	}
+	return catchingUp
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {

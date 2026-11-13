@@ -742,11 +742,17 @@ func TestCreateMilvusTableManifestFromSegmentManifests_PreservesSourceFragmentId
 	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
 	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
 	sourceRowCount := int64(7)
+	sourceFragment := Fragment{
+		FilePath: sourceManifest,
+		StartRow: 0,
+		EndRow:   sourceRowCount,
+		RowCount: sourceRowCount,
+	}
 	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
 	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
 		targetBasePath,
 		[]string{"pk", "ts"},
-		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: sourceRowCount, RowCount: sourceRowCount}},
+		[]Fragment{sourceFragment},
 		storageConfig,
 		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
 	)
@@ -759,6 +765,8 @@ func TestCreateMilvusTableManifestFromSegmentManifests_PreservesSourceFragmentId
 	assert.Equal(t, int64(0), fragments[0].StartRow)
 	assert.Equal(t, sourceRowCount, fragments[0].EndRow)
 	assert.Equal(t, sourceRowCount, fragments[0].RowCount)
+	assert.Empty(t, fragments[0].Properties)
+	assert.Equal(t, FragmentIdentity(sourceFragment), FragmentIdentity(fragments[0]))
 }
 
 func TestCreateMilvusTableManifestFromSegmentManifests_RejectsMissingSourceRowCount(t *testing.T) {

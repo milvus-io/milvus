@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include <parquet/arrow/writer.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -513,7 +514,7 @@ TEST_F(ArrowExportBoundaryTest, EmptyRetrieveHonorsCancellation) {
 
 TEST_F(ArrowExportBoundaryTest, RetrieveBudgetChecksAllSegmentsBeforeReads) {
     auto other = std::make_unique<FaultingSegment>(schema);
-    int reads = 0;
+    std::atomic<int> reads{0};
     segment->fault = [&] { ++reads; };
     other->fault = [&] { ++reads; };
     CSegmentInterface segments[] = {segment.get(), other.get()};
@@ -533,7 +534,7 @@ TEST_F(ArrowExportBoundaryTest, RetrieveBudgetChecksAllSegmentsBeforeReads) {
                                            &out_array,
                                            nullptr),
                  InvalidParameter);
-    EXPECT_EQ(reads, 0);
+    EXPECT_EQ(reads.load(), 0);
     EXPECT_EQ(out_schema.release, nullptr);
     EXPECT_EQ(out_array.release, nullptr);
     auto status = FillRetrieveFieldsOrdered(segments,
@@ -550,7 +551,7 @@ TEST_F(ArrowExportBoundaryTest, RetrieveBudgetChecksAllSegmentsBeforeReads) {
     auto imported = arrow::ImportRecordBatch(&out_array, &out_schema);
     ASSERT_TRUE(imported.ok()) << imported.status().ToString();
     EXPECT_EQ((*imported)->num_rows(), 2);
-    EXPECT_EQ(reads, 2);
+    EXPECT_EQ(reads.load(), 2);
 }
 
 }  // namespace

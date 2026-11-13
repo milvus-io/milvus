@@ -20,6 +20,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -219,6 +221,90 @@ func TestSearchTask_Requery(t *testing.T) {
 		_, _, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
 		assert.Error(t, err)
 	})
+}
+
+// TestSearchTask_RequeryKeepsSearchTimestamp checks that the requery task keeps
+// the search timestamp through scheduling, so its guarantee and TTL cutoffs
+// match the search. Otherwise a row that expires between the search and the
+// requery is missing from the requery and the search fails with
+// ErrInconsistentRequery.
+func TestSearchTask_RequeryKeepsSearchTimestamp(t *testing.T) {
+	const (
+		collectionName = "test_collection"
+		collectionID   = int64(100)
+	)
+	ctx := context.Background()
+	searchTime := time.Unix(1_700_000_000, 0)
+	searchTS := tsoutil.ComposeTSByTime(searchTime)
+	schedulerTS := tsoutil.ComposeTSByTime(searchTime.Add(2 * time.Second))
+	collectionTTL := time.Hour
+	gracefulTime := paramtable.Get().CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+
+	// QueryView derives TTL from the bound read schema's properties.
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: collectionName,
+		Properties: []*commonpb.KeyValuePair{{
+			Key: common.CollectionTTLConfigKey, Value: strconv.FormatInt(int64(collectionTTL/time.Second), 10),
+		}},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	})
+	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: schema, CollectionTTL: uint64(collectionTTL)}, nil)
+
+	var requeryTask *QueryTask
+	mockTestTo(t, (*namespaceRequeryMockNode).ExecuteQuery, func(_ *namespaceRequeryMockNode, _ context.Context, qt taskmodel.Task, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		requeryTask = qt.(*QueryTask)
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	})
+
+	// With a fresh requery timestamp, Strong only moves the collection TTL
+	// cutoff; Bounded also moves the guarantee and the entity TTL cutoff.
+	for _, tc := range []struct {
+		name          string
+		level         commonpb.ConsistencyLevel
+		guaranteeTime time.Time
+	}{
+		{name: "strong", level: commonpb.ConsistencyLevel_Strong, guaranteeTime: searchTime},
+		{name: "bounded", level: commonpb.ConsistencyLevel_Bounded, guaranteeTime: searchTime.Add(-gracefulTime)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requeryTask = nil
+			searchTask := &SearchTask{
+				ctx: ctx,
+				SearchRequest: &internalpb.SearchRequest{
+					Base:               &commonpb.MsgBase{MsgType: commonpb.MsgType_Search, Timestamp: searchTS},
+					CollectionID:       collectionID,
+					ConsistencyLevel:   tc.level,
+					GuaranteeTimestamp: tsoutil.ComposeTSByTime(tc.guaranteeTime),
+				},
+				request: &milvuspb.SearchRequest{CollectionName: collectionName},
+				schema:  schema,
+				tr:      timerecord.NewTimeRecorder("search"),
+				node:    &namespaceRequeryMockNode{},
+			}
+			op, err := newRequeryOperator(searchTask, nil)
+			require.NoError(t, err)
+			ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
+			_, _, err = op.(*requeryOperator).requery(ctx, nil, ids, []string{"id"})
+			require.NoError(t, err)
+			require.NotNil(t, requeryTask)
+
+			// Replay what the scheduler does before running the task: it assigns a
+			// newer timestamp, which must not replace the search timestamp.
+			require.NoError(t, requeryTask.OnEnqueue())
+			requeryTask.SetTs(schedulerTS)
+			require.NoError(t, requeryTask.PreExecute(ctx))
+
+			require.Equal(t, searchTS, requeryTask.BeginTs())
+			require.Equal(t, tsoutil.ComposeTSByTime(tc.guaranteeTime), requeryTask.GetGuaranteeTimestamp())
+			require.Equal(t, tsoutil.ComposeTSByTime(searchTime.Add(-collectionTTL)), requeryTask.GetCollectionTtlTimestamps())
+			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), requeryTask.GetEntityTtlPhysicalTime())
+		})
+	}
 }
 
 // TestSearchTask_ErrExecute exercises the error propagation of SearchTask

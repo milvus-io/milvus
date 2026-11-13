@@ -286,30 +286,15 @@ TextIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
     for (const auto& batch : input.batches) {
         AddBatch(batch);
     }
-    return FinishArtifact();
+    return std::move(*this).Finish(count_);
 }
 
-storage::ArtifactPtr
-TextIndexBuilder::Build(const TextIndexBuildSource& source) && {
-    AssertInfo(static_cast<bool>(source.produce),
-               "text build source has no producer");
-    TextIndexBuildSource::ConsumeBatch consume = [&](const auto& batch) {
-        AssertInfo(count_ <= source.row_count &&
-                       batch.values.size() <= source.row_count - count_,
-                   "text build source exceeded declared row count {}",
-                   source.row_count);
-        AddBatch(batch);
-    };
-    source.produce(consume);
-    AssertInfo(count_ == source.row_count,
-               "text build source declared {} rows but produced {}",
-               source.row_count,
+std::unique_ptr<TextIndexArtifact>
+TextIndexBuilder::Finish(size_t expected_rows) && {
+    AssertInfo(count_ == expected_rows,
+               "text build declared {} rows but produced {}",
+               expected_rows,
                count_);
-    return FinishArtifact();
-}
-
-storage::ArtifactPtr
-TextIndexBuilder::FinishArtifact() {
     auto params = std::move(params_);
     auto directory = std::move(directory_);
     auto engine = std::exchange(engine_, nullptr);

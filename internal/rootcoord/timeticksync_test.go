@@ -110,6 +110,14 @@ func TestTimetickSync(t *testing.T) {
 }
 
 func TestMultiTimetickSync(t *testing.T) {
+	params := paramtable.Get()
+	oldNum := params.RootCoordCfg.DmlChannelNum.SwapTempValue("1")
+	oldDml := params.CommonCfg.RootCoordDml.SwapTempValue(params.CommonCfg.ClusterPrefix.GetValue() + "-rootcoord-dml")
+	t.Cleanup(func() {
+		params.RootCoordCfg.DmlChannelNum.SwapTempValue(oldNum)
+		params.CommonCfg.RootCoordDml.SwapTempValue(oldDml)
+	})
+
 	ctx := context.Background()
 
 	factory := dependency.NewDefaultFactory(true)
@@ -118,8 +126,6 @@ func TestMultiTimetickSync(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "1")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
 	ttSync := newTimeTickSync(context.TODO(), ctx, UniqueID(0), factory, nil)
 
 	var wg sync.WaitGroup
@@ -176,6 +182,14 @@ func Test_ttHistogram_get(t *testing.T) {
 }
 
 func TestTimetickSyncWithExistChannels(t *testing.T) {
+	params := paramtable.Get()
+	oldNum := params.RootCoordCfg.DmlChannelNum.SwapTempValue("1")
+	oldDml := params.CommonCfg.RootCoordDml.SwapTempValue(params.CommonCfg.ClusterPrefix.GetValue() + "-rootcoord-dml")
+	t.Cleanup(func() {
+		params.RootCoordCfg.DmlChannelNum.SwapTempValue(oldNum)
+		params.CommonCfg.RootCoordDml.SwapTempValue(oldDml)
+	})
+
 	ctx := context.Background()
 	sourceID := int64(100)
 
@@ -185,11 +199,11 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	prefix := params.CommonCfg.RootCoordDml.GetValue()
 	chans := map[UniqueID][]string{}
 
-	chans[UniqueID(100)] = []string{"by-dev-rootcoord-dml_4", "by-dev-rootcoord-dml_8"}
-	chans[UniqueID(102)] = []string{"by-dev-rootcoord-dml_2", "by-dev-rootcoord-dml_9"}
+	chans[UniqueID(100)] = []string{prefix + "_4", prefix + "_8"}
+	chans[UniqueID(102)] = []string{prefix + "_2", prefix + "_9"}
 	ttSync := newTimeTickSync(context.TODO(), ctx, sourceID, factory, chans)
 
 	var wg sync.WaitGroup
@@ -214,10 +228,10 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 	t.Run("assign channels", func(t *testing.T) {
 		defer wg.Done()
 		channels := ttSync.getDmlChannelNames(int(4))
-		assert.Equal(t, channels, []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_3", "by-dev-rootcoord-dml_5"})
+		assert.Equal(t, channels, []string{prefix + "_0", prefix + "_1", prefix + "_3", prefix + "_5"})
 
 		channels = ttSync.getDmlChannelNames(int(4))
-		assert.Equal(t, channels, []string{"by-dev-rootcoord-dml_6", "by-dev-rootcoord-dml_7", "by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"})
+		assert.Equal(t, channels, []string{prefix + "_6", prefix + "_7", prefix + "_0", prefix + "_1"})
 	})
 
 	// test get new channels

@@ -24,8 +24,8 @@ func newNgramIndexChecker() *NgramIndexChecker {
 }
 
 func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
-	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_JSON {
-		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR or JSON field")
+	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_Text && dataType != schemapb.DataType_JSON {
+		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR, TEXT or JSON field")
 	}
 
 	// For JSON field with ngram index, json_cast_type must be VARCHAR
@@ -70,7 +70,7 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType s
 func (c *NgramIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dType := field.GetDataType()
 	if !typeutil.IsStringType(dType) && dType != schemapb.DataType_JSON {
-		return merr.WrapErrParameterInvalidMsg("ngram index can only be created on VARCHAR or JSON field")
+		return merr.WrapErrParameterInvalidMsg("ngram index can only be created on VARCHAR, TEXT or JSON field")
 	}
 	return nil
 }

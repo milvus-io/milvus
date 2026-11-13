@@ -15,10 +15,8 @@
 // limitations under the License.
 
 #pragma once
-#include "folly/coro/BlockingWait.h"
 
 #include "index/IndexLoadPlan.h"
-#include "index/contracts/query/IIndexReaderBase.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/artifact/LoadOptions.h"
 
@@ -30,27 +28,23 @@ namespace milvus::index {
  * production callers use the complete source-open/create/load lifecycle.
  */
 struct LoaderTestAccess {
+    // Exercise the production storage finalizer without wrapping it in an Index.
+    template <typename Loader, typename... Types>
+    static auto
+    StorageFinisher() {
+        if constexpr (sizeof...(Types) == 0) {
+            return &Loader::FinishPackedStorage;
+        } else {
+            return &Loader::template FinishPackedStorage<Types...>;
+        }
+    }
+
     template <typename Loader>
     static IndexLoadPlan
     Plan(const storage::IndexEntryDirectory& directory,
          const nlohmann::json& metadata,
          const storage::LoadOptions& options) {
         return Loader::PlanPacked(directory, metadata, options);
-    }
-
-    template <typename Loader>
-    static auto
-    Finish(IndexLoadPlan& plan,
-           const storage::LoadOptions& options,
-           bool use_async) {
-        return Loader::FinishPacked(plan, options, use_async);
-    }
-
-    template <typename Loader>
-    static IIndexReaderBasePtr
-    Finish(IndexLoadPlan& plan, const storage::LoadOptions& options) {
-        return folly::coro::blockingWait(
-            Loader::FinishPacked(plan, options, false));
     }
 };
 

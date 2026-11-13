@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -97,64 +98,6 @@ const (
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
-	}
-	return nil
-}
-
-// validateAddFunctionRequiresStorageV3 rejects adding a function to an existing collection
-// unless the compaction infrastructure that backfills its output field into pre-existing
-// sealed segments is enabled. The new function-output field is materialized only by
-// compaction (bump_schema_version compaction requires a StorageV3 segment):
-//   - common.storage.useLoonFFI: StorageV3 mode (bump works only on V3 segments; TEXT needs V3).
-//   - dataCoord.compaction.bumpSchemaVersion.enabled: the bumpSchemaVersionPolicy that directly
-//     backfills pre-existing V3 segments; it defaults to false, and there is no direct trigger
-//     on the add-function DDL, so without it an already-V3 old segment never receives the output.
-//   - dataCoord.compaction.storageVersion.enabled: the storageVersionUpgradePolicy that first
-//     mix-upgrades a pre-existing V2 segment to V3 so it can be bumped.
-//
-// Without all three, the DDL would succeed while old rows silently never get the function output.
-// New writes always compute the function output at flush, so create_collection with a function is
-// unaffected; this guard applies only to add-function on an existing collection. See issue #51167.
-func validateAddFunctionRequiresStorageV3() error {
-	if !paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
-	}
-	if !paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
-	}
-	if !paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
-	}
-	return nil
-}
-
-// validateAddFunctionInputNotText rejects adding a BM25/MinHash function whose input is a
-// TEXT field. TEXT columns are stored as binary LOB references, so when the async backfill
-// compaction materializes the function output for pre-existing segments it reads the input
-// back as *array.Binary and hard-fails in stringInputsFromRecord ("cannot materialize bm25
-// from text binary values without lob decoding"); the add-function DDL would return success
-// while the backfill silently fails and old rows never get the output. Reject it up front
-// (fail-fast). VarChar inputs stay allowed, and create_collection with such a function is
-// unaffected -- its output is computed at flush from the raw text. Distinct from the
-// storage-version gate (validateAddFunctionRequiresStorageV3): this is a request-content
-// input-type constraint, not an environment/config check. See issue #51167.
-func validateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
-	switch function.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		// Only BM25/MinHash are materialized from string input during backfill.
-		return nil
-	}
-	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, f := range schema.GetFields() {
-		fieldByName[f.GetName()] = f
-	}
-	for _, name := range function.GetInputFieldNames() {
-		if f, ok := fieldByName[name]; ok && f.GetDataType() == schemapb.DataType_Text {
-			return merr.WrapErrParameterInvalidMsg(
-				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
-				function.GetType().String(), name)
-		}
 	}
 	return nil
 }
@@ -404,6 +347,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
+	if t.schema.GetExternalSource() != "" {
+		if err := externalspec.ValidateSourceAndSpec(t.schema.GetExternalSource(), t.schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+			return err
+		}
+	}
 	if err := validateTextStorageV3Enabled(t.schema); err != nil {
 		return err
 	}
@@ -574,10 +522,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := checkArrayFeatureGate(t.schema); err != nil {
-		return err
-	}
-
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
@@ -667,9 +611,6 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
 	}
-	if err := checkArrayFeatureGateField(t.fieldSchema); err != nil {
-		return err
-	}
 	mlog.Info(context.TODO(), "PreExecute addField task done", mlog.Any("field schema", t.fieldSchema))
 	return nil
 }
@@ -749,9 +690,6 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
-		return err
-	}
-	if err := checkArrayFeatureGateStruct(t.structFieldSchema); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1062,15 +1000,7 @@ func (t *AlterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
-		if err := t.preExecuteAdd(ctx); err != nil {
-			return err
-		}
-		for _, fieldInfo := range action.GetAddRequest().GetFieldInfos() {
-			if err := checkArrayFeatureGateField(fieldInfo.GetFieldSchema()); err != nil {
-				return err
-			}
-		}
-		return nil
+		return t.preExecuteAdd(ctx)
 	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
 		return t.preExecuteDrop(ctx)
 	default:
@@ -1107,7 +1037,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		}
 	}
 	if plan.HasFunction() {
-		if err := validateAddFunctionRequiresStorageV3(); err != nil {
+		if err := schemautil.ValidateAddFunctionRequiresStorageV3(); err != nil {
 			return err
 		}
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
@@ -1151,7 +1081,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
 	}
 	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
-	if err := validateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
+	if err := schemautil.ValidateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
 		return err
 	}
 	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {

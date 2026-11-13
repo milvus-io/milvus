@@ -173,7 +173,7 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
     def test_milvus_client_compact_mix_preserves_topology_and_data(self):
         """
         target: verify ordinary MixCompaction rewrites multiple sealed segments without losing data
-        method: create three flushed segments, compact, then inspect plans, active segments, and all primary keys
+        method: create three flushed and indexed segments, compact, then inspect plans, active segments, and all primary keys
         expected: selected sources are replaced, unselected sources remain active, and all primary keys remain queryable
         """
         client = self._client()
@@ -181,20 +181,26 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
         batch_size = default_nb
         num_batches = 3
         total_rows = batch_size * num_batches
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             default_vector_field_name,
+            index_name=default_vector_field_name,
             index_type="FLAT",
             metric_type="COSINE",
         )
         self.create_collection(
             client,
             collection_name,
-            default_dim,
+            schema=schema,
             index_params=index_params,
             consistency_level="Strong",
             properties={"collection.autocompaction.enabled": "false"},
         )
+        index_info = self.describe_index(client, collection_name, default_vector_field_name)[0]
+        assert index_info["index_type"] == "FLAT", f"Expected FLAT index, got {index_info}"
 
         rng = np.random.default_rng()
         for batch in range(num_batches):
@@ -213,6 +219,8 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
             client,
             collection_name,
             minimum_segment_count=num_batches,
+            timeout=180,
+            index_name=default_vector_field_name,
         )
         raw_source_ids = [segment.segment_id for segment in segments_before]
         source_ids = set(raw_source_ids)

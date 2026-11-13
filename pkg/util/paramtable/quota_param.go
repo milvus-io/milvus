@@ -437,7 +437,7 @@ To use this setting, set quotaAndLimits.flushRate.enabled to true at the same ti
 	p.MaxFlushRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.flushRate.collection.max",
 		Version:      "2.3.9",
-		DefaultValue: "0.1",
+		DefaultValue: "1",
 		Formatter: func(v string) string {
 			if !p.FlushLimitEnabled.GetAsBool() {
 				return max
@@ -448,7 +448,7 @@ To use this setting, set quotaAndLimits.flushRate.enabled to true at the same ti
 			}
 			return v
 		},
-		Doc:    "qps, default no limit, rate for flush at collection level.",
+		Doc:    "Maximum number of flush requests per second for each collection.",
 		Export: true,
 	}
 	p.MaxFlushRatePerCollection.Init(base.mgr)

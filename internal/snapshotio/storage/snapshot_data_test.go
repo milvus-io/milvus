@@ -49,6 +49,14 @@ import (
 
 // =========================== Test Helper Functions ===========================
 
+func TestSnapshotReaderSegmentManifestReadFailure(t *testing.T) {
+	reader := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager())
+	segment, err := reader.ReadSegmentManifest(context.Background(), path.Join(t.TempDir(), "missing.avro"), 6)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to read manifest file")
+	require.Nil(t, segment)
+}
+
 func createTestSnapshotData() *snapshotstorage.SnapshotData {
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
@@ -3626,4 +3634,140 @@ func TestSnapshotReader_FutureManifest(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snapshot.Segments, 1)
 	assert.Equal(t, int64(123), snapshot.Segments[0].GetSegmentId())
+}
+
+func TestRebaseSelfContainedSnapshotData_SameKeyPrefix(t *testing.T) {
+	for _, root := range []string{"", "bundle"} {
+		for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+			t.Run(fmt.Sprintf("root=%s/storage=%d", root, version), func(t *testing.T) {
+				key := path.Join(root, "files", "segment")
+				uri := "s3://original-bucket/" + key
+				segment := &datapb.SegmentDescription{
+					StorageVersion: version,
+					Binlogs:        []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}, {LogPath: key}, {}}}},
+					Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}}}},
+					ManifestPath:   uri,
+				}
+				if version == storage.StorageV3 {
+					segment.ManifestPath = packed.MarshalManifestPath(uri, 7)
+				}
+				err := snapshotstorage.RebaseSelfContainedSnapshotData(&snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{segment}}, root, root)
+				require.NoError(t, err)
+				require.Equal(t, key, segment.Deltalogs[0].Binlogs[0].LogPath)
+				if version == storage.StorageV2 {
+					require.Equal(t, key, segment.Binlogs[0].Binlogs[0].LogPath)
+					require.Equal(t, key, segment.Binlogs[0].Binlogs[1].LogPath)
+					require.Empty(t, segment.Binlogs[0].Binlogs[2].LogPath)
+					require.Equal(t, key, segment.ManifestPath)
+				} else {
+					require.Equal(t, packed.MarshalManifestPath(key, 7), segment.ManifestPath)
+				}
+			})
+		}
+	}
+}
+
+func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
+	for _, mode := range []string{"same_bucket", "scheme_alias", "same_endpoint", "new_endpoint", "new_bucket", "key_origin", "key_location", "unknown_origin", "outside_avro", "outside_data", "referenced", "destination_bucket", "destination_endpoint", "destination_alias", "bare_key", "mixed_identities", "unrelated_bucket"} {
+		t.Run(mode, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: "s3://old/root/snapshots/1/metadata/2.json"},
+				Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{}},
+				ManifestList: []string{"s3://old/root/snapshots/1/manifests/20.avro"},
+			}
+			uri := "s3://new/root/snapshots/1/metadata/2.json"
+			dataPath := "s3://old/root/files/insert"
+			switch mode {
+			case "same_bucket":
+				uri = metadata.SnapshotInfo.S3Location
+			case "scheme_alias":
+				metadata.SnapshotInfo.S3Location = "gcs://old/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "gcs://old/root/snapshots/1/manifests/20.avro"
+				dataPath = "gcs://old/root/files/insert"
+				uri = "gs://old/root/snapshots/1/metadata/2.json"
+			case "same_endpoint", "new_endpoint":
+				metadata.SnapshotInfo.S3Location = "minio://OLD:9000/bucket/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "minio://old:9000/bucket/root/snapshots/1/manifests/20.avro"
+				dataPath = "minio://old:9000/bucket/root/files/insert"
+				uri = "minio://old:9000/bucket/root/snapshots/1/metadata/2.json"
+				if mode == "new_endpoint" {
+					uri = "minio://new:9000/bucket/root/snapshots/1/metadata/2.json"
+				}
+			case "destination_bucket", "mixed_identities":
+				metadata.ManifestList[0] = "s3://new/root/snapshots/1/manifests/20.avro"
+				dataPath = "s3://new/root/files/insert"
+			case "destination_endpoint":
+				metadata.SnapshotInfo.S3Location = "minio://old:9000/bucket/root/snapshots/1/metadata/2.json"
+				uri = "minio://new:9000/bucket/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "minio://NEW:9000/bucket/root/snapshots/1/manifests/20.avro"
+				dataPath = "minio://NEW:9000/bucket/root/files/insert"
+			case "destination_alias":
+				metadata.SnapshotInfo.S3Location = "gs://old/root/snapshots/1/metadata/2.json"
+				uri = "gs://new/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "gcs://new/root/snapshots/1/manifests/20.avro"
+				dataPath = "gcs://new/root/files/insert"
+			case "bare_key":
+				metadata.ManifestList[0] = "root/snapshots/1/manifests/20.avro"
+				dataPath = "root/files/insert"
+			case "unrelated_bucket":
+				dataPath = "s3://unrelated/root/files/insert"
+			case "key_origin":
+				metadata.SnapshotInfo.S3Location = "root/snapshots/1/metadata/2.json"
+			case "key_location":
+				uri = "root/snapshots/1/metadata/2.json"
+			case "unknown_origin":
+				metadata.SnapshotInfo.S3Location = ""
+			case "outside_avro":
+				metadata.ManifestList[0] = "s3://old/outside/20.avro"
+			case "outside_data":
+				dataPath = "s3://old/outside/insert"
+			case "referenced":
+				metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
+			}
+			frozen := proto.Clone(metadata)
+			segment := &datapb.SegmentDescription{
+				SegmentId: 20, StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L1,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: dataPath}}}},
+			}
+			if mode == "mixed_identities" {
+				segment.Binlogs[0].Binlogs = append(segment.Binlogs[0].Binlogs,
+					&datapb.Binlog{LogPath: "s3://old/root/files/old"},
+					&datapb.Binlog{LogPath: "root/files/key"})
+			}
+			data, err := snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			read := mockey.Mock((*storage.LocalChunkManager).Read).Return(data, nil).Build()
+			defer read.UnPatch()
+			reader := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager())
+			got, err := reader.ReadSnapshotFromMetadata(context.Background(), uri, metadata, true)
+			require.True(t, proto.Equal(frozen, metadata))
+			if mode == "outside_avro" || mode == "outside_data" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			logPath := got.Segments[0].Binlogs[0].Binlogs[0].LogPath
+			refs := []snapshotstorage.SnapshotFileRef{{Path: logPath, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(logPath)}}
+			err = snapshotstorage.ValidateExternalSnapshotPaths(uri, got, refs)
+			if mode == "unknown_origin" || mode == "referenced" || mode == "key_origin" || mode == "unrelated_bucket" {
+				require.Error(t, err, "unknown origins and referenced snapshots must not silently change storage identity")
+				require.Equal(t, dataPath, logPath)
+				return
+			}
+			require.NoError(t, err)
+			if mode == "same_bucket" || mode == "scheme_alias" || mode == "same_endpoint" || mode == "key_location" ||
+				mode == "destination_bucket" || mode == "destination_endpoint" || mode == "destination_alias" || mode == "bare_key" || mode == "mixed_identities" {
+				require.Equal(t, dataPath, logPath)
+				require.Equal(t, metadata.ManifestList, got.ManifestPaths)
+				if mode == "mixed_identities" {
+					require.Equal(t, "root/files/old", got.Segments[0].Binlogs[0].Binlogs[1].LogPath)
+					require.Equal(t, "root/files/key", got.Segments[0].Binlogs[0].Binlogs[2].LogPath)
+				}
+				return
+			}
+			require.Equal(t, "root/files/insert", logPath)
+			require.Equal(t, []string{"root/snapshots/1/manifests/20.avro"}, got.ManifestPaths)
+		})
+	}
 }

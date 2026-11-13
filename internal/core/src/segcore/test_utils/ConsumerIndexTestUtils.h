@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -160,23 +162,19 @@ BuildVectorReader(DataType field_type,
     AssertInfo(static_cast<bool>(loader),
                "consumer vector fixture has no loader");
     const auto caps = loader.derive_caps(adapted.params);
-    auto reader =
+    auto owner =
         loader.Load({index::IndexFiles{std::move(context),
                                        std::move(files),
                                        index::LegacyIndexStorageConfig{}},
-                     std::move(options)});
+                     std::move(options),
+                     milvus::index::test::TestIndexCacheConfig()});
+    auto reader = owner->CreateReader(nullptr);
     sink.ReleaseLocalStaging();
-    return {std::move(reader), adapted.family, std::move(adapted.params), caps};
-}
-
-inline std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-CreateReaderCache(index::IIndexReaderBasePtr reader,
-                  OpContext** observed = nullptr) {
-    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
-        translator = std::make_unique<expr_index::ReaderTranslator>(
-            std::move(reader), observed);
-    return cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
+    return {std::move(owner),
+            std::move(reader),
+            adapted.family,
+            std::move(adapted.params),
+            caps};
 }
 
 inline segcore::LoadIndexInfo
@@ -198,7 +196,6 @@ MakeLoadIndexInfo(OpenedIndex opened,
     // retain the logical parent-row count from the build input.
     info.num_rows =
         opened.params.value(INDEX_NUM_ROWS_KEY, opened.reader->Count());
-    info.index_size = opened.reader->MemoryUsage();
     if (const auto* vector =
             dynamic_cast<const index::IVectorReader*>(opened.reader.get())) {
         info.dim = vector->Dim();
@@ -208,7 +205,7 @@ MakeLoadIndexInfo(OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.cache_index = CreateReaderCache(std::move(opened.reader));
+    info.index = std::move(opened.index);
     return info;
 }
 

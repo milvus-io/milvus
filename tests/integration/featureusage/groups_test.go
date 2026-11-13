@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -187,11 +188,23 @@ func (s *Suite) TestQueryNodeGroups() {
 	filtered := integration.ConstructSearchRequest("", name, "pk >= 0", "vec",
 		schemapb.DataType_FloatVector, nil, metric.L2, map[string]any{"nprobe": 4}, 1, dim, 5, -1)
 	filtered.UseDefaultConsistency = true
-	_, err = s.Cluster.MilvusClient.Search(ctx, filtered)
+	result, err := s.Cluster.MilvusClient.Search(ctx, filtered)
 	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(result.GetStatus()))
+	s.Require().NotEmpty(result.GetResults().GetIds().GetIntId().GetData())
 	after := execFeatures(s.report(ctx))
 	s.Greater(after["two_stage_search"], before["two_stage_search"],
-		"a filtered pure-ANN search takes the two-stage branch; the delegator reports it as an execution feature")
+		"a filtered pure-ANN search takes the two-stage branch; QueryViewClient reports it as an execution feature")
+
+	// Zero filter cardinalities still complete both stages and must produce an
+	// empty ANN result rather than being mistaken for missing statistics.
+	emptyFilter := proto.Clone(filtered).(*milvuspb.SearchRequest)
+	emptyFilter.Dsl = "pk < 0"
+	empty, err := s.Cluster.MilvusClient.Search(ctx, emptyFilter)
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(empty.GetStatus()))
+	s.Empty(empty.GetResults().GetIds().GetIntId().GetData())
+	s.Greater(execFeatures(s.report(ctx))["two_stage_search"], after["two_stage_search"])
 
 	// RunAnalyzer is the one user feature only a QueryNode serves; it is
 	// counted at the Proxy, once per client request.
@@ -578,4 +591,19 @@ func (s *Suite) TestProvidersAndCustomResourceGroup() {
 	}, 60*timeUnit, timeUnit, "the default resource group should get its nodes back")
 
 	qn.Stop()
+	// Feature-usage reports still poll a stopped node until QueryCoord removes it.
+	waitCtx, cancel := context.WithTimeout(ctx, 60*timeUnit)
+	defer cancel()
+	s.Require().Eventually(func() bool {
+		resp, err := s.Cluster.MixCoordClient.ListQueryNode(waitCtx, &querypb.ListQueryNodeRequest{})
+		if err != nil || resp.GetStatus() == nil || !merr.Ok(resp.GetStatus()) {
+			return false
+		}
+		for _, node := range resp.GetNodeInfos() {
+			if node.GetID() == qn.GetNodeID() {
+				return false
+			}
+		}
+		return true
+	}, 60*timeUnit, timeUnit, "QueryCoord should remove the stopped QueryNode %d", qn.GetNodeID())
 }

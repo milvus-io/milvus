@@ -464,9 +464,10 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_order_by_pagination(self):
-        """OB-020~023: Pagination with a single ORDER BY field."""
+        """OB-020~023: Pagination with a unique ORDER BY field."""
         client = self._client()
-        order_by = [{"field": "price", "order": "asc"}]
+        # Equal prices have no stable order across independent page requests.
+        order_by = [{"field": "id", "order": "asc"}]
 
         # --- OB-020: Page 1 and Page 2 consistency ---
         page1 = self.query(
@@ -494,14 +495,14 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
         ids1 = {r["id"] for r in page1}
         ids2 = {r["id"] for r in page2}
         assert ids1.isdisjoint(ids2), f"Overlap between pages: {ids1 & ids2}"
-        assert page1[-1]["price"] <= page2[0]["price"], (
-            f"Pages not contiguous: page1 last {page1[-1]['price']} > page2 first {page2[0]['price']}"
+        assert page1[-1]["id"] <= page2[0]["id"], (
+            f"Pages not contiguous: page1 last {page1[-1]['id']} > page2 first {page2[0]['id']}"
         )
 
         # --- OB-021: Multi-page full traversal ---
         page_size = 100
         all_ids = set()
-        all_prices = []
+        ordered_ids = []
         offset = 0
         while True:
             page = self.query(
@@ -519,15 +520,12 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             page_ids = {r["id"] for r in page}
             assert page_ids.isdisjoint(all_ids), f"Duplicate ids at offset {offset}"
             all_ids.update(page_ids)
-            all_prices.extend([r["price"] for r in page])
+            ordered_ids.extend([r["id"] for r in page])
             offset += page_size
             if offset > default_nb + 1000:
                 break
         assert len(all_ids) == default_nb, f"Expected {default_nb} total rows, got {len(all_ids)}"
-        for i in range(len(all_prices) - 1):
-            assert all_prices[i] <= all_prices[i + 1], (
-                f"Global sort broken at index {i}: {all_prices[i]} > {all_prices[i + 1]}"
-            )
+        assert ordered_ids == list(range(default_nb)), "Pagination must return every ID exactly once in order"
 
         # --- OB-022: Offset exceeds total rows (but within topK cap 16384) ---
         # Data has 3200 rows, offset=4000 is beyond data but offset+limit=4010 < 16384
@@ -555,9 +553,7 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             consistency_level="Strong",
         )[0]
         assert len(res) == default_nb
-        prices = [r["price"] for r in res]
-        for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1]
+        assert [r["id"] for r in res] == list(range(default_nb))
         log.info(f"OB-023: limit=16000, returned {len(res)} rows (total={default_nb})")
 
     # ==================== 5.5 L1: Nullable Field Handling ====================

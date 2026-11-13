@@ -1,8 +1,5 @@
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
     # PyUDF reranking requires both the runtime and Proxy resource synchronization.
     function:
       pyUDF:

@@ -27,7 +27,7 @@ func (suite *SegmentSuite) prepareReadState(local *LocalSegment) (ReadState, err
 	for _, field := range typeutil.GetAllFieldSchemas(suite.collection.Schema()) {
 		fields = append(fields, field.GetFieldID())
 	}
-	collection := suite.collection.WithLoadScope([]int64{suite.partitionID}, fields)
+	collection := suite.collection.WithLoadScope([]int64{suite.partitionID}, fields, fields)
 	info := proto.Clone(local.LoadInfo()).(*querypb.SegmentLoadInfo)
 	return local.PrepareReadState(suite.T().Context(), nil, info, collection)
 }
@@ -196,7 +196,7 @@ func (suite *SegmentSuite) TestLegacyLoadFieldsPreserveLazyColumns() {
 	suite.True(physical.HasFieldData(106), "legacy preload selection must retain other lazy columns")
 }
 
-func (suite *SegmentSuite) TestViewExplicitEmptyCreateLoadsOnlyDependencies() {
+func (suite *SegmentSuite) TestViewExplicitEmptyCreateLoadsNoUserFields() {
 	ctx := suite.T().Context()
 	local := suite.sealed.(*LocalSegment)
 	binlogs, _, err := mock_segcore.SaveBinLog(ctx, suite.collectionID, suite.partitionID,
@@ -211,7 +211,7 @@ func (suite *SegmentSuite) TestViewExplicitEmptyCreateLoadsOnlyDependencies() {
 	suite.Require().NoError(err)
 	defer physical.Release()
 	suite.Require().NoError(physical.Load(ctx))
-	suite.True(physical.HasFieldData(GetPkField(suite.collection.Schema()).GetFieldID()))
+	suite.False(physical.HasFieldData(GetPkField(suite.collection.Schema()).GetFieldID()), "PK metadata does not imply loading the PK column")
 	suite.False(physical.HasFieldData(106), "an empty explicit scope cannot load all user columns")
 	suite.True(local.csegment.HasFieldData(106), "another scope keeps its own column")
 	suite.Equal(int64(100), physical.RowNum())

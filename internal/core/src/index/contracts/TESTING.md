@@ -53,8 +53,9 @@ only checking that a call returned.
 |---|---|
 | `BuilderRegistry`, `LoaderRegistry`, `LoaderEntry` | Typed lookup, unknown and duplicate keys, metadata only caps, independent create/load, parameter forwarding, and factory errors |
 | `IArtifactBuilder`, scalar/vector input | Complete borrowed input, multiple and empty batches, null validity, one shot artifact ownership, serialization after caller input dies, and invalid input rejection |
-| `IReaderConvertible` | Optional consuming conversion, no implicit I/O, shell destruction, failure propagation, and reader dependency lifetime |
-| `IIndexReaderBase`, `ReaderCaps` | Count in declared coordinate domain, type, capability/mixin agreement, resource values, and metadata derived caps matching the opened reader |
+| `IIndex` | Metadata without I/O, independent request contexts, retained index version, cold reader creation, and warmup cancellation without invalidating readers |
+| `IIndexReaderBase`, `ReaderCaps` | Count in declared coordinate domain, type, capability/mixin agreement, and metadata derived caps matching the request reader |
+| Concrete Storage/Engine cells | Heap/mmap resource accounting, retained backing owners, and cache estimates when actual usage is unavailable |
 | `IScalarPredicateReader` | IN, NOT IN, all comparison and interval bounds, duplicates, empty keys, null exclusion, bit count, nested element offsets |
 | `INullReader` | Exact complementary masks, all valid/all null, packed boundaries, empty batches, independent returned bitmap, and own coordinate domain |
 | `IScalarValueReader` | Owned `Lookup`, null, repeated and unordered `Gather`, callback ordering/validity, and borrowed view copied inside callback |
@@ -77,6 +78,7 @@ only checking that a call returned.
 | `IPatternMatchReader::ShouldUseForOp`, `PatternMatchIsExact`, `PatternMatch` | Per-call guard at short/empty literal, stable per-operation exact/candidate declaration, SQL LIKE versus literal prefix/postfix/inner and regex, escaping/NUL/Unicode, NULL, high cardinality, candidate superset and independent bitmaps |
 | `ITextMatchReader::MatchQuery`, `PhraseMatchQuery`, `FuzzyMatchQuery` | Token and analyzer cases, threshold 0/above token count, phrase order/slop, edit distance 0/1/2, empty query, all-null/empty reader, exact Count-sized bitmap |
 | `INgramReader::CanHandle`, `Candidates` | Literal length threshold, pattern operation, UTF-8, empty input, initial mask, candidate superset and repeated AND idempotence |
+| `INgramReader::CanHandleConditionTree`, `ConditionTreeCandidates` | Decoded necessary-condition trees, AND/OR, Unicode/NUL, planner fallback, caller-side malformed/version errors before reader calls, and candidate supersets checked against the Rust matcher |
 | `ISpatialReader::Candidates` | Each spatial relation, MBR superset retains true hits, null rows, empty candidate result, result size and repeatability |
 | `IJsonIndexReader::CastTypesOf`, `Resolve`, `Exists`; `JsonResolvedReader` | Supported versus unsupported path/cast, escaped path, supported but absent path, null comparable values, owned/borrowed/empty handles, simultaneous resolves and move lifetime |
 | `IIndexReaderBase` getters and `ReaderCaps` | Metadata-derived versus opened caps, mixin consistency, row/element count, value type, repeated resource reads, single row/multibatch/all-null profiles |
@@ -88,7 +90,6 @@ only checking that a call returned.
 | `LoaderEntry`, `LoaderRegistry` | Empty/partial/full entry, metadata only `derive_caps`, unknown/duplicate registration, synchronous and asynchronous load, create error/null loader/load error with preserved classification |
 | `BuilderRegistry<Input>` | Unknown and duplicate family, separate tables for different input types, same family with distinct input shape, unchanged typed parameters, independent instances, null/throwing factory, concurrent registration and lookup |
 | `IArtifactBuilder<Input>::InputSpec`, `Build` | Stable side input declaration; borrowed values survive multiple/empty batches and input destruction; all-null, explicit all-valid, omitted-validity, scalar/array/vector shapes; invalid non-nullable input and invalid prepared-file path rejection |
-| `IReaderConvertible::FromArtifact`, `IntoReader` | Null artifact, absent capability, successful ownership transfer, conversion throw/null result, non-convertible real artifact, direct RAM conversion, persistence before consumption |
 
 Invalid scalar lookup offsets, empty scalar builder input, and NaN order have no
 uniform expectation in the interfaces or across the registered reader profiles.

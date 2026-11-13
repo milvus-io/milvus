@@ -440,7 +440,9 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	// BeginLogID is deprecated, but still assign it for compatibility.
 	plan.BeginLogID = logIDRange.Begin
 
-	meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan)
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan); err != nil {
+		return nil, err
+	}
 
 	mlog.Info(context.TODO(), "Compaction handler refreshed mix compaction plan", mlog.Int64("maxSize", plan.GetMaxSize()),
 		mlog.Any("PreAllocatedLogIDs", logIDRange), mlog.Any("segID2DeltaLogs", segIDMap))

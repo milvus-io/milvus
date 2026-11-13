@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -48,6 +49,19 @@ func NewQueryTask(ctx context.Context,
 	}
 }
 
+// NewMaterializeTask is NewQueryTask for MaterializeSegments: the retrieve
+// takes the Arrow path and the task replies with one Arrow batch
+// (MaterializeResult) instead of Result (design doc 20261019 §4).
+func NewMaterializeTask(ctx context.Context,
+	collection *segments.Collection,
+	manager *segments.Manager,
+	req *querypb.QueryRequest,
+) *QueryTask {
+	t := NewQueryTask(ctx, collection, manager, req)
+	t.materialize = true
+	return t
+}
+
 type QueryTask struct {
 	ctx            context.Context
 	collection     *segments.Collection
@@ -59,6 +73,11 @@ type QueryTask struct {
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
 	scheduleSpan   trace.Span
+
+	// materialize (NewMaterializeTask) sets materializeResult instead of
+	// result.
+	materialize       bool
+	materializeResult *internalpb.MaterializeResults
 }
 
 // Return the username which task is belong to.
@@ -107,7 +126,15 @@ func (t *QueryTask) PreExecute() error {
 
 	var err error
 	t.queryChain, err = chain.PrepareQueryPlanChainExecution(t.plan, t.collection.Schema(), t.req.GetReq().GetIsIterator())
-	return err
+	if err != nil {
+		return err
+	}
+	// A query chain replies with candidate rows and computed columns, which
+	// a Materialize batch does not carry; the proxy falls back to Query.
+	if t.materialize && t.queryChain != nil {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "materialize: query function chains are not supported")
+	}
+	return nil
 }
 
 func (t *QueryTask) SearchResult() *internalpb.SearchResults {
@@ -152,10 +179,15 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 
 	var results []segments.RetrieveSegmentResult
 	var pinnedSegments []segments.Segment
+	// A materialize task's segments take the Arrow path, its reply's format.
+	var opts []segments.RetrieveOption
+	if t.materialize {
+		opts = append(opts, segments.WithArrowTransport())
+	}
 	if selected != nil {
-		results, err = segments.RetrieveSelectedSegments(t.ctx, retrievePlan, t.req, selected)
+		results, err = segments.RetrieveSelectedSegments(t.ctx, retrievePlan, t.req, selected, opts...)
 	} else {
-		results, pinnedSegments, err = segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+		results, pinnedSegments, err = segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req, opts...)
 		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	}
 	// The Arrow transport hands back records that MaterializeArrowSelection
@@ -211,6 +243,22 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		return err
 	}
 
+	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
+		return acc + segments.GetSegmentRelatedDataSize(seg)
+	}, 0)
+	cost := &internalpb.CostAggregation{TotalRelatedDataSize: relatedDataSize}
+
+	if t.materialize {
+		// ServiceTime covers building the batch, mirroring the Query path
+		// which covers MaterializeArrowSelection.
+		if err := t.buildMaterializeResult(reducedResult, arrowSelection, cost); err != nil {
+			return err
+		}
+		t.materializeResult.Header.FeatureBits = retrievePlan.FeatureBits() | segments.ColdReadFeatureBit(reducedResult.GetScannedRemoteBytes())
+		cost.ServiceTime = tr.ElapseSpan().Milliseconds()
+		return nil
+	}
+
 	// Materialize the Arrow path's chosen rows into FieldsData. This is the
 	// response's own format, so it ends the Arrow representation here, at the
 	// RPC boundary, exactly where the records are still alive -- the deferred
@@ -218,23 +266,17 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	if err := queryutil.MaterializeArrowSelection(reducedResult, arrowSelection, t.collection.Schema()); err != nil {
 		return err
 	}
-
-	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
-		return acc + segments.GetSegmentRelatedDataSize(seg)
-	}, 0)
+	cost.ServiceTime = tr.ElapseSpan().Milliseconds()
 
 	t.result = &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{
 			SourceID: paramtable.GetNodeID(),
 		},
-		Status:          merr.Success(),
-		ComputedResults: reducedResult.GetComputedResults(),
-		Ids:             reducedResult.Ids,
-		FieldsData:      reducedResult.FieldsData,
-		CostAggregation: &internalpb.CostAggregation{
-			ServiceTime:          tr.ElapseSpan().Milliseconds(),
-			TotalRelatedDataSize: relatedDataSize,
-		},
+		Status:             merr.Success(),
+		ComputedResults:    reducedResult.GetComputedResults(),
+		Ids:                reducedResult.Ids,
+		FieldsData:         reducedResult.FieldsData,
+		CostAggregation:    cost,
 		AllRetrieveCount:   reducedResult.GetAllRetrieveCount(),
 		HasMoreResult:      reducedResult.HasMoreResult,
 		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
@@ -243,6 +285,35 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
 		FeatureBits:        retrievePlan.FeatureBits() | segments.ColdReadFeatureBit(reducedResult.GetScannedRemoteBytes()),
 	}
+	return nil
+}
+
+// buildMaterializeResult writes the reduce output as one Arrow IPC batch. It
+// runs while the selection's records are alive (before the deferred
+// ReleaseRecords in execute).
+func (t *QueryTask) buildMaterializeResult(reduced *segcorepb.RetrieveResults, sel *queryutil.ArrowSelection, cost *internalpb.CostAggregation) error {
+	header := &internalpb.MaterializeHeader{
+		Status:             merr.Success(),
+		SourceId:           paramtable.GetNodeID(),
+		AllRetrieveCount:   reduced.GetAllRetrieveCount(),
+		ScannedRemoteBytes: reduced.GetScannedRemoteBytes(),
+		ScannedTotalBytes:  reduced.GetScannedTotalBytes(),
+		CostAggregation:    cost,
+	}
+	t.materializeResult = &internalpb.MaterializeResults{Header: header}
+	enc, err := materialize.Encode(reduced, sel)
+	if err != nil || enc.Entry == nil {
+		return err
+	}
+	// The caller names a schema it already holds; send the bytes only when
+	// this batch's schema is a different one. Zero means "none named".
+	header.SchemaFingerprint = materialize.SchemaFingerprint(enc.SchemaMsg)
+	if want := t.req.GetMaterializeSchemaFingerprint(); want == 0 || want != header.SchemaFingerprint {
+		header.BodySchema = enc.SchemaMsg
+	}
+	header.BodyRawSize = enc.RawSize
+	header.ResultSize = enc.ResultSize
+	t.materializeResult.Body = [][]byte{enc.Entry}
 	return nil
 }
 
@@ -256,6 +327,10 @@ func (t *QueryTask) Wait() error {
 
 func (t *QueryTask) Result() *internalpb.RetrieveResults {
 	return t.result
+}
+
+func (t *QueryTask) MaterializeResult() *internalpb.MaterializeResults {
+	return t.materializeResult
 }
 
 func (t *QueryTask) NQ() int64 {

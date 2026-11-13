@@ -17,15 +17,8 @@
 package segment
 
 import (
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // UniqueID is typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
-
-// Timestamp is typeutil.Timestamp.
-type Timestamp = typeutil.Timestamp
-
-// Params is the component param table.
-var Params = paramtable.Get()

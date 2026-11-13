@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "folly/coro/BlockingWait.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
@@ -250,7 +251,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
                         : cachinglayer::ResourceUsage{expected_bytes, 0}));
         EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
         EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
-        auto cells = translator->get_cells(nullptr, {0});
+        auto cells = folly::coro::blockingWait(
+            translator->get_cells_async(nullptr, {0}));
         ASSERT_EQ(cells.size(), 1);
         auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
         ASSERT_NE(chunk, nullptr);
@@ -281,7 +283,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
     EXPECT_EQ(usage.resident,
               (GetParam() ? cachinglayer::ResourceUsage{0, 78}
                           : cachinglayer::ResourceUsage{78, 0}));
-    auto cells = translator->get_cells(nullptr, {0});
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, {0}));
     ASSERT_EQ(cells.size(), 1);
     auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
     ASSERT_NE(chunk, nullptr);
@@ -318,7 +321,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
         FieldDataInfo null_info(meta.get_id().get(), 3, getMmapDirPath());
         auto null_translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, meta, null_info, GetParam(), true, zero_offsets);
-        auto null_cells = null_translator->get_cells(nullptr, {0});
+        auto null_cells = folly::coro::blockingWait(
+            null_translator->get_cells_async(nullptr, {0}));
         ASSERT_EQ(null_cells.size(), 1);
         auto* null_chunk =
             dynamic_cast<ColumnarArrayChunk*>(null_cells[0].second.get());
@@ -344,7 +348,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
                                                GetParam(),
                                                true,
                                                zero_offsets);
-    auto null_cells = null_translator->get_cells(nullptr, {0});
+    auto null_cells = folly::coro::blockingWait(
+        null_translator->get_cells_async(nullptr, {0}));
     ASSERT_EQ(null_cells.size(), 1);
     auto* null_chunk =
         dynamic_cast<VectorArrayChunk*>(null_cells[0].second.get());
@@ -690,7 +695,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestGetMultipleCells) {
             cids.push_back(i);
         }
 
-        auto cells = translator->get_cells(nullptr, cids);
+        auto cells = folly::coro::blockingWait(
+            translator->get_cells_async(nullptr, cids));
         EXPECT_EQ(cells.size(), cids.size());
 
         for (size_t i = 0; i < cells.size(); ++i) {
@@ -841,8 +847,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     EXPECT_EQ(
         usage.resident,
         (use_mmap
-             ? cachinglayer::ResourceUsage{0, row_count * sizeof(int64_t)}
-             : cachinglayer::ResourceUsage{row_count * sizeof(int64_t), 0}));
+             ? cachinglayer::ResourceUsage(0, row_count * sizeof(int64_t))
+             : cachinglayer::ResourceUsage(row_count * sizeof(int64_t), 0)));
     EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
     EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
     const auto empty = translator->estimated_loading_usage({});
@@ -1076,7 +1082,8 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
     for (size_t i = 0; i < std::min<size_t>(3, num_cells); ++i) {
         cids.push_back(i);
     }
-    auto cells = translator->get_cells(nullptr, cids);
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, cids));
     ASSERT_EQ(cells.size(), cids.size());
 
     // Verify file was created (all cells share the same buffer/file)
@@ -1172,7 +1179,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringMultipleCellsWithTailBuffer) {
         cids.push_back(i);
     }
 
-    auto cells = translator->get_cells(nullptr, cids);
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, cids));
     EXPECT_EQ(cells.size(), num_cells);
 
     int64_t total_rows = 0;

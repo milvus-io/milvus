@@ -202,9 +202,8 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context) error {
 }
 
 // PrepareIndexMeta refreshes a reused runtime before the new view can serve.
-// Hold indexMu across the RPC: an older concurrent preparation must resolve its
-// version against Coord after a newer publication, rather than overwrite it with
-// a response captured earlier. Load-info versions are hashes and cannot be ordered.
+// Serialize preparation of the shared write resources. Exact LoadInfo reads are
+// immutable references; read bindings prepare their own selected index metadata.
 func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryViewMeta, provider LoadInfoProvider) error {
 	version := meta.GetLoadInfoVersion()
 	if version == 0 || provider == nil {
@@ -245,8 +244,8 @@ func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryV
 		return err
 	}
 	for _, module := range r.modules {
-		if indexed, ok := module.(QueryRuntimeIndexModule); ok {
-			if err := indexed.UpdateIndexMeta(ctx, info.IndexInfos); err != nil {
+		if indexed, ok := module.(QueryRuntimeGrowingIndexModule); ok {
+			if err := indexed.PrepareGrowingIndexes(ctx, info.IndexInfos); err != nil {
 				return err
 			}
 		}

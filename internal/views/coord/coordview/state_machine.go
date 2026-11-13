@@ -25,8 +25,9 @@ import (
 //
 // Thread-safety: NOT thread-safe. The caller (Manager) must serialize access.
 type CoordQueryViewStateMachine struct {
-	state qviews.QueryViewState
-	view  *viewpb.QueryViewOfShard
+	preparation *Preparation // Exact-version completion, protected by the manager lock.
+	state       qviews.QueryViewState
+	view        *viewpb.QueryViewOfShard
 
 	// Per-node reported states.
 	snState  qviews.QueryViewState
@@ -263,12 +264,24 @@ func (sm *CoordQueryViewStateMachine) OnQueryNodeLost(node qviews.QueryNode) {
 	}
 }
 
-// EnterDown is called by the Manager to transition this view from Up to Down.
-// Triggers: higher-version view is Up (Manager decision), or ReleaseCollection.
-// No-op if not in Up state.
+// EnterDown starts ordinary retirement with serving-lease protection.
 func (sm *CoordQueryViewStateMachine) EnterDown() {
-	if sm.state != qviews.QueryViewStateUp {
+	sm.EnterDownWithControl(nil)
+}
+
+// EnterDownWithControl can strengthen an already-published Down command. A
+// control-only update must be persisted and resent while SN still reports Up.
+func (sm *CoordQueryViewStateMachine) EnterDownWithControl(control *viewpb.QueryViewControl) {
+	if sm.state != qviews.QueryViewStateUp && sm.state != qviews.QueryViewStateDown {
 		return
+	}
+	disableLease := control.GetPreemptServingLease() && !sm.view.Meta.GetControl().GetPreemptServingLease()
+	if sm.state == qviews.QueryViewStateDown && !disableLease {
+		return
+	}
+	if disableLease {
+		sm.view = proto.Clone(sm.view).(*viewpb.QueryViewOfShard)
+		sm.view.Meta.Control = proto.Clone(control).(*viewpb.QueryViewControl)
 	}
 	sm.state = qviews.QueryViewStateDown
 	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDown)

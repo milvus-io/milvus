@@ -17,12 +17,15 @@
 //! # Ok::<(), milvus_grep_core::Error>(())
 //! ```
 
+mod condition;
+mod condition_proto;
 mod error;
 pub mod ffi;
 mod plan;
 mod result;
 mod session;
 
+pub use condition::LiteralCondition;
 pub use error::{Error, InputKind, LimitKind};
 pub use plan::{Boundary, CaseMode, CompileLimits, MatchOptions, PatternKind, Plan};
 pub use result::{BatchResult, Line, Span, TextResult};
@@ -30,3 +33,6 @@ pub use session::{CancellationToken, Session};
 
 #[cfg(test)]
 mod core_tests;
+
+#[cfg(test)]
+mod condition_tests;

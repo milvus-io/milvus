@@ -228,9 +228,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.proxyManager,
 	)
 
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
-	}
 	suite.targetObserver.Start()
 	suite.ob.Start()
 	suite.loadAll()
@@ -395,7 +392,9 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.dist.SegmentDistManager.Update(2, segments103Node2...)
 	suite.dist.SegmentDistManager.Update(3, segments103Node3...)
 
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	for _, collection := range suite.collections {
+		suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: collection})
+	}
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 

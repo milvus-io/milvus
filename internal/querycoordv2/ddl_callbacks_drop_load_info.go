@@ -21,10 +21,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var errReleaseCollectionNotLoaded = errors.New("release collection not loaded")
@@ -38,41 +39,86 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped.
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 
-	if !s.meta.Exist(ctx, req.GetCollectionID()) {
+	isLoaded := s.qviewsRuntime.loadConfigStore.Contains(req.GetCollectionID())
+	if !isLoaded {
+		// A previous release may have removed desired state before cleanup
+		// completed. Keep the collection lock until its views are gone.
+		if err := s.waitQueryViewsReleased(ctx, req.GetCollectionID()); err != nil {
+			return err
+		}
 		return errReleaseCollectionNotLoaded
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().
 		WithHeader(&message.DropLoadConfigMessageHeader{
-			DbId:         coll.GetDbId(),
-			CollectionId: coll.GetCollectionID(),
+			DbId:         coll.DatabaseID,
+			CollectionId: coll.ID,
 		}).
 		WithBody(&message.DropLoadConfigMessageBody{}).
 		WithControlChannelBroadcast().
-		MustBuildBroadcast() // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
+		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
 
 func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
-	releaseJob := job.NewReleaseCollectionJob(ctx,
-		result,
-		s.dist,
-		s.meta,
-		s.broker,
-		s.targetMgr,
-		s.targetObserver,
-		s.checkerController,
-		s.proxyClientManager,
-	)
-	if err := releaseJob.Execute(); err != nil {
+	if err := s.qviewsRuntime.loadManager.ReleaseCollection(ctx, result.Message.Header()); err != nil {
 		return err
 	}
 	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
-	return nil
+	// Broadcast owns the collection lock until this callback completes. Waiting
+	// here also serializes a subsequent load with the old replica's cleanup.
+	collectionID := result.Message.Header().GetCollectionId()
+	if err := s.waitQueryViewsReleased(ctx, collectionID); err != nil {
+		return err
+	}
+	return s.qviewsRuntime.loadConfigStore.Remove(ctx, collectionID)
+}
+
+func (s *Server) waitQueryViewsReleased(ctx context.Context, collectionID int64) error {
+	// Join a batch queued after desired-state withdrawal. Its completion drains
+	// older planning before checking the registry, so an in-flight prepare cannot
+	// create a shard after an empty-registry check. Concurrent releases share the
+	// batch instead of each synchronously running Reconcile.
+	runtime := s.qviewsRuntime
+	completion := runtime.balancer.TriggerWithCompletion(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
+	select {
+	case <-completion.Done():
+		if err := completion.Get(); err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-runtime.readyChanges.Done():
+		return merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for QueryView release, collection=%d", collectionID)
+	}
+	registry := runtime.shardViewRegistry
+	changed := make(chan struct{}, 1)
+	// Subscribe before checking to avoid losing a final-removal notification.
+	unregister := registry.RegisterShardRemovalListener(collectionID, func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
+	defer unregister()
+	for {
+		if err := ctx.Err(); err != nil {
+			return merr.Wrapf(err, "waiting for QueryView release, collection=%d", collectionID)
+		}
+		// Dropping views can have neither Up nor segment stats. Only final
+		// registry removal proves node cleanup and durable deletion completed.
+		if len(registry.CollectionShards(collectionID)) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-changed:
+		}
+	}
 }

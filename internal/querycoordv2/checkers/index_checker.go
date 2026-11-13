@@ -92,21 +92,12 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 		}
 
 		collection := c.meta.GetCollection(ctx, collectionID)
-		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		if collection == nil {
 			mlog.Warn(ctx, "collection released during check index", mlog.Int64("collection", collectionID))
 			continue
 		}
-		// A nil schema means the collection is not in the shared store yet
-		// (created after boot, not yet lazily loaded by DataCoord). Fetch it
-		// for this round only -- caching it in QueryCoord would just be a
-		// second copy that nothing invalidates.
-		if schema == nil && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-			collectionSchema, err1 := c.broker.DescribeCollection(ctx, collectionID)
-			if err1 == nil {
-				schema = collectionSchema.GetSchema()
-			}
-		}
+		// A nil schema means RootCoord no longer has the collection.
+		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)

@@ -179,6 +179,20 @@ func (r *ShardViewRegistry) Close() {
 		return
 	}
 	r.flushScheduler.Close()
+	r.mu.RLock()
+	managers := make([]*ShardViewManager, 0, len(r.shards))
+	for _, manager := range r.shards {
+		managers = append(managers, manager)
+	}
+	r.mu.RUnlock()
+	for _, manager := range managers {
+		manager.mu.Lock()
+		manager.closed = true
+		for _, sm := range manager.views {
+			sm.failPreparation("shard registry closed")
+		}
+		manager.mu.Unlock()
+	}
 }
 
 // Begin opens an explicit cross-shard QueryView flush batch. Existing flush
@@ -265,6 +279,31 @@ func (r *ShardViewRegistry) SnapshotForCollection(collectionID int64) *ShardView
 		stats[shardID] = r.stats[shardID]
 	}
 	return &ShardViewSnapshot{version: r.version, stats: stats}
+}
+
+// CollectionIDs returns collections with resident shard managers, including
+// released collections whose views have not finished cleanup.
+func (r *ShardViewRegistry) CollectionIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Keys(r.collectionShards)
+}
+
+// LoadedSegmentsOnNode returns distinct segments confirmed ready by QueryView
+// reports, including retained Down views. Preparing targets are not loaded
+// facts; Dropping views are no longer advertised as available resources.
+func (r *ShardViewRegistry) LoadedSegmentsOnNode(nodeID int64) []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	segments := make(map[int64]struct{})
+	for shardID := range r.nodeShards[nodeID] {
+		for id, segment := range r.stats[shardID].Segments {
+			if segment.Nodes[nodeID] >= SegmentStateReady {
+				segments[id] = struct{}{}
+			}
+		}
+	}
+	return maps.Keys(segments)
 }
 
 // CollectionShards returns the resident shards belonging to collectionID.

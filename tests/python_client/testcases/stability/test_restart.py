@@ -12,7 +12,18 @@ TIMEOUT = 120
 insert_interval_time = 1.5
 big_nb = 100000
 field_name = "float_vector"
-big_entities = gen_entities(big_nb)
+_big_entities = None
+
+
+def big_entities():
+    # Build lazily: generating 100k entities at import time costs ~750 MB in every
+    # pytest worker during collection, even when no test in this module is selected.
+    global _big_entities
+    if _big_entities is None:
+        _big_entities = gen_entities(big_nb)
+    return _big_entities
+
+
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
@@ -66,7 +77,7 @@ class TestRestartBase:
         expected: row count equals 0
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities())
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -94,7 +105,7 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities())
         connect.flush([collection])
         delete_length = 1000
         delete_ids = ids[big_nb // 4 : big_nb // 4 + delete_length]
@@ -127,7 +138,7 @@ class TestRestartBase:
         expected: row count equals nb
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities())
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index)
         res_count = connect.count_entities(collection)
@@ -159,7 +170,7 @@ class TestRestartBase:
         # disable_autoflush()
         loop = 5
         for i in range(loop):
-            ids = connect.bulk_insert(collection, big_entities)
+            ids = connect.bulk_insert(collection, big_entities())
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index, _async=True)
         res_count = connect.count_entities(collection)
@@ -204,7 +215,7 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities())
         connect.flush([collection])
         delete_length = 1000
         loop = 10
@@ -248,7 +259,7 @@ class TestRestartBase:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            ids = connect.bulk_insert(collection_name, big_entities)
+            ids = connect.bulk_insert(collection_name, big_entities())
         connect.flush(collection_list, _async=True)
         res_count = connect.count_entities(collection_list[-1])
         logging.getLogger().info(res_count)
@@ -291,7 +302,7 @@ class TestRestartBase:
             tag_tmp = gen_unique_str()
             partitions.append(tag_tmp)
             connect.create_partition(collection, tag_tmp)
-            ids = connect.bulk_insert(collection, big_entities, partition_name=tag_tmp)
+            ids = connect.bulk_insert(collection, big_entities(), partition_name=tag_tmp)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)

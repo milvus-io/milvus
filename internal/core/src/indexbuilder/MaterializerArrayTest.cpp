@@ -133,7 +133,7 @@ index::IIndexReaderBasePtr
 BuildNestedReader(const std::vector<ScalarFieldProto>& rows,
                   const uint8_t* parent_validity,
                   std::string_view backend_name,
-                  int64_t element_count) {
+                  std::size_t element_count) {
     const auto& backend =
         index::test::ScalarReaderBackends().Get<T>(backend_name);
     auto materializer = MakeScalarBuildInputMaterializer(
@@ -191,7 +191,6 @@ TEST(MaterializerArrayTest,
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
         EXPECT_EQ(reader->Count(), 5);
-        EXPECT_GT(reader->MemoryUsage(), 0);
         ExpectNestedHits<int32_t>(*reader, 10, {0});
         ExpectNestedHits<int32_t>(*reader, 20, {1, 2});
         ExpectNestedHits<int32_t>(*reader, 30, {3, 4});

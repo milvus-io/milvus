@@ -426,8 +426,9 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		s.pendingFlushChunkLocked(targetTimeTick).persisted = result
 		s.mu.Unlock()
 	}
-	// TODO: Remove after enabling queryview. Publish exactly this stable pack
-	// before exposing its recovery snapshot or releasing the Insert handles.
+	// Publish exactly this stable pack before exposing its recovery snapshot
+	// or releasing the Insert handles. QueryView's W/A Transform coverage
+	// requires the first StartPosition registration in this ordering.
 	appendPersistedStorage(result.PersistedStorage, pack.Meta)
 	var start *msgpb.MsgPosition
 	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {
@@ -459,25 +460,67 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 // TimeTick is not greater than targetTimeTick. The whole current buffer may be
 // persisted, so the scheduled task can cover a later TimeTick as well.
 func (s *SegmentView) RequestPersistThrough(targetTimeTick uint64) bool {
+	return s.requestPersistThrough(targetTimeTick, false)
+}
+
+// RequestPersistThroughUnderPressure promotes persistence needed by the recovery tail.
+func (s *SegmentView) RequestPersistThroughUnderPressure(targetTimeTick uint64) bool {
+	return s.requestPersistThrough(targetTimeTick, true)
+}
+
+func (s *SegmentView) requestPersistThrough(targetTimeTick uint64, underPressure bool) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.unrecoverableErr() != nil {
-		s.mu.Unlock()
 		return false
 	}
-	if len(s.pending.entries) == 0 || s.pending.fromTimeTick > targetTimeTick {
-		s.mu.Unlock()
-		return false
+	scheduled := len(s.pending.entries) > 0 && s.pending.fromTimeTick <= targetTimeTick
+	if scheduled {
+		s.newFlushL1BufferTaskLocked()
 	}
-	s.newFlushL1BufferTaskLocked()
+	hasPendingTarget := (len(s.pendingDataHandles) > 0 && s.pendingDataHandles[0].timetick <= targetTimeTick) ||
+		(len(s.pendingFlushChunks) > 0 && s.pendingFlushChunks[0].fromTimeTick <= targetTimeTick)
+	promotionTarget := targetTimeTick
+	if underPressure && s.pendingFinalCommit != nil && s.createSegmentTimeTick < targetTimeTick {
+		// L0 through the target also waits for final publication of earlier L1
+		// segments. Its queued commit may have a later flush boundary.
+		hasPendingTarget = true
+		promotionTarget = max(promotionTarget, s.pendingFinalCommit.timeTick())
+	}
+	if underPressure && hasPendingTarget {
+		// Promote the serial prefix, including already submitted work. A target
+		// whose buffer was sealed earlier must not lose its pressure signal.
+		for _, task := range s.pendingTasks {
+			task.taskPriority().Promote()
+			if task.timeTick() >= promotionTarget {
+				break
+			}
+		}
+	}
 	s.maybeSubmitNextLocked()
-	s.mu.Unlock()
-	return true
+	return scheduled
 }
 
 func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
+}
+
+// SchemaReference is what keeps a retained segment's schema versions alive.
+// Schema GC reads it on every cleanup pass, so it avoids cloning the assignment.
+type SchemaReference struct {
+	CreateTimeTick uint64
+	SchemaVersion  int32
+}
+
+func (info *SegmentView) SchemaReference() SchemaReference {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return SchemaReference{
+		CreateTimeTick: info.createSegmentTimeTick,
+		SchemaVersion:  info.meta.GetSchemaVersion(),
+	}
 }
 
 func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRecoveryState, bool) {

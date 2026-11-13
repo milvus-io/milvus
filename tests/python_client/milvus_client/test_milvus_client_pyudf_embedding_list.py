@@ -261,7 +261,7 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
             control = self._synced_search(client, self._request(name, nq, chain=self._chain(resource)))
             self._assert_results(control, nq, [1, 2, 3], reranked=True)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("element_level", [False, True], ids=["embedding_list", "element"])
     def test_pyudf_indexed_array_search_preserves_scores_and_fields(
         self, minio_host, minio_bucket, request, record_property, element_level

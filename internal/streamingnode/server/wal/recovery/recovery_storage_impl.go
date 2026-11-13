@@ -222,9 +222,9 @@ func (r *recoveryStorageImpl) installCheckpoint(checkpoint *WALCheckpoint) {
 	}
 	var tracker *messageack.Tracker
 	tracker = messageack.NewTracker(point, func(utility.WALCheckpoint) {
-		observed, completed := tracker.LogicalOffsets()
+		observed, completed, count, lastMessageAt := tracker.LogicalState()
 		if r.tailController != nil {
-			r.tailController.UpdateTrackerFrontiers(observed, completed)
+			r.tailController.UpdateTrackerFrontiers(observed, completed, count, lastMessageAt)
 		}
 		r.notifyPersist()
 	}, r.vchannelManager)
@@ -262,13 +262,6 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID(), retry.Attempts(1)),
 	)
 	// The temporary L0 consumer rebuilds retained Delete handles from WAL replay.
-	// Deprecated: the manager periodically reports the pchannel recovery
-	// checkpoint to DataCoord (DataCoord.UpdateChannelCheckpoint) so that
-	// GetFlushState can observe flush progress. The recovery storage write
-	// path itself never calls UpdateChannelCheckpoint; remove this wiring
-	// together with PChannelCheckpointUpdater once the new
-	// checkpoint-propagation path lands.
-	coordinatorBroker := broker.NewCoordBroker(coord, paramtable.GetNodeID())
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
 		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
 			queryresource.NewGrowingRuntimeModuleBuilder(nil),
@@ -288,12 +281,10 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			packed.CreateStorageConfig(),
 		),
-		SummaryManager:        summaryManager,
-		L0Materializer:        l0Writer,
-		L0MaterializeRows:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
-		L0MaterializeBytes:    uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
-		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
-		CoordinatorBroker:     coordinatorBroker,
+		SummaryManager:     summaryManager,
+		L0Materializer:     l0Writer,
+		L0MaterializeRows:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+		L0MaterializeBytes: uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
 	})
 	if err != nil {
 		return err
@@ -401,11 +392,11 @@ func (r *recoveryStorageImpl) startAckTracker() {
 	r.ackTrackerWG.Add(1)
 	go func() {
 		defer r.ackTrackerWG.Done()
-		var underPressure func() bool
+		var shouldFlush func() bool
 		if r.tailController != nil {
-			underPressure = r.tailController.UnderSoftPressure
+			shouldFlush = r.tailController.ShouldFlush
 		}
-		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, underPressure)
+		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, shouldFlush)
 	}()
 }
 
@@ -416,13 +407,13 @@ func (r *recoveryStorageImpl) startSummaryBacklog() {
 	r.summaryWG.Add(1)
 	go func() {
 		defer r.summaryWG.Done()
-		var underPressure func() bool
+		var shouldFlush func() bool
 		if r.tailController != nil {
-			underPressure = r.tailController.UnderSoftPressure
+			shouldFlush = r.tailController.ShouldFlush
 		}
-		// Summary checks tail pressure independently of AckTracker stalls. The
+		// Summary checks flush thresholds independently of AckTracker stalls. The
 		// current WAL L0 materializer owns its own consumption age policy.
-		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), 0, underPressure)
+		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), 0, shouldFlush)
 	}()
 }
 
@@ -452,12 +443,14 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	if r.summaryManager != nil {
 		summaryThrough = r.summaryManager.LastAcked()
 	}
-	completedPoint, completedLogicalOffset := r.ackTracker.CheckpointThrough(summaryThrough)
+	completedPoint, completedLogicalOffset, completedMessageCount := r.ackTracker.CheckpointThroughWithCount(summaryThrough)
 
 	if checkpoint != nil && !shouldAdvanceConsumePoint(*checkpoint, completedPoint) {
 		completedPoint = *checkpoint.Clone()
 		if r.tailController != nil {
-			completedLogicalOffset = r.tailController.Snapshot().PublishedOffset
+			published := r.tailController.Snapshot()
+			completedLogicalOffset = published.PublishedOffset
+			completedMessageCount = published.PublishedMessages
 		}
 	}
 	frozenCheckpoint := &WALCheckpoint{
@@ -492,11 +485,12 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 		return nil
 	}
 	return &dirtyPersistSnapshot{
-		Checkpoint:        frozenCheckpoint,
-		LogicalEndOffset:  completedLogicalOffset,
-		CheckpointDirty:   checkpointDirty,
-		SalvageCheckpoint: salvageCP,
-		ModuleDirtySnaps:  moduleSnapshots,
+		Checkpoint:             frozenCheckpoint,
+		LogicalEndOffset:       completedLogicalOffset,
+		LogicalEndMessageCount: completedMessageCount,
+		CheckpointDirty:        checkpointDirty,
+		SalvageCheckpoint:      salvageCP,
+		ModuleDirtySnaps:       moduleSnapshots,
 	}
 }
 
@@ -573,8 +567,8 @@ func (r *recoveryStorageImpl) refreshRecoveryTail() {
 	if r.ackTracker == nil || r.tailController == nil {
 		return
 	}
-	observed, completed := r.ackTracker.LogicalOffsets()
-	r.tailController.UpdateTrackerFrontiers(observed, completed)
+	observed, completed, count, lastMessageAt := r.ackTracker.LogicalState()
+	r.tailController.UpdateTrackerFrontiers(observed, completed, count, lastMessageAt)
 }
 
 func (r *recoveryStorageImpl) observeModulesMessage(
@@ -589,6 +583,19 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 	if r.summaryManager != nil {
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
+	// Ordinary confirmations are PChannel recovery progress, not VChannel
+	// resource events. Keep Tracker/Summary coverage without a shard-wide fanout.
+	msg := retained.Message()
+	if msg.MessageType() == message.MessageTypeTimeTick {
+		return
+	}
+	// Old WALs may contain empty transactions. They have no resource or query
+	// effects, but their Summary/AckTracker progress must still be consumed.
+	if msg.MessageType() == message.MessageTypeTxn && message.AsImmutableTxnMessage(msg).Size() == 0 {
+		return
+	}
+	// RecoveryBarrier and persisted MVCCBarrier still retain their complete-prefix
+	// effects. The extra scoped query-plan progress is dispatched separately.
 	r.vchannelManager.ObserveMessage(ctx, retained)
 }
 

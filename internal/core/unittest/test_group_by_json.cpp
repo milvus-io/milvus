@@ -108,8 +108,7 @@ TEST(GroupBYJSON, SealedData) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
 

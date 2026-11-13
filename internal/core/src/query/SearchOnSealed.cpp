@@ -52,9 +52,8 @@ SearchOnSealedIndex(const FieldMeta& field,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    milvus::OpContext* op_context,
                     SearchResult& search_result) {
-    // The reader stays pinned for the lifetime of the SearchResult that owns
+    // The reader stays alive for the lifetime of the SearchResult that owns
     // the recreator.
     const auto* reader_ptr = &reader;
     auto register_vector_search_provider = [&] {
@@ -70,10 +69,9 @@ SearchOnSealedIndex(const FieldMeta& field,
              phase1_search_info = search_info,
              query_data,
              query_offsets,
-             num_queries,
-             op_context](const BitsetView& combined_filter,
-                         int64_t remaining_topk,
-                         SearchResult& filtered_result) {
+             num_queries](const BitsetView& combined_filter,
+                          int64_t remaining_topk,
+                          SearchResult& filtered_result) {
                 SearchOnSealedIndex(
                     field,
                     *reader_ptr,
@@ -82,7 +80,6 @@ SearchOnSealedIndex(const FieldMeta& field,
                     query_offsets,
                     num_queries,
                     combined_filter,
-                    op_context,
                     filtered_result);
             });
     };
@@ -136,7 +133,7 @@ SearchOnSealedIndex(const FieldMeta& field,
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            reader, dataset, search_info, search_bitset, op_context);
+            reader, dataset, search_info, search_bitset);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());
@@ -149,13 +146,11 @@ SearchOnSealedIndex(const FieldMeta& field,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      reader,
-                                                      op_context);
+                                                      reader);
     if (!use_iterator) {
         reader.Search(dataset,
                       milvus::exec::ProjectVectorSearchParams(search_info),
                       search_bitset,
-                      op_context,
                       search_result);
     }
     FinalizeVectorSearchOffsets(

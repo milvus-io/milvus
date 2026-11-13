@@ -288,96 +288,9 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 // mergeByPKWithTimestamp merges with timestamp-based deduplication.
 // When duplicate PK found with higher timestamp, replaces the previous entry.
 func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*timestampedResult, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
-	cursors := make([]int64, len(results))
-	var rowSizeCalculators []*rowSizeCalculator
-	if op.maxOutputSize > 0 {
-		rowSizeCalculators = make([]*rowSizeCalculator, len(results))
-		for i, result := range results {
-			// Account for Arrow fields that have not been materialized yet.
-			rowSizeCalculators[i] = newRowSizeCalculator(result.result).withArrowRecord(result.record)
-		}
-	}
-
-	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
-	type pkEntry struct {
-		rowIndex int // index in selectedRows
-		ts       int64
-		size     int64 // Retained row size, reused when a newer version replaces it.
-	}
-	pkTsMap := make(map[any]pkEntry)
-
-	measureRowSize := func(result int, row int64) int64 {
-		if op.maxOutputSize <= 0 {
-			return 0
-		}
-		return rowSizeCalculators[result].rowSize(row)
-	}
-	var retSize int64
-	var selectedRows []rowRef
-	var availableCount int64 // row count for doc-level, element count for element-level
-
-	// Detect element-level from first result
-	isElementLevel := len(results) > 0 && results[0].result.GetElementLevel()
-
-	for {
-		sel, drainOneResult := selectMinPKWithTimestamp(results, cursors)
-
-		if sel == -1 {
-			break
-		}
-		if reduce.ShouldStopWhenDrained(op.reduceType) && drainOneResult {
-			break
-		}
-
-		pk := typeutil.GetPK(results[sel].result.GetIds(), cursors[sel])
-		ts := results[sel].getTimestamp(cursors[sel])
-
-		// Compute element count for this row
-		var elemCount int64 = 1
-		if isElementLevel {
-			elemIndices := results[sel].result.GetElementIndices()
-			if int(cursors[sel]) < len(elemIndices) {
-				elemCount = int64(len(elemIndices[cursors[sel]].GetIndices()))
-			}
-		}
-
-		if entry, exists := pkTsMap[pk]; !exists {
-			// New PK - add it
-			rowSize := measureRowSize(sel, cursors[sel])
-			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts, size: rowSize}
-			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
-			retSize += rowSize
-			availableCount += elemCount
-		} else {
-			// Duplicate PK - keep the one with higher timestamp
-			if ts != 0 && ts > entry.ts {
-				// Replace existing entry — swap row sizes and element counts
-				oldRef := selectedRows[entry.rowIndex]
-				rowSize := measureRowSize(sel, cursors[sel])
-				retSize += rowSize - entry.size
-				// Adjust element count for replacement
-				if isElementLevel {
-					oldElemIndices := results[oldRef.resultIdx].result.GetElementIndices()
-					if int(oldRef.rowIdx) < len(oldElemIndices) {
-						availableCount -= int64(len(oldElemIndices[oldRef.rowIdx].GetIndices()))
-					}
-					availableCount += elemCount
-				}
-				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts, size: rowSize}
-				selectedRows[entry.rowIndex] = rowRef{resultIdx: sel, rowIdx: cursors[sel]}
-			}
-		}
-
-		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
-			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
-		}
-
-		// Early termination when limit reached
-		if op.limit > 0 && availableCount >= op.limit {
-			break
-		}
-
-		cursors[sel]++
+	selectedRows, err := op.selectRowsByPKWithTimestamp(results)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build merged result from original results
@@ -424,6 +337,304 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 	merged.HasMoreResult = hasMoreResult
 	return merged, nil
+}
+
+// selectRowsByPKWithTimestamp picks the rows the merge keeps, in output order.
+//
+// Every input is normally sorted ascending by PK (segcore and the worker-side
+// reduce both emit PK order), and then the k-way merge emits all copies of a
+// PK back to back, so dedup is a comparison with the last emitted row rather
+// than a map lookup. The fast path reads the PK and timestamp slices directly
+// instead of boxing every candidate into `any`, and it checks sortedness as it
+// consumes each row; the first out-of-order row abandons it for the map path,
+// which is correct for any order. Until that row is consumed the emitted
+// sequence is non-decreasing, so whatever the fast path decided before
+// noticing is exactly what the map path decides -- but the restart is cheaper
+// to reason about than a hand-over, and unsorted input is not a hot case.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestamp(results []*timestampedResult) ([]rowRef, error) {
+	// Rows are sized only for the maxOutputSize guard.
+	var rowSizeCalculators []*rowSizeCalculator
+	if op.maxOutputSize > 0 {
+		rowSizeCalculators = make([]*rowSizeCalculator, len(results))
+		for i, result := range results {
+			// withArrowRecord is what keeps the maxOutputSize guard honest on the
+			// Arrow path, where the user columns are in the record rather than in
+			// FieldsData. See rowSizeCalculator.
+			rowSizeCalculators[i] = newRowSizeCalculator(result.result).
+				withArrowRecord(result.record)
+		}
+	}
+
+	var (
+		rows []rowRef
+		ok   bool
+		err  error
+	)
+	if intPKs, strPKs := typedPKs(results); intPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, intPKs, rowSizeCalculators)
+	} else if strPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, strPKs, rowSizeCalculators)
+	}
+	if ok {
+		return rows, err
+	}
+	return op.selectRowsByPKWithTimestampMap(results, rowSizeCalculators)
+}
+
+// typedPKs returns every result's PK column as a typed slice when all of them
+// share one PK type, and nil, nil otherwise (mixed or unknown ID kinds go to
+// the map path).
+func typedPKs(results []*timestampedResult) ([][]int64, [][]string) {
+	if len(results) == 0 {
+		return nil, nil
+	}
+	switch results[0].result.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		pks := make([][]int64, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_IntId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.IntId.GetData()
+		}
+		return pks, nil
+	case *schemapb.IDs_StrId:
+		pks := make([][]string, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_StrId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.StrId.GetData()
+		}
+		return nil, pks
+	default:
+		return nil, nil
+	}
+}
+
+// selectSortedByPK is the fast path of selectRowsByPKWithTimestamp. It returns
+// ok=false, with no rows and no error, as soon as it consumes a row whose PK is
+// below its predecessor in the same input; the caller then reruns the map path
+// from scratch. Everything else -- tie-breaking, replacement, the size guard,
+// the limit, the drain stop and element-level counting -- is the map path's
+// behavior, row for row; TestSelectRowsByPKWithTimestamp_Differential holds the
+// two together.
+func selectSortedByPK[K int64 | string](
+	op *ReduceByPKWithTimestampOperator,
+	results []*timestampedResult,
+	pks [][]K,
+	rowSizeCalculators []*rowSizeCalculator,
+) ([]rowRef, bool, error) {
+	n := len(results)
+	cursors := make([]int, n)
+	hasMore := make([]bool, n)
+	elemIndices := make([][]*internalpb.ElementIndices, n)
+	isElementLevel := results[0].result.GetElementLevel()
+	stopWhenDrained := reduce.ShouldStopWhenDrained(op.reduceType)
+	var drained bool
+	for i, r := range results {
+		hasMore[i] = r.result.GetHasMoreResult()
+		drained = drained || (len(pks[i]) == 0 && hasMore[i])
+		if isElementLevel {
+			elemIndices[i] = r.result.GetElementIndices()
+		}
+	}
+	// getTimestamp's contract: a missing or short timestamp column reads as 0.
+	tsAt := func(i, row int) int64 {
+		if ts := results[i].timestamps; row < len(ts) {
+			return ts[row]
+		}
+		return 0
+	}
+	elemCountAt := func(i, row int) int64 {
+		if !isElementLevel {
+			return 1
+		}
+		if row < len(elemIndices[i]) {
+			return int64(len(elemIndices[i][row].GetIndices()))
+		}
+		return 1
+	}
+
+	var (
+		selectedRows   []rowRef
+		retSize        int64
+		availableCount int64
+		lastPK         K
+		lastTs         int64
+		lastSize       int64
+	)
+	for {
+		// Same choice as selectMinPKWithTimestamp: the smallest PK, a strictly
+		// newer timestamp on an equal PK, and otherwise the lowest input index.
+		sel := -1
+		var minPK K
+		var maxTs int64
+		for i := 0; i < n; i++ {
+			c := cursors[i]
+			if c >= len(pks[i]) {
+				continue
+			}
+			pk := pks[i][c]
+			if sel == -1 || pk < minPK {
+				sel, minPK, maxTs = i, pk, tsAt(i, c)
+			} else if pk == minPK {
+				if ts := tsAt(i, c); ts > maxTs {
+					sel, maxTs = i, ts
+				}
+			}
+		}
+		if sel == -1 {
+			break
+		}
+		// drained mirrors selectMinPKWithTimestamp's drainResult: some input
+		// with more results behind it has run out. Cursors only grow, so it is
+		// tracked where a cursor reaches the end rather than recomputed.
+		if stopWhenDrained && drained {
+			break
+		}
+
+		c := cursors[sel]
+		if c > 0 && minPK < pks[sel][c-1] {
+			return nil, false, nil
+		}
+		ts := maxTs
+		elemCount := elemCountAt(sel, c)
+
+		if len(selectedRows) == 0 || minPK != lastPK {
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, int64(c))
+			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: int64(c)})
+			lastPK, lastTs, lastSize = minPK, ts, rowSize
+			retSize += rowSize
+			availableCount += elemCount
+		} else if ts != 0 && ts > lastTs {
+			// Duplicate PK: all copies are adjacent, so the entry to compare
+			// with is the last one emitted.
+			last := len(selectedRows) - 1
+			oldRef := selectedRows[last]
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, int64(c))
+			retSize += rowSize - lastSize
+			lastSize = rowSize
+			if isElementLevel {
+				if old := int(oldRef.rowIdx); old < len(elemIndices[oldRef.resultIdx]) {
+					availableCount -= int64(len(elemIndices[oldRef.resultIdx][old].GetIndices()))
+				}
+				availableCount += elemCount
+			}
+			selectedRows[last] = rowRef{resultIdx: sel, rowIdx: int64(c)}
+			lastTs = ts
+		}
+
+		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
+			return nil, true, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+		}
+		if op.limit > 0 && availableCount >= op.limit {
+			break
+		}
+
+		cursors[sel]++
+		if cursors[sel] >= len(pks[sel]) && hasMore[sel] {
+			drained = true
+		}
+	}
+	return selectedRows, true, nil
+}
+
+// measureRowSize is a row's size for the maxOutputSize guard, 0 when the
+// guard is off (rowSizeCalculators is then nil).
+func measureRowSize(op *ReduceByPKWithTimestampOperator, rowSizeCalculators []*rowSizeCalculator, result int, row int64) int64 {
+	if op.maxOutputSize <= 0 {
+		return 0
+	}
+	return rowSizeCalculators[result].rowSize(row)
+}
+
+// selectRowsByPKWithTimestampMap is the general selection: it dedups through a
+// map keyed by the boxed PK, so it is correct for inputs in any order. It is
+// the fallback of selectRowsByPKWithTimestamp and the reference the fast path
+// is differentially tested against.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestampMap(results []*timestampedResult, rowSizeCalculators []*rowSizeCalculator) ([]rowRef, error) {
+	cursors := make([]int64, len(results))
+
+	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
+	type pkEntry struct {
+		rowIndex int // index in selectedRows
+		ts       int64
+		size     int64 // Retained row size, reused when a newer version replaces it.
+	}
+	pkTsMap := make(map[any]pkEntry)
+
+	var retSize int64
+	var selectedRows []rowRef
+	var availableCount int64 // row count for doc-level, element count for element-level
+
+	// Detect element-level from first result
+	isElementLevel := len(results) > 0 && results[0].result.GetElementLevel()
+
+	for {
+		sel, drainOneResult := selectMinPKWithTimestamp(results, cursors)
+
+		if sel == -1 {
+			break
+		}
+		if reduce.ShouldStopWhenDrained(op.reduceType) && drainOneResult {
+			break
+		}
+
+		pk := typeutil.GetPK(results[sel].result.GetIds(), cursors[sel])
+		ts := results[sel].getTimestamp(cursors[sel])
+
+		// Compute element count for this row
+		var elemCount int64 = 1
+		if isElementLevel {
+			elemIndices := results[sel].result.GetElementIndices()
+			if int(cursors[sel]) < len(elemIndices) {
+				elemCount = int64(len(elemIndices[cursors[sel]].GetIndices()))
+			}
+		}
+
+		if entry, exists := pkTsMap[pk]; !exists {
+			// New PK - add it
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, cursors[sel])
+			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts, size: rowSize}
+			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
+			retSize += rowSize
+			availableCount += elemCount
+		} else {
+			// Duplicate PK - keep the one with higher timestamp
+			if ts != 0 && ts > entry.ts {
+				// Replace existing entry — swap row sizes and element counts
+				oldRef := selectedRows[entry.rowIndex]
+				rowSize := measureRowSize(op, rowSizeCalculators, sel, cursors[sel])
+				retSize += rowSize - entry.size
+				// Adjust element count for replacement
+				if isElementLevel {
+					oldElemIndices := results[oldRef.resultIdx].result.GetElementIndices()
+					if int(oldRef.rowIdx) < len(oldElemIndices) {
+						availableCount -= int64(len(oldElemIndices[oldRef.rowIdx].GetIndices()))
+					}
+					availableCount += elemCount
+				}
+				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts, size: rowSize}
+				selectedRows[entry.rowIndex] = rowRef{resultIdx: sel, rowIdx: cursors[sel]}
+			}
+		}
+
+		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+		}
+
+		// Early termination when limit reached
+		if op.limit > 0 && availableCount >= op.limit {
+			break
+		}
+
+		cursors[sel]++
+	}
+
+	return selectedRows, nil
 }
 
 // timestampedResult wraps a RetrieveResult with extracted timestamps

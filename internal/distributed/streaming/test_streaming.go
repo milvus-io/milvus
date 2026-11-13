@@ -91,18 +91,6 @@ func (n *noopBalancer) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (n *noopBalancer) IsRebalanceSuspended(ctx context.Context) (bool, error) {
-	return false, nil
-}
-
-func (n *noopBalancer) SuspendRebalance(ctx context.Context) error {
-	return nil
-}
-
-func (n *noopBalancer) ResumeRebalance(ctx context.Context) error {
-	return nil
-}
-
 func (n *noopBalancer) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
 	return nil
 }

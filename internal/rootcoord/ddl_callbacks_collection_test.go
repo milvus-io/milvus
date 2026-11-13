@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -27,12 +28,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDDLCallbacksCollectionDDL(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -174,6 +177,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 }
 
 func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "2")
 	defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
@@ -265,15 +269,14 @@ func TestCreatePartitionAckCallbackSyncsLoadedPartition(t *testing.T) {
 	// The first sync fails, so the ack callback must retry until it succeeds.
 	type syncCall struct{ collectionID, partitionID int64 }
 	var calls []syncCall
-	broker := newValidMockBroker()
-	broker.SyncNewCreatedPartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	patch := mockey.Mock((*qvresource.Resources).AddPartition).To(func(_ *qvresource.Resources, ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
 		calls = append(calls, syncCall{collectionID, partitionID})
 		if len(calls) == 1 {
 			return merr.WrapErrServiceNotReady("querycoord", 0, "initializing")
 		}
 		return nil
-	}
-	core.broker = broker
+	}).Build()
+	defer patch.UnPatch()
 
 	status, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
 		DbName:         dbName,

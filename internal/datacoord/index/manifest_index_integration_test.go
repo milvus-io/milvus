@@ -25,7 +25,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,10 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -125,9 +124,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.EqualValues(t, 5, info.CurrentIndexVersion)
 	require.EqualValues(t, 6, info.CurrentScalarIndexVersion)
 	require.Equal(t, []string{"0", "1"}, info.IndexFileKeys)
-	require.Equal(t, "16", info.Properties["M"])
-	require.Equal(t, "8", info.Properties[common.DimKey])
-	require.Equal(t, "HNSW", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties, "collection parameters are not segment build metadata")
 
 	// The stored path is relative to <basePath>/_index and resolves back to the
 	// segment index prefix, which is what milvus-storage reproduces on read.
@@ -171,7 +168,7 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "FLAT", info.IndexType)
-	require.Equal(t, "FLAT", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties)
 	// A field the schema does not describe leaves ColumnName empty rather than
 	// inventing one; field_id stays the authoritative identity.
 	require.Empty(t, info.ColumnName)
@@ -297,12 +294,8 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 	store.FailReadsFrom()
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{meta.RestartCollID}}},
-	}, nil).Maybe()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
-	_, err := meta.NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
+	_, err := meta.NewMeta(context.TODO(), catalog, cm, meta.NewMetaStoreWithCollections(catalog, meta.RestartCollID), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 
@@ -323,6 +316,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	manifestEntries := store.Revisions[m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()]
 	require.Len(t, manifestEntries, 1, "the index task must publish its artifact into the manifest")
 	assert.EqualValues(t, meta.RestartBuildID, manifestEntries[0].BuildID)
+	assert.Empty(t, manifestEntries[0].Properties)
 
 	// Nothing about this index reached etcd.
 	persisted, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
@@ -330,6 +324,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	require.Empty(t, persisted, "the switch must have kept the record out of etcd")
 
 	// Restart: same catalog, brand new meta, memory rebuilt from scratch.
+	metrics.DataCoordStoredIndexFilesSize.Reset()
 	_, restartedDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
 
 	recovered := restartedDomains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)
@@ -342,6 +337,9 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.EqualValues(t, 4096, segIdx.IndexSerializedSize)
 	assert.EqualValues(t, 1000, segIdx.NumRows)
 	assert.Equal(t, "HNSW", segIdx.IndexType)
+	// The recovered record counts toward the stored index size.
+	assertIndexTaskCounts(t, restartedDomains.IndexMeta)
+	assert.Equal(t, map[int64]int64{meta.RestartCollID: 4096}, storedIndexSizeSeries(t))
 
 	// The consumers that gate load, compaction and rebuild decisions.
 	assert.Equal(t, []int64{meta.RestartSegID},
@@ -393,15 +391,15 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 // Regression test for an ABBA deadlock between the manifest commit and every
 // other SegmentIndex writer.
 //
-// CommitSegmentManifest must take keyLock before segMu, matching every other
-// SegmentIndex writer. Reversing that order forms a cycle on a shared buildID
-// and can hang DataCoord globally.
+// CommitSegmentManifest must take keyLock before the segment's writer lock,
+// matching every other SegmentIndex writer. Reversing that order forms a cycle
+// on a shared buildID.
 //
 // Rather than racing the two paths and hoping to hit a microsecond window,
 // this asserts the invariant that makes the cycle impossible: while blocked on
-// keyLock, the commit must NOT be holding segMu. Hold the key lock, let the
-// commit park on it, and check segMu is still free.
-func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
+// keyLock, the commit must NOT be holding the segment's writer lock. Hold the
+// key lock, let the commit park on it, and check the writer lock is still free.
+func TestCommitSegmentManifestTakesKeyLockBeforeSegmentLock(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
@@ -412,7 +410,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 
 	segIdx, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	finished, _, err := mDomains.IndexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
+	finished, err := mDomains.IndexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 		BuildID:               meta.RestartBuildID,
 		State:                 commonpb.IndexState_Finished,
@@ -460,11 +458,11 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 	}
 
 	// The load-bearing assertion. Parked on keyLock, the commit must hold no
-	// segMu; if it does, any keyLock holder that reads segment state - which is
-	// what the manifest-backed gate does - closes the cycle.
-	acquired := m.SegMu.TryLock()
+	// writer lock of the segment; if it does, any keyLock holder that writes
+	// the segment closes the cycle.
+	acquired := m.GetSegmentLocks().TryLock(meta.RestartSegID)
 	if acquired {
-		m.SegMu.Unlock()
+		m.GetSegmentLocks().Unlock(meta.RestartSegID)
 	}
 	mDomains.IndexMeta.KeyLock.Unlock(meta.RestartBuildID)
 
@@ -476,7 +474,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 	}
 
 	require.True(t, acquired,
-		"commit is holding segMu while blocked on keyLock: lock order is inverted against every other SegmentIndex writer")
+		"commit is holding the segment writer lock while blocked on keyLock: lock order is inverted against every other SegmentIndex writer")
 }
 
 // A manifest entry whose index definition is already gone MUST still be

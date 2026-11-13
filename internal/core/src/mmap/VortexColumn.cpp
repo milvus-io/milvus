@@ -1411,8 +1411,14 @@ class VortexDataBatchReader final {
                        "planned end {}",
                        row_id_start_ + batch->num_rows(),
                        range_end_);
-            auto array = PrepareBatchArray(batch->column(0));
-            FillOutput(array, batch->num_rows(), out);
+            auto array = batch->column(0);
+            if (array == nullptr || array->length() != batch->num_rows()) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "vortex data scan column length does not match {} rows",
+                    batch->num_rows());
+            }
+            FillOutput(PrepareBatchArray(array), batch->num_rows(), out);
             return true;
         }
     }
@@ -1810,6 +1816,19 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
                           static_cast<int>(column_->data_type_));
             }
         }
+        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
+            const auto& planner = column_->Planner();
+            all_cell_pins_.resize(planner.NumCells());
+            for (int64_t file_id = 0; file_id < planner.NumCells(); ++file_id) {
+                const auto rows = planner.CellRows(file_id);
+                if (rows == 0) {
+                    continue;
+                }
+                const auto plan = column_->PlanRowRange(file_id, 0, rows);
+                all_cell_pins_[file_id] =
+                    column_->PinPlanCells(op_ctx_, file_id, plan.cell_ids);
+            }
+        }
     }
 
     int64_t
@@ -1872,6 +1891,9 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
  private:
     VortexCellPin
     PinCells(int64_t chunk_id, const std::vector<uint64_t>& cell_ids) {
+        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
+            return all_cell_pins_[chunk_id];
+        }
         if (cursor_pin_ != nullptr && cursor_chunk_id_ == chunk_id &&
             cursor_cell_ids_ == cell_ids) {
             return cursor_pin_;
@@ -2042,6 +2064,7 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
     detail::ColumnFilterPtr filter_;
     std::optional<std::string> predicate_;
     int64_t scan_pos_{0};
+    std::vector<VortexCellPin> all_cell_pins_;
     VortexCellPin cursor_pin_;
     int64_t cursor_chunk_id_{-1};
     std::vector<uint64_t> cursor_cell_ids_;
@@ -2053,7 +2076,7 @@ VortexColumn::VortexColumn(
     FieldId field_id,
     FieldMeta field_meta,
     std::string field_name,
-    std::shared_ptr<milvus_storage::api::Properties> properties,
+    std::shared_ptr<const milvus_storage::api::Properties> properties,
     std::shared_ptr<VortexColumnGroup> column_group,
     std::optional<size_t> data_byte_size)
     : field_id_(field_id),
@@ -2178,17 +2201,18 @@ VortexColumn::BulkIsValid(milvus::OpContext* op_ctx,
     }
 
     if (offsets == nullptr) {
-        // TODO(local-format): The legacy complete-column validity API still
-        // materializes one temporary Chunk per file. Move its remaining
-        // consumers to validity-only Scan before removing this compatibility
-        // path; explicit sparse offsets already use Take below.
-        int64_t logical_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
-            auto chunk = MaterializeChunk(op_ctx, chunk_id);
-            for (int64_t i = 0; i < chunk->RowNums(); ++i) {
-                fn(chunk->isValid(static_cast<int>(i)), logical_offset + i);
+        auto cursor =
+            Scan(op_ctx,
+                 ScanOptions::ForData(
+                     0, TargetType::None, ScanPinPolicy::CursorOwned));
+        ScanBatch batch;
+        while (cursor->Next(NumRows() - cursor->Position(),
+                            ScanReadMode::ValidityOnly,
+                            &batch)) {
+            for (int64_t i = 0; i < batch.size; ++i) {
+                fn(!batch.validity || batch.validity[i],
+                   batch.row_id_start + i);
             }
-            logical_offset += chunk->RowNums();
         }
         return;
     }
@@ -2830,15 +2854,17 @@ VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
     }
 
     return options.output == ScanOutput::RowIds &&
+           options.pin_policy != ScanPinPolicy::AllCells &&
            options.predicate != ScanPredicate::None &&
            BuildVortexPredicate(options).has_value();
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 VortexColumn::MakeVortexReaderProperties(
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
-    auto reader_properties = *properties;
-    reader_properties[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    auto reader_properties =
+        std::make_shared<milvus_storage::api::Properties>(*properties);
+    (*reader_properties)[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
         std::string("true");
     return reader_properties;
 }
@@ -3889,20 +3915,6 @@ VortexColumn::BulkVectorValueAt(
 }
 
 void
-VortexColumn::BulkRawStringAt(
-    milvus::OpContext* op_ctx,
-    std::function<void(std::string_view, size_t, bool)> fn,
-    const int64_t* offsets,
-    int64_t count) const {
-    if (!IsChunkedVariableColumnDataType(data_type_) ||
-        data_type_ == DataType::JSON) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkRawStringAt only supports string fields");
-    }
-    BulkStringLikeAt(op_ctx, fn, offsets, count);
-}
-
-void
 VortexColumn::BulkRawBsonAt(
     milvus::OpContext* op_ctx,
     std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -3922,16 +3934,22 @@ VortexColumn::BulkRawBsonAt(
     for (int64_t i = 0; i < count; ++i) {
         offsets[i] = row_offsets[i];
     }
-    BulkStringLikeAt(
-        op_ctx,
-        [&](std::string_view value, size_t index, bool) {
-            fn(BsonView(reinterpret_cast<const uint8_t*>(value.data()),
-                        value.size()),
-               row_offsets[index],
-               value_offsets[index]);
-        },
-        offsets.data(),
-        count);
+    auto take = Take(op_ctx,
+                     TakeOptions{OffsetView::From(offsets.data(), count),
+                                 TargetType::StringView});
+    AssertInfo(take != nullptr, "vortex BSON take is unsupported");
+    AssertInfo(take->Size() == count,
+               "vortex BSON take returned {} rows, expected {}",
+               take->Size(),
+               count);
+    const auto items = take->Access<std::string_view>();
+    for (int64_t i = 0; i < count; ++i) {
+        const auto value = items[i].value.value_or(std::string_view{});
+        fn(BsonView(reinterpret_cast<const uint8_t*>(value.data()),
+                    value.size()),
+           row_offsets[i],
+           value_offsets[i]);
+    }
 }
 
 void
@@ -3979,96 +3997,6 @@ VortexColumn::BulkVectorArrayAt(milvus::OpContext*,
               "VortexColumn does not support vector array fields");
 }
 
-void
-VortexColumn::BulkStringLikeAt(
-    milvus::OpContext* op_ctx,
-    const std::function<void(std::string_view, size_t, bool)>& fn,
-    const int64_t* offsets,
-    int64_t count) const {
-    if (offsets == nullptr) {
-        const auto& planner = Planner();
-        int64_t global_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
-            const auto file_rows = planner.CellRows(chunk_id);
-            if (!SupportsDirectDataScan(chunk_id)) {
-                auto chunk = MaterializeChunk(op_ctx, chunk_id);
-                auto views = static_cast<StringChunk*>(chunk.get())
-                                 ->StringViews(std::nullopt);
-                for (int64_t i = 0;
-                     i < static_cast<int64_t>(views.first.size());
-                     ++i) {
-                    fn(views.first[i],
-                       global_offset + i,
-                       IsNullable() ? views.second[i] : true);
-                }
-            } else {
-                auto scan = OpenDataScanForFile(op_ctx, chunk_id, 0, file_rows);
-                int64_t row_offset = 0;
-                while (true) {
-                    std::shared_ptr<arrow::RecordBatch> batch;
-                    auto status = scan.get()->ReadNext(&batch);
-                    if (!status.ok()) {
-                        ThrowVortexStatus(
-                            status,
-                            ErrorCode::DataFormatBroken,
-                            "failed to read vortex string-like scan batch");
-                    }
-                    if (batch == nullptr) {
-                        break;
-                    }
-                    AssertInfo(
-                        batch->num_columns() == 1,
-                        "vortex string-like scan expects one column, got {}",
-                        batch->num_columns());
-                    ValidateVortexArrowArray(field_id_,
-                                             data_type_,
-                                             IsNullable(),
-                                             batch->column(0),
-                                             true);
-                    ArrowStringLikeColumn column(batch->column(0));
-                    for (int64_t i = 0; i < column.length(); ++i) {
-                        fn(column.ValueAt(i),
-                           global_offset + row_offset + i,
-                           column.IsValid(i));
-                    }
-                    row_offset += column.length();
-                }
-                if (row_offset != file_rows) {
-                    ThrowInfo(
-                        ErrorCode::DataFormatBroken,
-                        "vortex string-like scan field {} chunk {} returned "
-                        "{} rows, expected {}",
-                        field_id_.get(),
-                        chunk_id,
-                        row_offset,
-                        file_rows);
-                }
-            }
-            global_offset += file_rows;
-        }
-        return;
-    }
-
-    if (count == 0) {
-        return;
-    }
-    auto take = Take(
-        op_ctx,
-        TakeOptions{OffsetView::From(offsets, count), TargetType::StringView});
-    AssertInfo(take != nullptr,
-               "vortex string-like take is unsupported for type {}",
-               data_type_);
-    AssertInfo(take->Size() == count,
-               "vortex string-like take returned {} rows, expected {}",
-               take->Size(),
-               count);
-    const auto items = take->Access<std::string_view>();
-    for (int64_t i = 0; i < count; ++i) {
-        const auto item = items[i];
-        fn(item.value.value_or(std::string_view{}), i, item.is_valid);
-    }
-}
-
 ChunkedColumnInterface::ScanResult
 VortexColumn::Scan(milvus::OpContext* op_ctx,
                    const ScanOptions& options) const {
@@ -4091,7 +4019,8 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
 
     // RowId output is only meaningful for pushed-down predicates. Without a
     // predicate there is no sparse result to return, so let callers fall back.
-    if (options.predicate == ScanPredicate::None) {
+    if (options.predicate == ScanPredicate::None ||
+        options.pin_policy == ScanPinPolicy::AllCells) {
         return nullptr;
     }
     return std::make_unique<VortexScanCursor>(this, op_ctx, options);

@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -42,7 +41,6 @@ type LoadConfigStore struct {
 	catalog         queryview.CollectionLoadInfoCatalog
 	allocateVersion func(context.Context) (uint64, error)
 	indexes         func(int64, ...int64) []*indexpb.IndexInfo
-	schema          func(context.Context, int64) (*schemapb.CollectionSchema, error)
 	history         map[int64]map[uint64]*LoadConfig
 	references      map[loadInfoKey]int
 	gcEnabled       bool
@@ -69,13 +67,12 @@ type LoadConfigEntry struct {
 }
 
 // LoadConfigStoreDependencies supplies persistence and metadata for publication.
-// Schema supplies defaults during publication; Indexes resolves exact
-// selected IDs for reads as well as current IDs for publication.
+// Indexes resolves exact selected IDs for reads as well as current IDs for
+// publication. Field scopes are already explicit at this boundary.
 type LoadConfigStoreDependencies struct {
 	Catalog         queryview.CollectionLoadInfoCatalog
 	AllocateVersion func(context.Context) (uint64, error)
 	Indexes         func(int64, ...int64) []*indexpb.IndexInfo
-	Schema          func(context.Context, int64) (*schemapb.CollectionSchema, error)
 }
 
 // RecoverLoadConfigStore loads all immutable versions before any View can acquire
@@ -83,7 +80,7 @@ type LoadConfigStoreDependencies struct {
 func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencies) (*LoadConfigStore, error) {
 	s := &LoadConfigStore{
 		collectionLocks: lock.NewKeyLock[int64](), referenceLocks: lock.NewKeyLock[int64](), catalog: deps.Catalog,
-		allocateVersion: deps.AllocateVersion, indexes: deps.Indexes, schema: deps.Schema,
+		allocateVersion: deps.AllocateVersion, indexes: deps.Indexes,
 		version: 1, configs: make(map[int64]*LoadConfig), versions: make(map[int64]uint64),
 		history: make(map[int64]map[uint64]*LoadConfig), references: make(map[loadInfoKey]int),
 	}
@@ -93,7 +90,7 @@ func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencie
 	}
 
 	for _, info := range records {
-		if info.GetVersion() == 0 || len(info.GetRequiredFields()) == 0 {
+		if info.GetVersion() == 0 {
 			return nil, merr.WrapErrDataIntegrityMsg("invalid collection load info, collection=%d version=%d", info.GetCollectionID(), info.GetVersion())
 		}
 		cfg := buildFromPersisted(info)

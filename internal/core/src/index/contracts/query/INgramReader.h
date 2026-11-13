@@ -28,11 +28,28 @@
 // the executor nor performs that refinement. PatternOp names the operation;
 // implementing INgramReader does not imply exact IPatternMatchReader support.
 
+namespace milvus {
+struct RegexLiteralCondition;
+}
+
 namespace milvus::index {
 
 class INgramReader {
  public:
     virtual ~INgramReader() = default;
+
+    // Input is a validated necessary-condition tree, borrowed for this call.
+    // The caller decodes/validates transport data before entering the reader.
+    // Unselective plans return false, including planner budget exhaustion.
+    virtual bool
+    CanHandleConditionTree(const RegexLiteralCondition& condition) const = 0;
+
+    // AND-merges a candidate superset into the Count-sized bitmap.
+    // Requires CanHandleConditionTree(condition) == true. Always requires exact
+    // predicate refinement against raw values, even for a single literal.
+    virtual void
+    ConditionTreeCandidates(const RegexLiteralCondition& condition,
+                            TargetBitmap& candidates) const = 0;
 
     // Whether this literal/operator can use the index, for example whether the
     // literal meets min_gram. This is a per-call check after pinning, not a cached

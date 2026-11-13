@@ -22,7 +22,6 @@ import (
 	"sync"
 
 	"golang.org/x/exp/constraints"
-	"google.golang.org/grpc/grpclog"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -48,7 +47,7 @@ func SetupLogger(cfg *mlog.Config) {
 			mlog.Fatal(context.TODO(), "initialize logger error", mlog.Err(err))
 		}
 
-		grpclog.SetLoggerV2(mlog.NewGRPCLogger(logger, cfg.GrpcLevel))
+		mlog.ReplaceGRPCLogger(logger, cfg.GrpcLevel)
 
 		mlog.Info(context.TODO(), "Log directory", mlog.String("configDir", cfg.File.RootPath))
 		mlog.Info(context.TODO(), "Set log file to ", mlog.String("path", cfg.File.Filename))

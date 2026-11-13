@@ -50,7 +50,7 @@ const ReserveRatio = 0.1
 // InsertData.Data map entry, the slice headers, the append-grown capacity
 // beyond len and the allocator size-class rounding. Calibrated by measuring
 // the HeapAlloc delta of 4-row fragments built the way hash routing builds
-// them (NewInsertDataWithCap + AppendRow): ~173B per field at a 15-field
+// them (InsertDataBuilder.WithCapacity + AppendRow): ~173B per field at a 15-field
 // temporary schema, ~615B at 5 fields; 200B keeps a margin for the
 // string/JSON-heavy field mixes. Fragments only dominate the live set when
 // buckets split every source batch into many small pieces, which is exactly
@@ -204,8 +204,13 @@ func (m Model) SortInput(memoryBudget int64) int64 {
 // batch and final transform at 3*ReadBuffer (MergeExecutor.BatchSize ==
 // ImportBaseBufferSize), and the segment writer's buffer. A merge never spills,
 // so FragmentTarget and FlushConcurrency do not participate.
-func (m Model) ImportWorkingSet(writerBuffer int64, fanIn int) int64 {
-	footprint := int64(fanIn)*2*m.ReadBuffer + 3*m.ReadBuffer + writerBuffer
+//
+// textWriterBuffer is the sum of the per-TEXT-column LOB writer buffers the
+// DataNode keeps while the merge runs. Those buffers live beside the converted
+// batch (the stored TEXT column is only a reference), so they are not covered by
+// the batch terms above and must be charged explicitly.
+func (m Model) ImportWorkingSet(writerBuffer, textWriterBuffer int64, fanIn int) int64 {
+	footprint := int64(fanIn)*2*m.ReadBuffer + 3*m.ReadBuffer + writerBuffer + textWriterBuffer
 	return int64(m.Expansion() * float64(footprint))
 }
 

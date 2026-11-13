@@ -21,7 +21,7 @@ import "context"
 // notifyQueryViewSegmentUpdates runs after catalog and in-memory publication,
 // outside segment/manifest locks. New Manifest requirements reach QueryNodes
 // through a new DataView and QueryView rather than a SegmentMeta subscription.
-func (m *Meta) notifyQueryViewSegmentUpdates(ctx context.Context, segments []*SegmentInfo) {
+func (m *Meta) NotifyQueryViewSegmentUpdates(ctx context.Context, segments []*SegmentInfo) {
 	collections := make(map[int64]struct{})
 	for _, segment := range segments {
 		collections[segment.GetCollectionID()] = struct{}{}

@@ -518,62 +518,6 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return ret
 }
 
-func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
-	info := &milvuspb.ReplicaInfo{
-		ReplicaID:         replica.GetID(),
-		CollectionID:      replica.GetCollectionID(),
-		NodeIds:           replica.GetNodes(),
-		ResourceGroupName: replica.GetResourceGroup(),
-		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(ctx, replica),
-	}
-
-	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
-	if len(channels) == 0 {
-		mlog.Warn(context.TODO(), "failed to get channels, collection may be not loaded or in recovering", mlog.Int64("collectionID", replica.GetCollectionID()))
-		return info
-	}
-	shardReplicas := make([]*milvuspb.ShardReplica, 0, len(channels))
-
-	var segments []*meta.Segment
-	if withShardNodes {
-		segments = s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()))
-	}
-
-	for _, channel := range channels {
-		leader := s.dist.ChannelDistManager.GetShardLeader(channel.ChannelName, replica)
-		var leaderInfo *session.NodeInfo
-		if leader != nil {
-			leaderInfo = s.nodeMgr.Get(leader.Node)
-		}
-		if leaderInfo == nil {
-			mlog.Warn(context.TODO(), "failed to get shard leader for shard",
-				mlog.Int64("collectionID", replica.GetCollectionID()),
-				mlog.Int64("replica", replica.GetID()),
-				mlog.String("shard", channel.GetChannelName()))
-			return info
-		}
-
-		shard := &milvuspb.ShardReplica{
-			LeaderID:      leader.Node,
-			LeaderAddr:    leaderInfo.Addr(),
-			DmChannelName: channel.GetChannelName(),
-			NodeIds:       []int64{leader.Node},
-		}
-		if withShardNodes {
-			shardNodes := lo.FilterMap(segments, func(segment *meta.Segment, _ int) (int64, bool) {
-				if replica.Contains(segment.Node) {
-					return segment.Node, true
-				}
-				return 0, false
-			})
-			shard.NodeIds = typeutil.NewUniqueSet(shardNodes...).Collect()
-		}
-		shardReplicas = append(shardReplicas, shard)
-	}
-	info.ShardReplicas = shardReplicas
-	return info
-}
-
 // GetQueryCoordTopology returns QueryCoord topology directly without JSON serialization
 // This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
 func (s *Server) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {

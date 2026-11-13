@@ -62,6 +62,10 @@ endif ()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe")
 
+# Folly's async exception traces walk native frame pointers across coroutine callers.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-omit-frame-pointer")
+
 # Enable hardware popcnt for all compilation units on x86_64.
 # PopCountHelper in bitset/detail/popcount.h is header-only; without this flag,
 # __builtin_popcountll falls back to __popcountdi2 software emulation.
@@ -419,6 +423,15 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
     add_subdirectory(benchmark)
+endif ()
+
+# Use the same checks in normal, verifier and coverage builds. These operate
+# on first-party targets only; no additional compiler or sanitizer build runs.
+include(CompileChecks)
+milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/src")
+if ( BUILD_UNIT_TEST STREQUAL "ON" )
+    milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/unittest")
+    milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/benchmark")
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )

@@ -35,7 +35,8 @@ local Retained consumers have released and BroadcastAck is the only remaining
 Owner holder. Explicit Flush/lifecycle requests include L0Materializer among
 these consumers: readiness waits for L1 final commit, required L0 output, and
 installation of dirty materialization metadata. The current WAL materializer also retains ordinary Delete handles through
-output and registration. L1/L0 work on an explicit request joins independently.
+output and registration. L1/L0 work on an explicit request joins through message handles; L0 waits for
+final publication of every L1 created before its materialization boundary.
 
 For successful consumers the callback marks the task ready and nonblockingly
 wakes the dispatcher; it performs no Coordinator I/O. If any consumer poisoned
@@ -66,6 +67,30 @@ its own retained handle.
 On success, BroadcastAck releases the Owner and unblocks later conflicting
 tasks. On failure, it keeps the Owner and ResourceKey claim, waits for retry,
 and does not block unrelated tasks.
+
+The transitional legacy import commit RPC has no additional timeout; it remains
+cancelable by the scheduler and module shutdown. It can occupy its worker for
+longer than 100ms. After it succeeds, broadcastAckTask supplies a fresh 100ms
+context budget to Broadcast.Ack. The client forwards that context unchanged,
+makes one call and does not retry internally; timeout policy belongs to the task.
+Failure returns NodeScheduler's ErrDelay; the shared
+scheduler retains the same submission and applies its exponential backoff.
+The task stays in flight across delayed retries, so the dispatcher cannot submit
+a duplicate and later conflicting broadcasts cannot overtake it. Delayed retries
+hold no worker. Module shutdown cancels an active attempt; scoped scheduler
+shutdown also cancels queued and delayed work without releasing unfinished Owners.
+
+ACK tasks use priority 20. The shared scheduler reserves capacity by cumulative
+priority bands: priorities -20 through -10 at most 50%, all negative priorities
+at most 75%, and nonnegative priorities without an extra limit. Ordinary data
+work uses -5; recovery-tail pressure promotes affected data work to 5. QueryView
+build/ready uses 0 and release uses 5. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
+for rounding, non-preemption and fairness.
+
+The 100ms budget bounds the client-side attempt. The Coordinator currently
+detaches client cancellation after acquiring the broadcaster, so a timed-out
+server-side ACK may still complete. ACK processing and business callbacks must
+retain their existing idempotent replay semantics.
 
 Coordinator Ack is idempotent. A crash before global checkpoint publication may
 replay and repeat it.
@@ -139,7 +164,7 @@ CreateSnapshot as a hard batch boundary, including requests behind active work.
 The all-Ack callback derives each channel's snapshot position from that channel's
 broadcast append result and excludes CChannel. The shared WAL recovery checkpoint
 is not the snapshot cut. Snapshot generation receives these positions explicitly;
-it neither calls Flush RPC nor waits for cp_updater to publish them. Existing
+it neither calls Flush RPC nor waits for DataCoord channel checkpoints. Existing
 compaction protection and snapshot publication remain in the snapshot manager.
 
 ## Truncate API Completion
@@ -161,7 +186,12 @@ part of the truncate flow.
 Import, CommitImport, and RollbackImport broadcast to the business VChannels
 plus CChannel. Business-channel append results supply their own commit fences;
 CChannel supplies the common ordering point for replicated callbacks. These
-messages do not request AckSyncUp: durable WAL append can FastAck the broadcast.
+Import and RollbackImport can FastAck after durable WAL append. Coordinator-owned
+CommitImport requests AckSyncUp: query MVCC publication precedes consumer ACK,
+which must precede the callback publishing imported segments in DataView. This
+applies to both explicit CommitImport RPCs and automatic import commits. Legacy
+consumer-owned CommitImport retains FastAck so its callback can enter Committing
+before the consumer calls HandleCommitVchannel.
 
 New Import messages set `commit_by_coordinator=true` in ImportHeader. The Import
 callback persists this choice in ImportJob, and CommitImportHeader inherits it.
@@ -172,15 +202,22 @@ DataCoord's CommitImport callback owns the complete commit flow for these jobs:
 2. For each business VChannel, set its imported segments' CommitTimestamp to
    that channel's append TimeTick and clear IsImporting. CChannel's timestamp
    and the maximum timestamp across channels must not replace this fence.
-3. After segment metadata succeeds, request the existing DataViewManager's
-   asynchronous reconciliation for the collection, then persist Completed and
-   completion time. Reconciliation is requested outside ImportMeta's lock.
+3. After segment metadata succeeds, synchronously publish its loadable projection
+   through DataViewManager, then persist Completed and completion time. Publication
+   runs outside ImportMeta's lock and inside the collection broadcast resource
+   lock. Later CommitImport callbacks cannot overtake this publication.
+
+Import completion does not wait for QueryView Up. Load/Refresh owns serving
+readiness: a fresh Load sees the committed DataView, and refresh waits for the
+corresponding serving publication on an already loaded collection. QN availability
+must not hold the import commit's collection lock.
 
 Committing is a durable protection against timeout/cleanup during a partial
 commit, not a wait for per-channel RPC acknowledgements. Failed writes return
 errors to the broadcast callback scheduler. Its persisted task retries after
 failure/restart; segment updates are idempotent. Completed replay leaves segment
-and job metadata unchanged but repeats the DataView reconciliation request.
+and job metadata unchanged but synchronously reconciles DataView again (including
+repair of a job completed by the former asynchronous producer).
 The segment and job writes are ordered, not one atomic transaction.
 
 For these new messages, RecoveryStorage has no Import-specific RPC task, Flush
@@ -217,10 +254,20 @@ that case. It is follow-up work.
 
 This branch uses the existing segment-metadata serving path: MVCC already
 tracks CommitImport's WAL position, and QueryNode uses CommitTimestamp for
-import visibility and the delete replay boundary. DataView reconciliation from
-master is preserved at the broadcast callback that now owns the segment mutation.
+import visibility and the delete replay boundary. DataView publication is completed in the broadcast callback that owns the segment
+mutation before the job becomes Completed.
 Growing/Transforming MVCC frontiers are not introduced here.
 
 Validation covers per-channel timestamps including a higher CChannel tick,
 empty channels, readiness retries, segment/job persistence failures, callback
 replay, timeout during a partial commit, and initial/commit/rollback routing.
+
+## Schema ALTER completion boundary
+
+Schema-changing AlterCollection sets AckSyncUp. Allocation fencing prevents new
+schema writes from entering old segments. RecoveryStorage retains ALTER through
+pre-boundary L1 final commits (including DataView publication); only then may
+BroadcastAck acknowledge and run the DDL callback. The callback advances the
+DataView read schema directly or waits for historical Function materialization,
+then waits for QueryView handoff before publishing public schema. No extra
+Broadcast or recovery-checkpoint wait is introduced.
