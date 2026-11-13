@@ -102,6 +102,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"ListIndexedSegment": "unimplemented feder endpoint",
 	// ListRefreshExternalCollectionJobs lists external-collection refresh jobs, optionally scoped by collection.
 	"ListRefreshExternalCollectionJobs": "external-collection refresh job listing",
+	// MultiSearch checks the Search privilege for each item in its resolved database and collection.
+	"MultiSearch": "per-item Search authorization in the proxy",
 	// RegisterLink only reports proxy deployment metadata for client link registration.
 	"RegisterLink": "client link registration",
 	// ReplicateMessage is the CDC message-replication endpoint.
