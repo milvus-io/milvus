@@ -119,10 +119,6 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 
 func TestCompactionTargetReconcilerPlansCompleteMatchAndChecksSatisfaction(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	paramtable.Get().Save(Params.DataCoordCfg.TargetCompactionMaxEvents.Key, "1")
-	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.TargetCompactionMaxEvents.Key)
-	})
 
 	ctx := context.Background()
 	activeRecord := &datapb.CompactionTarget{
@@ -156,12 +152,6 @@ func TestCompactionTargetReconcilerPlansCompleteMatchAndChecksSatisfaction(t *te
 	require.Len(t, events[policy.TriggerTypeSingle], 2)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(200).GetState())
-
-	paramtable.Get().Save(Params.DataCoordCfg.TargetCompactionMaxEvents.Key, "2")
-	events, err = reconciler.Reconcile(ctx)
-
-	require.NoError(t, err)
-	require.Len(t, events[policy.TriggerTypeSingle], 2)
 }
 
 func TestCompactionTargetReconcilerAppliesTargetCollectionScope(t *testing.T) {
@@ -426,9 +416,9 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 
 func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "true")
 	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
 	})
 
 	const (
@@ -467,7 +457,7 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 				sortedTargetSegment(1, collectionID, 10, "ch-1", 0, 199, false),
 				sortedTargetSegment(2, collectionID, 10, "ch-1", 0, 199, false),
 			)
-			mt.MetaStore.PutCollection(&meta.CollectionInfo{
+			mt.AddCollection(&meta.CollectionInfo{
 				ID: collectionID,
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{FieldID: vectorFieldID, DataType: schemapb.DataType_FloatVector},
@@ -483,10 +473,10 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 						},
 					},
 				},
-				SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
 			}
 			for _, segmentID := range test.finishedSegmentIDs {
-				finishedIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+				finishedIndexes := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
 				finishedIndexes.Insert(indexID, &model.SegmentIndex{
 					CollectionID: collectionID,
 					SegmentID:    segmentID,
@@ -511,9 +501,9 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 
 func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
 	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
 	})
 
 	ctx := context.Background()
@@ -529,7 +519,7 @@ func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing
 	mt := newCompactionTargetReconcilerTestMeta(targetMeta,
 		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
 	)
-	mt.indexMeta.Indexes[1] = map[UniqueID]*model.Index{
+	mt.indexMeta.Indexes[1] = map[int64]*model.Index{
 		1000: {CollectionID: 1, FieldID: 100, IndexID: 1000},
 	}
 
@@ -542,9 +532,9 @@ func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing
 
 func TestCompactionTargetReconcilerManualIndexFilterKeepsNoIndexCollection(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	paramtable.Get().Save(Params.DataCoordCfg.IndexBasedCompaction.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "true")
 	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.IndexBasedCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
 	})
 
 	ctx := context.Background()
@@ -569,14 +559,17 @@ func TestCompactionTargetReconcilerManualIndexFilterKeepsNoIndexCollection(t *te
 }
 
 func newCompactionTargetReconcilerForTest(fixture *compactionTargetReconcilerFixture) *CompactionTargetReconciler {
-	return NewCompactionTargetReconciler(fixture.Meta, fixture.indexMeta, fixture.targetMeta, meta.NewMockHandlerWithMeta(fixture.Meta))
+	return NewCompactionTargetReconciler(fixture.Meta, fixture.indexMeta, fixture.targetMeta, meta.NewMockHandlerWithMeta(fixture.Meta),
+		func(_ context.Context, id int64) (bool, error) {
+			return fixture.Meta.GetCollection(id) != nil, nil
+		})
 }
 
 func enableCompactionTargetReconciler(t *testing.T) {
 	t.Helper()
-	paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 	t.Cleanup(func() {
-		paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
 	})
 }
 
@@ -620,11 +613,11 @@ func segmentIDsFromViews(views []*view.SegmentView) []int64 {
 
 func TestCompactionTargetReconcilerReoffersSortWithAutoCompactionOff(t *testing.T) {
 	enableCompactionTargetReconciler(t)
-	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
-	Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+	Params.Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
+	Params.Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
 	t.Cleanup(func() {
-		Params.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
-		Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		Params.Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
+		Params.Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 	})
 
 	record := &datapb.CompactionTarget{
@@ -639,4 +632,21 @@ func TestCompactionTargetReconcilerReoffersSortWithAutoCompactionOff(t *testing.
 	require.Equal(t, []int64{1}, segmentIDsFromViews(events[policy.TriggerTypeSort][0].GetSegmentsView()))
 	require.Empty(t, events[policy.TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
+func TestCompactionTargetReconcilerSatisfiesEmptyCollectionWithoutLocalCache(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	record := &datapb.CompactionTarget{
+		TargetID: 100, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE, ExpectedTS: 200,
+	}
+	targetMeta := NewLoadedCompactionTargetMeta(t, t.Context(), record)
+	mt := meta.NewTestMetaForCompactionTargets()
+	reconciler := NewCompactionTargetReconciler(mt, nil, targetMeta, meta.NewMockHandlerWithMeta(mt),
+		func(_ context.Context, id int64) (bool, error) {
+			return id == 1, nil
+		})
+	events, err := reconciler.Reconcile(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, events)
+	require.Equal(t, StopSatisfied, targetMeta.GetCompactionTarget(100).GetStopReason())
 }

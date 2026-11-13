@@ -122,9 +122,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 	return m
 }
 
-func (m *CompactionTriggerManager) SetCompactionTargetMeta(targetMeta *targets.CompactionTargetMeta) {
+func (m *CompactionTriggerManager) SetCompactionTargetMeta(targetMeta *targets.CompactionTargetMeta, collectionAvailable func(context.Context, int64) (bool, error)) {
 	if targetMeta != nil {
-		m.policies[TargetTicker] = targets.NewCompactionTargetReconciler(m.meta, m.indexMeta, targetMeta, m.handler)
+		m.policies[TargetTicker] = targets.NewCompactionTargetReconciler(m.meta, m.indexMeta, targetMeta, m.handler, collectionAvailable)
 	}
 }
 

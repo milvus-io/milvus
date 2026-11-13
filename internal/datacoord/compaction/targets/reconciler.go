@@ -28,16 +28,18 @@ type CompactionTargetReconciler struct {
 	IndexMeta            *index.IndexMeta
 	CompactionTargetMeta *CompactionTargetMeta
 	handler              meta.Handler
+	collectionAvailable  func(context.Context, int64) (bool, error)
 }
 
 var _ policy.CompactionPolicy = (*CompactionTargetReconciler)(nil)
 
-func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler) *CompactionTargetReconciler {
+func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, collectionAvailable func(context.Context, int64) (bool, error)) *CompactionTargetReconciler {
 	return &CompactionTargetReconciler{
 		meta:                 mt,
 		IndexMeta:            indexMeta,
 		CompactionTargetMeta: compactionTargetMeta,
 		handler:              handler,
+		collectionAvailable:  collectionAvailable,
 	}
 }
 
@@ -45,6 +47,7 @@ func (reconciler *CompactionTargetReconciler) Enable() bool {
 	return reconciler != nil &&
 		reconciler.meta != nil &&
 		reconciler.CompactionTargetMeta != nil &&
+		reconciler.collectionAvailable != nil &&
 		paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() &&
 		paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.GetAsBool()
 }
@@ -71,7 +74,12 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if reconciler.meta.GetCollection(record.GetCollectionID()) == nil {
+		available, err := reconciler.collectionAvailable(ctx, record.GetCollectionID())
+		if err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(1), "could not check compaction target collection",
+				mlog.FieldCollectionID(record.GetCollectionID()), mlog.Err(err))
+		}
+		if !available || err != nil {
 			continue
 		}
 		observation, err := ObserveRewrite(ctx, reconciler.meta, record, false)
@@ -98,8 +106,12 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		collectionID := segment.GetCollectionID()
 		collectionBlocked, checked := blocked[collectionID]
 		if !checked {
-			collection := reconciler.meta.GetCollection(collectionID)
-			collectionBlocked = collection == nil || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(collectionID)
+			collection, err := reconciler.handler.GetCollection(ctx, collectionID)
+			if err != nil {
+				mlog.RatedWarn(ctx, rate.Limit(1), "could not load collection for compaction target planning",
+					mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			}
+			collectionBlocked = err != nil || collection == nil || collection.IsExternal() || reconciler.meta.IsCollectionCompactionBlocked(collectionID)
 			if !collectionBlocked {
 				ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
 				if err != nil {
@@ -114,7 +126,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		if !collectionBlocked && policy.IsSharedCompactionSelectable(reconciler.meta, segment) {
 			// Reoffer eligible Sort work for a matched segment if its
 			// reactive notification was missed, including with auto off.
-			if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() && policy.CanTriggerSortCompaction(segment) {
+			if paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && policy.CanTriggerSortCompaction(segment) {
 				views := view.GetViewsByInfo(segment)
 				events[policy.TriggerTypeSort] = append(events[policy.TriggerTypeSort], &policy.MixSegmentView{
 					Label: views[0].Label, Segments: views, CollectionTTL: ttls[collectionID],
@@ -146,9 +158,12 @@ func (reconciler *CompactionTargetReconciler) finishRewrite(ctx context.Context,
 	manager := reconciler.CompactionTargetMeta
 	defer manager.LockCollectionAdmission(record.GetCollectionID())()
 	return manager.Stop(ctx, record.GetTargetID(), StopSatisfied, func(current *datapb.CompactionTarget) (bool, error) {
-		if current.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE ||
-			reconciler.meta.GetCollection(current.GetCollectionID()) == nil {
+		if current.GetState() != datapb.TargetState_TARGET_STATE_ACTIVE {
 			return false, nil
+		}
+		available, err := reconciler.collectionAvailable(ctx, current.GetCollectionID())
+		if err != nil || !available {
+			return false, err
 		}
 		// The collection snapshot is the stop decision point. It observes
 		// replacement atomically and includes data published since the first

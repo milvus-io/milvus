@@ -169,6 +169,11 @@ func (s *Server) lookupCompactionTargetCollection(ctx context.Context, id int64)
 	return resource, external, nil
 }
 
+func (s *Server) compactionTargetCollectionAvailable(ctx context.Context, id int64) (bool, error) {
+	resource, external, err := s.lookupCompactionTargetCollection(ctx, id)
+	return err == nil && !resource.GetDeleted() && !external, err
+}
+
 func (s *Server) compactionTargetResource(ctx context.Context, id int64) (*datapb.CompactionTargetResource, error) {
 	if id < 0 {
 		return nil, merr.WrapErrDataIntegrityMsg("invalid compaction target collection ID %d", id)

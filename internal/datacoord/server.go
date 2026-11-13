@@ -771,7 +771,7 @@ func (s *Server) initCompaction() {
 	cph.LoadMeta()
 	s.compactionInspector = cph
 	manager := compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.indexEngineVersionManager)
-	manager.SetCompactionTargetMeta(s.compactionTargetMeta)
+	manager.SetCompactionTargetMeta(s.compactionTargetMeta, s.compactionTargetCollectionAvailable)
 	s.compactionTriggerManager = manager
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)

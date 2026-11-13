@@ -2184,7 +2184,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -2210,7 +2210,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -2239,7 +2239,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -2268,7 +2268,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -2299,7 +2299,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, uint64(777), infos[0].GetCreateTs())
