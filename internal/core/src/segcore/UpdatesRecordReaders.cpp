@@ -221,9 +221,35 @@ class CorrectedIndexReader final
         });
     }
     TargetBitmap
+    CorrectEquality(TargetBitmap bitmap, const T& wanted, bool equal) const {
+        binding_->records->RecordOldIndexRead();
+        const bool build_validity = !validity_;
+        auto validity = build_validity ? OriginalValidity() : TargetBitmap{};
+        const auto value = Own(wanted);
+        const auto start = std::chrono::steady_clock::now();
+        binding_->records->CorrectEquality(
+            binding_->field_id,
+            binding_->query_ts,
+            value,
+            equal,
+            bitmap,
+            build_validity ? &validity : nullptr);
+        timings_.correction_ns += ElapsedNs(start);
+        if (build_validity) {
+            validity_.emplace(std::move(validity));
+        }
+        return bitmap;
+    }
+    TargetBitmap
     In(size_t n, const T* values) const override {
         RequireReaderInput(n == 0 || values != nullptr,
                            "Missing predicate values");
+        if (n == 1) {
+            return CorrectEquality(
+                TimePredicate([&] { return predicate_->In(n, values); }),
+                values[0],
+                true);
+        }
         std::unordered_set<T> wanted;
         for (size_t i = 0; i < n; ++i) wanted.insert(values[i]);
         return CorrectValues(
@@ -234,6 +260,12 @@ class CorrectedIndexReader final
     NotIn(size_t n, const T* values) const override {
         RequireReaderInput(n == 0 || values != nullptr,
                            "Missing predicate values");
+        if (n == 1) {
+            return CorrectEquality(
+                TimePredicate([&] { return predicate_->NotIn(n, values); }),
+                values[0],
+                false);
+        }
         std::unordered_set<T> wanted;
         for (size_t i = 0; i < n; ++i) wanted.insert(values[i]);
         return CorrectValues(
@@ -242,6 +274,12 @@ class CorrectedIndexReader final
     }
     TargetBitmap
     Range(const T& value, index::CompareOp op) const override {
+        if (op == index::CompareOp::Equal || op == index::CompareOp::NotEqual) {
+            return CorrectEquality(
+                TimePredicate([&] { return predicate_->Range(value, op); }),
+                value,
+                op == index::CompareOp::Equal);
+        }
         return CorrectValues(
             TimePredicate([&] { return predicate_->Range(value, op); }),
             [&](const T& v) {

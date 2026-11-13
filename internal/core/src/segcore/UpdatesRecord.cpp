@@ -502,6 +502,36 @@ UpdatesRecord::VisitUpdates(
     impl_->correction_rows.fetch_add(count, std::memory_order_relaxed);
 }
 
+void
+UpdatesRecord::CorrectEquality(int64_t field_id,
+                               uint64_t query_ts,
+                               const UpdateValue& wanted,
+                               bool equal,
+                               TargetBitmap& result,
+                               TargetBitmap* validity) const {
+    std::shared_lock lock(impl_->mutex);
+    const auto& field = impl_->GetField(field_id);
+    uint64_t count = 0;
+    const auto correct = [&]<typename T>(const T& needle) {
+        field.offsets.ForEach([&](int64_t offset, const History& history) {
+            if (const auto* version = Visible(history, query_ts)) {
+                const auto* value = std::get_if<T>(version->value.get());
+                result[offset] = value && ((*value == needle) == equal);
+                if (validity) {
+                    (*validity)[offset] = value != nullptr;
+                }
+                ++count;
+            }
+        });
+    };
+    if (field.type == UpdateFieldType::Int64) {
+        correct(std::get<int64_t>(wanted));
+    } else {
+        correct(std::get<std::string>(wanted));
+    }
+    impl_->correction_rows.fetch_add(count, std::memory_order_relaxed);
+}
+
 UpdatesRecord::Stats
 UpdatesRecord::GetStats() const {
     std::shared_lock lock(impl_->mutex);

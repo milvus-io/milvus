@@ -87,6 +87,16 @@ class UpdatesRecord {
         int64_t field_id,
         uint64_t query_ts,
         const std::function<void(int64_t, const UpdateValue&)>& visit) const;
+    // Fused singleton equality/inequality correction. Dispatch the field type
+    // once; retain original bits when no update is visible. A non-null validity
+    // pointer receives NULL corrections in the same pass.
+    void
+    CorrectEquality(int64_t field_id,
+                    uint64_t query_ts,
+                    const UpdateValue& wanted,
+                    bool equal,
+                    TargetBitmap& result,
+                    TargetBitmap* validity) const;
     struct Stats {
         uint64_t updated_cells = 0, update_versions = 0, base_index_rows = 0;
         uint64_t value_rows = 0, base_rows = 0, correction_rows = 0;
