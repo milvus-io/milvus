@@ -90,6 +90,17 @@ manifest leaves the format observation incomplete. Version work can still
 proceed, subject to writer and QueryNode capability. TEXT collections retain
 V3 storage when the desired version changes to V2.
 
+Standing SORT uses one cluster-wide identity for periodic and post-flush work.
+The shared admission bucket charges new physical tasks and preserves recovery
+of existing tasks. Schema Version compares each V3 segment against the
+confirmed pending ALTER when one exists, otherwise the published schema.
+It captures that schema in the planned task. Version confirmation and
+in-place materialization preserve segment identity and rewrite time.
+
+Delete Cleanup and TTL use the existing statistics thresholds and share
+one physical Mix task when both apply to a segment. L2 inputs are eligible
+for cleanup. Their nonempty Mix replacements are published as L1.
+
 Reconciliation first checks semantic progress and then applies execution
 gates, including snapshot protection, occupancy, and index readiness. Shared
 matches contribute one physical input per round. Before persisting
@@ -122,9 +133,9 @@ retention independently of task history. The default is seven days. While a
 record is retained, Describe and Drop preserve its durable lifecycle. After
 collection of the record, both report TargetNotFound.
 
-This slice implements manual REWRITE on standalone clusters without a CDC
-topology. OPTIMIZE and Standing sources require their own implementation
-before they can be enabled.
+Manual REWRITE is available on clusters without a CDC topology. The automatic
+sources described above keep their identities across restarts and configuration
+changes.
 
 ## Test Plan
 
@@ -144,6 +155,12 @@ before they can be enabled.
   protection lets a previously blocked REWRITE reach satisfaction.
 - Delete a collection while its REWRITE is active. Verify `scope_dropped`
   after the DDL succeeds, and exercise recovery after deletion in legacy mode.
+- Exercise Storage Version and Storage Format against published Mix results.
+  Confirm the storage version and data-group format from the written data.
+- Exercise Schema Version with real V3 workers and confirm which updates
+  preserve the input and which publish a replacement.
+- Exercise the actual Mix worker with Delete Cleanup and TTL input. Check
+  the resulting segment level, row count, and surviving primary keys.
 
 ## Rejected Alternatives
 

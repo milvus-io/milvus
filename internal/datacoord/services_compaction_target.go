@@ -312,6 +312,13 @@ func (s *Server) describeCompactionTarget(ctx context.Context, req *datapb.Descr
 	case targets.IsStandingStorage(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
 		rows, observationErr = targets.ObserveStorage(ctx, s.meta, s.handler, record)
 		observed = true
+	case targets.HasStandingCondition(record) && record.GetIntent() == datapb.TargetIntent_INTENT_SCHEMA_VERSION &&
+		record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		rows, observationErr = targets.ObserveSchemaVersion(ctx, s.meta, s.handler)
+		observed = true
+	case targets.IsStandingCleanup(record) && record.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE && record.GetEnabled():
+		rows, observationErr = targets.ObserveCleanup(ctx, s.meta, s.handler, record)
+		observed = true
 	}
 	if observed && observationErr == nil {
 		target.RemainingRows = proto.Int64(rows)
@@ -368,6 +375,10 @@ func publicStandingConditionKeys(intent datapb.TargetIntent) []string {
 		return []string{"storage_version"}
 	case datapb.TargetIntent_INTENT_STORAGE_FORMAT:
 		return []string{"storage_format"}
+	case datapb.TargetIntent_INTENT_DELETE_CLEANUP:
+		return []string{targets.DeletedRatioKey, targets.MaxDeltalogBytesKey, targets.MaxDeltalogCountKey}
+	case datapb.TargetIntent_INTENT_TTL:
+		return []string{targets.ExpiredRatioKey, targets.MaxExpiredBytesKey, targets.StrictToleranceHoursKey}
 	default:
 		return nil
 	}

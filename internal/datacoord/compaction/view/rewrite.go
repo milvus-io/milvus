@@ -47,8 +47,9 @@ func (v *RewriteInputs) GetGroupLabel() *CompactionGroupLabel { return v.Group }
 func (v *RewriteInputs) GetSegmentsView() []*SegmentView      { return v.Segments }
 
 type (
-	SortView    struct{ RewriteInputs }
-	RewriteView struct{ RewriteInputs }
+	SortView              struct{ RewriteInputs }
+	RewriteView           struct{ RewriteInputs }
+	BumpSchemaVersionView struct{ RewriteInputs }
 )
 
 func (v *SortView) Plan() ([]*datapb.CompactionTask, error) {
@@ -154,6 +155,10 @@ func (v *MixView) planMix(group []*SegmentView, maxSize, preferredSize int64, fu
 		InputSegments: ids, TotalRows: rows, MaxSize: maxSize, CollectionTtl: v.TTL.Nanoseconds(), Schema: v.Schema,
 		OutputSegmentCountHint: EstimateResultSegmentCount(size, float64(preferredSize)),
 	}, nil
+}
+
+func (v *BumpSchemaVersionView) Plan() ([]*datapb.CompactionTask, error) {
+	return v.planSingletons(datapb.CompactionType_BumpSchemaVersionCompaction)
 }
 
 func (v *RewriteInputs) planSingletons(typ datapb.CompactionType) ([]*datapb.CompactionTask, error) {

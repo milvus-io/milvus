@@ -195,13 +195,17 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, ClusteringTicker)
 		case <-singleTicker.C:
 			m.handleTicker(ctx, TargetTicker)
-			m.handleTicker(ctx, SingleTicker)
+			if m.targetReconciler == nil {
+				m.handleTicker(ctx, SingleTicker)
+			}
 		case <-storageVersionTicker.C:
 			if m.targetReconciler == nil {
 				m.handleTicker(ctx, StorageVersionTicker)
 			}
 		case <-bumpSchemaVersionTicker.C:
-			m.handleTicker(ctx, BumpSchemaVersionTicker)
+			if m.targetReconciler == nil {
+				m.handleTicker(ctx, BumpSchemaVersionTicker)
+			}
 		case segID := <-meta.GetStatsTaskChSingleton():
 			m.handleSortSignal(ctx, segID, false)
 		case segID := <-meta.GetClusteringSortCh():

@@ -123,13 +123,13 @@ func buildTestSegment(id int64,
 
 func (s *SingleCompactionPolicySuite) TestIsDeleteRowsTooManySegment() {
 	segment0 := buildTestSegment(101, meta.CollID, datapb.SegmentLevel_L2, 0, 10000, 201, true, true)
-	s.Equal(true, policy.HasTooManyDeletions(segment0))
+	s.Equal(true, policy.HasTooManyDeletions(s.T().Context(), segment0))
 
 	segment1 := buildTestSegment(101, meta.CollID, datapb.SegmentLevel_L2, 3000, 10000, 1, true, true)
-	s.Equal(true, policy.HasTooManyDeletions(segment1))
+	s.Equal(true, policy.HasTooManyDeletions(s.T().Context(), segment1))
 
 	segment2 := buildTestSegment(101, meta.CollID, datapb.SegmentLevel_L2, 300, 10000, 10, true, true)
-	s.Equal(true, policy.HasTooManyDeletions(segment2))
+	s.Equal(true, policy.HasTooManyDeletions(s.T().Context(), segment2))
 }
 
 func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {

@@ -151,6 +151,10 @@ func IsMixCompactionSelectable(segment *meta.SegmentInfo) bool {
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
 // if not set, returns global auto compaction config.
 func GetCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+	return CollectionAutoCompactionEnabled(properties, Params.DataCoordCfg.EnableAutoCompaction.GetAsBool())
+}
+
+func CollectionAutoCompactionEnabled(properties map[string]string, defaultEnabled bool) (bool, error) {
 	// when collection is on truncating, disable auto compaction.
 	if _, ok := properties[common.CollectionOnTruncatingKey]; ok {
 		return false, nil
@@ -163,7 +167,7 @@ func GetCollectionAutoCompactionEnabled(properties map[string]string) (bool, err
 		}
 		return enabled, nil
 	}
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil
+	return defaultEnabled, nil
 }
 
 func IsCollectionAutoCompactionEnabled(coll *meta.CollectionInfo) bool {
@@ -208,47 +212,6 @@ func GetCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 		FailureReason: task.GetFailReason(),
 		Targets:       task.GetResultSegments(),
 	}
-}
-
-func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
-	stats := segment.EnsureStats()
-	deltaLogCount := int(stats.GetDeltaBinlogCount())
-	totalDeletedRows := int(stats.GetDeleteNumRows())
-	totalDeleteLogSize := stats.GetDeltaBinlogSize()
-
-	// Too many deltalog files, accumulates IO count.
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
-		mlog.Info(context.TODO(), "delta logs file count exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int("delta log count", deltaLogCount),
-			mlog.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
-		)
-		return true
-	}
-
-	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
-		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("number of rows", segment.GetNumOfRows()),
-			mlog.Int("deleted rows", totalDeletedRows),
-			mlog.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
-		)
-		return true
-	}
-
-	// Delete size is too large, varchar PK tends to accumulates deltalog size.
-	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		mlog.Info(context.TODO(), "total delete entries size exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("numRows", segment.GetNumOfRows()),
-			mlog.Int64("delete entries size", totalDeleteLogSize),
-			mlog.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
-		)
-		return true
-	}
-
-	return false
 }
 
 func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
