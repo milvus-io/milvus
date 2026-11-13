@@ -2682,7 +2682,19 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         properties = std::move(external_properties);
     }
 
-    const auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    if (schema_snapshot->is_milvus_table_external_collection()) {
+        needed_columns =
+            std::make_shared<std::vector<std::string>>(*needed_columns);
+        needed_columns->erase(
+            std::remove_if(needed_columns->begin(),
+                           needed_columns->end(),
+                           [&](const std::string& name) {
+                               return !segment_load_info.HasManifestColumn(
+                                   name);
+                           }),
+            needed_columns->end());
+    }
     const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
@@ -8477,6 +8489,17 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.fields_to_fill_default.empty()) {
+        // A refreshed manifest may remove a previously present column or change row count.
+        if (schema_snapshot->is_milvus_table_external_collection() &&
+            diff.manifest_updated) {
+            committer.Commit([&](RuntimeResourceState& runtime,
+                                 PublishedSegmentState& state) {
+                for (auto field_id : diff.fields_to_fill_default) {
+                    DropFieldData(field_id, schema_snapshot, &runtime);
+                    DropFieldFromState(state, field_id);
+                }
+            });
+        }
         FillDefaultValueFields(diff.fields_to_fill_default,
                                segment_load_info,
                                schema_snapshot,
@@ -10920,6 +10943,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->field_ids_) {
+        if (snapshot->load_info->IsFieldFilledWithDefault(field_id)) {
+            return false;
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             continue;
         }
@@ -10934,6 +10960,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
         auto column_name = schema_snapshot->GetPhysicalColumnName(field_id);
+        // A raw-data index can serve a missing column without a default-fill
+        // marker. take() still requires the physical manifest column.
+        if (schema_snapshot->is_milvus_table_external_collection() &&
+            snapshot->load_info->HasManifestPath() &&
+            !snapshot->load_info->HasManifestColumn(column_name)) {
+            return false;
+        }
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
     }
@@ -11219,6 +11252,9 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->target_entries_) {
+        if (snapshot->load_info->IsFieldFilledWithDefault(field_id)) {
+            return false;
+        }
         auto& field_meta = schema_snapshot->operator[](field_id);
         if (is_external_collection &&
             !schema_snapshot->IsExternalManifestStoredField(field_id)) {
@@ -11227,6 +11263,12 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
         auto column_name = schema_snapshot->GetPhysicalColumnName(field_id);
+        // Index-backed fields may be readable without a physical column.
+        if (schema_snapshot->is_milvus_table_external_collection() &&
+            snapshot->load_info->HasManifestPath() &&
+            !snapshot->load_info->HasManifestColumn(column_name)) {
+            return false;
+        }
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
         take_column_names.push_back(std::move(column_name));

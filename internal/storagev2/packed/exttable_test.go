@@ -956,7 +956,7 @@ func TestManifestMissingColumns(t *testing.T) {
 		{name: "read error", columns: []string{"101"}, err: readErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			read := mockey.Mock(readColumnGroupsFromManifest).Return(tc.groups, tc.err).Build()
+			read := mockey.Mock(readColumnGroupsFromManifestWithExtfs).Return(tc.groups, tc.err).Build()
 			defer read.UnPatch()
 			missing, err := ManifestMissingColumns("pinned-manifest", nil, tc.columns)
 			require.ErrorIs(t, err, tc.err)
@@ -3143,4 +3143,40 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestManifestMissingColumnsWithExtfs(t *testing.T) {
+	paramtable.Init()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(cfg.RootPath, ManifestEarliest), cfg,
+		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"101"}, Format: "parquet",
+			Files: []ColumnGroupFileEntry{{Path: "data.parquet", EndIndex: 10}},
+		}}})
+	require.NoError(t, err)
+	t.Run("physical columns", func(t *testing.T) {
+		missing, err := ManifestMissingColumnsWithExtfs(manifest, cfg, []string{"103", "101", "103", "104"}, ExternalSpecContext{})
+		require.NoError(t, err)
+		require.Equal(t, []string{"103", "104"}, missing)
+	})
+	t.Run("empty request", func(t *testing.T) {
+		missing, err := ManifestMissingColumnsWithExtfs("unreadable", nil, nil, ExternalSpecContext{})
+		require.NoError(t, err)
+		require.Empty(t, missing)
+	})
+	t.Run("read error", func(t *testing.T) {
+		readErr := merr.WrapErrServiceUnavailableMsg("source unavailable")
+		read := mockey.Mock(GetManifestHandleWithExtfs).Return(nil, readErr).Build()
+		defer read.UnPatch()
+		missing, err := ManifestMissingColumnsWithExtfs(manifest, cfg, []string{"103"}, ExternalSpecContext{})
+		require.ErrorIs(t, err, readErr)
+		require.Nil(t, missing)
+	})
+	t.Run("nil manifest", func(t *testing.T) {
+		read := mockey.Mock(GetManifestHandleWithExtfs).Return(nil, nil).Build()
+		defer read.UnPatch()
+		missing, err := ManifestMissingColumnsWithExtfs(manifest, cfg, []string{"103"}, ExternalSpecContext{})
+		require.Error(t, err)
+		require.Nil(t, missing)
+	})
 }

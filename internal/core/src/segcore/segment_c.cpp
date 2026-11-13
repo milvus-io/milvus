@@ -550,6 +550,15 @@ CheckExternalFieldsInLoadedManifest(
         if (!schema->IsExternalManifestStoredField(field_id)) {
             continue;
         }
+        // Like native tables, milvus-table can serve a missing column from
+        // synthesized data or an index that carries the raw values.
+        if (schema->is_milvus_table_external_collection() &&
+            (segment->HasFieldData(field_id) ||
+             (!milvus::SystemProperty::Instance().IsSystem(field_id) &&
+              segment->HasIndex(field_id) &&
+              segment->HasRawData(field_id.get())))) {
+            continue;
+        }
         const auto& field_meta = schema->operator[](field_id);
         auto column_name = schema->GetPhysicalColumnName(field_id);
         // External output may be served through take(), so "ready" here means

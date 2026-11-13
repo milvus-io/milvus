@@ -77,6 +77,15 @@ IsMilvusTableExternalSpec(const std::string& external_spec) {
     }
 }
 
+bool
+CanFillMissingMilvusTableColumn(const proto::schema::FieldSchema& field) {
+    return field.fieldid() >= START_USER_FIELDID && field.nullable() &&
+           !field.has_default_value() && !field.is_primary_key() &&
+           !field.is_partition_key() && !field.is_clustering_key() &&
+           !field.is_dynamic() && !field.is_function_output() &&
+           IsPrimitiveType(field.data_type());
+}
+
 namespace {
 
 bool
@@ -121,6 +130,8 @@ Schema::Schema(const Schema& other)
       name_ids_(other.name_ids_),
       id_names_(other.id_names_),
       primary_field_id_opt_(other.primary_field_id_opt_),
+      partition_key_field_id_opt_(other.partition_key_field_id_opt_),
+      clustering_key_field_id_opt_(other.clustering_key_field_id_opt_),
       dynamic_field_id_opt_(other.dynamic_field_id_opt_),
       namespace_field_id_opt_(other.namespace_field_id_opt_),
       ttl_field_id_opt_(other.ttl_field_id_opt_),
@@ -155,6 +166,9 @@ Schema::operator=(const Schema& other) {
     std::swap(name_ids_, copied.name_ids_);
     std::swap(id_names_, copied.id_names_);
     std::swap(primary_field_id_opt_, copied.primary_field_id_opt_);
+    std::swap(partition_key_field_id_opt_, copied.partition_key_field_id_opt_);
+    std::swap(clustering_key_field_id_opt_,
+              copied.clustering_key_field_id_opt_);
     std::swap(dynamic_field_id_opt_, copied.dynamic_field_id_opt_);
     std::swap(namespace_field_id_opt_, copied.namespace_field_id_opt_);
     std::swap(ttl_field_id_opt_, copied.ttl_field_id_opt_);
@@ -191,6 +205,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
         auto f = FieldMeta::ParseFrom(child);
         schema->AddField(std::move(f));
+
+        if (child.is_partition_key()) {
+            schema->partition_key_field_id_opt_ = field_id;
+        }
+        if (child.is_clustering_key()) {
+            schema->clustering_key_field_id_opt_ = field_id;
+        }
 
         if (child.is_function_output()) {
             schema->add_function_output_field_id(field_id);
@@ -413,6 +434,18 @@ Schema::GetExternalColumnNames() const {
         }
     }
     return columns;
+}
+
+bool
+Schema::CanFillMissingMilvusTableColumn(FieldId field_id) const {
+    // FieldMeta omits schema roles; restore them before checking eligibility.
+    auto field = (*this)[field_id].ToProto();
+    field.set_is_primary_key(primary_field_id_opt_ == field_id);
+    field.set_is_partition_key(partition_key_field_id_opt_ == field_id);
+    field.set_is_clustering_key(clustering_key_field_id_opt_ == field_id);
+    field.set_is_dynamic(dynamic_field_id_opt_ == field_id);
+    field.set_is_function_output(is_function_output(field_id));
+    return milvus::CanFillMissingMilvusTableColumn(field);
 }
 
 // Mirror pkg/util/typeutil.StorageColumnResolver. Keep Go and C++ behavior

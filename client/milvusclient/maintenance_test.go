@@ -38,6 +38,18 @@ type MaintenanceSuite struct {
 	MockSuiteBase
 }
 
+func TestLoadCollectionRefreshOption(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		option := NewLoadCollectionOption("external").WithRefresh(refresh)
+		if got := option.Request().GetRefresh(); got != refresh {
+			t.Fatalf("request refresh = %v, want %v", got, refresh)
+		}
+		if got := option.IsRefresh(); got != refresh {
+			t.Fatalf("wait refresh = %v, want %v", got, refresh)
+		}
+	}
+}
+
 func (s *MaintenanceSuite) TestLoadCollection() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

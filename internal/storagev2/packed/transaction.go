@@ -197,6 +197,8 @@ func validateDeltaLogMetadata(manifestPath, logPath string, entriesNum int64) er
 // GetDeltaLogsFromManifestWithExtfs extracts delta log entries from a StorageV3
 // manifest. When extfs is present, returned paths are normalized to object keys
 // readable by the local chunk manager.
+// Zero-entry markers with nonempty paths retain their identity. Empty-path,
+// zero-entry records are omitted because they have neither deletes nor identity.
 func GetDeltaLogsFromManifestWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,

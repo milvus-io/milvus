@@ -115,6 +115,16 @@ class SealedFieldLayout {
         return schema_->is_external_collection();
     }
     bool
+    is_milvus_table_external_collection() const {
+        return schema_->is_milvus_table_external_collection();
+    }
+    bool
+    CanFillMissingMilvusTableColumn(FieldId id) const {
+        AssertInfo(
+            has_field(id), "field {} is outside sealed layout", id.get());
+        return schema_->CanFillMissingMilvusTableColumn(id);
+    }
+    bool
     is_function_output(FieldId id) const {
         return has_field(id) && schema_->is_function_output(id);
     }
