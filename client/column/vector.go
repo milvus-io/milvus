@@ -72,17 +72,19 @@ func NewColumnFloatVector(fieldName string, dim int, data [][]float32) *ColumnFl
 }
 
 // AppendValue appends vector value into values.
-// override default type constrains, add `[]float32` conversion
+// override default type constrains, add `[]float32` conversion.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnFloatVector) AppendValue(i interface{}) error {
 	switch vector := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case entity.FloatVector:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(vector)
 	case []float32:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(entity.FloatVector(vector))
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
-	return nil
 }
 
 func (c *ColumnFloatVector) Slice(start, end int) Column {
@@ -105,17 +107,19 @@ func NewColumnBinaryVector(fieldName string, dim int, data [][]byte) *ColumnBina
 }
 
 // AppendValue appends vector value into values.
-// override default type constrains, add `[]byte` conversion
+// override default type constrains, add `[]byte` conversion.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnBinaryVector) AppendValue(i interface{}) error {
 	switch vector := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case entity.BinaryVector:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(vector)
 	case []byte:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(entity.BinaryVector(vector))
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
-	return nil
 }
 
 func (c *ColumnBinaryVector) Slice(start, end int) Column {
@@ -147,20 +151,22 @@ func NewColumnFloat16VectorFromFp32Vector(fieldName string, dim int, data [][]fl
 // AppendValue appends vector value into values.
 // Override default type constrains, add `[]byte`, `entity.FloatVector` and
 // `[]float32` conversion.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnFloat16Vector) AppendValue(i interface{}) error {
 	switch vector := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case entity.Float16Vector:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(vector)
 	case []byte:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(entity.Float16Vector(vector))
 	case entity.FloatVector:
-		c.values = append(c.values, vector.ToFloat16Vector())
+		return c.genericColumnBase.AppendValue(vector.ToFloat16Vector())
 	case []float32:
-		c.values = append(c.values, entity.FloatVector(vector).ToFloat16Vector())
+		return c.genericColumnBase.AppendValue(entity.FloatVector(vector).ToFloat16Vector())
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
-	return nil
 }
 
 func (c *ColumnFloat16Vector) Slice(start, end int) Column {
@@ -192,20 +198,22 @@ func NewColumnBFloat16VectorFromFp32Vector(fieldName string, dim int, data [][]f
 // AppendValue appends vector value into values.
 // Override default type constrains, add `[]byte`, `entity.FloatVector` and
 // `[]float32` conversion.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnBFloat16Vector) AppendValue(i interface{}) error {
 	switch vector := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case entity.BFloat16Vector:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(vector)
 	case []byte:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(entity.BFloat16Vector(vector))
 	case entity.FloatVector:
-		c.values = append(c.values, vector.ToBFloat16Vector())
+		return c.genericColumnBase.AppendValue(vector.ToBFloat16Vector())
 	case []float32:
-		c.values = append(c.values, entity.FloatVector(vector).ToBFloat16Vector())
+		return c.genericColumnBase.AppendValue(entity.FloatVector(vector).ToBFloat16Vector())
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
-	return nil
 }
 
 func (c *ColumnBFloat16Vector) Slice(start, end int) Column {
@@ -228,17 +236,19 @@ func NewColumnInt8Vector(fieldName string, dim int, data [][]int8) *ColumnInt8Ve
 }
 
 // AppendValue appends vector value into values.
-// override default type constrains, add `[]int8` conversion
+// override default type constrains, add `[]int8` conversion.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnInt8Vector) AppendValue(i interface{}) error {
 	switch vector := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case entity.Int8Vector:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(vector)
 	case []int8:
-		c.values = append(c.values, vector)
+		return c.genericColumnBase.AppendValue(entity.Int8Vector(vector))
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
 	}
-	return nil
 }
 
 func (c *ColumnInt8Vector) Slice(start, end int) Column {
