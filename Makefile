@@ -104,6 +104,14 @@ ifdef TANTIVY_ANALYZER_REMOTE_TLS
 	tantivy_analyzer_remote_tls = ${TANTIVY_ANALYZER_REMOTE_TLS}
 endif
 
+# FIPS: set TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=ON, with
+# TANTIVY_ANALYZER_REMOTE_TLS=OFF, to keep gRPC tokenizer https:// endpoints
+# through OpenSSL. Lindera HTTPS fetch stays off.
+tantivy_analyzer_remote_tls_openssl = OFF
+ifdef TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL
+	tantivy_analyzer_remote_tls_openssl = ${TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL}
+endif
+
 
 use_svs = OFF
 ifdef USE_SVS
@@ -394,15 +402,15 @@ check-segcore-codes-product: generate-segcore-codes
 
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
-	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=$(tantivy_analyzer_remote_tls_openssl) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=$(tantivy_analyzer_remote_tls_openssl) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=$(tantivy_analyzer_remote_tls_openssl) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
