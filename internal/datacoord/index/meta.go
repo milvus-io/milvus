@@ -863,6 +863,61 @@ func (m *IndexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID)
 	return segmentsIndexes
 }
 
+// MatchMaterializedIndexVersions returns matching segment IDs in input order.
+// Definitions stay stable while it reads the current registered artifacts.
+func (m *IndexMeta) MatchMaterializedIndexVersions(
+	ctx context.Context, collectionID int64, segmentIDs []int64, vector, scalar IndexVersionCondition,
+) ([]int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
+	definitions := m.Indexes[collectionID]
+	if len(definitions) == 0 {
+		return nil, nil
+	}
+	indexIsVector := make(map[int64]bool, len(definitions))
+	vectorIndexManager := vecindexmgr.GetVecIndexMgrInstance()
+	for id, definition := range definitions {
+		if definition.IsDeleted {
+			continue
+		}
+		isVector := vectorIndexManager.IsVecIndex(meta.GetIndexType(definition.IndexParams))
+		if (isVector && vector.Mode != IndexVersionAbsent) || (!isVector && scalar.Mode != IndexVersionAbsent) {
+			indexIsVector[id] = isVector
+		}
+	}
+	if len(indexIsVector) == 0 {
+		return nil, nil
+	}
+
+	var match []int64
+	for _, id := range segmentIDs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		artifacts, ok := m.SegmentIndexes.Get(id)
+		if !ok {
+			continue
+		}
+		artifacts.Range(func(indexID int64, artifact *model.SegmentIndex) bool {
+			isVector, live := indexIsVector[indexID]
+			if !live || artifact.IsDeleted || len(artifact.IndexFileKeys) == 0 {
+				return true
+			}
+			if isVector && vector.ViolatedBy(artifact.CurrentIndexVersion) ||
+				!isVector && scalar.ViolatedBy(artifact.CurrentScalarIndexVersion) {
+				match = append(match, id)
+				return false
+			}
+			return true
+		})
+	}
+	return match, ctx.Err()
+}
+
 func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
