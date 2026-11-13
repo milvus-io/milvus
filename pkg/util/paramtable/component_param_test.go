@@ -496,6 +496,63 @@ func TestComponentParam_StorageTalonParams(t *testing.T) {
 	}
 }
 
+func TestComponentParam_StorageTalonEnabledStages(t *testing.T) {
+	t.Run("yaml_list", func(t *testing.T) {
+		for _, tc := range []struct {
+			stages string
+			mask   uint32
+		}{{"load_open", 1}, {"manifest", 2}, {"load_open, manifest", 3}} {
+			t.Run(tc.stages, func(t *testing.T) {
+				dir := t.TempDir()
+				t.Setenv("MILVUSCONF", dir)
+				file := filepath.Join(dir, "talon.yaml")
+				require.NoError(t, os.WriteFile(file, []byte("common:\n  storage:\n    talon:\n      enabledStages: ["+tc.stages+"]\n"), 0o600))
+				params := &ComponentParam{}
+				params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"talon.yaml"})))
+				assert.Equal(t, tc.mask, params.CommonCfg.StorageTalonEnabledStages.GetAsUint32())
+			})
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		stages string
+		mask   uint32
+	}{
+		{name: "default", mask: ^uint32(0)},
+		{name: "all", stages: "all", mask: ^uint32(0)},
+		{name: "load_open", stages: "load_open", mask: 1},
+		{name: "trimmed", stages: " load_open ", mask: 1},
+		{name: "repeated", stages: "load_open,load_open", mask: 1},
+		{name: "manifest", stages: "manifest", mask: 2},
+		{name: "combined", stages: "load_open,manifest", mask: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			if tc.stages != "" {
+				require.NoError(t, base.Save("common.storage.talon.enabledStages", tc.stages))
+			}
+			params := &ComponentParam{}
+			params.Init(base)
+			assert.Equal(t, tc.mask, params.CommonCfg.StorageTalonEnabledStages.GetAsUint32())
+			// Parsing the stage policy must not rewrite the mode that is sent
+			// alongside it in StorageConfig.
+			for _, mode := range []uint32{0, 1, 2} {
+				require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, fmt.Sprint(mode)))
+				assert.Equal(t, mode, params.CommonCfg.StorageTalonMode.GetAsUint32())
+			}
+		})
+	}
+	for _, invalid := range []string{"", " ", "unknown", "1", "all,load_open", "load_open,all", "all,all", "load_open,", ",load_open"} {
+		t.Run("invalid_"+invalid, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+			require.NoError(t, base.Save("common.storage.talon.enabledStages", invalid))
+			assert.PanicsWithValue(t,
+				fmt.Sprintf("invalid common.storage.talon.enabledStages: %q", invalid),
+				func() { (&ComponentParam{}).Init(base) })
+		})
+	}
+}
+
 func TestLoadAdmissionAsyncMemoryDefault(t *testing.T) {
 	pt := &ComponentParam{}
 	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))

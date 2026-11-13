@@ -59,6 +59,7 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     storage_config.tls_min_version = config.ssl_tls_min_version();
     storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
     storage_config.talon_mode = config.talon_mode();
+    storage_config.talon_enabled_stages = config.talon_enabled_stages();
     storage_config.talon_small_read_threshold =
         config.talon_small_read_threshold();
     storage_config.talon_coordinator = config.talon_coordinator();
@@ -122,6 +123,7 @@ Analyze(CAnalyze* res_analyze,
             storage_config.tls_min_version,
             storage_config.use_crc32c_checksum,
             storage_config.talon_mode,
+            storage_config.talon_enabled_stages,
             storage_config.talon_small_read_threshold,
             storage_config.talon_coordinator,
             storage_config.talon_block_size,

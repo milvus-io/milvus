@@ -593,7 +593,7 @@ func TestSnapshotL0DeferredManifest(t *testing.T) {
 			if mode == "canceled_after_manifest" {
 				source.ManifestL0Paths[1] = packed.MarshalManifestPath("root/l0", 8)
 			}
-			resolve := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(got string, _ *indexpb.StorageConfig) ([]string, error) {
+			resolve := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(got string, _ *indexpb.StorageConfig, _ ...uint32) ([]string, error) {
 				require.Equal(t, manifest, got)
 				if mode == "manifest_error" {
 					return nil, merr.ErrIoKeyNotFound

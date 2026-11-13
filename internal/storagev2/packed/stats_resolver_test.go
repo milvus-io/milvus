@@ -18,13 +18,47 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestStatsResolverManifestStage(t *testing.T) {
+	paramtable.Init()
+	const manifest = `{"base_path":"files/segment","ver":1}`
+	for _, tc := range []struct {
+		name     string
+		resolver *StatsResolver
+		stage    uint32
+	}{
+		{"query_node", NewStatsResolverFromLoadInfo(&querypb.SegmentLoadInfo{ManifestPath: manifest}), 2},
+		{"data_node", NewStatsResolverFromSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifest}), 0},
+		{"unscoped", NewStatsResolver(manifest, CreateStorageConfig()), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			patch := mockey.Mock(GetManifestStats).To(func(path string, config *indexpb.StorageConfig, stages ...uint32) (map[string]ManifestStat, error) {
+				calls++
+				assert.Equal(t, manifest, path)
+				assert.NotNil(t, config)
+				assert.Equal(t, []uint32{tc.stage}, stages)
+				return map[string]ManifestStat{"bloom_filter.100": {Paths: []string{"files/segment/_stats/pk/2"}}}, nil
+			}).Build()
+			defer patch.UnPatch()
+			for range 2 {
+				paths, err := tc.resolver.BloomFilterPaths(100)
+				require.NoError(t, err)
+				assert.Equal(t, []string{"files/segment/_stats/pk/2"}, paths)
+			}
+			assert.Equal(t, 1, calls, "stats lookups must reuse the loaded manifest")
+		})
+	}
+}
 
 func TestParseStatKey(t *testing.T) {
 	t.Run("valid bloom_filter key", func(t *testing.T) {

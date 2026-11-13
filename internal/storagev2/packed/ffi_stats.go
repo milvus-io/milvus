@@ -129,8 +129,9 @@ func UpdateTransactionStat(
 func GetManifestStats(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	talonStages ...uint32,
 ) (map[string]ManifestStat, error) {
-	cManifest, err := GetManifestHandle(manifestPath, storageConfig)
+	cManifest, err := GetManifestHandle(manifestPath, storageConfig, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}

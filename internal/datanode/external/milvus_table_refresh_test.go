@@ -1002,7 +1002,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestShouldRefreshMilvusTableDeltalo
 	}}
 
 	m := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
-		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext, _ ...uint32) ([]*datapb.FieldBinlog, error) {
 			s.Equal("source-manifest", manifestPath)
 			return []*datapb.FieldBinlog{{
 				FieldID: 100,
@@ -1060,7 +1060,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestShouldRefreshMilvusTableDeltalo
 	}}
 
 	m := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
-		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext, _ ...uint32) ([]*datapb.FieldBinlog, error) {
 			s.Equal("source-manifest", manifestPath)
 			return []*datapb.FieldBinlog{{
 				Binlogs: []*datapb.Binlog{{
@@ -1136,7 +1136,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestGetMilvusTableSourceManifestDel
 
 	readCount := 0
 	m := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
-		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext, _ ...uint32) ([]*datapb.FieldBinlog, error) {
 			readCount++
 			s.Equal("source-manifest", manifestPath)
 			return []*datapb.FieldBinlog{{

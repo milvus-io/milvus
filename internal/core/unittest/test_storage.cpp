@@ -17,6 +17,7 @@
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <atomic>
 #include <barrier>
 #include <chrono>
 #include <thread>
@@ -1045,7 +1046,269 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
     }
 }
 
+TEST(StorageTalonConfig, StageMaskTestsRequestedBits) {
+    EXPECT_TRUE(TalonStageEnabled(0, kTalonStageLoadOpen));
+    // The mask produced by the Go "manifest" config must select this stage.
+    EXPECT_TRUE(TalonStageEnabled(2, kTalonStageManifest));
+    EXPECT_FALSE(TalonStageEnabled(1, kTalonStageManifest));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStagesAll, kTalonStageLoadOpen));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStageLoadOpen, kTalonStageLoadOpen));
+    EXPECT_FALSE(TalonStageEnabled(1U << 1, kTalonStageLoadOpen));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStageLoadOpen | (1U << 1),
+                                  kTalonStageLoadOpen));
+    EXPECT_FALSE(TalonStageEnabled(0, 0));
+    EXPECT_FALSE(TalonStageEnabled(kTalonStagesAll, 0));
+}
+
+TEST(StorageTalonConfig, OrdinaryFilesystemUsesConfiguredStages) {
+    StorageConfig config;
+    config.storage_type = "remote";
+    config.address = "http://127.0.0.1:9000";
+    config.region = "us-east-1";
+    // A non-AWS provider disables AWS instance metadata during client construction.
+    config.cloud_provider = "aliyun";
+    config.talon_coordinator = "127.0.0.1:7000";
+    for (const uint32_t stages :
+         {uint32_t{0}, uint32_t{1}, uint32_t{2}, uint32_t{3}, UINT32_MAX}) {
+        for (const uint32_t mode : {0, 1, 2}) {
+            config.talon_mode = mode;
+            config.talon_enabled_stages = stages;
+            const auto fs =
+                StorageV2FSCache::Instance().Get(ToStorageV2FSCacheKey(config));
+            ASSERT_NE(fs, nullptr);
+            const auto observable =
+                std::dynamic_pointer_cast<milvus_storage::Observable>(fs);
+            ASSERT_NE(observable, nullptr);
+            const auto sources = observable->GetMetricsSources();
+            ASSERT_TRUE(sources.ok()) << sources.status().ToString();
+            EXPECT_EQ(
+                sources->count(milvus_storage::kTalonMetricsSource),
+                mode != 0 && (stages == 0 || stages == UINT32_MAX) ? 1 : 0);
+        }
+    }
+}
+
+namespace milvus::storage {
+
 TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
+    struct StageCase {
+        uint32_t mask;
+        bool ordinary;
+        bool load_open;
+        bool manifest;
+    };
+    const StageCase cases[] = {{0, true, true, true},
+                               {1, false, true, false},
+                               {2, false, false, true},
+                               {3, false, true, true},
+                               {4, false, false, false},
+                               {UINT32_MAX, true, true, true}};
+    struct RequestCase {
+        uint32_t stage;
+        bool load_open;
+        bool manifest;
+    };
+    const RequestCase requests[] = {
+        {0, false, false}, {1, true, false}, {2, false, true}, {3, true, true}};
+    for (const auto& request : requests) {
+        for (const auto* storage_type : {"local", "remote"}) {
+            for (const auto& stage : cases) {
+                for (const uint32_t mode : {0, 1, 2}) {
+                    for (const bool external : {false, true}) {
+                        StorageConfig input;
+                        input.storage_type = storage_type;
+                        input.talon_mode = mode;
+                        input.talon_enabled_stages = stage.mask;
+                        input.talon_coordinator = "127.0.0.1:7000";
+                        input.talon_enable_for_external_table = external;
+                        const auto c_config = ToCStorageConfig(input);
+                        EXPECT_EQ(c_config.talon_mode, mode);
+                        EXPECT_EQ(c_config.crt_queue_sizes, 0);
+                        EXPECT_EQ(c_config.talon_enabled_stages, stage.mask);
+                        const auto key = ToStorageV2FSCacheKey(input);
+                        EXPECT_EQ(key.talon_mode, mode);
+                        EXPECT_EQ(key.talon_enabled_stages, stage.mask);
+                        LoonFFIPropertiesSingleton singleton;
+                        singleton.Init(c_config);
+                        const auto base = singleton.GetProperties();
+                        const auto original = *base;
+                        EXPECT_FALSE(std::get<bool>(
+                            base->at(PROPERTY_FS_TALON_OPEN_ONLY)));
+                        auto properties = singleton.GetProperties(
+                            {.talon_stage = request.stage});
+                        if (*properties == original) {
+                            EXPECT_EQ(properties.get(), base.get());
+                        } else {
+                            EXPECT_NE(properties.get(), base.get());
+                        }
+                        EXPECT_EQ(
+                            properties.get(),
+                            singleton
+                                .GetProperties({.talon_stage = request.stage})
+                                .get());
+                        const bool is_local =
+                            std::string_view(storage_type) == "local";
+                        const bool selected =
+                            (request.load_open && stage.load_open) ||
+                            (request.manifest && stage.manifest);
+                        const uint32_t reader_mode =
+                            stage.ordinary || selected ? mode : 0;
+                        const bool open_only = request.load_open &&
+                                               stage.load_open &&
+                                               !stage.ordinary && mode != 0;
+                        const auto policy = milvus_storage::api::GetValue<bool>(
+                            properties, PROPERTY_FS_TALON_OPEN_ONLY);
+                        ASSERT_TRUE(policy.ok()) << policy.status().ToString();
+                        EXPECT_EQ(*policy, open_only);
+                        const auto internal =
+                            milvus_storage::FilesystemCache::getInstance()
+                                .resolve_config(properties, "");
+                        ASSERT_TRUE(internal.ok())
+                            << internal.status().ToString();
+                        EXPECT_EQ(static_cast<uint32_t>(internal->talon_mode),
+                                  is_local ? 0 : reader_mode);
+                        EXPECT_EQ(internal->talon_open_only, open_only);
+                        const auto cached_properties = *properties;
+                        auto external_properties =
+                            std::make_shared<milvus_storage::api::Properties>(
+                                *properties);
+                        ::InjectExternalSpecProperties(
+                            *external_properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            "");
+                        const auto resolved =
+                            milvus_storage::FilesystemCache::getInstance()
+                                .resolve_config(
+                                    external_properties,
+                                    "s3://s3.amazonaws.com/bucket/data/");
+                        ASSERT_TRUE(resolved.ok())
+                            << resolved.status().ToString();
+                        EXPECT_EQ(static_cast<uint32_t>(resolved->talon_mode),
+                                  external ? reader_mode : 0);
+                        EXPECT_EQ(resolved->talon_open_only, open_only);
+                        ::InjectExternalSpecProperties(
+                            *external_properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            R"({"extfs":{"storage_type":"local"}})");
+                        EXPECT_EQ(
+                            external_properties->count("extfs.42.talon.mode"),
+                            0);
+                        ::InjectExternalSpecProperties(
+                            *external_properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            "");
+                        EXPECT_EQ(std::get<std::string>(external_properties->at(
+                                      "extfs.42.talon.mode")),
+                                  std::to_string(external ? reader_mode : 0));
+                        EXPECT_EQ(std::get<std::string>(external_properties->at(
+                                      "extfs.42.talon.open_only")),
+                                  open_only ? "true" : "false");
+                        EXPECT_EQ(*properties, cached_properties);
+                        // External aliases never change cached or ordinary properties.
+                        EXPECT_EQ(*base, original);
+                        EXPECT_EQ(singleton.GetProperties().get(), base.get());
+                    }
+                }
+            }
+        }
+    }
+
+    // Concurrent first lookups must publish a single immutable snapshot.
+    {
+        StorageConfig input;
+        input.storage_type = "remote";
+        input.talon_mode = 1;
+        input.talon_enabled_stages = kTalonStageLoadOpen | kTalonStageManifest;
+        LoonFFIPropertiesSingleton singleton;
+        singleton.Init(ToCStorageConfig(input));
+        singleton.SetArrowReaderConfig(32 * 1024, 4 * 1024 * 1024);
+        const PropertiesOptions first_options{.talon_stage =
+                                                  kTalonStageLoadOpen};
+        std::vector<std::shared_ptr<const milvus_storage::api::Properties>>
+            results(8);
+        std::atomic<bool> start{false};
+        std::vector<std::thread> threads;
+        for (size_t i = 0; i < results.size(); ++i) {
+            threads.emplace_back([&, i] {
+                while (!start.load()) {
+                    std::this_thread::yield();
+                }
+                results[i] = singleton.GetProperties(
+                    {.talon_stage = kTalonStageLoadOpen |
+                                    (static_cast<uint32_t>(i) << 2)});
+            });
+        }
+        start.store(true);
+        for (auto& thread : threads) {
+            thread.join();
+        }
+        const auto first = results.front();
+        for (const auto& result : results) {
+            EXPECT_EQ(result.get(), first.get());
+        }
+
+        const PropertiesOptions manifest_options{.talon_stage =
+                                                     kTalonStageManifest};
+        const auto manifest = singleton.GetProperties(manifest_options);
+        EXPECT_NE(manifest.get(), first.get());
+        EXPECT_FALSE(std::get<bool>(manifest->at(PROPERTY_FS_TALON_OPEN_ONLY)));
+        EXPECT_TRUE(std::get<bool>(first->at(PROPERTY_FS_TALON_OPEN_ONLY)));
+
+        // Equivalent masks must share one entry and must not evict the distinct
+        // manifest policy, even when there are more masks than LRU slots.
+        for (uint32_t i = 1; i <= 256; ++i) {
+            EXPECT_EQ(
+                singleton.GetProperties({.talon_stage = 1 | (i << 2)}).get(),
+                first.get());
+        }
+        EXPECT_EQ(
+            singleton.GetProperties({.talon_stage = kTalonStagesAll}).get(),
+            first.get());
+        EXPECT_EQ(singleton.GetProperties(manifest_options).get(),
+                  manifest.get());
+
+        // Updating the base invalidates derived entries without changing the
+        // snapshots already held by readers.
+        const auto base = singleton.GetProperties();
+        singleton.SetArrowReaderConfig(64 * 1024, 8 * 1024 * 1024);
+        const auto updated = singleton.GetProperties(first_options);
+        EXPECT_NE(updated.get(), first.get());
+        EXPECT_EQ(singleton.GetProperties(first_options).get(), updated.get());
+        EXPECT_NE(singleton.GetProperties(), base);
+        EXPECT_NE(singleton.GetProperties(manifest_options).get(),
+                  manifest.get());
+        EXPECT_EQ(std::get<uint32_t>(manifest->at(PROPERTY_FS_TALON_MODE)), 1);
+        EXPECT_EQ(milvus_storage::api::GetValueNoError<int64_t>(
+                      first, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
+                  32 * 1024);
+        EXPECT_EQ(
+            milvus_storage::api::GetValueNoError<int64_t>(
+                updated, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
+            64 * 1024);
+    }
+
+    // With only manifest enabled, all and manifest resolve to the same policy.
+    {
+        StorageConfig input;
+        input.storage_type = "remote";
+        input.talon_mode = 1;
+        input.talon_enabled_stages = kTalonStageManifest;
+        LoonFFIPropertiesSingleton singleton;
+        singleton.Init(ToCStorageConfig(input));
+        const auto manifest =
+            singleton.GetProperties({.talon_stage = kTalonStageManifest});
+        EXPECT_NE(manifest.get(), singleton.GetProperties().get());
+        EXPECT_EQ(
+            singleton.GetProperties({.talon_stage = kTalonStagesAll}).get(),
+            manifest.get());
+        EXPECT_EQ(
+            singleton.GetProperties({.talon_stage = kTalonStageLoadOpen}).get(),
+            singleton.GetProperties().get());
+    }
+
     StorageConfig first;
     first.storage_type = "remote";
     first.talon_mode = 2;
@@ -1180,6 +1443,8 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                  "2");
     loon_properties_free(&ffi_properties);
 }
+
+}  // namespace milvus::storage
 
 TEST_F(StorageTest, InitArrowReaderConfig) {
     auto default_cache_options =

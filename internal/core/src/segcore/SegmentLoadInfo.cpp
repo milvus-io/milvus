@@ -47,8 +47,10 @@ SegmentLoadInfo::GetColumnGroups() const {
     if (column_groups_ != nullptr) {
         return column_groups_;
     }
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
+    auto properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetProperties(
+                {.talon_stage = milvus::storage::kTalonStageManifest});
 
     auto loon_manifest = ::GetLoonManifest(manifest_path, properties);
     column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(

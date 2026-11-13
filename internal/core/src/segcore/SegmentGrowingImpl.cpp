@@ -4168,8 +4168,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto schema = get_schema_snapshot();
     auto primary_field_id =
         schema->get_primary_field_id().value_or(FieldId(-1));
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
+    const auto& storage_properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+    auto properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageManifest});
     auto loon_manifest = GetLoonManifest(manifest_path, properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -4180,6 +4182,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 
     auto arrow_schema =
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageLoadOpen});
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, properties);
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {

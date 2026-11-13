@@ -786,7 +786,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				return nil
 			}).Build()
 			defer validate.UnPatch()
-			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig) ([]string, error) {
+			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig, _ ...uint32) ([]string, error) {
 				require.Same(t, foreignCfg, cfg)
 				return []string{"root/files/l0/delete"}, nil
 			}).Build()
@@ -2239,7 +2239,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 				if tc.deletes {
 					paths = []string{"root/files/delta"}
 				}
-				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig) ([]string, error) {
+				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig, ...uint32) ([]string, error) {
 					manifestChecks++
 					return paths, nil
 				}).Build()

@@ -17,6 +17,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func TestParseTalonEnabledStages(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		mask  uint32
+		valid bool
+	}{
+		{value: "all", mask: ^uint32(0), valid: true},
+		{value: " all ", mask: ^uint32(0), valid: true},
+		{value: "load_open", mask: 1, valid: true},
+		{value: " load_open ", mask: 1, valid: true},
+		{value: "load_open, load_open", mask: 1, valid: true},
+		{value: "manifest", mask: 2, valid: true},
+		{value: " manifest, manifest ", mask: 2, valid: true},
+		{value: "load_open, manifest", mask: 3, valid: true},
+		{value: "manifest,load_open", mask: 3, valid: true},
+		{value: ""},
+		{value: " "},
+		{value: "unknown"},
+		{value: "1"},
+		{value: "LOAD_OPEN"},
+		{value: "all,load_open"},
+		{value: "load_open,all"},
+		{value: "all,all"},
+		{value: "load_open,"},
+		{value: ",load_open"},
+		{value: "load_open,unknown"},
+		{value: "all,manifest"},
+		{value: "manifest,all"},
+		{value: "manifest,"},
+		{value: "manifest,unknown"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			mask, valid := ParseTalonEnabledStages(tc.value)
+			assert.Equal(t, tc.valid, valid)
+			assert.Equal(t, tc.mask, mask)
+		})
+	}
+}
+
 func TestGetCollectionAutoReleaseIdleTTL(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

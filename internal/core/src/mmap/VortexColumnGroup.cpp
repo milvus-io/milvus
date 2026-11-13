@@ -144,6 +144,9 @@ VortexColumnGroup::VortexColumnGroup(
                 fmt::format("failed to open vortex file {}", file.path));
         }
 
+        // The footer source handle ends with Open. The translator below opens
+        // its data handle on the same FS and disables Talon for load_open.
+
         auto cell_metas_result =
             milvus_storage::vortex::BuildVortexGroupCellMetas(
                 state.footer_reader, field_names);
