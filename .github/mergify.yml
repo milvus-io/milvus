@@ -7,162 +7,158 @@
 # GLOBAL CONFIGURATIONS AND ALIASES
 # Define reusable conditions and patterns for better maintainability
 # ==============================================================================
-misc:
-  # Mixed E2E test suites run E2E + Go SDK, but no build/UT pipeline.
-  - mixed_e2e_test_files: &MIXED_E2E_TEST_FILES
-      - files~=^tests/go_client/(?!.*\.md$).+
-      - files~=^tests/(python_client|restful_client_v2)/(?!.*\.md$).+
-      - -files~=^(?!tests/(go_client|python_client|restful_client_v2)/|.*\.md$).+
+shared:
+  misc:
+    # Mixed E2E test suites run E2E + Go SDK, but no build/UT pipeline.
+    - mixed_e2e_test_files: &MIXED_E2E_TEST_FILES
+        - files~=^tests/go_client/(?!.*\.md$).+
+        - files~=^tests/(python_client|restful_client_v2)/(?!.*\.md$).+
+        - -files~=^(?!tests/(go_client|python_client|restful_client_v2)/|.*\.md$).+
 
-  # File pattern matchers
-  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  
-  # Build and test status conditions
-  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
-      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
-      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
-  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
-      - 'status-success=go-sdk'
-      - 'status-success=milvus-sdk-go'
-      - 'status-success=ci-v2/go-sdk'
-  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
-      - 'status-success=cpp-unit-test'
-      - 'status-success=UT for Cpp'
-      - 'status-success=ci-v2/ut-cpp'
-  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
-      - 'status-success=go-unit-test'
-      - 'status-success=UT for Go'
-      - 'status-success=ci-v2/ut-go'
-  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=integration-test'
-      - 'status-success=Integration Test'
-      - 'status-success=ci-v2/integration-test'
-  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
-      - 'status-success=cpu-e2e'
-      - 'status-success=ci-v2/e2e-default'
-  - when_build_success: &WHEN_BUILD_SUCCESS
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/build'
-  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/code-check'
+    # File pattern matchers
+    - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+    - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+    - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+    - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
 
-  # CI-v2 checker conditions (3.0 branch)
-  - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
-      - 'status-success=ci-v2/build-ut-cov'
-  - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
-      - 'status-success=ci-v2/e2e-amd'
-  - when_master_legacy_build_ut_cov_success: &WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
-      and:
-        - or: *WHEN_BUILD_SUCCESS
-        - or: *WHEN_CPP_UNIT_TEST_SUCCESS
-        - or: *WHEN_GO_UNIT_TEST_SUCCESS
-        - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-        - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_go_unit_legacy_build_ut_cov_success: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
-      and:
-        - or: *WHEN_BUILD_SUCCESS
-        - or: *WHEN_GO_UNIT_TEST_SUCCESS
-        - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
-      status-success=ci-v2/build-ut-cov
-  - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
-      status-success=ci-v2/build-ut-cov
-  - when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
-      or:
-        - and:
-            - not:
-                or:
-                  - 'status-success=Build and test AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/build'
-            - or:
-                - 'status-failure=Build and test AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/build'
-        - and:
-            - not:
-                or:
-                  - 'status-success=UT for Go'
-                  - 'status-success=ci-v2/ut-go'
-            - or:
-                - 'status-failure=UT for Go'
-                - 'status-failure=ci-v2/ut-go'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Integration Test'
-                  - 'status-success=ci-v2/integration-test'
-            - or:
-                - 'status-failure=Integration Test'
-                - 'status-failure=ci-v2/integration-test'
-        - and:
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - 'status-success=cpp-unit-test'
-                  - 'status-success=ci-v2/ut-cpp'
-            - or:
-                - 'status-failure=cpp-unit-test'
-                - 'status-failure=ci-v2/ut-cpp'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/code-check'
-            - or:
-                - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/code-check'
-  - when_master_go_unit_legacy_build_ut_cov_failure: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
-      or:
-        - and:
-            - not:
-                or:
-                  - 'status-success=Build and test AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/build'
-            - or:
-                - 'status-failure=Build and test AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/build'
-        - and:
-            - not:
-                or:
-                  - 'status-success=UT for Go'
-                  - 'status-success=ci-v2/ut-go'
-            - or:
-                - 'status-failure=UT for Go'
-                - 'status-failure=ci-v2/ut-go'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/code-check'
-            - or:
-                - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/code-check'
-  - when_master_build_ut_cov_gate_not_success: &WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS
-      -status-success=ci-v2/build-ut-cov
+    # Build and test status conditions
+    - when_build_and_test_status_successs:
+        - 'status-success=Build and test AMD64 Ubuntu 20.04'
+        - 'status-success=Build and test AMD64 Ubuntu 22.04'
+    - when_build_and_test_status_failed:
+        - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
+        - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
+    - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+        - 'status-success=go-sdk'
+        - 'status-success=milvus-sdk-go'
+        - 'status-success=ci-v2/go-sdk'
+    - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
+        - 'status-success=cpp-unit-test'
+        - 'status-success=UT for Cpp'
+        - 'status-success=ci-v2/ut-cpp'
+    - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
+        - 'status-success=go-unit-test'
+        - 'status-success=UT for Go'
+        - 'status-success=ci-v2/ut-go'
+    - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+        - 'status-success=integration-test'
+        - 'status-success=Integration Test'
+        - 'status-success=ci-v2/integration-test'
+    - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+        - 'status-success=cpu-e2e'
+        - 'status-success=ci-v2/e2e-default'
+    - when_build_success: &WHEN_BUILD_SUCCESS
+        - 'status-success=Build and test AMD64 Ubuntu 22.04'
+        - 'status-success=ci-v2/build'
+    - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+        - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+        - 'status-success=ci-v2/code-check'
 
-  # Branch configurations
-  - branch: &BRANCHES
-      - &MASTER_BRANCH base=master
-      - &2X_BRANCH base~=^2(\.\d+){1,2}$
-      - &3X_BRANCH base=3.0
+    # CI-v2 checker conditions (3.0 branch)
+    - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
+        - 'status-success=ci-v2/build-ut-cov'
+    - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
+        - 'status-success=ci-v2/e2e-amd'
+    - when_master_legacy_build_ut_cov_success:
+        and:
+          - or: *WHEN_BUILD_SUCCESS
+          - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+          - or: *WHEN_GO_UNIT_TEST_SUCCESS
+          - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+          - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+    - when_master_go_unit_legacy_build_ut_cov_success:
+        and:
+          - or: *WHEN_BUILD_SUCCESS
+          - or: *WHEN_GO_UNIT_TEST_SUCCESS
+          - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+    - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS status-success=ci-v2/build-ut-cov
+    - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS status-success=ci-v2/build-ut-cov
+    - when_master_legacy_build_ut_cov_failure:
+        or:
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Build and test AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/build'
+              - or:
+                  - 'status-failure=Build and test AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/build'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=UT for Go'
+                    - 'status-success=ci-v2/ut-go'
+              - or:
+                  - 'status-failure=UT for Go'
+                  - 'status-failure=ci-v2/ut-go'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Integration Test'
+                    - 'status-success=ci-v2/integration-test'
+              - or:
+                  - 'status-failure=Integration Test'
+                  - 'status-failure=ci-v2/integration-test'
+          - and:
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - 'status-success=cpp-unit-test'
+                    - 'status-success=ci-v2/ut-cpp'
+              - or:
+                  - 'status-failure=cpp-unit-test'
+                  - 'status-failure=ci-v2/ut-cpp'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/code-check'
+              - or:
+                  - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/code-check'
+    - when_master_go_unit_legacy_build_ut_cov_failure:
+        or:
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Build and test AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/build'
+              - or:
+                  - 'status-failure=Build and test AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/build'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=UT for Go'
+                    - 'status-success=ci-v2/ut-go'
+              - or:
+                  - 'status-failure=UT for Go'
+                  - 'status-failure=ci-v2/ut-go'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/code-check'
+              - or:
+                  - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/code-check'
+    - when_master_build_ut_cov_gate_not_success: &WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS -status-success=ci-v2/build-ut-cov
+
+    # Branch configurations
+    - branch: &BRANCHES
+        - &MASTER_BRANCH base=master
+        - &2X_BRANCH base~=^2(\.\d+){1,2}$
+        - &3X_BRANCH base=3.0
 
 # ==============================================================================
 # PULL REQUEST RULES
 # Organized by functionality for better maintenance and understanding
 # ==============================================================================
 pull_request_rules:
-  
   # ==========================================================================
   # DCO (Developer Certificate of Origin) MANAGEMENT
   # Handles DCO compliance for all contributions
   # ==========================================================================
-  
   - name: Add needs-dco label when DCO check failed
     conditions:
       - or: *BRANCHES
@@ -192,8 +188,7 @@ pull_request_rules:
   # CONTINUOUS INTEGRATION (CI) STATUS MANAGEMENT
   # Rules for managing CI test results and labeling PRs accordingly
   # ==========================================================================
-  
-  - name: Test passed for code changed on master 
+  - name: Test passed for code changed on master
     conditions:
       - *MASTER_BRANCH
       - *WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
@@ -205,7 +200,7 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-          
+
   - name: Test passed for code changed on 2.* branch
     conditions:
       - *2X_BRANCH
@@ -238,8 +233,8 @@ pull_request_rules:
   - name: Test passed for tests changed
     conditions:
       - or:
-        - *MASTER_BRANCH
-        - *2X_BRANCH
+          - *MASTER_BRANCH
+          - *2X_BRANCH
       - -files~=^(?!tests\/python_client).+
       - or: *WHEN_E2E_TEST_SUCCESS
     actions:
@@ -292,8 +287,8 @@ pull_request_rules:
   - name: Test passed for non rust go or c++ code changed
     conditions:
       - or:
-        - *MASTER_BRANCH
-        - *2X_BRANCH
+          - *MASTER_BRANCH
+          - *2X_BRANCH
       - or: *WHEN_E2E_TEST_SUCCESS
       - *no_source_code_files
     actions:
@@ -412,8 +407,8 @@ pull_request_rules:
   - name: Remove ci-passed when E2E test not success for tests changed
     conditions:
       - or:
-        - *MASTER_BRANCH
-        - *2X_BRANCH
+          - *MASTER_BRANCH
+          - *2X_BRANCH
       - -files~=^(?!tests\/python_client).+
       - label!=manual-pass
       - label=ci-passed
@@ -493,23 +488,23 @@ pull_request_rules:
       - *source_code_files
       - or:
         # build-ut-cov is required for every source-code pass path.
-        - *WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS
+          - *WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS
         # Go SDK and E2E are required only for regular source-code changes.
-        - and:
-            - -title~=\[skip e2e\]
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - status-success=go-sdk
-                  - status-success=milvus-sdk-go
-                  - status-success=ci-v2/go-sdk
-        - and:
-            - -title~=\[skip e2e\]
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - status-success=cpu-e2e
-                  - status-success=ci-v2/e2e-default
+          - and:
+              - -title~=\[skip e2e\]
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - status-success=go-sdk
+                    - status-success=milvus-sdk-go
+                    - status-success=ci-v2/go-sdk
+          - and:
+              - -title~=\[skip e2e\]
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - status-success=cpu-e2e
+                    - status-success=ci-v2/e2e-default
     actions:
       label:
         remove:
@@ -523,42 +518,42 @@ pull_request_rules:
       - *source_code_files
       - or:
         # Build, Go UT, and code check are required for every source-code pass path.
-        - not:
-            or:
-              - status-success=Build and test AMD64 Ubuntu 22.04
-              - status-success=ci-v2/build
-        - not:
-            or:
-              - status-success=go-unit-test
-              - status-success=UT for Go
-              - status-success=ci-v2/ut-go
-        - not:
-            or:
-              - status-success=Code Checker AMD64 Ubuntu 22.04
-              - status-success=ci-v2/code-check
+          - not:
+              or:
+                - status-success=Build and test AMD64 Ubuntu 22.04
+                - status-success=ci-v2/build
+          - not:
+              or:
+                - status-success=go-unit-test
+                - status-success=UT for Go
+                - status-success=ci-v2/ut-go
+          - not:
+              or:
+                - status-success=Code Checker AMD64 Ubuntu 22.04
+                - status-success=ci-v2/code-check
         # Cpp UT and integration are not required for Go-unit-test-only changes.
-        - and:
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - status-success=cpp-unit-test
-                  - status-success=UT for Cpp
-                  - status-success=ci-v2/ut-cpp
-        - and:
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - status-success=integration-test
-                  - status-success=Integration Test
-                  - status-success=ci-v2/integration-test
+          - and:
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - status-success=cpp-unit-test
+                    - status-success=UT for Cpp
+                    - status-success=ci-v2/ut-cpp
+          - and:
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - status-success=integration-test
+                    - status-success=Integration Test
+                    - status-success=ci-v2/integration-test
         # E2E is required only for regular source-code changes.
-        - and:
-            - -title~=\[skip e2e\]
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - status-success=cpu-e2e
-                  - status-success=ci-v2/e2e-default
+          - and:
+              - -title~=\[skip e2e\]
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - status-success=cpu-e2e
+                    - status-success=ci-v2/e2e-default
     actions:
       label:
         remove:
@@ -577,26 +572,26 @@ pull_request_rules:
           and: *MIXED_E2E_TEST_FILES
       - or:
         # build-ut-cov is required for every source-code pass path.
-        - -status-success=ci-v2/build-ut-cov
+          - -status-success=ci-v2/build-ut-cov
         # Match the same UT-only boundary as the dedicated 3.0 pass rule.
-        - and:
-            - -title~=\[skip e2e\]
-            - not:
-                and:
-                  - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
-                  - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
-            - not:
-                or:
-                  - status-success=go-sdk
-                  - status-success=milvus-sdk-go
-                  - status-success=ci-v2/go-sdk
-        - and:
-            - -title~=\[skip e2e\]
-            - not:
-                and:
-                  - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
-                  - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
-            - -status-success=ci-v2/e2e-amd
+          - and:
+              - -title~=\[skip e2e\]
+              - not:
+                  and:
+                    - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+                    - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
+              - not:
+                  or:
+                    - status-success=go-sdk
+                    - status-success=milvus-sdk-go
+                    - status-success=ci-v2/go-sdk
+          - and:
+              - -title~=\[skip e2e\]
+              - not:
+                  and:
+                    - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+                    - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
+              - -status-success=ci-v2/e2e-amd
     actions:
       label:
         remove:
@@ -614,14 +609,14 @@ pull_request_rules:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - or:
-        - and:
-          - label=kind/enhancement
-          - or:
-            - label=size/L
-            - label=size/XL
-            - label=size/XXL
-        - label=kind/bug
-        - label=kind/feature
+          - and:
+              - label=kind/enhancement
+              - or:
+                  - label=size/L
+                  - label=size/XL
+                  - label=size/XXL
+          - label=kind/bug
+          - label=kind/feature
       - -label=kind/doc
       - -label=kind/test
       - -title~=\[automated\]
@@ -648,8 +643,8 @@ pull_request_rules:
   - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
     conditions:
       - or:
-        - *2X_BRANCH
-        - *3X_BRANCH
+          - *2X_BRANCH
+          - *3X_BRANCH
       - and:
           - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -666,8 +661,8 @@ pull_request_rules:
   - name: Dismiss block label if related pr be added into PR
     conditions:
       - or:
-        - *2X_BRANCH
-        - *3X_BRANCH
+          - *2X_BRANCH
+          - *3X_BRANCH
       - or:
           - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -745,8 +740,8 @@ pull_request_rules:
     conditions:
       - or: *BRANCHES
       - or:
-        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
-        - body=^$
+          - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
+          - body=^$
     actions:
       label:
         add:
@@ -936,4 +931,4 @@ pull_request_rules:
           - lgtm
           - approved
 
-        
+
