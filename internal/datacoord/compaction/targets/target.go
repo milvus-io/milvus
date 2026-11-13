@@ -49,6 +49,7 @@ type CompactionTargetMeta struct {
 	// record before making another decision about this Target.
 	unconfirmedStops   map[int64]struct{}
 	unconfirmedCreates map[int64]*datapb.CompactionTarget
+	unconfirmedDeletes map[int64]struct{}
 	writes             *lock.KeyLock[int64]
 	admission          *lock.KeyLock[int64]
 	collectionWrites   *lock.KeyLock[int64]
@@ -64,6 +65,7 @@ func NewCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCat
 		targets:            make(map[int64]*datapb.CompactionTarget, len(records)),
 		unconfirmedStops:   make(map[int64]struct{}),
 		unconfirmedCreates: make(map[int64]*datapb.CompactionTarget),
+		unconfirmedDeletes: make(map[int64]struct{}),
 		writes:             lock.NewKeyLock[int64](),
 		admission:          lock.NewKeyLock[int64](),
 		collectionWrites:   lock.NewKeyLock[int64](),
@@ -158,11 +160,14 @@ func (m *CompactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 // ambiguous writes before taking it so no item carries an obsolete outcome.
 func (m *CompactionTargetMeta) List(ctx context.Context) (map[int64]*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	ids := make([]int64, 0, len(m.unconfirmedStops)+len(m.unconfirmedCreates))
+	ids := make([]int64, 0, len(m.unconfirmedStops)+len(m.unconfirmedCreates)+len(m.unconfirmedDeletes))
 	for id := range m.unconfirmedStops {
 		ids = append(ids, id)
 	}
 	for id := range m.unconfirmedCreates {
+		ids = append(ids, id)
+	}
+	for id := range m.unconfirmedDeletes {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
@@ -200,6 +205,7 @@ func (m *CompactionTargetMeta) store(record *datapb.CompactionTarget, id int64) 
 	}
 	delete(m.unconfirmedStops, id)
 	delete(m.unconfirmedCreates, id)
+	delete(m.unconfirmedDeletes, id)
 }
 
 func (m *CompactionTargetMeta) Create(ctx context.Context, candidate *datapb.CompactionTarget, scope *metastore.CompactionTargetCollectionVersion, validate func() error) (*datapb.CompactionTarget, error) {
@@ -254,8 +260,9 @@ func sameCreation(stored, candidate *datapb.CompactionTarget) bool {
 // Read refreshes a Target whose previous write returned an ambiguous result.
 func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	_, refresh := m.unconfirmedStops[id]
-	if !refresh && m.unconfirmedCreates[id] == nil {
+	_, stopping := m.unconfirmedStops[id]
+	_, deleting := m.unconfirmedDeletes[id]
+	if !stopping && !deleting && m.unconfirmedCreates[id] == nil {
 		record := proto.CloneOf(m.targets[id])
 		m.mu.RUnlock()
 		return record, nil
@@ -268,16 +275,25 @@ func (m *CompactionTargetMeta) Read(ctx context.Context, id int64) (*datapb.Comp
 
 func (m *CompactionTargetMeta) readLocked(ctx context.Context, id int64) (*datapb.CompactionTarget, error) {
 	m.mu.RLock()
-	_, refresh := m.unconfirmedStops[id]
+	_, stopping := m.unconfirmedStops[id]
+	_, deleting := m.unconfirmedDeletes[id]
 	candidate := m.unconfirmedCreates[id]
 	record := proto.CloneOf(m.targets[id])
 	m.mu.RUnlock()
-	if !refresh && candidate == nil {
+	if !stopping && !deleting && candidate == nil {
 		return record, nil
 	}
 	stored, err := m.catalog.LoadCompactionTarget(ctx, id)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read compaction target %d after ambiguous write", id)
+	}
+	if deleting {
+		// A surviving value cannot rule out a delayed delete. Only a
+		// confirmed absence stops read-through for this ID.
+		if stored == nil {
+			m.store(nil, id)
+		}
+		return stored, nil
 	}
 	if candidate != nil {
 		if stored == nil {

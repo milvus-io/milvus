@@ -1104,6 +1104,10 @@ func (s *Server) startServerLoop() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.startCompaction()
 	}
+	if s.compactionTargetMeta != nil {
+		s.serverLoopWg.Add(1)
+		go s.collectExpiredCompactionTargets(s.serverLoopCtx)
+	}
 
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
@@ -1132,6 +1136,20 @@ func (s *Server) startServerLoop() {
 	}
 
 	s.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
+}
+
+func (s *Server) collectExpiredCompactionTargets(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	ticker := time.NewTicker(Params.DataCoordCfg.CompactionGCIntervalInSeconds.GetAsDuration(time.Second))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.compactionTargetMeta.CollectExpired(ctx, time.Now())
+		}
+	}
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {

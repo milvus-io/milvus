@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func enableTestCompactionTargets(t *testing.T) {
@@ -163,6 +165,110 @@ func TestDropCollectionCompactionTargetsRetriesPartialClosure(t *testing.T) {
 	afterDrop, err := s.DescribeCompactionTarget(ctx, req)
 	require.NoError(t, merr.CheckRPCCall(afterDrop, err))
 	require.True(t, proto.Equal(closed.GetTarget(), afterDrop.GetTarget()))
+}
+
+func TestCompactionTargetRecoveryClosesOnlyConfirmedDeletedScopes(t *testing.T) {
+	enableTestCompactionTargets(t)
+	active := &datapb.CompactionTarget{
+		TargetID: 1, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+		Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: []int64{11}}, TotalRows: proto.Int64(50),
+		ExpectedTS: 10, ActivatedAtTS: 10,
+	}
+	missing := proto.CloneOf(active)
+	missing.TargetID, missing.CollectionID = 2, 22
+	restoring := proto.CloneOf(active)
+	restoring.TargetID, restoring.CollectionID = 3, 33
+	history := proto.CloneOf(missing)
+	history.TargetID = 4
+	history.State = datapb.TargetState_TARGET_STATE_INACTIVE
+	history.StopReason, history.InactivatedAtTS = targets.StopOperatorDropped, 20
+	catalog, durable := targets.NewCompactionTargetTestCatalog(t, active, missing, restoring, history)
+	ctx := t.Context()
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "false"))
+	disabled := CreateServer(ctx, nil)
+	require.NoError(t, disabled.DropCollectionCompactionTargets(ctx, missing.GetCollectionID()))
+	require.True(t, proto.Equal(missing, durable[missing.GetTargetID()]))
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true"))
+	restarted, _ := newTargetRPCServer(t, catalog, nil)
+	restarted.UpdateStateCode(commonpb.StateCode_Initializing)
+	restarted.SetCollectionDroppedChecker(func(_ context.Context, id int64) (bool, error) {
+		return id == missing.GetCollectionID(), nil
+	})
+	require.NoError(t, restarted.recoverCompactionTargetScopes(ctx))
+	require.True(t, proto.Equal(active, durable[active.GetTargetID()]))
+	require.True(t, proto.Equal(restoring, durable[restoring.GetTargetID()]))
+	require.True(t, proto.Equal(history, durable[history.GetTargetID()]))
+
+	restarted.UpdateStateCode(commonpb.StateCode_Healthy)
+	req := &datapb.DescribeCompactionTargetRequest{
+		TargetId:   missing.GetTargetID(),
+		Collection: &datapb.CompactionTargetResource{CollectionId: missing.GetCollectionID(), Deleted: true},
+	}
+	resp, err := restarted.DescribeCompactionTarget(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, targets.StopScopeDropped, resp.GetTarget().GetStopReason())
+	require.Greater(t, resp.GetTarget().GetStoppedAt(), history.GetInactivatedAtTS())
+	require.Equal(t, []int64{11}, resp.GetTarget().GetRewrite().GetRootSegmentIds())
+	require.Equal(t, int64(50), resp.GetTarget().GetTotalRows())
+}
+
+func TestCompactionTargetGCConfirmsDeletionAndKeepsQueryableHistory(t *testing.T) {
+	enableTestCompactionTargets(t)
+	now := time.Date(2026, time.November, 13, 0, 0, 0, 0, time.UTC)
+	const retention = "dataCoord.compaction.target.retentionSeconds"
+	require.NoError(t, Params.Save(retention, "86400"))
+	t.Cleanup(func() { Params.Reset(retention) })
+
+	newTerminal := func(id int64, stoppedAt time.Time) *datapb.CompactionTarget {
+		return &datapb.CompactionTarget{
+			TargetID: id, CollectionID: 1, Intent: datapb.TargetIntent_INTENT_REWRITE,
+			Rewrite: &datapb.CompactionTargetRewrite{}, State: datapb.TargetState_TARGET_STATE_INACTIVE,
+			InactivatedAtTS: tsoutil.ComposeTSByTime(stoppedAt), StopReason: targets.StopOperatorDropped,
+		}
+	}
+	retained := newTerminal(1, now.Add(-48*time.Hour))
+	removed := newTerminal(2, now.Add(-48*time.Hour))
+	atLimit := newTerminal(3, now.Add(-24*time.Hour))
+	unknown := newTerminal(4, now.Add(-48*time.Hour))
+	unknown.Intent = datapb.TargetIntent(999)
+	missingStop := newTerminal(5, now.Add(-48*time.Hour))
+	missingStop.InactivatedAtTS = 0
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).
+		Return([]*datapb.CompactionTarget{retained, removed, atLimit, unknown, missingStop}, nil).Once()
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, retained).Return(context.DeadlineExceeded).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, retained.GetTargetID()).Return(retained, nil)
+	catalog.EXPECT().DropCompactionTarget(mock.Anything, removed).Return(context.DeadlineExceeded).Once()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
+
+	s, resource := newTargetRPCServer(t, catalog, nil)
+	s.compactionTargetMeta.CollectExpired(t.Context(), now)
+	req := &datapb.DescribeCompactionTargetRequest{TargetId: retained.GetTargetID(), Collection: resource}
+	resp, err := s.DescribeCompactionTarget(t.Context(), req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, retained.GetInactivatedAtTS(), resp.GetTarget().GetStoppedAt())
+	drop, err := s.DropCompactionTarget(t.Context(), &datapb.DropCompactionTargetRequest{TargetId: retained.GetTargetID(), Collection: resource})
+	require.NoError(t, merr.CheckRPCCall(drop, err))
+
+	req.TargetId = removed.GetTargetID()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, merr.ErrIoFailed).Once()
+	resp, err = s.DescribeCompactionTarget(t.Context(), req)
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrIoFailed)
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, removed.GetTargetID()).Return(nil, nil).Once()
+	resp, err = s.DescribeCompactionTarget(t.Context(), req)
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrCompactionTargetNotFound)
+
+	require.NoError(t, Params.Save(retention, "604800"))
+	s.compactionTargetMeta.CollectExpired(t.Context(), now)
+	listed, err := s.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{IncludeSystem: true})
+	require.NoError(t, merr.CheckRPCCall(listed, err))
+	require.Len(t, listed.GetTargets(), 4)
+	require.Equal(t, []int64{5, 4, 3, 1}, []int64{
+		listed.GetTargets()[0].GetTargetId(), listed.GetTargets()[1].GetTargetId(),
+		listed.GetTargets()[2].GetTargetId(), listed.GetTargets()[3].GetTargetId(),
+	})
 }
 
 func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {

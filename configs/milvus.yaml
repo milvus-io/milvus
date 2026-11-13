@@ -916,6 +916,7 @@ dataCoord:
     enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
     target:
       maxEventsPerReconcile: 100 # Maximum number of compaction events emitted by one target reconciliation.
+      retentionSeconds: 604800 # Retention in seconds for inactive compaction targets.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
