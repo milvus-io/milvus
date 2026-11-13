@@ -8761,6 +8761,8 @@ type streamingConfig struct {
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
+	TxnTombstoneMaxCount       ParamItem `refreshable:"true"`
+	TxnTombstoneMaxLifetime    ParamItem `refreshable:"true"`
 
 	// write ahead buffer
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
@@ -9097,6 +9099,22 @@ requests that carry no key are accepted at any value.`,
 		Export:       true,
 	}
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
+	p.TxnTombstoneMaxCount = ParamItem{
+		Key:          "streaming.txn.tombstoneMaxCount",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		Doc:          "Maximum cached successful transaction results per WAL; zero disables the cache.",
+		Export:       true,
+	}
+	p.TxnTombstoneMaxCount.Init(base.mgr)
+	p.TxnTombstoneMaxLifetime = ParamItem{
+		Key:          "streaming.txn.tombstoneMaxLifetime",
+		Version:      "3.0.0",
+		DefaultValue: "1m",
+		Doc:          "Maximum transaction result age relative to WAL TimeTick; capacity eviction may shorten this window.",
+		Export:       true,
+	}
+	p.TxnTombstoneMaxLifetime.Init(base.mgr)
 
 	p.WALWriteAheadBufferCapacity = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.capacity",

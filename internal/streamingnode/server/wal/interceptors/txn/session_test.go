@@ -131,11 +131,11 @@ func TestSession(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
-	// Test Commit Expired
+	// A prepared Commit cannot become retryable merely because its TTL passed.
 	err = session.RequestCommitAndWait(ctx, expiredTs, 0)
 	assert.Error(t, err)
 	serr = status.AsStreamingError(err)
-	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, serr.Code)
 
 	// Test Rollback
 	session, _ = m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Millisecond))
