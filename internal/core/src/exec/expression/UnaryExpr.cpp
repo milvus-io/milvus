@@ -725,107 +725,106 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // cache the result to suit the framework.
-    auto batch_res = ProcessIndexChunksWithRowLevel<ReaderType>(
-        [this, &val, reverse](
-            const index::IScalarPredicateReader<ReaderType>* index_ptr) {
-            boost::container::vector<ReaderType> elems;
-            elems.reserve(val.array_size());
-            for (auto const& element : val.array()) {
-                auto e = GetValueFromProto<ReaderType>(element);
-                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                    elems.push_back(std::move(e));
-                }
+    auto batch_res = ProcessIndexChunksWithRowLevel<
+        ReaderType>([this, &val, reverse](
+                        const index::IScalarPredicateReader<ReaderType>*
+                            index_ptr) {
+        boost::container::vector<ReaderType> elems;
+        elems.reserve(val.array_size());
+        for (auto const& element : val.array()) {
+            auto e = GetValueFromProto<ReaderType>(element);
+            if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
+                elems.push_back(std::move(e));
             }
+        }
 
-            // Convert element hits to candidate rows, then keep is_same_array as exact
-            // verification. TODO: migrate the callback/set path to bitmap query interfaces
-            // and the plan-selected projection constrained by index/contracts/README.md.
-            std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
-            if (selected_element_level_result_) {
-                struct_element_offsets = GetStructElementOffsets(field_id_);
-                AssertInfo(struct_element_offsets != nullptr,
-                           "array offsets are required for nested ARRAY index");
-            }
+        // Convert element hits to candidate rows, then keep is_same_array as exact
+        // verification. TODO: migrate the callback/set path to bitmap query interfaces
+        // and the plan-selected projection constrained by index/contracts/README.md.
+        std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
+        if (selected_element_level_result_) {
+            struct_element_offsets = GetStructElementOffsets(field_id_);
+            AssertInfo(struct_element_offsets != nullptr,
+                       "array offsets are required for nested ARRAY index");
+        }
 
-            auto to_row_offset =
-                [&struct_element_offsets](size_t offset) -> size_t {
-                if (struct_element_offsets == nullptr) {
-                    return offset;
-                }
-                auto [row_id, _] = struct_element_offsets->ElementIDToRowID(
-                    static_cast<int32_t>(offset));
-                return static_cast<size_t>(row_id);
-            };
+        auto to_row_offset =
+            [&struct_element_offsets](size_t offset) -> size_t {
+            if (struct_element_offsets == nullptr) {
+                return offset;
+            }
+            auto [row_id, _] = struct_element_offsets->ElementIDToRowID(
+                static_cast<int32_t>(offset));
+            return static_cast<size_t>(row_id);
+        };
 
-            TargetBitmap candidate_rows(active_count_, true);
-            for (size_t idx = 0; idx < elems.size(); idx++) {
-                auto element_hits = index_ptr->In(1, &elems[idx]);
-                TargetBitmap rows(active_count_, false);
-                for (auto hit = element_hits.find_first(); hit.has_value();
-                     hit = element_hits.find_next(*hit)) {
-                    const auto row_offset = to_row_offset(*hit);
-                    if (row_offset < static_cast<size_t>(active_count_)) {
-                        rows[row_offset] = true;
-                    }
-                }
-                candidate_rows &= rows;
-                if (candidate_rows.count() * 100 <
-                    static_cast<size_t>(active_count_)) {
-                    break;
+        TargetBitmap candidate_rows(active_count_, true);
+        for (size_t idx = 0; idx < elems.size(); idx++) {
+            auto element_hits = index_ptr->In(1, &elems[idx]);
+            TargetBitmap rows(active_count_, false);
+            for (auto hit = element_hits.find_first(); hit.has_value();
+                 hit = element_hits.find_next(*hit)) {
+                const auto row_offset = to_row_offset(*hit);
+                if (row_offset < static_cast<size_t>(active_count_)) {
+                    rows[row_offset] = true;
                 }
             }
-            TargetBitmap res(active_count_, reverse);
-            // The cached post-filter runs once for the complete candidate set.
-            if (candidate_rows.count() == 0) {
-                return res;
+            candidate_rows &= rows;
+            if (candidate_rows.count() * 100 <
+                static_cast<size_t>(active_count_)) {
+                break;
             }
-            if (segment_->is_chunked()) {
-                // Candidate order is immaterial to the result bitmap. Visiting
-                // rows in order lets Raw Take reuse one pin per touched Cell.
-                std::vector<int64_t> offsets;
-                offsets.reserve(candidate_rows.count());
-                for (auto row = candidate_rows.find_first(); row.has_value();
-                     row = candidate_rows.find_next(*row)) {
-                    offsets.push_back(*row);
-                }
-                auto resources = CaptureDataScanResources();
-                const auto& column = resources.first;
-                AssertInfo(column != nullptr,
-                           "ARRAY equality requires a data column");
-                auto take =
-                    column->Take(op_ctx_,
-                                 ChunkedColumnInterface::TakeOptions{
-                                     ChunkedColumnInterface::OffsetView::From(
-                                         offsets.data(), offsets.size()),
-                                     DataTargetType<milvus::ArrayView>(),
-                                     nullptr});
-                AssertInfo(take != nullptr && take->Size() == offsets.size(),
-                           "ARRAY equality requires one value per candidate");
-                const auto items = take->template Access<milvus::ArrayView>();
-                for (int64_t i = 0; i < items.Size(); ++i) {
-                    const auto item = items[i];
-                    // Consume the borrowed view before Take can switch pins;
-                    // GetOwn() would unnecessarily copy the array payloads.
-                    res[offsets[i]] =
-                        item.is_valid &&
-                        (item.value->is_same_array(val) ^ reverse);
-                }
-            } else {
-                auto size_per_chunk = segment_->size_per_chunk();
-                for (auto row = candidate_rows.find_first(); row.has_value();
-                     row = candidate_rows.find_next(*row)) {
-                    const auto candidate = *row;
-                    auto chunk_idx = candidate / size_per_chunk;
-                    auto chunk_offset = candidate % size_per_chunk;
-                    auto pw =
-                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
-                    const auto& chunk = pw.get();
-                    res[candidate] =
-                        chunk.data()[chunk_offset].is_same_array(val) ^ reverse;
-                }
-            }
+        }
+        TargetBitmap res(active_count_, reverse);
+        // The cached post-filter runs once for the complete candidate set.
+        if (candidate_rows.count() == 0) {
             return res;
-        });
+        }
+        if (segment_->is_chunked()) {
+            // Candidate order is immaterial to the result bitmap. Visiting
+            // rows in order lets Raw Take reuse one pin per touched Cell.
+            std::vector<int64_t> offsets;
+            offsets.reserve(candidate_rows.count());
+            for (auto row = candidate_rows.find_first(); row.has_value();
+                 row = candidate_rows.find_next(*row)) {
+                offsets.push_back(*row);
+            }
+            auto resources = CaptureDataScanResources();
+            const auto& column = resources.first;
+            AssertInfo(column != nullptr,
+                       "ARRAY equality requires a data column");
+            auto take =
+                column->Take(op_ctx_,
+                             ChunkedColumnInterface::TakeOptions{
+                                 ChunkedColumnInterface::OffsetView::From(
+                                     offsets.data(), offsets.size()),
+                                 DataTargetType<milvus::ArrayView>(),
+                                 nullptr});
+            AssertInfo(take != nullptr && take->Size() == offsets.size(),
+                       "ARRAY equality requires one value per candidate");
+            const auto items = take->template Access<milvus::ArrayView>();
+            for (int64_t i = 0; i < items.Size(); ++i) {
+                const auto item = items[i];
+                // Consume the borrowed view before Take can switch pins;
+                // GetOwn() would unnecessarily copy the array payloads.
+                res[offsets[i]] =
+                    item.is_valid && (item.value->is_same_array(val) ^ reverse);
+            }
+        } else {
+            auto size_per_chunk = segment_->size_per_chunk();
+            for (auto row = candidate_rows.find_first(); row.has_value();
+                 row = candidate_rows.find_next(*row)) {
+                const auto candidate = *row;
+                auto chunk_idx = candidate / size_per_chunk;
+                auto chunk_offset = candidate % size_per_chunk;
+                auto pw = GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
+                const auto& chunk = pw.get();
+                res[candidate] =
+                    chunk.data()[chunk_offset].is_same_array(val) ^ reverse;
+            }
+        }
+        return res;
+    });
     if (reverse) {
         auto column = std::dynamic_pointer_cast<ColumnVector>(batch_res);
         AssertInfo(column != nullptr && column->IsBitmap(),
