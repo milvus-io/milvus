@@ -74,6 +74,15 @@ func TestStorageStandingPlansLegacyL2WithStorageEligibility(t *testing.T) {
 	version := storageTestRecord(t, targetMeta, datapb.TargetIntent_INTENT_STORAGE_VERSION)
 	require.True(t, version.GetEnabled())
 	require.Equal(t, "3", version.GetProperties()["storage_version"])
+
+	setStorageTargetParam(t, Params.DataNodeCfg.StorageFormat.Key, "unknown-format")
+	events, err = reconciler.Reconcile(ctx)
+	require.NoError(t, err)
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
+	version = storageTestRecord(t, targetMeta, datapb.TargetIntent_INTENT_STORAGE_VERSION)
+	remaining, err := ObserveStorage(ctx, fixture.Meta, version)
+	require.NoError(t, err)
+	require.Equal(t, segment.GetNumOfRows(), remaining)
 }
 
 func TestStorageStandingFormatObservesPublishedManifestRevision(t *testing.T) {
@@ -104,7 +113,7 @@ func TestStorageStandingFormatObservesPublishedManifestRevision(t *testing.T) {
 
 	events, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
-	require.Empty(t, events[policy.TriggerTypeSingle])
+	require.Empty(t, plannedTaskDescriptors(t, events[policy.TriggerTypeSingle]))
 	format := storageTestRecord(t, targetMeta, datapb.TargetIntent_INTENT_STORAGE_FORMAT)
 	require.True(t, format.GetEnabled())
 	require.Equal(t, "parquet", format.GetProperties()["storage_format"])
