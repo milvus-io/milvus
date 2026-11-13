@@ -49,7 +49,7 @@ func validateCompactionTargetReplication(ctx context.Context) error {
 }
 
 func (s *Server) compactionTargetsReady() error {
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() || !Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+	if !s.targetCompactionEnabled {
 		return merr.WrapErrOperationNotSupportedMsg("target-based compaction is disabled")
 	}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {

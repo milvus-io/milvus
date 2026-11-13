@@ -136,6 +136,7 @@ type Server struct {
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	collectionDropped                   func(context.Context, int64) (bool, error)
 	checkCompactionTargetReplication    func(context.Context) error
+	targetCompactionEnabled             bool
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -286,6 +287,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		metricsRequest:                   metricsinfo.NewMetricsRequest(),
 		pkindexService:                   pkindexservice.New(),
 		checkCompactionTargetReplication: validateCompactionTargetReplication,
+		targetCompactionEnabled:          Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 
 	for _, opt := range opts {
@@ -789,7 +791,7 @@ type domainMetas struct {
 }
 
 // loadDomainMetas returns a DomainMetaLoader that builds every domain meta in parallel into out and returns the index catalog and the compaction protection.
-func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas) meta.DomainMetaLoader {
+func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas, targetCompactionEnabled bool) meta.DomainMetaLoader {
 	return func(ctx context.Context, collectionIDs []int64) (meta.SegmentIndexCatalog, meta.CompactionProtection, error) {
 		g, _ := errgroup.WithContext(ctx)
 
@@ -817,7 +819,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 			return err
 		})
 
-		if Params.DataCoordCfg.EnableCompaction.GetAsBool() && Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		if targetCompactionEnabled {
 			g.Go(func() error {
 				var err error
 				out.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
@@ -887,7 +889,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			err error
 			dm  domainMetas
 		)
-		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
+		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm, s.targetCompactionEnabled))
 		recoveredDomainMetas = dm
 		if err == nil {
 			recoveredMeta.PreparationSchema = coordinatorPreparationSchema
@@ -1084,7 +1086,7 @@ func (s *Server) startCompaction() {
 		s.compactionInspector.Start()
 	}
 
-	if s.compactionTrigger != nil {
+	if !s.targetCompactionEnabled && s.compactionTrigger != nil {
 		s.compactionTrigger.Start()
 	}
 

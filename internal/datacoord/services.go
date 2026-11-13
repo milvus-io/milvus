@@ -864,14 +864,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		_, err := s.compactionTrigger.TriggerCompaction(ctx,
-			compaction.NewCompactionSignal().
-				WithWaitResult(false).
-				WithCollectionID(req.GetCollectionID()).
-				WithPartitionID(req.GetPartitionID()).
-				WithChannel(req.GetChannel()))
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to trigger single compaction")
+		if !s.targetCompactionEnabled {
+			_, err := s.compactionTrigger.TriggerCompaction(ctx,
+				compaction.NewCompactionSignal().
+					WithWaitResult(false).
+					WithCollectionID(req.GetCollectionID()).
+					WithPartitionID(req.GetPartitionID()).
+					WithChannel(req.GetChannel()))
+			if err != nil {
+				mlog.Warn(ctx, "failed to trigger single compaction", mlog.Err(err))
+			}
 		}
 	}
 
@@ -1484,7 +1486,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
+	if s.targetCompactionEnabled &&
 		(req.GetTargetSize() != 0 || (!req.GetMajorCompaction() && !req.GetL0Compaction())) {
 		resp.Status = merr.Status(merr.WrapErrOperationNotSupportedMsg("use CreateCompactionTarget for REWRITE or OPTIMIZE"))
 		return resp, nil

@@ -62,7 +62,9 @@ func newTargetRPCServer(t *testing.T, catalog *catalogmocks.DataCoordCatalog, al
 		Schema: &schemapb.CollectionSchema{Name: "records"},
 	}
 	segmentMeta.AddCollection(collection)
-	s := &Server{allocator: alloc, meta: segmentMeta}
+	s := CreateServer(t.Context(), nil)
+	s.allocator = alloc
+	s.meta = segmentMeta
 	s.compactionTargetMeta = targetMeta
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	return s, &datapb.CompactionTargetResource{
@@ -77,6 +79,26 @@ func rewriteRPCRequest(resource *datapb.CompactionTargetResource, roots ...int64
 			Rewrite: &datapb.CompactionTargetRewrite{RootSegmentIds: roots},
 		},
 	}
+}
+
+func TestCompactionTargetModeIsFixedAtStartup(t *testing.T) {
+	enableTestCompactionTargets(t)
+	catalog, _ := targets.NewCompactionTargetTestCatalog(t)
+	enabled, _ := newTargetRPCServer(t, catalog, nil)
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "false"))
+	disabled := CreateServer(t.Context(), nil)
+	disabled.UpdateStateCode(commonpb.StateCode_Healthy)
+	enabled.UpdateStateCode(commonpb.StateCode_Initializing)
+	response, err := enabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrServiceNotReady)
+	enabled.UpdateStateCode(commonpb.StateCode_Healthy)
+	response, err = enabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.NoError(t, merr.CheckRPCCall(response, err))
+
+	require.NoError(t, Params.Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true"))
+	response, err = disabled.ListCompactionTargets(t.Context(), &datapb.ListCompactionTargetsRequest{})
+	require.ErrorIs(t, merr.CheckRPCCall(response, err), merr.ErrOperationNotSupported)
 }
 
 func TestCreateRewriteCompactionTargetPersistsCompleteMatch(t *testing.T) {

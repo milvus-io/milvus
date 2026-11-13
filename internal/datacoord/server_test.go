@@ -2228,7 +2228,7 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("target mode directs legacy rewrite and sizing callers to target API", func(t *testing.T) {
 		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
-		server := &Server{}
+		server := CreateServer(t.Context(), nil)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		for _, req := range []*milvuspb.ManualCompactionRequest{
 			{CollectionID: 1},
