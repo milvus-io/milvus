@@ -29,8 +29,8 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     add_definitions(-DWITHOUT_GO_LOGGING)
 endif()
 
-if ( MILVUS_GPU_VERSION )
-    add_definitions(-DMILVUS_GPU_VERSION)
+if ( WITH_GPU AND NOT INDEX_ENGINE STREQUAL "cardinal" )
+    add_definitions(-DMILVUS_WITH_CUVS)
 endif ()
 
 if ( USE_DYNAMIC_SIMD )
