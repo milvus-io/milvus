@@ -151,7 +151,7 @@ class RowContainer {
                       "rows container for now");
         } else {
             using T = typename TypeTraits<Type>::NativeType;
-            T raw_value = column->ValueAt<T>(index);
+            const T& raw_value = column->ValueAtRef<T>(index);
             bool equal = false;
             if constexpr (std::is_same_v<T, std::string>) {
                 equal = (raw_value == *(strAt(row, offset)));
