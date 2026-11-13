@@ -159,7 +159,7 @@ func (reconciler *CompactionTargetReconciler) selectable(
 		}
 		collections[id] = facts
 	}
-	return !facts.blocked && policy.IsSharedCompactionSelectable(reconciler.meta, segment)
+	return !facts.blocked && segment.GetNumOfRows() >= 0 && policy.IsSharedCompactionSelectable(reconciler.meta, segment)
 }
 
 func targetViews(segments []*meta.SegmentInfo, collections map[int64]collectionPlanningFacts, sorting bool) []view.TargetView {

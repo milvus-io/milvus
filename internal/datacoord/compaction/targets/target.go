@@ -56,6 +56,7 @@ type CompactionTargetMeta struct {
 	tryLockScope       func(context.Context, int64) (func(), error)
 
 	standingMu            sync.Mutex
+	sortTargetID          int64
 	pendingSort           *datapb.CompactionTarget
 	unconfirmedSortUpdate bool
 }

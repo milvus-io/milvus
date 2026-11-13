@@ -36,7 +36,12 @@ func IsStandingSort(record *datapb.CompactionTarget) bool {
 		record.GetActivatedAtTS() != 0 && record.GetConditionRevision() != 0
 }
 
+// Called with standingMu held. The first lookup discovers the durable ID
+// after startup, and later notifications use the same record by ID.
 func (m *CompactionTargetMeta) sortRecord() (*datapb.CompactionTarget, error) {
+	if m.sortTargetID != 0 {
+		return m.GetCompactionTarget(m.sortTargetID), nil
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var sort *datapb.CompactionTarget
@@ -96,6 +101,7 @@ func (m *CompactionTargetMeta) SyncSort(ctx context.Context, alloc allocator.All
 		}
 	}
 	m.pendingSort = nil
+	m.sortTargetID = current.GetTargetID()
 	// A previously timed-out update could still commit against this revision.
 	// A successful read alone cannot fence it.
 	if current.GetEnabled() == enabled && !m.unconfirmedSortUpdate {
@@ -169,9 +175,6 @@ func ObserveSort(ctx context.Context, mt *meta.Meta) (SortObservation, error) {
 		if rows < 0 || rows > math.MaxInt64-observation.Rows {
 			if rowErr == nil {
 				rowErr = merr.WrapErrDataIntegrityMsg("invalid SORT observation row count at segment %d", segment.GetID())
-			}
-			if rows < 0 {
-				continue
 			}
 		} else {
 			observation.Rows += rows
