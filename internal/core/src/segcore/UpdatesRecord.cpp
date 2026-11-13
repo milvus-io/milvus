@@ -75,13 +75,16 @@ Visible(const History& history, uint64_t query_ts) {
 
 constexpr size_t kPostingBlockSize = 256;
 
+struct Postings;
+
 struct PostingBlock {
-    explicit PostingBlock(size_t capacity)
+    PostingBlock(size_t capacity, Postings* owner)
         : offsets(new int64_t[capacity]),
           last_begin(new uint64_t[capacity]),
           last_end(new uint64_t[capacity]),
           histories(new History[capacity]),
-          capacity(capacity) {
+          capacity(capacity),
+          owner(owner) {
     }
 
     // Scan these arrays without following history/version pointers.
@@ -90,6 +93,7 @@ struct PostingBlock {
     std::unique_ptr<uint64_t[]> last_end;
     std::unique_ptr<History[]> histories;
     const size_t capacity;
+    Postings* const owner;
     size_t size = 0;
 };
 
@@ -99,34 +103,38 @@ struct PostingPosition {
 };
 
 struct Postings {
-    std::vector<int64_t> base;
     // Writer lookup only; readers walk dense blocks.
     std::unordered_map<int64_t, PostingPosition> slots;
     std::vector<std::unique_ptr<PostingBlock>> blocks;
+    size_t size = 0;
 
     PostingPosition
-    EnsureSlot(int64_t offset) {
-        auto found = slots.find(offset);
-        if (found != slots.end())
-            return found->second;
+    AppendSlot(int64_t offset) {
         if (blocks.empty() || blocks.back()->size == blocks.back()->capacity) {
             // Rare values should not pay for a full 256-slot block.
             const size_t capacity =
                 blocks.empty()
                     ? 1
                     : std::min(kPostingBlockSize, blocks.back()->capacity * 2);
-            blocks.push_back(std::make_unique<PostingBlock>(capacity));
+            blocks.push_back(std::make_unique<PostingBlock>(capacity, this));
         }
         auto& block = *blocks.back();
         const size_t slot = block.size;
         PostingPosition position{&block, slot};
-        // A failed map allocation leaves an unused slot for retry.
-        slots.emplace(offset, position);
         block.offsets[slot] = offset;
         block.last_begin[slot] = kInfinity;
         block.last_end[slot] = 0;  // reserved slot, no published version
         ++block.size;
+        ++size;
         return position;
+    }
+
+    PostingPosition
+    EnsureSlot(int64_t offset) {
+        auto [it, inserted] = slots.try_emplace(offset, PostingPosition{});
+        if (!it->second.block)
+            it->second = AppendSlot(offset);
+        return it->second;
     }
 };
 
@@ -141,6 +149,12 @@ struct Field {
     UpdateFieldType type;
     bool nullable;
     std::deque<Version> versions;
+    // Index-only base intervals are created only on first update. They carry
+    // no copied base payload and are never exposed by the value reader.
+    std::deque<Version> base_intervals;
+    // Writer-only current posting location, indexed by row offset. Base slots
+    // enter the per-value lookup map lazily when their row is first updated.
+    std::vector<PostingPosition> current_postings;
     std::unordered_map<int64_t, History> offsets;
     UpdatesRecord::BaseReader base_reader;
     uint64_t base_index_rows = 0, updated_cells = 0;
@@ -169,17 +183,7 @@ struct Field {
 };
 
 void
-Collect(const Field& field,
-        const Postings& postings,
-        uint64_t query_ts,
-        TargetBitmap& result) {
-    for (auto offset : postings.base) {
-        auto it = field.offsets.find(offset);
-        if (it == field.offsets.end() || it->second.empty() ||
-            query_ts < it->second.front()->begin_ts) {
-            result.set(offset);
-        }
-    }
+Collect(const Postings& postings, uint64_t query_ts, TargetBitmap& result) {
     for (const auto& block_ptr : postings.blocks) {
         const auto& block = *block_ptr;
         static const auto kernel = posting::SelectKernel();
@@ -315,8 +319,10 @@ UpdatesRecord::RegisterField(int64_t field_id,
     field->type = type;
     field->nullable = nullable;
     field->base_reader = std::move(base_reader);
-    if (impl_->enable_temp_index)
+    if (impl_->enable_temp_index) {
         field->index = std::make_unique<AllDataVersionedIndex>();
+        field->current_postings.reserve(impl_->row_count);
+    }
     impl_->fields.emplace(field_id, std::move(field));
 }
 
@@ -334,7 +340,10 @@ UpdatesRecord::IndexBaseBatch(int64_t field_id,
         auto& postings = (*field.index)[values[i]];
         if (!postings)
             postings = std::make_unique<Postings>();
-        postings->base.push_back(start + i);
+        auto position = postings->AppendSlot(start + i);
+        position.block->last_begin[position.slot] = 0;
+        position.block->last_end[position.slot] = kInfinity;
+        field.current_postings.push_back(position);
     }
     field.base_index_rows += values.size();
 }
@@ -397,7 +406,10 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
     for (const auto& assignment : assignments) {
         Require(assigned_fields.insert(assignment.field_id).second,
                 "POC update assigns a field more than once");
-        impl_->GetField(assignment.field_id).Validate(assignment.value);
+        auto& field = impl_->GetField(assignment.field_id);
+        field.Validate(assignment.value);
+        Require(!field.index || field.base_index_rows == impl_->row_count,
+                "POC base index must be complete before updates");
     }
     auto offsets = resolve_rows(primary_keys, mutation_ts);
     SortUnique(offsets);
@@ -419,6 +431,9 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
         PostingBlock* block;
         size_t slot;
         uint64_t* previous_end;
+        History* base_history;
+        Version* base_interval;
+        int64_t offset;
     };
     std::vector<Pending> pending;
     Require(offsets.empty() ||
@@ -437,34 +452,57 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
                 PostingBlock* block = nullptr;
                 size_t slot = 0;
                 uint64_t* previous_end = nullptr;
+                History* base_history = nullptr;
+                Version* base_interval = nullptr;
                 if (field.index) {
-                    auto& postings = field.IndexPostings(*value);
-                    auto position = postings.EnsureSlot(offset);
+                    auto previous = field.current_postings[offset];
+                    previous_end = &previous.block->last_end[previous.slot];
+                    if (history.empty()) {
+                        // Register the base slot before finding the destination:
+                        // SET to the same value must reuse that slot.
+                        previous.block->owner->slots.emplace(offset, previous);
+                        base_history =
+                            &previous.block->histories[previous.slot];
+                        base_history->reserve(base_history->size() + 1);
+                    }
+                    auto position =
+                        field.IndexPostings(*value).EnsureSlot(offset);
                     block = position.block;
                     slot = position.slot;
                     index_history = &block->histories[slot];
-                    index_history->reserve(index_history->size() + 1);
-                    if (!history.empty()) {
-                        auto& previous =
-                            field.IndexPostings(*history.back()->value);
-                        auto position = previous.slots.at(offset);
-                        previous_end = &position.block->last_end[position.slot];
-                    }
+                    index_history->reserve(
+                        index_history->size() +
+                        (base_history == index_history ? 2 : 1));
                 }
                 field.versions.push_back({value, mutation_ts, kInfinity});
+                if (base_history) {
+                    try {
+                        field.base_intervals.push_back(
+                            {nullptr, 0, mutation_ts});
+                        base_interval = &field.base_intervals.back();
+                    } catch (...) {
+                        field.versions.pop_back();
+                        throw;
+                    }
+                }
                 pending.push_back({&field,
                                    &history,
                                    index_history,
                                    &field.versions.back(),
                                    block,
                                    slot,
-                                   previous_end});
+                                   previous_end,
+                                   base_history,
+                                   base_interval,
+                                   offset});
             }
         }
     } catch (...) {
         // No history refs or closed intervals were published yet. Empty posting
         // groups left by failed allocation contain no visible version.
         for (auto it = pending.rbegin(); it != pending.rend(); ++it) {
+            if (it->base_interval)
+                it->field->base_intervals.pop_back();
             it->field->versions.pop_back();
         }
         throw;
@@ -475,15 +513,18 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
     for (auto& item : pending) {
         if (!item.history->empty()) {
             item.history->back()->end_ts = mutation_ts;
-            if (item.previous_end)
-                *item.previous_end = mutation_ts;
         } else
             ++item.field->updated_cells;
+        if (item.previous_end)
+            *item.previous_end = mutation_ts;
+        if (item.base_history)
+            item.base_history->push_back(item.base_interval);
         item.history->push_back(item.version);
         if (item.index_history) {
             item.index_history->push_back(item.version);
             item.block->last_begin[item.slot] = mutation_ts;
             item.block->last_end[item.slot] = kInfinity;
+            item.field->current_postings[item.offset] = {item.block, item.slot};
         }
     }
     impl_->last_mutation_ts = mutation_ts;
@@ -564,10 +605,9 @@ UpdatesRecord::InBitmap(int64_t field_id,
         field.Validate(value);
         auto it = field.index->find(value);
         if (it != field.index->end()) {
-            impl_->index_postings.fetch_add(
-                it->second->base.size() + it->second->slots.size(),
-                std::memory_order_relaxed);
-            Collect(field, *it->second, query_ts, result);
+            impl_->index_postings.fetch_add(it->second->size,
+                                            std::memory_order_relaxed);
+            Collect(*it->second, query_ts, result);
         }
     }
     return result;
@@ -602,10 +642,9 @@ UpdatesRecord::RangeBitmap(int64_t field_id,
                                   : tree.lower_bound(upper->value);
     TargetBitmap result(impl_->row_count, false);
     for (auto it = begin; it != end; ++it) {
-        impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->slots.size(),
-            std::memory_order_relaxed);
-        Collect(field, *it->second, query_ts, result);
+        impl_->index_postings.fetch_add(it->second->size,
+                                        std::memory_order_relaxed);
+        Collect(*it->second, query_ts, result);
     }
     return result;
 }
@@ -626,10 +665,9 @@ UpdatesRecord::PrefixBitmap(int64_t field_id,
         if (value.compare(0, prefix.size(), prefix) != 0) {
             break;
         }
-        impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->slots.size(),
-            std::memory_order_relaxed);
-        Collect(field, *it->second, query_ts, result);
+        impl_->index_postings.fetch_add(it->second->size,
+                                        std::memory_order_relaxed);
+        Collect(*it->second, query_ts, result);
     }
     return result;
 }
@@ -642,10 +680,9 @@ UpdatesRecord::NullBitmap(int64_t field_id, uint64_t query_ts) const {
     TargetBitmap result(impl_->row_count, false);
     auto it = tree.find(UpdateValue{std::monostate{}});
     if (it != tree.end()) {
-        impl_->index_postings.fetch_add(
-            it->second->base.size() + it->second->slots.size(),
-            std::memory_order_relaxed);
-        Collect(field, *it->second, query_ts, result);
+        impl_->index_postings.fetch_add(it->second->size,
+                                        std::memory_order_relaxed);
+        Collect(*it->second, query_ts, result);
     }
     return result;
 }
