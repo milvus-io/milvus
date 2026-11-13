@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/blang/semver/v4"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -61,9 +62,7 @@ func TestStorageStandingPlansLegacyL2WithStorageEligibility(t *testing.T) {
 		Properties: map[string]string{common.CollectionAutoCompactionKey: "false"},
 	})
 	reconciler := newCompactionTargetReconcilerForTest(fixture)
-	versionManager := index.NewMockVersionManager(t)
-	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.9")).Maybe()
-	reconciler.SetIndexVersionManager(versionManager)
+	reconciler.SetIndexVersionManager(newStorageTargetVersionManager(t, "2.6.9"))
 
 	events, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
@@ -101,9 +100,7 @@ func TestStorageStandingFormatObservesPublishedManifestRevision(t *testing.T) {
 	t.Cleanup(fixture.CloseManifestExecutors)
 	fixture.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{}})
 	reconciler := newCompactionTargetReconcilerForTest(fixture)
-	versionManager := index.NewMockVersionManager(t)
-	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0")).Maybe()
-	reconciler.SetIndexVersionManager(versionManager)
+	reconciler.SetIndexVersionManager(newStorageTargetVersionManager(t, "3.0.0"))
 
 	events, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
@@ -161,9 +158,7 @@ func TestStorageStandingKeepsVersionWorkWhenManifestReadFails(t *testing.T) {
 	t.Cleanup(fixture.CloseManifestExecutors)
 	fixture.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{}})
 	reconciler := newCompactionTargetReconcilerForTest(fixture)
-	versionManager := index.NewMockVersionManager(t)
-	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0")).Maybe()
-	reconciler.SetIndexVersionManager(versionManager)
+	reconciler.SetIndexVersionManager(newStorageTargetVersionManager(t, "3.0.0"))
 
 	events, err := reconciler.Reconcile(ctx)
 	require.NoError(t, err)
@@ -241,4 +236,13 @@ func storageTestRecord(t *testing.T, targetMeta *CompactionTargetMeta, intent da
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, found.GetState())
 	require.Zero(t, found.GetCollectionID())
 	return found
+}
+
+func newStorageTargetVersionManager(t *testing.T, minSession string) *index.MockVersionManager {
+	t.Helper()
+	manager := index.NewMockVersionManager(t)
+	manager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse(minSession)).Maybe()
+	absent := index.IndexVersionCondition{Mode: index.IndexVersionAbsent}
+	manager.EXPECT().ResolveIndexVersionConditions(mock.Anything).Return(absent, absent).Maybe()
+	return manager
 }

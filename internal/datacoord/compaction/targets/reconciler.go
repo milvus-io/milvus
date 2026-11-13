@@ -62,6 +62,7 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	}
 
 	sortMatches := reconciler.observeStandingSort(ctx)
+	indexRewrites := reconciler.selectableIndexRewrites(ctx, Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
 	records := manager.GetActiveCompactionTargets()
@@ -86,6 +87,9 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		for _, segment := range observation.Match {
 			matches[segment.GetID()] = segment
 		}
+	}
+	for _, segment := range indexRewrites {
+		matches[segment.GetID()] = segment
 	}
 
 	// Pick the physical path for each segment before constructing any View.

@@ -7,6 +7,97 @@
 - **Related Issues:** #49991, #50057
 - **Released:** N/A
 
+## Dedicated Target API
+
+The dedicated API gives a compaction request a durable resource ID while it
+waits for data or execution capacity. A Target can create several physical
+tasks over its lifetime. Each task has its own identity and is recovered by
+the compaction task scheduler. The original Base design is recorded below.
+
+### Create, observe, and stop
+
+`CreateCompactionTarget`, `DescribeCompactionTarget`, `ListCompactionTargets`,
+and `DropCompactionTarget` are available over gRPC and under
+`/v2/vectordb/compaction_targets` over HTTP. Create resolves the collection
+through RootCoord and authorizes `PrivilegeCompaction` on that resource.
+DataCoord revalidates the stable collection ID and metadata revision before
+committing the Target. Describe and List resolve current collection names
+from the stored ID. Cluster administrators can inspect history for a deleted
+collection and list cluster-wide Standing Targets with `includeSystem`.
+
+Create fixes a timestamp `T` and returns the Target ID and its initial matched
+row count. An uncertain persistence result is confirmed by reading the same
+candidate ID. If that read cannot establish the outcome, Create reports an
+unknown outcome. Proxy forwarding and SDK Create calls dispatch at most one
+application request. The operator can use List to inspect recent Targets
+before deciding whether to submit a new request.
+
+An active Target can report a fresh observation through Describe. A successful
+observation can report zero remaining rows while a terminal write is still
+pending. List returns persisted definitions and lifecycle fields. The first
+successful terminal write fixes the stop reason and timestamp. Repeating Drop
+preserves this result while the record exists.
+
+### Manual REWRITE
+
+The current scope is healthy, Flushed data in the collection outside L0 and
+L2, excluding imports that have not committed. A segment's effective data
+start must be strictly before `T`. This uses the import commit timestamp,
+segment statistics, and start position. Missing timestamp facts are included
+conservatively. If the caller supplies segment IDs, the Target stores those
+lineage roots and follows the current descendants recorded by compaction.
+
+REWRITE matches in-scope segments whose rewrite timestamp is zero or earlier
+than `T`. A full Mix, Sort, Clustering, or Schema replacement publishes its
+task's admission timestamp. Same-ID schema updates retain the existing
+timestamp. Snapshot protection, occupancy, and index readiness can defer work
+while the segment remains part of the observed match set.
+
+Before saving satisfaction, DataCoord rechecks the collection snapshot and
+relevant in-flight inputs while serializing new task admission. It also takes
+shared locks on the collection's DDL resources. DropCollection holds the
+exclusive collection lock through its acknowledgment, so early channel
+cleanup cannot turn pending work into a false `satisfied` outcome. The control
+channel callback persists the collection tombstone, then ends active Targets
+for that stable ID with `scope_dropped`. Startup recovery checks retained
+active Targets against collection metadata. The configurable
+`dataCoord.compaction.target.retentionSeconds` window defaults to seven days.
+After the Target record is collected, Describe and Drop return TargetNotFound.
+
+### Standing SORT and task admission
+
+Standing SORT keeps one cluster-wide ID and persists its enabled condition.
+It checks ordinary flushed data for the published sorted state and can plan
+Sort work while global auto compaction is disabled. Import owns its sorting
+stage. When a segment needs both SORT and REWRITE, a sufficiently recent
+published Sort replacement can satisfy the REWRITE condition.
+
+Reconciliation plans each complete input group, then selects full plans
+across collections, groups, and compatible work. In both startup modes, the
+Inspector uses one token bucket for new physical tasks from legacy compaction,
+TBC, Import, and Restore. A failed pre-queue submission returns its token.
+Recovery and requeue of previously accepted tasks use the original admission.
+`dataCoord.compaction.rateLimitTokens` and `dataCoord.compaction.rateLimitInterval`
+configure the shared bucket. The legacy `target.maxEventsPerReconcile` setting
+is deprecated.
+
+### Compatibility and verification
+
+`dataCoord.compaction.enableTargetBasedCompaction` is a default-off startup
+setting. With it enabled, ordinary manual compaction and target-size requests
+use the dedicated Target API. Legacy L0 and Clustering still create physical
+tasks, and their existing task-state RPCs remain available. In legacy mode,
+ordinary manual compaction uses its task path. Stored Target history becomes
+accessible again when the setting is re-enabled.
+
+Verification exercises the four operations through Go SDK and REST, including
+the published replacement's lineage, snapshot protection and resumption, and
+collection deletion while a Target is active. Coordinator tests cover
+ambiguous writes, stale collection identity, late segment publication, and
+contention among task producers.
+
+## Original Base Slice
+
 ## Summary
 
 This slice adds the first target-based compaction path behind the default-off
