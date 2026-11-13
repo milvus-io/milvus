@@ -1292,6 +1292,7 @@ common:
   DiskIndex:
     MaxDegree: 56
     SearchListSize: 100
+    PQCodeBudgetGBRatio: 0.125
     BuildNumThreadsRatio: 1
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8

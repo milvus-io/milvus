@@ -426,7 +426,7 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		if !exist {
 			return merr.WrapErrParameterMissingMsg("IndexType not specified")
 		}
-		_, pqBudgetFromSDK := indexParamsMap[indexparams.PQCodeBudgetRatioKey]
+		pqBudget, pqBudgetFromSDK := indexParamsMap[indexparams.PQCodeBudgetRatioKey]
 		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
 		if paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
 			var err error
@@ -436,10 +436,14 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 		}
 		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-			if err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap); err != nil {
+			err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap)
+			if err != nil {
 				return err
 			}
-			indexparams.LogPQCodeBudgetOverride(ctx, paramtable.Get(), indexParamsMap, pqBudgetFromSDK)
+			// Preserve only an explicit request value; keep server-side precedence unchanged.
+			if pqBudgetFromSDK && !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+				indexParamsMap[indexparams.PQCodeBudgetRatioKey] = pqBudget
+			}
 		}
 		metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 		if !metricTypeExist {
