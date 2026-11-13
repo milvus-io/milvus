@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -560,6 +561,72 @@ func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
 	err := cit.parseIndexParams(context.TODO())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		request  string
+		knowhere bool
+		auto     bool
+		want     float64
+	}{
+		{"shipped defaults preserve common", "", true, false, 0.25},
+		{"SDK overrides both server settings", "0.0625", true, false, 0.0625},
+		{"SDK with generic config disabled", "0.0625", false, false, 0.0625},
+		{"common with generic config disabled", "", false, false, 0.25},
+		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			genericKey := "knowhere.DISKANN.build.pq_code_budget_gb_ratio"
+			for _, key := range []string{
+				genericKey, params.KnowhereConfig.Enable.Key,
+				params.CommonCfg.PQCodeBudgetGBRatio.Key, params.AutoIndexConfig.Enable.Key,
+				params.AutoIndexConfig.IndexParams.Key, params.AutoIndexConfig.ExtraParams.Key,
+			} {
+				t.Cleanup(func() { params.Reset(key) })
+			}
+			// Keep the shipped generic default while tuning only the legacy server setting.
+			require.NoError(t, params.Reset(genericKey))
+			require.Equal(t, "0.125", params.GetWithDefault(genericKey, ""))
+			require.NoError(t, params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25"))
+			require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, strconv.FormatBool(tc.knowhere)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, strconv.FormatBool(tc.auto)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.IndexParams.Key,
+				`{"index_type":"DISKANN","max_degree":56,"search_list_size":100}`))
+			require.NoError(t, params.Save(params.AutoIndexConfig.ExtraParams.Key,
+				`{"build_ratio":"{\"pq_code_budget_gb\":0.1875,\"num_threads\":1}"}`))
+
+			requestParams := "{}"
+			if tc.request != "" {
+				requestParams = `{"pq_code_budget_gb_ratio":` + tc.request + `}`
+			}
+			task := &CreateIndexTask{
+				fieldSchema: &schemapb.FieldSchema{
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+				req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "DISKANN"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: common.ParamsKey, Value: requestParams},
+				}},
+			}
+			require.NoError(t, task.parseIndexParams(context.Background()))
+			built := funcutil.KeyValuePair2Map(task.newIndexParams)
+			ratio, err := strconv.ParseFloat(built[indexparams.PQCodeBudgetRatioKey], 64)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, ratio)
+			assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), built[indexparams.MaxDegreeKey])
+			require.NoError(t, indexparams.SetDiskIndexBuildParams(built, 4<<30))
+			budget, err := strconv.ParseFloat(built[indexparams.PQCodeBudgetKey], 64)
+			require.NoError(t, err)
+			assert.Equal(t, 4*tc.want, budget)
+		})
+	}
 }
 
 func Test_parseIndexParams(t *testing.T) {
