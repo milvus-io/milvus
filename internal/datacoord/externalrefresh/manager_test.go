@@ -3234,3 +3234,103 @@ func TestExternalCollectionRefreshManager_RejectsEmptyPaimonExplore(t *testing.T
 		})
 	}
 }
+
+// Exercise the real row resolver and planner through task publication, starting
+// with the actual Parquet Explore sentinel rather than invented positive counts.
+func TestCreateTasksForJobFunctionRowBudget(t *testing.T) {
+	paramtable.Init()
+	filesParam := &paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask
+	oldFiles := filesParam.GetValue()
+	require.NoError(t, paramtable.Get().Save(filesParam.Key, "10000"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(filesParam.Key, oldFiles) })
+	param := &paramtable.Get().DataCoordCfg.ExternalCollectionFunctionRowsPerTask
+	previous := param.GetValue()
+	t.Cleanup(func() { _ = paramtable.Get().Save(param.Key, previous) })
+	for _, tc := range []struct {
+		name, budget string
+		functions    bool
+		readErr      error
+		wantTasks    int
+	}{
+		{"large_parquet_functions", "16000000", true, nil, 64},
+		{"disabled", "0", true, nil, 1},
+		{"reference_only", "16000000", false, nil, 1},
+		{"planning_canceled", "16000000", true, nil, 0},
+		{"canceled_before_publication", "16000000", true, nil, 0},
+		{"metadata_timeout", "16000000", true, context.DeadlineExceeded, 16},
+		{"metadata_read_canceled", "16000000", true, context.Canceled, 16},
+		{"metadata_throttled", "16000000", true, merr.Wrap(packed.ErrLoonTransient, "throttled"), 16},
+		{"metadata_denied", "16000000", true, merr.Wrap(packed.ErrLoonPermanent, "access denied"), 16},
+		{"metadata_corrupt", "16000000", true, merr.WrapErrDataIntegrityMsg("corrupt footer"), 16},
+		{"metadata_negative_count", "16000000", true, nil, 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, paramtable.Get().Save(param.Key, tc.budget))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.name == "planning_canceled" {
+				cancel()
+			}
+			job := &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`}
+			refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, nil)
+			mt := meta.NewEmptyTestMeta()
+			schema := &schemapb.CollectionSchema{ExternalSpec: job.ExternalSpec}
+			if tc.functions {
+				schema.Functions = []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25}}
+			}
+			mt.AddCollection(&meta.CollectionInfo{ID: 100, Schema: schema})
+			files := make([]packed.FileInfo, 1024)
+			for i := range files {
+				files[i] = packed.FileInfo{FilePath: fmt.Sprintf("f%d.parquet", i), NumRows: -1}
+			}
+			explore := mockey.Mock((*Manager).exploreExternalFiles).Return(files, "shared-manifest", nil).Build()
+			defer explore.UnPatch()
+			var reads atomic.Int32
+			fileInfo := mockey.Mock(packed.GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*packed.FileInfo, error) {
+				reads.Add(1)
+				rows := int64(1000000)
+				if tc.name == "metadata_negative_count" {
+					rows = -1
+				}
+				return &packed.FileInfo{FilePath: path, NumRows: rows}, tc.readErr
+			}).Build()
+			defer fileInfo.UnPatch()
+			scheduler := newStubScheduler()
+			manager := NewExternalCollectionRefreshManager(ctx, mt, nil, scheduler, &stubAllocator{nextID: 1000}, refreshMeta, nil, nil, nil, nil, nil).(*Manager)
+			defer manager.Stop()
+			if tc.name == "canceled_before_publication" {
+				var next atomic.Int64
+				allocate := mockey.Mock((*stubAllocator).AllocID).To(func(_ *stubAllocator, _ context.Context) (int64, error) {
+					cancel()
+					return next.Add(1) + 1000, nil
+				}).Build()
+				defer allocate.UnPatch()
+			}
+			tasks, err := manager.createTasksForJob(ctx, job)
+			if tc.wantTasks == 0 {
+				require.ErrorIs(t, err, context.Canceled)
+				require.Empty(t, tasks)
+				require.Empty(t, refreshMeta.GetJob(1).GetTaskIds())
+				if tc.name == "planning_canceled" {
+					require.Zero(t, reads.Load())
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, tasks, tc.wantTasks)
+			if tc.wantTasks == 1 {
+				require.Zero(t, reads.Load())
+			} else {
+				require.EqualValues(t, 1024, reads.Load())
+			}
+			var next int64
+			for _, id := range refreshMeta.GetJob(1).GetTaskIds() {
+				planned := refreshMeta.GetTask(id)
+				require.Equal(t, next, planned.GetFileIndexBegin())
+				require.Equal(t, "shared-manifest", planned.GetExploreManifestPath())
+				next = planned.GetFileIndexEnd()
+			}
+			require.EqualValues(t, 1024, next)
+		})
+	}
+}

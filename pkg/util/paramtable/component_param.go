@@ -6761,13 +6761,14 @@ type dataCoordConfig struct {
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
-	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
-	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
-	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
-	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
-	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
-	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
-	RefreshWaitForIndex                ParamItem `refreshable:"true"`
+	ExternalCollectionCheckInterval       ParamItem `refreshable:"true"`
+	ExternalCollectionJobTimeout          ParamItem `refreshable:"true"`
+	ExternalCollectionJobRetention        ParamItem `refreshable:"true"`
+	ExternalCollectionDropRatioWarn       ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionPreAllocSegments    ParamItem `refreshable:"true"`
+	ExternalCollectionFilesPerTask        ParamItem `refreshable:"true"`
+	ExternalCollectionFunctionRowsPerTask ParamItem `refreshable:"true"`
+	RefreshWaitForIndex                   ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -8577,6 +8578,16 @@ raise this for files written with small row groups, many columns, or untruncated
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionFilesPerTask.Init(base.mgr)
+
+	p.ExternalCollectionFunctionRowsPerTask = ParamItem{
+		Key:          "dataCoord.externalCollection.functionRowsPerTask",
+		Version:      "3.1.0",
+		DefaultValue: "16000000",
+		Export:       true,
+		Doc: "Target source rows per base refresh task for Parquet collections with Functions. " +
+			"Zero disables row-based splitting. A file is indivisible and segment ownership may merge ranges.",
+	}
+	p.ExternalCollectionFunctionRowsPerTask.Init(base.mgr)
 
 	p.RefreshWaitForIndex = ParamItem{
 		Key:     "dataCoord.externalCollection.refreshWaitForIndex",

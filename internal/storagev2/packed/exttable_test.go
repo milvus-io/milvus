@@ -3144,3 +3144,46 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestFetchExternalFileRowCountsCancellationDrainsReaders(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{}, getFileInfoPoolSize)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	m := mockey.Mock(GetFileInfo).To(func(_ string, _ string, _ *indexpb.StorageConfig, _ ExternalSpecContext) (*FileInfo, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return &FileInfo{NumRows: 10}, nil
+	}).Build()
+	defer m.UnPatch()
+	files := make([]FileInfo, 100)
+	for i := range files {
+		files[i] = FileInfo{FilePath: "file.parquet", NumRows: -1}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := FetchExternalFileRowCounts(ctx, "parquet", files, &indexpb.StorageConfig{}, ExternalSpecContext{})
+		done <- err
+	}()
+	// Establish all sixteen readers are in-flight before cancellation.
+	for i := 0; i < getFileInfoPoolSize; i++ {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			cancel()
+			close(release)
+			t.Fatal("metadata readers did not start")
+		}
+	}
+	cancel()
+	close(release)
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("metadata readers did not drain")
+	}
+	require.EqualValues(t, getFileInfoPoolSize, calls.Load(), "queued files must not start native reads after cancellation")
+}

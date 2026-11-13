@@ -863,6 +863,10 @@ indexNode:
     buildParallel: 1
 
 dataCoord:
+  externalCollection:
+    # Refine base ranges by source rows for Parquet collections with Functions.
+    # 0 disables. Indivisible files and segment ownership can exceed this target.
+    functionRowsPerTask: 16000000
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
     legacyVersionWithoutRPCWatch: 2.4.1 # Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels

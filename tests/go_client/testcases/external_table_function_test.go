@@ -489,7 +489,8 @@ func TestExternalTableBM25Function(t *testing.T) {
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 	// Step 1: Upload text parquet to MinIO
-	const numFiles, rowsPerFile = 10, int64(3000)
+	numFiles := externalBM25FileCount(t)
+	const rowsPerFile = int64(3000)
 	totalRows := int64(numFiles) * rowsPerFile
 	for i := 0; i < numFiles; i++ {
 		data, err := generateTextParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
@@ -558,6 +559,7 @@ func TestExternalTableBM25Function(t *testing.T) {
 		}
 	}
 refreshDone:
+	assertExternalRefreshTaskCount(t, ctx, refreshResult.JobID, coll.ID)
 
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
 	common.CheckErr(t, err, true)
@@ -579,6 +581,15 @@ refreshDone:
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
 	t.Log("Collection loaded")
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	common.CheckErr(t, err, true)
+	require.Equal(t, totalRows, count, "all refresh tasks must be query-visible after loading")
+	t.Logf("Verified query-visible row count: %d", count)
 
 	// Step 6: BM25 search; each query should rank the matching text class first.
 	// Corpus repeats 10 distinct sentences, so rows where id%10 matches the
