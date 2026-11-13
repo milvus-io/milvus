@@ -866,7 +866,7 @@ dataCoord:
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     # Soft cap on pending and running compaction tasks. Concurrent submissions can briefly exceed it.
-    # Sort tasks required by an admitted clustering task may pass this cap while still using the shared bucket and queue.
+    # Sort tasks required by an admitted import or clustering task may pass this cap while still using the shared bucket and queue.
     # 0 or a negative value means unlimited.
     maxTaskNum: 0
     rpcTimeout: 10
