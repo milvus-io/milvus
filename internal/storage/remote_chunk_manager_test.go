@@ -1639,3 +1639,103 @@ func TestRemoteChunkManagerTLSVersion(t *testing.T) {
 		t.Logf("NewRemoteChunkManager(SslTLSMinVersion=<empty>, CloudProvider=%s): OK (default)", cloudProvider)
 	})
 }
+
+type sizedObjectStorageTarget struct{ ObjectStorage }
+
+func (*sizedObjectStorageTarget) CopyObjectCrossBucketAndGetSize(context.Context, string, string, string, string) (int64, error) {
+	panic("must be mocked")
+}
+
+func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
+	t.Run("legacy MinIO stats source once", func(t *testing.T) {
+		var stats int
+		stat := mockey.Mock((*minio.Client).StatObject).To(func(_ *minio.Client, _ context.Context, bucket, key string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+			stats++
+			require.Equal(t, "source", bucket)
+			require.Equal(t, "src", key)
+			return minio.ObjectInfo{Size: 9}, nil
+		}).Build()
+		defer stat.UnPatch()
+		copy := mockey.Mock(minio.Core.CopyObject).Return(minio.ObjectInfo{ETag: "copied"}, nil).Build()
+		defer copy.UnPatch()
+		client := &MinioObjectStorage{Client: &minio.Client{}}
+		require.NoError(t, (&RemoteChunkManager{client: client}).CopyCrossBucket(context.Background(), "source", "src", "target", "dst"))
+		require.Equal(t, 1, stats)
+	})
+	// Provider routing is exercised by TestMinioObjectStorageCopyObjectCrossBucket;
+	// this boundary must select the sized capability and preserve its result.
+	for _, tc := range []struct {
+		name string
+		size int64
+		err  error
+	}{
+		{name: "success", size: 9},
+		{name: "empty"},
+		{name: "negative", size: -1},
+		{name: "failure", err: context.Canceled},
+	} {
+		t.Run("sized backend/"+tc.name, func(t *testing.T) {
+			copy := mockey.Mock((*sizedObjectStorageTarget).CopyObjectCrossBucketAndGetSize).To(func(_ *sizedObjectStorageTarget, _ context.Context, srcBucket, src, dstBucket, dst string) (int64, error) {
+				require.Equal(t, []string{"source", "src", "target", "dst"}, []string{srcBucket, src, dstBucket, dst})
+				return tc.size, tc.err
+			}).Build()
+			defer copy.UnPatch()
+			size, err := (&RemoteChunkManager{client: &sizedObjectStorageTarget{}}).CopyCrossBucketAndGetSize(context.Background(), "source", "src", "target", "dst")
+			if tc.size < 0 {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			} else {
+				require.ErrorIs(t, err, tc.err)
+			}
+			if err != nil {
+				require.Zero(t, size)
+			} else {
+				require.Equal(t, tc.size, size)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name             string
+		size             int64
+		copyErr, statErr error
+	}{
+		{name: "success", size: 9},
+		{name: "empty"},
+		{name: "copy failure", copyErr: context.Canceled},
+		{name: "stat failure", statErr: context.Canceled},
+		{name: "negative size", size: -1},
+	} {
+		t.Run("backend fallback/"+tc.name, func(t *testing.T) {
+			client := &objectStorageTarget{}
+			var calls, stats int
+			copy := mockey.Mock((*objectStorageTarget).CopyObjectCrossBucket).To(func(context.Context, string, string, string, string) error { calls++; return tc.copyErr }).Build()
+			defer copy.UnPatch()
+			stat := mockey.Mock((*objectStorageTarget).StatObject).To(func(_ *objectStorageTarget, _ context.Context, bucket, key string) (int64, error) {
+				require.Equal(t, 1, calls, "query destination only after copy")
+				require.Equal(t, "target", bucket)
+				require.Equal(t, "dst", key)
+				stats++
+				return tc.size, tc.statErr
+			}).Build()
+			defer stat.UnPatch()
+			size, err := (&RemoteChunkManager{client: client}).CopyCrossBucketAndGetSize(context.Background(), "source", "src", "target", "dst")
+			require.Equal(t, 1, calls)
+			if tc.copyErr != nil {
+				require.ErrorIs(t, err, tc.copyErr)
+				require.Zero(t, stats)
+			} else {
+				require.Equal(t, 1, stats)
+				if tc.statErr != nil {
+					require.ErrorIs(t, err, tc.statErr)
+				} else if tc.size < 0 {
+					require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, tc.size, size)
+				}
+			}
+			if err != nil {
+				require.Zero(t, size)
+			}
+		})
+	}
+}

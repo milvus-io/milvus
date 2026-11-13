@@ -20,11 +20,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -145,28 +147,45 @@ func isDeleteSucceededWithOK(err error) bool {
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
-	singleCopyMaxSize := min(paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64(), minioSingleCopyObjectMaxSize)
-	srcOpts := minio.CopySrcOptions{
-		Bucket: srcBucket,
-		Object: srcObjectName,
-	}
-	dstOpts := minio.CopyDestOptions{
-		Bucket: dstBucket,
-		Object: dstObjectName,
-	}
+	_, err := minioObjectStorage.CopyObjectCrossBucketAndGetSize(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
+	return err
+}
+
+// CopyObjectCrossBucketAndGetSize discovers the immutable source size at copy time.
+func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) (int64, error) {
+	threshold := paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64()
+	partSize := paramtable.Get().MinioCfg.MultipartCopyPartSize.GetAsInt64()
 	srcInfo, err := minioObjectStorage.Client.StatObject(ctx, srcBucket, srcObjectName, minio.StatObjectOptions{})
 	if err != nil {
-		return mapObjectStorageError(srcObjectName, err)
+		return 0, mapObjectStorageError(srcObjectName, err)
 	}
+	if srcInfo.Size < 0 {
+		return 0, merr.WrapErrDataIntegrityMsg("source object size cannot be negative")
+	}
+	srcOpts := minio.CopySrcOptions{Bucket: srcBucket, Object: srcObjectName}
+	dstOpts := minio.CopyDestOptions{Bucket: dstBucket, Object: dstObjectName}
 	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
-	// ComposeObject) has no x-goog-* equivalent. Its whole-object copy has no
+	// UploadPartCopy) has no x-goog-* equivalent. Its whole-object copy has no
 	// 5GiB cap though, so GCP always takes the single-copy path.
-	if srcInfo.Size <= singleCopyMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
-		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
-		return mapObjectStorageError(srcObjectName, err)
+	multipart := srcInfo.Size >= max(threshold, minioCopyPartSize) || srcInfo.Size > minioSingleCopyObjectMaxSize
+	if !multipart || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
+		// minio-go v7.0.73 Client.CopyObject returns the ETag from the HTTP
+		// header, but S3 puts it in the XML body. Core.CopyObject reads the
+		// body correctly, so use it without upgrading the shared SDK.
+		core := minio.Core{Client: minioObjectStorage.Client}
+		var result minio.ObjectInfo
+		result, err = core.CopyObject(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName, nil, srcOpts, minio.PutObjectOptions{})
+		// Both SDK paths can decode HTTP 200 <Error> as an empty result.
+		// Require the body ETag before reporting success or counting bytes;
+		// an empty ETag does not confirm a copy and remains a retriable I/O error.
+		if err == nil && strings.TrimSpace(result.ETag) == "" {
+			return 0, merr.WrapErrIoFailedMsg("single-object copy returned an empty ETag")
+		}
+	} else {
+		err = minioObjectStorage.copyObjectMultipart(ctx, dstOpts, srcOpts, srcInfo, partSize)
 	}
-	// Copy larger objects in parts to reduce the work per request. ComposeObject
-	// runs provider-side and avoids streaming snapshot data through Milvus.
-	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
-	return mapObjectStorageError(srcObjectName, err)
+	if err != nil {
+		return 0, mapObjectStorageError(srcObjectName, err)
+	}
+	return srcInfo.Size, nil
 }

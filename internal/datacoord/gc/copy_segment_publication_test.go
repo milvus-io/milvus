@@ -162,10 +162,8 @@ func TestCopyResultKeepsImportProtectionThroughIndexInstall(t *testing.T) {
 	ctx := context.Background()
 	m, _, copies, task, result, _ := copyPublicationFixture(t)
 	gc := &GarbageCollector{Meta: m, Option: GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)}}
-	var original func(context.Context, *datapb.CopySegmentResult, copysegment.CopySegmentTask, *meta.Meta, *index.IndexMeta, copysegment.CopySegmentMeta, map[int64]int64) error
-	patch := mockey.Mock(copysegment.SyncVectorScalarIndexesForTest).Origin(&original).To(func(ctx context.Context, result *datapb.CopySegmentResult,
-		task copysegment.CopySegmentTask, m *meta.Meta, im *index.IndexMeta, copies copysegment.CopySegmentMeta, published map[int64]int64,
-	) error {
+	var original func(*index.IndexMeta, context.Context, *model.SegmentIndex) error
+	patch := mockey.Mock((*index.IndexMeta).AddSegmentIndexFromManifest).Origin(&original).To(func(im *index.IndexMeta, ctx context.Context, record *model.SegmentIndex) error {
 		segment := m.GetSegment(ctx, meta.RestartSegID)
 		require.True(t, segment.GetIsImporting())
 		require.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
@@ -173,7 +171,7 @@ func TestCopyResultKeepsImportProtectionThroughIndexInstall(t *testing.T) {
 		// partial installation, whose manifest base has not yet been published.
 		check := gc.newIndexFileReclaimChecker(ctx)
 		require.False(t, check("copied-index", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
-		require.NoError(t, original(ctx, result, task, m, im, copies, published))
+		require.NoError(t, original(im, ctx, record))
 		require.False(t, gc.newIndexFileReclaimChecker(ctx)("copied-index", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
 		require.False(t, m.GetSegmentManifestLocks().TryLock(meta.RestartSegID), "migration must wait until target finalization")
 		return nil
@@ -211,11 +209,9 @@ func TestCopyResultEtcdFinalizationWakesBackfill(t *testing.T) {
 	task.(*copysegment.Task).Task.Load().IndexWriteToManifest = proto.Bool(false)
 	result.SegmentResults[0].ManifestIndexBuildIds = nil
 	result.SegmentResults[0].IndexInfos[meta.RestartBuildID].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
-	var original func(context.Context, *datapb.CopySegmentResult, copysegment.CopySegmentTask, *meta.Meta, *index.IndexMeta, copysegment.CopySegmentMeta, map[int64]int64) error
-	patch := mockey.Mock(copysegment.SyncVectorScalarIndexesForTest).Origin(&original).To(func(ctx context.Context, result *datapb.CopySegmentResult,
-		task copysegment.CopySegmentTask, m *meta.Meta, im *index.IndexMeta, copies copysegment.CopySegmentMeta, published map[int64]int64,
-	) error {
-		require.NoError(t, original(ctx, result, task, m, im, copies, published))
+	var original func(*index.IndexMeta, context.Context, *model.SegmentIndex) error
+	patch := mockey.Mock((*index.IndexMeta).AddSegmentIndex).Origin(&original).To(func(im *index.IndexMeta, ctx context.Context, record *model.SegmentIndex) error {
+		require.NoError(t, original(im, ctx, record))
 		select {
 		case <-m.IndexCatalog.(*index.IndexMeta).ManifestIndexBackfillNotifyForTest():
 		default:
@@ -248,7 +244,9 @@ func TestCopyResultRevalidatesTargetBeforeFinalization(t *testing.T) {
 			ctx := context.Background()
 			m, _, copies, task, result, _ := copyPublicationFixture(t)
 			changedPath := packed.MarshalManifestPath("/tmp/test-restart/insert_log/300/30/8001", 2)
-			patch := mockey.Mock(copysegment.SyncJSONKeyIndexesForTest).To(func(context.Context, *datapb.CopySegmentResult, copysegment.CopySegmentTask, *meta.Meta, copysegment.CopySegmentMeta) error {
+			var original func(*index.IndexMeta, context.Context, *model.SegmentIndex) error
+			patch := mockey.Mock((*index.IndexMeta).AddSegmentIndexFromManifest).Origin(&original).To(func(im *index.IndexMeta, ctx context.Context, record *model.SegmentIndex) error {
+				require.NoError(t, original(im, ctx, record))
 				if dropped {
 					return m.SetState(ctx, meta.RestartSegID, commonpb.SegmentState_Dropped)
 				}
