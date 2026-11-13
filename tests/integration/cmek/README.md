@@ -81,6 +81,41 @@ Raw-data format campaigns disable compaction before starting the cluster; propag
 
 The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
 
+QueryView checks use the shared IT-only `MiniClusterSuite.GetQueryViewDistribution`
+helper. It reads the collection's persisted Coordinator Views from etcd in one
+linearizable prefix read, retains all states for release checks, and selects the
+highest Up version per shard/replica for confirmed placements. Preparing is only
+intent; `ready_segment_ids` are not persisted. These records expose minimum
+Manifest requirements, not a direct sample of a worker's native read revision.
+
+Physical segment IDs and HNSW build identities are checked through existing QN
+segment metrics. Serving checks independently compare the persisted Up QueryView
+with the StreamingNode's actual QueryPlan, and require its Growing Statistics to
+be zero before claiming a sealed-only cold read. Release waits for QN collection
+cache ownership and every persisted collection QueryView to disappear before
+reloading. The inspected DataCoord Manifest identities must remain exact across
+the cold load and queries, and the Up View must require those revisions. Together
+these checks establish cold source identity without adding production distribution
+reporting or Manifest reads to resource preparation.
+
+For V2 JSON Stats, each new binding fetches fresh loading metadata. The test
+checks cold QV Up confirmation, exact inspected Stats BuildID/version/files
+remaining unchanged across reload, physical segment presence, and the original
+JSON queries with shredding enabled and synchronous warmup.
+
+StorageV3 index publication advances the segment manifest and retires the
+Finished catalog row. Index propagation checks join DataCoord's actual task
+statistics (including the cold worker and BuildID) with `GetIndexInfos` artifact
+identities. The V3 consumer verifies the old manifest bytes and exact raw-data
+objects remain unchanged, the same segment lineage advances, and the cold read
+uses the new manifest containing the HNSW build.
+
+Collection cipher contexts are shared by `(EZ, collection)` across native
+collection shells, including StreamingNode growing/recovery resources and
+versioned read bindings. Releasing an older binding must not remove the context
+while another shell still needs it. The first shell acquires the required key;
+the last shell releases the context.
+
 ## Object discovery and encryption checks
 
 | File | Responsibility |

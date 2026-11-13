@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
 
 func TestSelectFlushSegmentsDoesNotSubstituteCompactionChildren(t *testing.T) {
@@ -41,6 +42,39 @@ func TestSelectFlushSegmentsDoesNotSubstituteCompactionChildren(t *testing.T) {
 	require.Empty(t, selectFlushSegments([]int64{11}, []*datapb.SegmentInfo{child}))
 	require.Empty(t, selectFlushSegments([]int64{11, 12}, []*datapb.SegmentInfo{original, child}))
 	require.Equal(t, []*datapb.SegmentInfo{original, second}, selectFlushSegments([]int64{11, 12}, []*datapb.SegmentInfo{original, second, child}))
+}
+
+func TestParquetReadSnapshotRequiresPhysicalAndServingIdentity(t *testing.T) {
+	manifest := inspector.ManifestLocatorV3{BasePath: "collection/segment", Version: 7}
+	expected := map[int64]inspector.ManifestLocatorV3{31: manifest}
+	valid := func() v3ReadSnapshot {
+		return v3ReadSnapshot{
+			Loaded:  map[int64][]v3LoadedIdentity{31: {{NodeID: 5}}},
+			Serving: map[int64][]v3ServingIdentity{31: {{NodeID: 5, MinimumManifestVersion: 7}}},
+		}
+	}
+	require.True(t, valid().matches(expected, expected))
+	for _, test := range []struct {
+		name   string
+		change func(*v3ReadSnapshot)
+	}{
+		{"growing", func(s *v3ReadSnapshot) { s.Growing = true }},
+		{"not-serving", func(s *v3ReadSnapshot) { s.Unserviceable = true }},
+		{"missing-physical", func(s *v3ReadSnapshot) { delete(s.Loaded, 31) }},
+		{"missing-route", func(s *v3ReadSnapshot) { delete(s.Serving, 31) }},
+		{"wrong-node", func(s *v3ReadSnapshot) { s.Serving[31][0].NodeID = 6 }},
+		{"wrong-manifest", func(s *v3ReadSnapshot) { s.Serving[31][0].MinimumManifestVersion++ }},
+		{"duplicate-base", func(s *v3ReadSnapshot) { s.Loaded[31] = append(s.Loaded[31], s.Loaded[31][0]) }},
+		{"duplicate-route", func(s *v3ReadSnapshot) { s.Serving[31] = append(s.Serving[31], s.Serving[31][0]) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := valid()
+			test.change(&snapshot)
+			require.False(t, snapshot.matches(expected, expected))
+		})
+	}
+	require.False(t, valid().matches(expected, map[int64]inspector.ManifestLocatorV3{31: {BasePath: manifest.BasePath, Version: 8}}))
+	require.False(t, (v3ReadSnapshot{}).matches(nil, nil))
 }
 
 func TestCompleteVectorIndexMetadataRequiresEveryField(t *testing.T) {

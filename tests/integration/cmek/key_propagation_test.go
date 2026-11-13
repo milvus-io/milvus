@@ -44,14 +44,12 @@ import (
 )
 
 func TestKeyPropagationAnalyzeAndClustering(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, stage := range []string{"analyze", "clustering"} {
 		t.Run(stage, func(t *testing.T) { suite.Run(t, &propagationAnalyzeSuite{faultStage: stage}) })
 	}
 }
 
 func TestKeyPropagationCompaction(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
 		for _, kind := range []datapb.CompactionType{datapb.CompactionType_SortCompaction, datapb.CompactionType_MixCompaction} {
 			for _, fault := range []bool{false, true} {
@@ -64,7 +62,6 @@ func TestKeyPropagationCompaction(t *testing.T) {
 }
 
 func TestKeyPropagationFlush(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
 		for _, fault := range []bool{false, true} {
 			t.Run(fmt.Sprintf("v%d/key_unavailable=%t", version, fault), func(t *testing.T) {
@@ -75,7 +72,6 @@ func TestKeyPropagationFlush(t *testing.T) {
 }
 
 func TestKeyPropagationImport(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, protocol := range []int{2, 3} {
 		for _, source := range []bool{false, true} {
 			for _, target := range []bool{false, true} {
@@ -97,7 +93,6 @@ func TestKeyPropagationImport(t *testing.T) {
 }
 
 func TestKeyPropagationIndex(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
 		for _, kind := range []string{"vector", "scalar", "default"} {
 			if version == 2 && kind == "default" {
@@ -113,7 +108,6 @@ func TestKeyPropagationIndex(t *testing.T) {
 }
 
 func TestKeyPropagationSchema(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, rewrite := range []bool{false, true} {
 		stages := []string{"none", "schema"}
 		if !rewrite {
@@ -126,7 +120,6 @@ func TestKeyPropagationSchema(t *testing.T) {
 }
 
 func TestKeyPropagationJSONStats(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, fault := range []bool{false, true} {
 		t.Run(fmt.Sprintf("key_unavailable=%t", fault), func(t *testing.T) { suite.Run(t, &propagationJSONSuite{fault: fault}) })
 	}
