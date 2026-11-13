@@ -665,6 +665,9 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
 	}
 
 	schema := collectionInfo.Schema
+	if err := meta.CheckRefreshSchema(segment, schema); err != nil {
+		return nil, err
+	}
 	var field *schemapb.FieldSchema
 
 	allFields := typeutil.GetAllFieldSchemas(schema)

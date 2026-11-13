@@ -3113,7 +3113,17 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
 	}
 
-	// Advance the target shards' Transform MVCC before publishing refreshed data.
+	schema, err := s.externalRefreshSchemaManager.PrepareExternalRefreshSchema(ctx, req.GetCollectionId(), req.GetExternalSource(), req.GetExternalSpec())
+	if err != nil {
+		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+	tasks, err := s.externalCollectionRefreshManager.PrepareRefresh(ctx, allocatedJobID, req.GetCollectionId(), req.GetCollectionName(), schema)
+	if err != nil {
+		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+	// The WAL owns this exact prepared plan once Broadcast is submitted. Do not
+	// clean it on a timeout: the durable callback may still be using it.
+
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
 		WithHeader(&message.RefreshExternalCollectionMessageHeader{
 			CollectionId:   req.GetCollectionId(),
@@ -3122,18 +3132,30 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 			ExternalSource: req.GetExternalSource(),
 			ExternalSpec:   req.GetExternalSpec(),
 		}).
-		WithBody(&message.RefreshExternalCollectionMessageBody{}).
+		WithBody(&message.RefreshExternalCollectionMessageBody{Schema: schema, Tasks: tasks}).
 		WithUnreplicable().
 		WithBroadcast(collection.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 
-	if _, err := b.Broadcast(ctx, msg); err != nil {
+	if _, err := b.Broadcast(broadcaster.WithWaitForAcknowledgement(ctx), msg); err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast refresh message", mlog.Err(err))
 		return &datapb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
+	// ACK precedes callback execution. Return only once progress polling can
+	// resolve this job; the callback continues under broadcaster ownership.
+	for {
+		if _, err := s.externalCollectionRefreshManager.GetJobProgress(ctx, allocatedJobID); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(ctx.Err())}, nil
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	mlog.Info(context.TODO(), "refresh external collection job submitted via WAL broadcast", mlog.Int64("jobID", allocatedJobID))
 
 	return &datapb.RefreshExternalCollectionResponse{

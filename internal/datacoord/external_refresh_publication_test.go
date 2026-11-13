@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
@@ -51,6 +52,10 @@ func TestExternalRefreshBroadcastFences(t *testing.T) {
 			return &types.BroadcastAppendResult{}, broadcastErr
 		}).Build()
 		server := &Server{handler: &ServerHandler{}, allocator: &refreshBroadcastAllocator{}, externalCollectionRefreshManager: &externalrefresh.Manager{}}
+		server.SetExternalRefreshSchemaManager(&refreshTestSchemaManager{})
+		mockey.Mock((*refreshTestSchemaManager).PrepareExternalRefreshSchema).Return(&schemapb.CollectionSchema{}, nil).Build()
+		mockey.Mock((*externalrefresh.Manager).PrepareRefresh).Return([]*datapb.ExternalCollectionRefreshTask{}, nil).Build()
+		mockey.Mock((*externalrefresh.Manager).GetJobProgress).Return(&datapb.ExternalCollectionRefreshJob{JobId: 42}, nil).Build()
 		server.ddl = newDDLCallbacks(server)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		request := &datapb.RefreshExternalCollectionRequest{CollectionId: 100}

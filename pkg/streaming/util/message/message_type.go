@@ -147,6 +147,7 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		IsSystem:       true,
 		SelfControlled: true,
 	},
+	MessageTypeRefreshExternalCollection: {ExclusiveRequired: true},
 }
 
 // String implements fmt.Stringer interface.

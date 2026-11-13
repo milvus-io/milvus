@@ -39,6 +39,7 @@ import (
 
 // Deps holds what the DDL ack callbacks read.
 type Deps struct {
+	PublishExternalRefresh           func(context.Context, message.BroadcastResultRefreshExternalCollectionMessageV2) error
 	RefreshDataView                  func(context.Context, int64) (*viewpb.DataVersion, error)
 	Meta                             *meta.Meta
 	ImportMeta                       bulkimport.ImportMeta

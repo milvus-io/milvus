@@ -228,6 +228,8 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleSchemaChangeMessage(message.MustAsImmutableSchemaChangeMessageV2(msg))
 	case message.MessageTypeAlterCollection:
 		m.handleAlterCollectionMessage(ctx, retained)
+	case message.MessageTypeRefreshExternalCollection:
+		m.vchannelView.ObserveRefreshExternalCollectionMessageV2(message.MustAsImmutableRefreshExternalCollectionMessageV2(msg))
 	case message.MessageTypeDropCollection:
 		m.handleDropCollectionMessage(ctx, retained)
 	case message.MessageTypeDropPartition:

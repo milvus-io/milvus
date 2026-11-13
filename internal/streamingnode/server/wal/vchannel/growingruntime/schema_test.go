@@ -58,3 +58,29 @@ func TestRecoveredGrowingSegmentUsesItsOwnSchema(t *testing.T) {
 	require.True(t, proto.Equal(original, segment.collection.Schema()))
 	require.NotSame(t, collection, segment.collection)
 }
+
+func TestRefreshSchemaUpdatesRuntimeAndPreservesPreviousCollection(t *testing.T) {
+	initSegcoreForRuntimeTest(t)
+	schema := mock_segcore.GenTestCollectionSchema("refresh", schemapb.DataType_Int64, false)
+	c, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 1, Schema: schema})
+	require.NoError(t, err)
+	r := newRuntime()
+	r.collection = c
+	r.writeSchema = schema
+	defer r.Close()
+	updated := proto.Clone(schema).(*schemapb.CollectionSchema)
+	updated.Version = 1
+	updated.ExternalSource = "s3://new"
+	updated.ExternalSpec = `{"format":"parquet"}`
+	build := func(target *schemapb.CollectionSchema) message.ImmutableMessage {
+		return message.NewRefreshExternalCollectionMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.RefreshExternalCollectionMessageHeader{CollectionId: 1}).WithBody(&message.RefreshExternalCollectionMessageBody{Schema: target}).MustBuildMutable().WithTimeTick(100).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(100))
+	}
+	require.NoError(t, r.dispatchMessage(t.Context(), build(updated), false, true))
+	require.Zero(t, r.WriteSchemaVersion())
+	require.NoError(t, r.dispatchMessage(t.Context(), build(nil), true, true))
+	require.Zero(t, r.WriteSchemaVersion())
+	require.NoError(t, r.dispatchMessage(t.Context(), build(updated), true, true))
+	require.EqualValues(t, 1, r.WriteSchemaVersion())
+	require.Equal(t, "s3://new", r.writeSchema.ExternalSource)
+	require.Zero(t, schema.Version)
+}

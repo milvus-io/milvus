@@ -35,6 +35,9 @@ import (
 // - Non-retriable errors (collection not found, not external, job already in progress): return nil to avoid blocking WAL
 // - Retriable errors (transient failures): return error to trigger WAL retry
 func (c *Callbacks) RefreshExternalCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultRefreshExternalCollectionMessageV2) error {
+	if result.Message.MustBody().GetSchema() != nil {
+		return c.ExternalCollectionRefreshManager.RunPreparedRefresh(ctx, result, c.PublishExternalRefresh)
+	}
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.FieldCollectionID(header.CollectionId),

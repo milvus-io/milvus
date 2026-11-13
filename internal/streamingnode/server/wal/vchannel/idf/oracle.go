@@ -611,11 +611,11 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 		return nil
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeAlterCollection:
-		altered := message.MustAsImmutableAlterCollectionMessageV2(msg)
-		if messageutil.IsSchemaChange(altered.Header()) {
+	case message.MessageTypeAlterCollection, message.MessageTypeRefreshExternalCollection:
+		schema := messageutil.CollectionSchemaTarget(msg)
+		if schema != nil {
 			r.mu.Lock()
-			r.writeSchema = altered.MustBody().GetUpdates().GetSchema()
+			r.writeSchema = schema
 			r.mu.Unlock()
 		}
 	case message.MessageTypeCreateSegment:

@@ -2055,22 +2055,9 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	})
 }
 
-// TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes
-// pins the one ordering in which the wait can commit segments without ever
-// telling the collection where they came from.
-//
-// A job whose ingest ran past the job timeout enters the wait and times out in
-// the SAME processJob pass: aggregateJobState applies its segments and stamps
-// the marker (the job stays InProgress), tryTimeoutJob then persists Failed and
-// fires onJobFailed, and ensureJobFinishedNotified fires onJobFinished right
-// after. The two callbacks must not share a dedup key, or the Failed one
-// claims it first and the publish is skipped for good - the collection would
-// serve the refreshed segments under the pre-refresh external_source/spec, and
-// nothing re-publishes it: the job is terminal and the key only clears at GC.
-//
-// This drives the REAL manager callbacks through processJob, which is the only
-// place the ordering exists; calling the two methods directly cannot see it.
-func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(t *testing.T) {
+// A legacy job that times out immediately after applying still reclaims its
+// preparation resources. Schema publication belongs to the Refresh callback.
+func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassCleansUp(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
 
@@ -2115,13 +2102,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 		mockey.Mock((*index.IndexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
 
 		cm := &recordingChunkManager{}
-		var published [][2]string
-		mgr := NewExternalCollectionRefreshManager(ctx, mt, &index.IndexMeta{}, newStubScheduler(), &stubAllocator{},
-			refreshMeta, nil, testCollectionGetter(mt),
-			func(_ context.Context, _ int64, source, spec string) error {
-				published = append(published, [2]string{source, spec})
-				return nil
-			}, cm, nil).(*Manager)
+		mgr := NewExternalCollectionRefreshManager(ctx, mt, &index.IndexMeta{}, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, testCollectionGetter(mt), cm, nil).(*Manager)
 
 		// The manager's own callbacks, wired to a stub apply - what is under
 		// test is the callback ordering, not the segment update.
@@ -2137,9 +2118,6 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 			"the pass must have applied the segments before timing the job out")
 		require.Equal(t, indexpb.JobState_JobStateFailed, applied.GetState(),
 			"a job that outruns its budget mid-wait fails like any refresh")
-
-		assert.Equal(t, [][2]string{{"s3://new", `{"format":"parquet","v":2}`}}, published,
-			"segments applied means the refreshed source/spec is owed, whatever state the job ends in")
 
 		prefixes, _ := cm.snapshot()
 		assert.Len(t, prefixes, 1, "the explore temp dir is still reclaimed exactly once")

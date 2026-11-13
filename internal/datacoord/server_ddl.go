@@ -40,6 +40,7 @@ func RegisterDDLCallbacks(s *Server) {
 func newDDLCallbacks(s *Server) *ddl.Callbacks {
 	return &ddl.Callbacks{Deps: ddl.Deps{
 		Meta:                             s.meta,
+		PublishExternalRefresh:           s.publishExternalRefresh,
 		RefreshDataView:                  s.RefreshDataView,
 		ImportMeta:                       s.importMeta,
 		IndexMeta:                        s.indexMeta,
