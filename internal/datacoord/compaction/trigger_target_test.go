@@ -105,6 +105,10 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	require.NoError(t, err)
 	alloc.EXPECT().AllocID(mock.Anything).Return(200, nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(110), nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(201, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(111), nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(202, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(112), nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(120), nil).Once()
 	alloc.EXPECT().AllocN(int64(3)).Return(10_000, 10_003, nil).Once()
 
