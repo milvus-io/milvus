@@ -55,6 +55,9 @@ type PkStatsConfig struct {
 	Capacity              int64
 	BloomFilterType       string
 	MaxBloomFalsePositive float64
+	// UseDeferredBloomFilter lets PkStatsCollector size a BlockedBloomFilter at serialization.
+	// Capacity then only hints the initial hash cache size. It has no effect on BasicBloomFilter.
+	UseDeferredBloomFilter bool
 }
 
 // UnmarshalJSON unmarshal bytes to PrimaryKeyStats
@@ -213,6 +216,11 @@ func (stats *PrimaryKeyStats) UpdateMinMax(pk PrimaryKey) {
 }
 
 func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error) {
+	return NewPrimaryKeyStatsWithConfig(fieldID, pkType, DefaultPkStatsConfig(rowNum))
+}
+
+// DefaultPkStatsConfig returns the PkStatsConfig built from paramtable for rowNum rows.
+func DefaultPkStatsConfig(rowNum int64) PkStatsConfig {
 	config := PkStatsConfig{
 		Capacity:              rowNum,
 		BloomFilterType:       paramtable.Get().CommonCfg.BloomFilterType.GetValue(),
@@ -227,10 +235,19 @@ func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error)
 			mlog.String("type", config.BloomFilterType))
 		config.BloomFilterType = bloomfilter.BlockBFName
 	}
-	return NewPrimaryKeyStatsWithConfig(fieldID, pkType, config)
+	return config
 }
 
 func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
+	stats, err := newPrimaryKeyStatsMetadata(fieldID, pkType, config)
+	if err != nil {
+		return nil, err
+	}
+	stats.BF = bloomfilter.NewBloomFilterWithType(uint(config.Capacity), config.MaxBloomFalsePositive, config.BloomFilterType)
+	return stats, nil
+}
+
+func newPrimaryKeyStatsMetadata(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
 	if config.Capacity <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num %d", config.Capacity)
 	}
@@ -245,10 +262,6 @@ func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (
 		FieldID: fieldID,
 		PkType:  pkType,
 		BFType:  bfType,
-		BF: bloomfilter.NewBloomFilterWithType(
-			uint(config.Capacity),
-			config.MaxBloomFalsePositive,
-			config.BloomFilterType),
 	}, nil
 }
 

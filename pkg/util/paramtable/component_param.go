@@ -8902,14 +8902,15 @@ type dataNodeConfig struct {
 	ImportCopyObjectTimeout         ParamItem `refreshable:"true"`
 
 	// Compaction
-	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
-	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
-	UseMergeSort             ParamItem `refreshable:"true"`
-	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
-	MaxCompactionConcurrency ParamItem `refreshable:"true"`
-	SortReadConcurrency      ParamItem `refreshable:"true"`
-	SortReadBufferSize       ParamItem `refreshable:"true"`
-	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
+	L0BatchMemoryRatio        ParamItem `refreshable:"true"`
+	L0CompactionMaxBatchSize  ParamItem `refreshable:"true"`
+	UseMergeSort              ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort       ParamItem `refreshable:"true"`
+	MaxCompactionConcurrency  ParamItem `refreshable:"true"`
+	SortReadConcurrency       ParamItem `refreshable:"true"`
+	SortReadBufferSize        ParamItem `refreshable:"true"`
+	LOBHoleRatioThreshold     ParamItem `refreshable:"true"`
+	EnableDeferredBloomFilter ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
 	TextInlineThreshold     ParamItem `refreshable:"true"`
@@ -9342,6 +9343,15 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       true,
 	}
 	p.LOBHoleRatioThreshold.Init(base.mgr)
+
+	p.EnableDeferredBloomFilter = ParamItem{
+		Key:          "dataNode.compaction.enableDeferredBloomFilter",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable deferred Bloom filter sizing for mix compactions estimated to produce multiple output segments. Read by DataCoord and passed to DataNode in the compaction plan. Single-output estimates use the existing path.",
+		Export:       true,
+	}
+	p.EnableDeferredBloomFilter.Init(base.mgr)
 
 	p.TextInlineThreshold = ParamItem{
 		Key:          "dataNode.text.inlineThreshold",
