@@ -29,10 +29,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -283,6 +286,121 @@ func TestCreateOptimizeConflictPrecedesCurrentSizeMinimum(t *testing.T) {
 		require.Zero(t, response.GetTargetId())
 	}
 	require.Len(t, persisted, 1)
+}
+
+func TestCreateOptimizePersistsOneSizeForEmptyScopeAndLateGroups(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	const mib = 1024 * 1024
+	const targetID int64 = 101
+	params := &Params.DataCoordCfg
+	require.NoError(t, Params.Save(params.SegmentMaxSize.Key, "1"))
+	t.Cleanup(func() { Params.Reset(params.SegmentMaxSize.Key) })
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(targetID, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(100, nil).Once()
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t)
+	s, resource := newTargetRPCServer(t, catalog, alloc)
+	collectionBroker := broker.NewMockBroker(t)
+	collectionBroker.EXPECT().DescribeCollectionInternal(mock.Anything, resource.GetCollectionId()).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: resource.GetCollectionId(), UpdateTimestamp: resource.GetRevision(),
+		Schema: &schemapb.CollectionSchema{Name: resource.GetCollectionName()},
+	}, nil).Once()
+	s.broker = collectionBroker
+	topology := view.NewMockCollectionTopologyQuerier(t)
+	topology.EXPECT().GetCollectionTopology(mock.Anything, int64(1)).Return(&view.CollectionTopology{CollectionID: 1}, nil).Once()
+	s.compactionTargetTopology = topology
+	response, err := s.CreateCompactionTarget(ctx, &datapb.CreateCompactionTargetRequest{
+		Collection: resource,
+		Target:     &datapb.CreateCompactionTargetRequest_InputTargetSizeBytes{InputTargetSizeBytes: 3 * mib},
+	})
+	require.NoError(t, merr.CheckRPCCall(response, err))
+	require.Equal(t, targetID, response.GetTargetId())
+	require.Equal(t, int64(3*mib), response.GetOptimize().GetInputTargetSizeBytes())
+	require.Equal(t, int64(mib), response.GetOptimize().GetActualTargetSizeBytes())
+	require.Zero(t, response.GetTotalRows())
+
+	require.NoError(t, Params.Save(params.SegmentMaxSize.Key, "8"))
+	s.compactionTargetMeta, err = targets.NewCompactionTargetMeta(ctx, catalog)
+	require.NoError(t, err)
+	// 0.95E and 1.05E are inclusive even though E is not a multiple of 20.
+	for _, fact := range []struct{ id, group, size, rows int64 }{
+		{11, 1, mib - mib/20, 10},
+		{12, 1, mib + mib/20, 20},
+		{13, 2, mib - mib/20 - 1, 7},
+		{14, 3, mib + mib/20 + 1, 9},
+	} {
+		s.meta.Segments.SetSegment(fact.id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: fact.id, CollectionID: 1, PartitionID: fact.group, InsertChannel: "ch",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: fact.rows,
+			Stats: &datapb.Statistics{InsertBinlogSize: fact.size, TimestampFrom: 90},
+		}))
+	}
+	described, err := s.DescribeCompactionTarget(ctx, &datapb.DescribeCompactionTargetRequest{Collection: resource, TargetId: targetID})
+	require.NoError(t, merr.CheckRPCCall(described, err))
+	require.True(t, proto.Equal(response.GetOptimize(), described.GetTarget().GetOptimize()))
+	require.Equal(t, int64(16), described.GetTarget().GetRemainingRows())
+	require.NotNil(t, described.GetTarget().TotalRows)
+	require.Zero(t, described.GetTarget().GetTotalRows())
+	stopped, err := s.DropCompactionTarget(ctx, &datapb.DropCompactionTargetRequest{Collection: resource, TargetId: targetID})
+	require.NoError(t, merr.CheckRPCCall(stopped, err))
+	require.Equal(t, targets.StopOperatorDropped, persisted[targetID].GetStopReason())
+}
+
+func TestStandingSizeReadUsesCurrentParameters(t *testing.T) {
+	enableTestCompactionTargets(t)
+	ctx := t.Context()
+	cfg := &Params.DataCoordCfg
+	for _, setting := range []struct{ key, value string }{
+		{cfg.SegmentMaxSize.Key, "1"},
+		{cfg.DiskSegmentMaxSize.Key, "2"},
+		{cfg.MaxFragmentsPerGroup.Key, "8"},
+	} {
+		require.NoError(t, Params.Save(setting.key, setting.value))
+		t.Cleanup(func() { Params.Reset(setting.key) })
+	}
+	const targetID int64 = 105
+	catalog, persisted := targets.NewCompactionTargetTestCatalog(t, &datapb.CompactionTarget{
+		TargetID: targetID, Intent: datapb.TargetIntent_INTENT_SIZE, ActivatedAtTS: 50, TailLimit: -1,
+	})
+	s, _ := newTargetRPCServer(t, catalog, nil)
+	list, err := s.ListCompactionTargets(ctx, &datapb.ListCompactionTargetsRequest{IncludeSystem: true})
+	require.NoError(t, merr.CheckRPCCall(list, err))
+	require.Len(t, list.GetTargets(), 1)
+	listed := list.GetTargets()[0]
+	require.Equal(t, targetID, listed.GetTargetId())
+	require.NotNil(t, listed.Enabled)
+	require.False(t, listed.GetEnabled())
+	require.Equal(t, map[string]string{
+		"max_size_bytes": "1048576", "disk_max_size_bytes": "2097152", "max_fragments_per_group": "8", "planner": "two_tier",
+	}, listed.GetParameters())
+	require.Nil(t, listed.RemainingRows)
+	require.NoError(t, Params.Save(cfg.EnableAutoCompaction.Key, "true"))
+	// 85% of 1 MiB truncated to a byte. At equality a segment is full.
+	for _, fact := range []struct{ id, size int64 }{{10, 891_288}, {11, 891_289}} {
+		s.meta.Segments.SetSegment(fact.id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: fact.id, CollectionID: 1, PartitionID: 1, InsertChannel: "ch", State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L1, NumOfRows: 1, IsImporting: fact.id == 10,
+			Stats: &datapb.Statistics{InsertBinlogSize: fact.size},
+		}))
+	}
+	request := &datapb.DescribeCompactionTargetRequest{Collection: &datapb.CompactionTargetResource{}, TargetId: targetID}
+	described, err := s.DescribeCompactionTarget(ctx, request)
+	require.NoError(t, merr.CheckRPCCall(described, err))
+	require.True(t, described.GetTarget().GetEnabled())
+	require.NotNil(t, described.GetTarget().RemainingRows)
+	require.Equal(t, int64(1), described.GetTarget().GetRemainingRows())
+
+	require.NoError(t, Params.Save(cfg.SegmentMaxSize.Key, "invalid"))
+	described, err = s.DescribeCompactionTarget(ctx, request)
+	require.NoError(t, merr.CheckRPCCall(described, err))
+	require.Equal(t, targetID, described.GetTarget().GetTargetId())
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, described.GetTarget().GetState())
+	require.NotContains(t, described.GetTarget().GetParameters(), "max_size_bytes")
+	require.Equal(t, "2097152", described.GetTarget().GetParameters()["disk_max_size_bytes"])
+	require.Nil(t, described.GetTarget().RemainingRows)
+	require.Zero(t, described.GetTarget().GetCheckedAt())
+	require.Nil(t, persisted[targetID].Enabled)
 }
 
 func TestCompactionTargetCreateConfirmsCandidateAfterWriteTimeout(t *testing.T) {

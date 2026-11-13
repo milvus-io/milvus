@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -34,10 +35,15 @@ type CompactionTargetReconciler struct {
 	allocator            allocator.Allocator
 	collectionAvailable  func(context.Context, int64) (bool, error)
 	versionManager       index.IndexEngineVersionManager
+	taskMeta             *task.CompactionTaskMeta
 }
 
 func (reconciler *CompactionTargetReconciler) SetIndexVersionManager(manager index.IndexEngineVersionManager) {
 	reconciler.versionManager = manager
+}
+
+func (reconciler *CompactionTargetReconciler) SetTaskMeta(tasks *task.CompactionTaskMeta) {
+	reconciler.taskMeta = tasks
 }
 
 func NewCompactionTargetReconciler(mt *meta.Meta, indexMeta *index.IndexMeta, compactionTargetMeta *CompactionTargetMeta, handler meta.Handler, alloc allocator.Allocator, collectionAvailable func(context.Context, int64) (bool, error)) *CompactionTargetReconciler {
@@ -70,8 +76,20 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	standingRewrites := reconciler.selectableStorageRewrites(ctx, auto, segments)
 	manager := reconciler.CompactionTargetMeta
 	manager.refreshUnconfirmedCreates(ctx)
+	var size SizeCondition
+	var sizeErr error
+	if _, err := manager.SyncSize(ctx, reconciler.allocator); err != nil {
+		sizeErr = err
+	} else {
+		size, sizeErr = readSizeCondition(auto)
+	}
+	if sizeErr != nil {
+		mlog.RatedWarn(ctx, rate.Limit(1), "could not synchronize Standing SIZE compaction target", mlog.Err(sizeErr))
+		size.Enabled = false
+	}
 	records := manager.GetActiveCompactionTargets()
 	matches := make(map[int64]*meta.SegmentInfo)
+	optimizeInputs := make(map[int64]optimizeInput)
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -82,6 +100,10 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 				mlog.FieldCollectionID(record.GetCollectionID()), mlog.Err(err))
 		}
 		if !available || err != nil {
+			continue
+		}
+		if IsOptimize(record) {
+			reconciler.observeOptimize(ctx, record, optimizeInputs)
 			continue
 		}
 		observation, err := ObserveRewrite(ctx, reconciler.meta, record, false)
@@ -137,9 +159,8 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		}
 		return compareSegment(a, b)
 	})
-	slices.SortFunc(rewriteSelectable, compareSegment)
-	events[policy.TriggerTypeSort] = targetViews(sortSelectable, eligible, true)
-	events[policy.TriggerTypeSingle] = targetViews(rewriteSelectable, eligible, false)
+	events[policy.TriggerTypeSort] = sortViews(sortSelectable, eligible)
+	events[policy.TriggerTypeSingle] = reconciler.mixViews(ctx, rewriteSelectable, optimizeInputs, allocated, eligible, size, segments)
 	return events, ctx.Err()
 }
 
@@ -202,7 +223,7 @@ func (reconciler *CompactionTargetReconciler) selectable(
 	return !facts.blocked && segment.GetNumOfRows() >= 0 && policy.IsSharedCompactionSelectable(reconciler.meta, segment)
 }
 
-func targetViews(segments []*meta.SegmentInfo, collections map[int64]collectionPlanningFacts, sorting bool) []view.TargetView {
+func sortViews(segments []*meta.SegmentInfo, collections map[int64]collectionPlanningFacts) []view.TargetView {
 	groups := make(map[view.CompactionGroupLabel]*view.RewriteInputs)
 	var order []view.CompactionGroupLabel
 	for _, segment := range segments {
@@ -222,11 +243,7 @@ func targetViews(segments []*meta.SegmentInfo, collections map[int64]collectionP
 	views := make([]view.TargetView, 0, len(order))
 	for _, label := range order {
 		pool := groups[label]
-		if sorting {
-			views = append(views, &view.SortView{RewriteInputs: *pool})
-		} else {
-			views = append(views, &view.RewriteView{RewriteInputs: *pool})
-		}
+		views = append(views, &view.SortView{RewriteInputs: *pool})
 	}
 	return views
 }
@@ -263,7 +280,7 @@ func (reconciler *CompactionTargetReconciler) SelectSort(ctx context.Context, se
 	if !policy.MatchesSortCompaction(segment) || !reconciler.selectable(ctx, segment, collections) {
 		return nil, nil
 	}
-	return targetViews([]*meta.SegmentInfo{segment}, collections, true)[0], nil
+	return sortViews([]*meta.SegmentInfo{segment}, collections)[0], nil
 }
 
 func (reconciler *CompactionTargetReconciler) finishRewrite(ctx context.Context, record *datapb.CompactionTarget, observation *RewriteObservation) error {

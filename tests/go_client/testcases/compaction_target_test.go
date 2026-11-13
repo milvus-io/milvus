@@ -19,6 +19,7 @@ package testcases
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -183,4 +184,99 @@ func TestCompactionTargetClosesWhenCollectionIsDropped(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, after.GetStoppedAt(), retained.GetStoppedAt())
 	require.Equal(t, "scope_dropped", retained.GetStopReason())
+}
+
+func TestCompactionTargetOptimize(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	_, err := mc.ListCompactionTargets(ctx, client.NewListCompactionTargetsOption())
+	if client.ErrorCode(err) == 3000 && strings.Contains(err.Error(), "target-based compaction is disabled") {
+		t.Skip("requires target-based compaction")
+	}
+	require.NoError(t, err)
+
+	name := common.GenRandomString("tbc_optimize", 8)
+	const dim = 4
+	schema := entity.NewSchema().WithName(name).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(dim))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).WithShardNum(1).
+		WithIndexOptions(client.NewCreateIndexOption(name, "vector", index.NewFlatIndex(entity.L2))).
+		WithProperty("collection.autocompaction.enabled", false)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(name)))
+	})
+
+	const rowsPerInput = 1_024
+	for batch := 0; batch < 2; batch++ {
+		ids := make([]int64, rowsPerInput)
+		vectors := make([][]float32, rowsPerInput)
+		for i := range ids {
+			ids[i] = int64(batch*rowsPerInput + i)
+			vectors[i] = []float32{float32(ids[i]), 1, 0, 1}
+		}
+		inserted, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name).WithInt64Column("id", ids).
+			WithFloatVectorColumn("vector", dim, vectors))
+		require.NoError(t, err)
+		require.EqualValues(t, rowsPerInput, inserted.InsertCount)
+		flush, err := mc.Flush(ctx, client.NewFlushOption(name))
+		require.NoError(t, err)
+		require.NoError(t, flush.Await(ctx))
+	}
+
+	var inputs []int64
+	require.Eventually(t, func() bool {
+		response, err := mc.GetService().GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{CollectionName: name})
+		if err != nil || response.GetStatus() == nil || response.GetStatus().GetCode() != 0 {
+			return false
+		}
+		inputs = inputs[:0]
+		for _, segment := range response.GetInfos() {
+			if segment.GetIsSorted() && segment.GetNumRows() == rowsPerInput {
+				inputs = append(inputs, segment.GetSegmentID())
+			}
+		}
+		return len(inputs) == 2
+	}, time.Minute, time.Second)
+
+	const snapshot = "protect_optimize_inputs"
+	protection, err := mc.GetService().CreateSnapshot(ctx, &milvuspb.CreateSnapshotRequest{
+		Name: snapshot, CollectionName: name, CompactionProtectionSeconds: 60,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, protection)
+	require.Zero(t, protection.GetCode(), protection.GetReason())
+
+	const requestedBytes = 1 << 30
+	created, err := mc.CreateCompactionTarget(ctx, client.NewOptimizeCompactionTargetOption(name, requestedBytes))
+	require.NoError(t, err)
+	require.Positive(t, created.GetTargetId())
+	require.EqualValues(t, 2*rowsPerInput, created.GetTotalRows())
+	require.EqualValues(t, requestedBytes, created.GetOptimize().GetInputTargetSizeBytes())
+	actualBytes := created.GetOptimize().GetActualTargetSizeBytes()
+	require.Positive(t, actualBytes)
+
+	_, err = mc.CreateCompactionTarget(ctx, client.NewOptimizeCompactionTargetOption(name, 1))
+	require.EqualValues(t, 2302, client.ErrorCode(err), "%v", err)
+	require.ErrorContains(t, err, strconv.FormatInt(created.GetTargetId(), 10))
+	before, err := mc.DescribeCompactionTarget(ctx, created.GetTargetId())
+	require.NoError(t, err)
+	require.Equal(t, milvuspb.CompactionTargetState_COMPACTION_TARGET_STATE_ACTIVE, before.GetState())
+	require.EqualValues(t, 2*rowsPerInput, before.GetRemainingRows())
+	require.Equal(t, actualBytes, before.GetOptimize().GetActualTargetSizeBytes())
+
+	require.NoError(t, mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshot, name)))
+	done, err := mc.WaitForCompactionTarget(ctx, created.GetTargetId(), time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "satisfied", done.GetStopReason())
+	require.Equal(t, actualBytes, done.GetOptimize().GetActualTargetSizeBytes())
+	segments, err := mc.GetService().GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{CollectionName: name})
+	require.NoError(t, err)
+	require.NotNil(t, segments.GetStatus())
+	require.Zero(t, segments.GetStatus().GetCode())
+	require.Len(t, segments.GetInfos(), 1)
+	require.ElementsMatch(t, inputs, segments.GetInfos()[0].GetCompactionFrom())
+	require.EqualValues(t, 2*rowsPerInput, segments.GetInfos()[0].GetNumRows())
 }

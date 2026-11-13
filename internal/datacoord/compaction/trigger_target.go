@@ -145,7 +145,9 @@ func (m *CompactionTriggerManager) SubmitTBC(ctx context.Context, plan *datapb.C
 	task.PreAllocatedSegmentIDs = block.segmentIDRange()
 	task.State = datapb.CompactionTaskState_pipelining
 	task.LastStateStartTime = time.Now().Unix()
-	return m.inspector.EnqueueCompaction(ctx, task, AdmissionOptions{Producer: ProducerTBC})
+	options := AdmissionOptions{Producer: ProducerTBC, SizeCompaction: task.GetSizeCompactionHint()}
+	task.SizeCompactionHint = false
+	return m.inspector.EnqueueCompaction(ctx, task, options)
 }
 
 type (

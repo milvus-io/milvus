@@ -35,6 +35,14 @@ import (
 // accepted tasks enters the queue separately from new work.
 var ErrAdmissionLimited = errors.New("compaction task admission limited")
 
+// This marker separates the public Clustering rejection from ordinary input races.
+var errClusteringOverlapsOptimize = errors.New("clustering overlaps an OPTIMIZE target")
+
+func clusteringOverlapsOptimize(targetID int64) error {
+	return merr.Mark(merr.Wrapf(merr.ErrCompactionPlanConflict,
+		"Clustering overlaps OPTIMIZE target %d; this Clustering work was not admitted", targetID), errClusteringOverlapsOptimize)
+}
+
 type (
 	Producer         = meta.CompactionProducer
 	AdmissionOptions = meta.CompactionAdmissionOptions

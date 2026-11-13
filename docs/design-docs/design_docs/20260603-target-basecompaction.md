@@ -62,6 +62,25 @@ segment ID preserve its previous timestamp. Explicit roots follow retained
 compaction lineage as the original segments are replaced. Each observation
 deduplicates current matching segments.
 
+Manual OPTIMIZE takes a positive byte size and persists both the requested
+and actual sizes. Create uses the existing Force Merge calculation once.
+Each physical group uses the saved actual size, including groups that first
+flush while the Target is active. The group satisfies OPTIMIZE when every
+segment is within 5% of the actual size, with room for one smaller tail.
+DataCoord rechecks the published sizes and relevant in-flight work before
+persisting satisfaction.
+
+An active OPTIMIZE excludes new overlapping SIZE and Clustering work.
+Admission checks current segment facts under the collection admission lock.
+The catalog writes the Target and the collection's active OPTIMIZE slot in
+one transaction, allowing one active OPTIMIZE per collection.
+
+Standing SIZE keeps one cluster-wide ID. Describe, List and reconciliation
+derive its settings from the current configuration. The reconciler uses the
+existing TwoTier full and fragment grouping with the normal and disk size
+profiles. Eligible segments that need a rewrite can share a size package.
+Remaining independent rewrites can run individually.
+
 Storage Version and Storage Format keep separate cluster-wide Targets.
 Version compares the published segment storage version. Format reads the
 insert-group formats of the published V3 manifest revision through the

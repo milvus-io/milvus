@@ -802,7 +802,9 @@ func (s *Server) initCompaction() error {
 	if s.compactionTargetMeta != nil {
 		s.compactionTargetTopology = view.NewMetricsNodeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	}
-	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	trigger := compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	trigger.SetStandingSize(s.targetCompactionEnabled)
+	s.compactionTrigger = trigger
 	return nil
 }
 

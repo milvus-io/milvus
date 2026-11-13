@@ -1868,6 +1868,8 @@ message CompactionTask{
   CompactionTaskState terminal_state = 31;
   // Planning-time estimate used to allocate output IDs. Cleared before save.
   int64 output_segment_count_hint = 32;
+  // Planning-time marker for checking SIZE against a newly active OPTIMIZE.
+  bool size_compaction_hint = 33;
 }
 
 message PartitionStatsInfo {

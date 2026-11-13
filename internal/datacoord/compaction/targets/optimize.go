@@ -107,8 +107,8 @@ type OptimizeObservation struct {
 const optimizeTailLimit = 1
 
 func NewOptimizeRecord(
-	ctx context.Context, alloc allocator.Allocator, mt *meta.Meta, collection *meta.CollectionInfo,
-	topologyQuerier view.CollectionTopologyQuerier, inputSize, minimumSize int64,
+	ctx context.Context, alloc allocator.Allocator, mt *meta.Meta, topologyQuerier view.CollectionTopologyQuerier,
+	collectionID int64, shards int, inputSize, minimumSize int64,
 ) (*datapb.CompactionTarget, error) {
 	if minimumSize <= 0 {
 		return nil, merr.WrapErrServiceUnavailableMsg("the minimum OPTIMIZE size is unavailable")
@@ -116,7 +116,7 @@ func NewOptimizeRecord(
 	if inputSize < minimumSize {
 		return nil, merr.WrapErrParameterInvalidMsg("input_target_size_bytes %d must be at least %d bytes", inputSize, minimumSize)
 	}
-	record, err := newFiniteRecord(ctx, alloc, collection.ID)
+	record, err := newFiniteRecord(ctx, alloc, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func NewOptimizeRecord(
 	if topologyQuerier == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("OPTIMIZE topology is initializing")
 	}
-	topology, err := topologyQuerier.GetCollectionTopology(ctx, collection.ID)
+	topology, err := topologyQuerier.GetCollectionTopology(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func NewOptimizeRecord(
 		return nil, merr.WrapErrServiceUnavailableMsg("OPTIMIZE topology is unavailable")
 	}
 	snapshot := *topology
-	snapshot.NumShards = len(collection.VChannelNames)
+	snapshot.NumShards = shards
 	actualSize := view.CalculateForceMergeTargetSize(ctx, &snapshot, minimumSize, inputSize, insertBytes)
 	record.Optimize = &datapb.CompactionTargetOptimize{
 		InputTargetSizeBytes: inputSize, ActualTargetSizeBytes: actualSize,

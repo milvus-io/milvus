@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"testing"
 
+	prometheusdto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -39,6 +40,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	rootcatalog "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -109,6 +111,8 @@ func TestStandingSortPublishesRewriteCreditAtSharedCapacity(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(111), nil).Once()
 	alloc.EXPECT().AllocID(mock.Anything).Return(202, nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(112), nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(203, nil).Once()
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(113), nil).Once()
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(120), nil).Once()
 	alloc.EXPECT().AllocN(int64(3)).Return(10_000, 10_003, nil).Once()
 
@@ -199,4 +203,109 @@ func TestTargetSubmissionRotatesIndependentPlansAfterFailure(t *testing.T) {
 		}).Times(5)
 	manager.submitTargetViews(t.Context(), views)
 	require.Equal(t, []int64{11, 21, 14, 22, 13}, attempted)
+}
+
+func TestStandingSizeAdmitsOneCompletePackageAcrossGroups(t *testing.T) {
+	const mib = 1024 * 1024
+	params := paramtable.Get()
+	cfg := &params.DataCoordCfg
+	for _, setting := range []struct{ key, value string }{
+		{cfg.EnableAutoCompaction.Key, "true"},
+		{cfg.SegmentMaxSize.Key, "1"}, {cfg.MaxFragmentsPerGroup.Key, "8"},
+		{cfg.IndexBasedCompaction.Key, "false"}, {cfg.CompactionRateLimitTokens.Key, "1"},
+		{cfg.CompactionRateLimitInterval.Key, "3600"}, {cfg.CompactionPreAllocateIDExpansionFactor.Key, "1"},
+		{cfg.TwoTierCompaction.Key, "false"},
+	} {
+		require.NoError(t, params.Save(setting.key, setting.value))
+		t.Cleanup(func() { params.Reset(setting.key) })
+	}
+	sortConfig := &cfg.EnableSortCompaction
+	previousSort := sortConfig.SwapTempValue("false")
+	t.Cleanup(func() { sortConfig.SwapTempValue(previousSort) })
+	ctx := t.Context()
+	config := embed.NewConfig()
+	config.Dir, config.LogLevel = t.TempDir(), "error"
+	addr := url.URL{Scheme: "http", Host: "127.0.0.1:0"}
+	config.ListenClientUrls, config.AdvertiseClientUrls = []url.URL{addr}, []url.URL{addr}
+	config.ListenPeerUrls, config.AdvertisePeerUrls = []url.URL{addr}, []url.URL{addr}
+	config.InitialCluster = config.InitialClusterFromName(config.Name)
+	backend, err := etcdkv.NewEmbededEtcdKV(config, "test")
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	catalog := kvdatacoord.NewCatalog(backend, "", "")
+	taskMeta, err := ctask.NewCompactionTaskMeta(ctx, catalog)
+	require.NoError(t, err)
+	targetMeta, err := targets.NewCompactionTargetMeta(ctx, catalog)
+	require.NoError(t, err)
+	segmentMeta := meta.NewTestMetaForCompactionTargets()
+	segmentMeta.Catalog, segmentMeta.Ctx = catalog, ctx
+	segmentMeta.AddCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+		Version: 1, Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_FloatVector}},
+	}})
+	add := func(id, part, residual int64, level datapb.SegmentLevel) {
+		stats := &datapb.Statistics{InsertBinlogSize: residual, TimestampFrom: 99}
+		insertLogs := meta.GetFieldBinlogIDs(0, 10*id)
+		insertLogs.Binlogs[0].EntriesNum = 10
+		segmentMeta.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: part, InsertChannel: "ch", Level: level,
+			State: commonpb.SegmentState_Flushed, IsSorted: true, NumOfRows: 10, Stats: stats,
+			Binlogs:   []*datapb.FieldBinlog{insertLogs},
+			Statslogs: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(0, 10*id+1)},
+		}))
+	}
+	for _, id := range []int64{100, 101, 102, 103} {
+		add(id, 1+(id-100)/2, 480_000, datapb.SegmentLevel_L1)
+	}
+	add(104, 3, 475_000, datapb.SegmentLevel_L1) // isolated tail
+	add(105, 3, 475_000, datapb.SegmentLevel_L2) // cannot fill that tail
+	for i := int64(0); i < 16; i++ {
+		add(106+i, 4+i/8, 25_000, datapb.SegmentLevel_L1)
+	}
+	// Groups 4 and 5 have exactly eight fragments. Put the extra fragment
+	// into group 5, leaving the others at their original boundary.
+	add(122, 5, 25_000, datapb.SegmentLevel_L1)
+	alloc := meta.NewMockAllocator(t)
+	handler := meta.NewMockHandlerWithMeta(segmentMeta)
+	inspector := NewCompactionInspector(segmentMeta, taskMeta, &index.IndexMeta{}, nil, nil, nil, alloc, handler, nil, nil, index.NewTestVersionManager())
+	inspector.SetCompactionTargetMeta(targetMeta)
+	require.NoError(t, inspector.InitAdmission())
+	triggers := NewCompactionTriggerManager(alloc, handler, inspector, segmentMeta, &index.IndexMeta{}, taskMeta, nil, index.NewTestVersionManager())
+	triggers.SetCompactionTargetMeta(targetMeta, func(_ context.Context, id int64) (bool, error) {
+		return segmentMeta.GetCollection(id) != nil, nil
+	})
+	planned := metrics.DataCoordCompactionAdmission.WithLabelValues(ProducerTBC.String(), admissionTaskType(datapb.CompactionType_MixCompaction), "plan", "")
+	var before prometheusdto.Metric
+	require.NoError(t, planned.Write(&before))
+	triggers.handleTicker(ctx, TargetTicker)
+	var after prometheusdto.Metric
+	require.NoError(t, planned.Write(&after))
+	require.Equal(t, float64(3), after.GetCounter().GetValue()-before.GetCounter().GetValue())
+	stored, err := catalog.ListCompactionTask(ctx)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	task := stored[0]
+	require.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+	require.Equal(t, []int64{100, 101}, task.GetInputSegments())
+	require.Equal(t, int64(mib), task.GetMaxSize())
+	require.Equal(t, int64(1), task.GetPreAllocatedSegmentIDs().GetEnd()-task.GetPreAllocatedSegmentIDs().GetBegin())
+	require.False(t, segmentMeta.IsSegmentCompacting(102))
+	insertLogs := meta.GetFieldBinlogIDs(0, 10_000)
+	insertLogs.Binlogs[0].EntriesNum = 20
+	output, _, err := segmentMeta.CompleteCompactionMutation(ctx, task, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+		SegmentID: task.GetPreAllocatedSegmentIDs().GetBegin(), NumOfRows: 20, IsSorted: true,
+		Stats:               &datapb.Statistics{InsertBinlogSize: 960_000, TimestampFrom: 99},
+		InsertLogs:          []*datapb.FieldBinlog{insertLogs},
+		Field2StatslogPaths: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(0, 10_001)},
+	}}})
+	require.NoError(t, err)
+	require.Len(t, output, 1)
+	require.Equal(t, []int64{100, 101}, output[0].GetCompactionFrom())
+	require.Equal(t, int64(960_000), output[0].GetResidualSegmentSize())
+	for _, record := range targetMeta.GetCompactionTargets() {
+		if targets.IsStandingSize(record) {
+			require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
+			return
+		}
+	}
+	t.Fatal("missing Standing SIZE target")
 }

@@ -545,6 +545,11 @@ func (c *Inspector) EnqueueCompaction(ctx context.Context, task *datapb.Compacti
 	}
 	if c.compactionTargetMeta != nil {
 		defer c.compactionTargetMeta.LockCollectionAdmission(task.GetCollectionID())()
+		if task.GetType() == datapb.CompactionType_ClusteringCompaction || options.SizeCompaction {
+			if err := c.validateSizeAndClusteringAdmission(ctx, task, options.SizeCompaction); err != nil {
+				return err
+			}
+		}
 	}
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task); err != nil {
 		return err
@@ -597,6 +602,23 @@ func (c *Inspector) EnqueueCompaction(ctx context.Context, task *datapb.Compacti
 	queued = true
 	metrics.DataCoordCompactionAdmission.WithLabelValues(options.Producer.String(), admissionTaskType(task.GetType()), "enqueue", "").Inc()
 	log.Info(ctx, "Compaction plan submitted")
+	return nil
+}
+
+func (c *Inspector) validateSizeAndClusteringAdmission(ctx context.Context, task *datapb.CompactionTask, sizeCompaction bool) error {
+	record, _, err := c.compactionTargetMeta.ActiveOptimize(ctx, task.GetCollectionID())
+	if err != nil || record == nil {
+		return err
+	}
+	for _, segment := range c.meta.GetSegmentInfos(task.GetInputSegments()) {
+		if !targets.OptimizeScopeContains(record, segment) {
+			continue
+		}
+		if sizeCompaction {
+			return merr.Wrapf(merr.ErrCompactionPlanConflict, "SIZE overlaps OPTIMIZE target %d", record.GetTargetID())
+		}
+		return clusteringOverlapsOptimize(record.GetTargetID())
+	}
 	return nil
 }
 

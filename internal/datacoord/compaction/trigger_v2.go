@@ -18,12 +18,12 @@ package compaction
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
@@ -78,6 +78,7 @@ type CompactionTriggerManager struct {
 	meta           *meta.Meta
 	indexMeta      *index.IndexMeta
 	versionManager index.IndexEngineVersionManager
+	taskMeta       *ctask.CompactionTaskMeta
 
 	policies map[TickerType]policy.CompactionPolicy
 
@@ -104,6 +105,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler meta.Handler
 		meta:           mt,
 		indexMeta:      indexMeta,
 		versionManager: versionManager,
+		taskMeta:       compactionTaskMeta,
 
 		policies: make(map[TickerType]policy.CompactionPolicy),
 	}
@@ -131,6 +133,7 @@ func (m *CompactionTriggerManager) SetCompactionTargetMeta(targetMeta *targets.C
 		m.singlePolicy.StandingSort = true
 		m.targetReconciler = targets.NewCompactionTargetReconciler(m.meta, m.indexMeta, targetMeta, m.handler, m.allocator, collectionAvailable)
 		m.targetReconciler.SetIndexVersionManager(m.versionManager)
+		m.targetReconciler.SetTaskMeta(m.taskMeta)
 	}
 }
 
@@ -292,17 +295,43 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 		events[policy.TriggerTypeLevelZeroViewManual] = views
 	} else if isClustering {
 		views, triggerID, err = m.clusteringPolicy.TriggerOneCollection(ctx, collectionID, true)
+		if err == nil && m.targetReconciler != nil {
+			if err := m.checkManualClusteringScope(ctx, collectionID, views); err != nil {
+				return 0, err
+			}
+		}
 		events[policy.TriggerTypeClustering] = views
 	}
 	if err != nil {
 		return 0, err
 	}
 	for triggerType, views := range events {
-		if m.notify(ctx, triggerType, views) && m.inspector.GetCompactionTasksNumBySignalID(triggerID) == 0 {
+		limited, err := m.submitViews(ctx, triggerType, views, true)
+		if err != nil {
+			return 0, err
+		}
+		if limited && m.inspector.GetCompactionTasksNumBySignalID(triggerID) == 0 {
 			return 0, merr.WrapErrServiceUnavailableMsg("compaction task admission is temporarily limited")
 		}
 	}
 	return triggerID, nil
+}
+
+func (m *CompactionTriggerManager) checkManualClusteringScope(ctx context.Context, collectionID int64, views []view.CompactionView) error {
+	targetMeta := m.targetReconciler.CompactionTargetMeta
+	defer targetMeta.LockCollectionAdmission(collectionID)()
+	record, _, err := targetMeta.ActiveOptimize(ctx, collectionID)
+	if err != nil || record == nil {
+		return err
+	}
+	for _, candidate := range views {
+		for _, input := range candidate.GetSegmentsView() {
+			if targets.OptimizeScopeContains(record, m.meta.GetSegment(ctx, input.ID)) {
+				return clusteringOverlapsOptimize(record.GetTargetID())
+			}
+		}
+	}
+	return nil
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType policy.CompactionTriggerType,
@@ -322,7 +351,11 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 	}
 }
 
-func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView) bool {
+func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView) {
+	_, _ = m.submitViews(ctx, eventType, views, false)
+}
+
+func (m *CompactionTriggerManager) submitViews(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, manual bool) (bool, error) {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
 	for _, cv := range views {
@@ -349,12 +382,15 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.
 					err = m.SubmitBumpSchemaVersionViewToScheduler(ctx, outView)
 				}
 				if errors.Is(err, ErrAdmissionLimited) {
-					return true
+					return true, nil
+				}
+				if manual && errors.Is(err, errClusteringOverlapsOptimize) {
+					return false, err
 				}
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, cv view.CompactionView) error {
