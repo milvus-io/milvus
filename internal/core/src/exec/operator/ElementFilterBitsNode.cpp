@@ -263,9 +263,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         // The input is an already-normalized row selection, not a predicate
         // result. In particular, MVCC source nodes leave validity unused.
-        auto [elem_bitset, _] =
-            struct_element_offsets->RowBitsetToElementBitset(
-                doc_bitset, doc_bitset_valid, 0);
+        const bool all_parents = count == doc_bitset.size();
+        TargetBitmap elem_bitset;
+        if (!all_parents) {
+            elem_bitset =
+                struct_element_offsets->RowBitsetToElementBitset(doc_bitset, 0);
+        }
 
         TargetBitmap eval_bitset;
         int64_t num_processed_elements = 0;
@@ -275,17 +278,16 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         while (num_processed_elements < total_elements) {
             const auto next_row = std::min(num_processed_rows + batch_size_,
                                            query_context_->get_active_count());
-            const auto element_end =
-                struct_element_offsets->ElementIDRangeOfRow(next_row).first;
-            TargetBitmap candidates;
-            candidates.append(elem_bitset,
-                              num_processed_elements,
-                              element_end - num_processed_elements);
-            if (candidates.all()) {
-                // Preserve unmasked leaf fast paths for fully active batches.
-                eval_ctx.clear_bitmap_input();
-            } else {
-                eval_ctx.set_bitmap_input(std::move(candidates));
+            eval_ctx.clear_bitmap_input();
+            if (!all_parents) {
+                const auto element_end =
+                    struct_element_offsets->ElementIDRangeOfRow(next_row).first;
+                const auto candidates =
+                    elem_bitset.view(num_processed_elements,
+                                     element_end - num_processed_elements);
+                if (!candidates.all()) {
+                    eval_ctx.set_bitmap_input(candidates);
+                }
             }
             element_exprs_->Eval(0, 1, true, eval_ctx, results);
 
@@ -324,7 +326,9 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         // AND expression result with element bitset from doc filter
         // eval_bitset: true means element matches expression
         // elem_bitset: true means element's doc passed predicate filter
-        eval_bitset &= elem_bitset;
+        if (!all_parents) {
+            eval_bitset &= elem_bitset;
+        }
 
         eval_bitset.flip();
 

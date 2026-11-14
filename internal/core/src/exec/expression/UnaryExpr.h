@@ -154,7 +154,7 @@ struct UnaryElementFuncForMatch {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -234,7 +234,7 @@ struct UnaryElementFuncForRegexMatch {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -359,7 +359,7 @@ struct UnaryElementFunc {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -531,7 +531,7 @@ struct UnaryElementFuncForArray {
                int index,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -1039,6 +1039,13 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     SupportsJsonStatsExecPath() const override {
         return true;
+    }
+
+    bool
+    CanUseOffsetsForSequentialBatch() override {
+        EnsureExecPathDetermined();
+        return expr_->column_.element_level_ &&
+               exec_path_ == ExprExecPath::RawData && SupportOffsetInput();
     }
 
     void

@@ -6921,7 +6921,10 @@ class CandidateRecordingExprSet : public ExprSet {
         // element count or the preceding batch's result length.
         EXPECT_TRUE(ctx.get_bitmap_input().empty() ||
                     ctx.get_bitmap_input().size() == count);
-        masks.push_back(ctx.get_bitmap_input().clone());
+        if (!ctx.get_bitmap_input().empty() && expected_backing) {
+            EXPECT_EQ(ctx.get_bitmap_input().data(), expected_backing());
+        }
+        masks.push_back(TargetBitmap(ctx.get_bitmap_input()));
         TargetBitmap data(count, false);
         TargetBitmap valid(count, true);
         for (int64_t i = 0; i < count; ++i) {
@@ -6938,6 +6941,7 @@ class CandidateRecordingExprSet : public ExprSet {
         row_ = end_row;
     }
 
+    std::function<const void*()> expected_backing;
     std::vector<TargetBitmap> masks;
     std::vector<int64_t> evaluated;
 
@@ -7051,6 +7055,31 @@ TEST(ElementFilterUnknown, IterativeConsumerRejectsSetDataOnUnknownElements) {
 }
 
 }  // namespace
+
+class SelectionExpansionRecorder : public StructElementOffsetsSealed {
+ public:
+    using StructElementOffsetsSealed::StructElementOffsetsSealed;
+    TargetBitmap
+    RowBitsetToElementBitset(const TargetBitmapView& rows,
+                             int64_t start) const override {
+        ++selections;
+        auto result =
+            StructElementOffsetsSealed::RowBitsetToElementBitset(rows, start);
+        selection_data = result.data();
+        return result;
+    }
+    std::pair<TargetBitmap, TargetBitmap>
+    RowBitsetToElementBitset(const TargetBitmapView& rows,
+                             const TargetBitmapView& valid,
+                             int64_t start) const override {
+        ++paired;
+        return StructElementOffsetsSealed::RowBitsetToElementBitset(
+            rows, valid, start);
+    }
+    mutable int selections = 0;
+    mutable int paired = 0;
+    mutable const void* selection_data = nullptr;
+};
 
 class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
  protected:
@@ -7180,7 +7209,7 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
         const std::vector<int32_t> starts = {
             0, 0, 0, 1, 66, 66, 66, 68, 69, 70, 70, 72, 72, 75};
         const auto rows = starts.size() - 1;
-        StructElementOffsetsSealed offsets(starts);
+        SelectionExpansionRecorder offsets(starts);
         auto schema = std::make_shared<Schema>();
         const auto pk = schema->AddDebugField("id", DataType::INT64);
         schema->set_primary_field_id(pk);
@@ -7201,6 +7230,7 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
         auto recorder =
             std::make_unique<CandidateRecordingExprSet>(&exec_context, starts);
         auto* observed = recorder.get();
+        observed->expected_backing = [&] { return offsets.selection_data; };
         node.element_exprs_ = std::move(recorder);
         TargetBitmap parents(rows, false);
         // A row selection from MVCC may have an all-zero validity channel.
@@ -7218,6 +7248,8 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
             node.EvaluateElementExpression(TargetBitmapView(parents),
                                            TargetBitmapView(parent_valid),
                                            &offsets);
+        EXPECT_EQ(offsets.selections, all_rows ? 0 : 1);
+        EXPECT_EQ(offsets.paired, 0);
         std::vector<int64_t> expected_work;
         for (size_t row = 0; row < rows; ++row) {
             for (int64_t element = starts[row]; element < starts[row + 1];

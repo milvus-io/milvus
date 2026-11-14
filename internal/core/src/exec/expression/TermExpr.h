@@ -86,6 +86,13 @@ class PhyTermFilterExpr : public SegmentExpr {
         return !expr_->is_in_field_;
     }
 
+    bool
+    CanUseOffsetsForSequentialBatch() override {
+        EnsureExecPathDetermined();
+        return expr_->column_.element_level_ &&
+               exec_path_ == ExprExecPath::RawData && SupportOffsetInput();
+    }
+
     void
     DetermineExecPath() override;
 
