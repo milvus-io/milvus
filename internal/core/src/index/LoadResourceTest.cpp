@@ -37,7 +37,7 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/Util.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/indexing/SealedIndexLoader.h"
 #include "segcore/Types.h"
 #include "segcore/SegmentLoadInfo.h"
@@ -695,13 +695,11 @@ TEST(ScalarIndexV3ResourceTest,
     const auto size = fixture.Size(path);
     auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
     fixture.context.fs = fs;
-    const auto old_enabled =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    auto restore = folly::makeGuard([&] {
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
-    });
+    const auto old_enabled = milvus::storage::LoadAsyncReadEnabled();
+    auto restore = folly::makeGuard(
+        [&] { milvus::storage::SetLoadAsyncReadEnabled(old_enabled); });
     for (const bool enabled : {false, true}) {
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(enabled);
         for (const auto pinned : {std::optional<bool>{},
                                   std::optional<bool>{false},
                                   std::optional<bool>{true}}) {
@@ -765,13 +763,12 @@ TEST(ScalarIndexV3ResourceTest,
     const auto old_bytes = budget.CapacityBytes();
     const auto old_slots = budget.CapacitySlots();
     const auto old_workers = storage::GetAsyncLoadThreadPoolSize();
-    const auto old_enabled =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    const auto old_enabled = milvus::storage::LoadAsyncReadEnabled();
     auto restore = folly::makeGuard([&] {
         budget.SetCapacityBytes(old_bytes);
         budget.SetCapacitySlots(old_slots);
         storage::SetAsyncLoadThreadPoolSize(old_workers);
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(old_enabled);
     });
     constexpr size_t rows = 10001;
     for (const bool nullable : {false, true}) {
@@ -821,8 +818,8 @@ TEST(ScalarIndexV3ResourceTest,
                     budget.SetCapacityBytes(limit);
                     budget.SetCapacitySlots(limit == 0 ? 0 : 1);
                     for (const bool global_enabled : {false, true}) {
-                        segcore::storagev2translator::
-                            SetStorageV2AsyncLoadEnabled(global_enabled);
+                        milvus::storage::SetLoadAsyncReadEnabled(
+                            global_enabled);
                         for (const int workers : {1, 3}) {
                             storage::SetAsyncLoadThreadPoolSize(workers);
                             const auto changed = estimate();

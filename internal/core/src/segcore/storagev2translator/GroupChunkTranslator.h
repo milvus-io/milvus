@@ -78,6 +78,14 @@ class GroupChunkTranslator
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
+    // Borrow ctx/cids through completion; synchronous V2 I/O runs on HIGH/LOW.
+    folly::coro::Task<
+        std::vector<std::pair<milvus::cachinglayer::cid_t,
+                              std::unique_ptr<milvus::GroupChunk>>>>
+    get_cells_async(
+        milvus::OpContext* ctx,
+        const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+
     std::pair<size_t, size_t>
     get_file_and_row_group_offset(size_t global_row_group_idx) const;
 

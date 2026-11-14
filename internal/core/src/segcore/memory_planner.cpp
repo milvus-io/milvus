@@ -18,7 +18,7 @@
 #include <atomic>
 #include <cstddef>
 #include <exception>
-#include <future>
+#include <folly/futures/Future.h>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -32,6 +32,8 @@
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "folly/ScopeGuard.h"
+#include "folly/OperationCancelled.h"
+#include "folly/coro/WithCancellation.h"
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
@@ -42,7 +44,6 @@
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
 #include "storage/StatusToErrorCode.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/LoadAdmissionController.h"
 #include "storage/Util.h"
@@ -209,7 +210,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                        prepared_files.size() == remote_files.size(),
                    "[StorageV2] Prepared files must match remote files");
         auto& pool =
-            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+            ThreadPools::GetExecutor(milvus::PriorityForLoad(priority));
 
         for (size_t file_idx = 0; file_idx < remote_files.size(); ++file_idx) {
             const auto& file = remote_files[file_idx];
@@ -246,7 +247,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                      file);
 
             // Create and submit tasks for each block
-            std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
+            std::vector<
+                folly::SemiFuture<std::shared_ptr<milvus::ArrowDataWrapper>>>
                 futures;
             futures.reserve(blocks.size());
             // A failed submit/read/get must not leave sibling readers running
@@ -258,63 +260,73 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
 
             for (const auto& block : blocks) {
-                futures.emplace_back(pool.Submit([block,
-                                                  prepared,
-                                                  file,
-                                                  file_idx,
-                                                  schema,
-                                                  reader_memory_limit]() {
-                    auto result = prepared->MakeReader(
-                        schema,
-                        reader_memory_limit,
-                        milvus::storage::GetArrowReaderProperties());
-                    if (!result.ok()) {
-                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
-                                      result.status()),
-                                  "[StorageV2] Failed to create row group "
-                                  "reader: {}",
-                                  result.status().ToString());
-                    }
-                    auto row_group_reader = result.ValueOrDie();
-                    auto close_guard = folly::makeGuard([&row_group_reader]() {
-                        (void)row_group_reader->Close();
-                    });
-                    auto status = row_group_reader->SetRowGroupOffsetAndCount(
-                        block.offset, block.count);
-                    if (!status.ok()) {
-                        ThrowInfo(
-                            milvus::storage::ArrowStatusToErrorCode(status),
-                            "[StorageV2] Failed to set row group offset "
-                            "and count {} and {} with error {}",
-                            block.offset,
-                            block.count,
-                            status.ToString());
-                    }
-                    auto ret = std::make_shared<ArrowDataWrapper>();
-                    for (int64_t i = 0; i < block.count; ++i) {
-                        std::shared_ptr<arrow::Table> table;
-                        auto status =
-                            row_group_reader->ReadNextRowGroup(&table);
-                        if (!status.ok()) {
-                            ThrowInfo(
-                                milvus::storage::ArrowStatusToErrorCode(status),
-                                "[StorageV2] Failed to read row group "
-                                "{} from file {} with error {}",
-                                block.offset + i,
-                                file,
-                                status.ToString());
-                        }
-                        ret->arrow_tables.push_back(
-                            {file_idx,
-                             static_cast<size_t>(block.offset + i),
-                             table});
-                    }
-                    return ret;
-                }));
+                futures.emplace_back(
+                    folly::via(
+                        &pool,
+                        [block,
+                         prepared,
+                         file,
+                         file_idx,
+                         schema,
+                         reader_memory_limit]() {
+                            auto result = prepared->MakeReader(
+                                schema,
+                                reader_memory_limit,
+                                milvus::storage::GetArrowReaderProperties());
+                            if (!result.ok()) {
+                                ThrowInfo(
+                                    milvus::storage::ArrowStatusToErrorCode(
+                                        result.status()),
+                                    "[StorageV2] Failed to create row group "
+                                    "reader: {}",
+                                    result.status().ToString());
+                            }
+                            auto row_group_reader = result.ValueOrDie();
+                            auto close_guard =
+                                folly::makeGuard([&row_group_reader]() {
+                                    (void)row_group_reader->Close();
+                                });
+                            auto status =
+                                row_group_reader->SetRowGroupOffsetAndCount(
+                                    block.offset, block.count);
+                            if (!status.ok()) {
+                                ThrowInfo(
+                                    milvus::storage::ArrowStatusToErrorCode(
+                                        status),
+                                    "[StorageV2] Failed to set row group "
+                                    "offset "
+                                    "and count {} and {} with error {}",
+                                    block.offset,
+                                    block.count,
+                                    status.ToString());
+                            }
+                            auto ret = std::make_shared<ArrowDataWrapper>();
+                            for (int64_t i = 0; i < block.count; ++i) {
+                                std::shared_ptr<arrow::Table> table;
+                                auto status =
+                                    row_group_reader->ReadNextRowGroup(&table);
+                                if (!status.ok()) {
+                                    ThrowInfo(
+                                        milvus::storage::ArrowStatusToErrorCode(
+                                            status),
+                                        "[StorageV2] Failed to read row group "
+                                        "{} from file {} with error {}",
+                                        block.offset + i,
+                                        file,
+                                        status.ToString());
+                                }
+                                ret->arrow_tables.push_back(
+                                    {file_idx,
+                                     static_cast<size_t>(block.offset + i),
+                                     table});
+                            }
+                            return ret;
+                        })
+                        .semi());
             }
 
             for (auto& future : futures) {
-                auto field_data = future.get();
+                auto field_data = std::move(future).get();
                 channel->push(field_data);
             }
         }
@@ -328,13 +340,21 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     }
 }
 
-std::vector<CellLoadFuture>
-LoadCellBatchAsync(milvus::OpContext* op_ctx,
-                   std::vector<CellSpec> cell_specs,
-                   BatchReaderFactory reader_factory,
-                   const int64_t memory_limit,
-                   const milvus::proto::common::LoadPriority priority,
-                   CellFinalizeFunc finalize_cell) {
+namespace {
+
+// Group consecutive, same-key cells into batches for IO merging
+struct CellBatch {
+    size_t file_idx;
+    int64_t rg_offset;
+    int64_t rg_count;
+    int64_t batch_loaded_memory_bytes = 0;
+    size_t batch_loading_overhead_bytes = 0;
+    std::vector<CellSpec> cells;
+};
+
+// Use the same grouping and read-window policy for both loading entry points.
+std::vector<CellBatch>
+PlanCellBatches(std::vector<CellSpec> cell_specs, int64_t memory_limit) {
     if (cell_specs.empty()) {
         return {};
     }
@@ -356,16 +376,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    spec.cid,
                    spec.memory_size);
     }
-
-    // Group consecutive, same-key cells into batches for IO merging
-    struct CellBatch {
-        size_t file_idx;
-        int64_t rg_offset;
-        int64_t rg_count;
-        int64_t batch_loaded_memory_bytes = 0;
-        size_t batch_loading_overhead_bytes = 0;
-        std::vector<CellSpec> cells;
-    };
 
     const auto batch_limit_bytes =
         static_cast<size_t>(std::max<int64_t>(memory_limit, 1));
@@ -421,8 +431,70 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             20,
         FieldDataReadWindowBytes() >> 20);
 
+    return batches;
+}
+
+// Destroy temporary Arrow buffers before the caller releases the batch lease.
+LoadedCellBatch
+ReadCellBatch(OpContext* op_ctx,
+              const CellBatch& batch,
+              const BatchReaderFactory& reader_factory,
+              int64_t reader_memory_limit,
+              const CellFinalizeFunc& finalize_cell) {
+    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+
+    auto tables_result = reader_factory(
+        batch.file_idx, batch.rg_offset, batch.rg_count, reader_memory_limit);
+    if (!tables_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(tables_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "[StorageV2] Failed to read batch: {}",
+                  error.what());
+    }
+    auto all_tables = std::move(tables_result).ValueOrDie();
+    AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
+               "reader returns less tables than expected, "
+               "batch rg "
+               "count: {}, result size: {}",
+               batch.rg_count,
+               all_tables.size());
+    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+
+    int64_t table_offset = 0;
+    LoadedCellBatch loaded_cells;
+    loaded_cells.reserve(batch.cells.size());
+    for (const auto& cell : batch.cells) {
+        CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+        std::vector<std::shared_ptr<arrow::Table>> cell_tables;
+        cell_tables.reserve(cell.rg_count);
+        for (int64_t i = 0; i < cell.rg_count; ++i) {
+            cell_tables.push_back(std::move(all_tables[table_offset + i]));
+        }
+        table_offset += cell.rg_count;
+        auto chunk = finalize_cell(cell_tables, cell.cid);
+        cell_tables.clear();
+        CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+        loaded_cells.push_back({cell.cid, std::move(chunk)});
+    }
+    return loaded_cells;
+}
+
+}  // namespace
+
+std::vector<CellLoadFuture>
+LoadCellBatchAsync(milvus::OpContext* op_ctx,
+                   std::vector<CellSpec> cell_specs,
+                   BatchReaderFactory reader_factory,
+                   const int64_t memory_limit,
+                   const milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell) {
+    auto batches = PlanCellBatches(std::move(cell_specs), memory_limit);
+    if (batches.empty()) {
+        return {};
+    }
+
     const auto pool_priority = milvus::PriorityForLoad(priority);
-    auto& pool = ThreadPools::GetThreadPool(pool_priority);
+    auto& pool = ThreadPools::GetExecutor(pool_priority);
     const auto budget_priority =
         milvus::storage::LoadAdmissionPriorityForThreadPool(pool_priority);
     const auto shared_factory =
@@ -436,9 +508,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     futures.reserve(batches.size());
 
     const auto append_failed_future = [&](std::exception_ptr error) {
-        std::promise<LoadedCellBatch> promise;
-        futures.emplace_back(promise.get_future());
-        promise.set_exception(std::move(error));
+        futures.emplace_back(folly::makeSemiFuture<LoadedCellBatch>(
+            folly::exception_wrapper(std::move(error))));
     };
 
     for (auto& batch : batches) {
@@ -461,73 +532,125 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             continue;
         }
 
+        auto budget_guard =
+            folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
+                budget.Release({batch_loading_overhead_bytes, 1});
+            });
         try {
-            futures.emplace_back(pool.Submit([batch = std::move(batch),
-                                              shared_factory,
-                                              batch_loading_overhead_bytes,
-                                              reader_memory_limit,
-                                              shared_finalizer,
-                                              op_ctx]() mutable {
-                auto& budget =
-                    milvus::storage::LoadAdmissionController::GetInstance();
-                // This guard is declared before the Arrow table locals below,
-                // so their shared backing buffers are destroyed before the
-                // batch reservation is released.
-                auto release_guard =
-                    folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
-                        budget.Release({batch_loading_overhead_bytes, 1});
-                    });
-                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-
-                auto tables_result = (*shared_factory)(batch.file_idx,
-                                                       batch.rg_offset,
-                                                       batch.rg_count,
-                                                       reader_memory_limit);
-                if (!tables_result.ok()) {
-                    auto error =
-                        milvus_storage::ToSegcoreError(tables_result.status());
-                    ThrowInfo(error.get_error_code(),
-                              "[StorageV2] Failed to read batch: {}",
-                              error.what());
-                }
-                auto all_tables = std::move(tables_result).ValueOrDie();
-                AssertInfo(
-                    all_tables.size() == static_cast<size_t>(batch.rg_count),
-                    "reader returns less tables than expected, batch rg "
-                    "count: {}, result size: {}",
-                    batch.rg_count,
-                    all_tables.size());
-                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-
-                int64_t table_offset = 0;
-                LoadedCellBatch loaded_cells;
-                loaded_cells.reserve(batch.cells.size());
-                for (const auto& cell : batch.cells) {
-                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    std::vector<std::shared_ptr<arrow::Table>> cell_tables;
-                    cell_tables.reserve(cell.rg_count);
-                    for (int64_t i = 0; i < cell.rg_count; ++i) {
-                        cell_tables.push_back(
-                            std::move(all_tables[table_offset + i]));
-                    }
-                    table_offset += cell.rg_count;
-                    auto chunk = (*shared_finalizer)(cell_tables, cell.cid);
-                    cell_tables.clear();
-                    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    loaded_cells.push_back({cell.cid, std::move(chunk)});
-                }
-                return loaded_cells;
-            }));
+            futures.emplace_back(
+                folly::via(&pool,
+                           [batch = std::move(batch),
+                            shared_factory,
+                            budget_guard = std::move(budget_guard),
+                            reader_memory_limit,
+                            shared_finalizer,
+                            op_ctx]() mutable {
+                               // ReadCellBatch destroys Arrow buffers before this
+                               // guard releases the batch reservation.
+                               auto release_guard = std::move(budget_guard);
+                               return ReadCellBatch(op_ctx,
+                                                    batch,
+                                                    *shared_factory,
+                                                    reader_memory_limit,
+                                                    *shared_finalizer);
+                           })
+                    .semi());
         } catch (...) {
-            if (budget_admitted) {
-                milvus::storage::LoadAdmissionController::GetInstance().Release(
-                    {batch_loading_overhead_bytes, 1});
-            }
             append_failed_future(std::current_exception());
         }
     }
 
     return futures;
+}
+
+folly::coro::Task<std::vector<LoadedCellBatch>>
+LoadCellBatchesAsync(OpContext* op_ctx,
+                     std::vector<CellSpec> cell_specs,
+                     BatchReaderFactory reader_factory,
+                     int64_t memory_limit,
+                     proto::common::LoadPriority priority,
+                     CellFinalizeFunc finalize_cell) {
+    auto batches = PlanCellBatches(std::move(cell_specs), memory_limit);
+    if (batches.empty()) {
+        co_return std::vector<LoadedCellBatch>{};
+    }
+    AssertInfo(static_cast<bool>(finalize_cell),
+               "[StorageV2] LoadCellBatchesAsync requires a cell finalizer");
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token = folly::cancellation_token_merge(
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{},
+        caller_token);
+    const auto pool_priority = milvus::PriorityForLoad(priority);
+    auto& pool = ThreadPools::GetExecutor(pool_priority);
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto budget_priority =
+        storage::LoadAdmissionPriorityForThreadPool(pool_priority);
+    std::vector<folly::SemiFuture<LoadedCellBatch>> futures;
+    std::vector<LoadedCellBatch> results;
+    futures.reserve(batches.size());
+    results.reserve(batches.size());
+    std::exception_ptr submission_error;
+    try {
+        for (auto& batch : batches) {
+            auto lease = co_await budget.AcquireAsync(
+                {batch.batch_loading_overhead_bytes, 1},
+                budget_priority,
+                token);
+            const auto reader_memory_limit = BatchReaderMemoryLimit(
+                batch.batch_loaded_memory_bytes, memory_limit);
+            futures.emplace_back(
+                folly::via(
+                    &pool,
+                    [batch = std::move(batch),
+                     &reader_factory,
+                     &finalize_cell,
+                     reader_memory_limit,
+                     token,
+                     lease = std::move(lease)]() mutable {
+                        // Release before promise completion, after ReadCellBatch's
+                        // Arrow buffers and any failed partial results are destroyed.
+                        auto admitted = std::move(lease);
+                        OpContext context(token);
+                        return ReadCellBatch(&context,
+                                             batch,
+                                             reader_factory,
+                                             reader_memory_limit,
+                                             finalize_cell);
+                    })
+                    .semi());
+        }
+    } catch (...) {
+        submission_error = std::current_exception();
+    }
+    std::exception_ptr error;
+    // Cancellation cannot abandon workers that still borrow the caller's finalizer.
+    for (auto& future : futures) {
+        auto result =
+            co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
+                folly::CancellationToken{}, std::move(future)));
+        if (result.hasException()) {
+            if (!error) {
+                error = result.exception().to_exception_ptr();
+            }
+        } else {
+            results.push_back(std::move(result).value());
+        }
+    }
+    // Earlier batch failures precede later submission/admission failures.
+    if (!error) {
+        error = std::move(submission_error);
+    }
+    if (error) {
+        try {
+            std::rethrow_exception(error);
+        } catch (const folly::OperationCancelled&) {
+            ThrowInfo(ErrorCode::FollyCancel, "LoadCellBatchesAsync cancelled");
+        }
+    }
+    OpContext completed_context(token);
+    CheckCancellation(&completed_context, -1, "LoadCellBatchesAsync");
+    co_return results;
 }
 
 BatchReaderFactory

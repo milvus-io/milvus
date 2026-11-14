@@ -90,6 +90,13 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
+    // Await downloads without occupying the caller; issued reads drain on failure.
+    folly::coro::Task<std::vector<
+        std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>>
+    get_cells_async(
+        milvus::OpContext* ctx,
+        const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+
     milvus::cachinglayer::Meta*
     meta() override {
         return &meta_;

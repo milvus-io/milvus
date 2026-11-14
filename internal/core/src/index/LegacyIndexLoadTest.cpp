@@ -34,6 +34,8 @@
 #include "common/OpContext.h"
 #include "common/Slice.h"
 #include "folly/ScopeGuard.h"
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/InlineExecutor.h>
 #include "index/IndexTypeAdapter.h"
 #include "index/scalar/bitmap/BitmapIndexLoader.h"
 #include "index/scalar/bitmap/BitmapIndexReader.h"
@@ -403,6 +405,69 @@ class CountingLegacyChunkManager final : public storage::LocalChunkManager {
     std::atomic<size_t> size_calls{0};
     std::function<void(const std::string&)> after_read;
 };
+
+TEST_F(LegacyIndexLoadTest, SyncTransportAwaitYieldsAndDrainsCancellation) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    context_.use_async_load = false;
+    auto manager = std::make_shared<CountingLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    storage::V1DiskSink sink(context_);
+    const std::vector<uint8_t> payload(64 * 1024, 17);
+    sink.WriteEntry("payload", payload.data(), payload.size());
+    const auto stats = sink.Finish();
+    ASSERT_EQ(stats.Files().size(), 1);
+    auto source = Run(storage::V1RemoteSource::OpenAsync(
+        context_,
+        {stats.Files()[0].file_name},
+        {},
+        storage::ArtifactStorageNamespace::Index,
+        storage::V1SourceLayout::MemoryEntries,
+        false));
+    folly::CPUThreadPoolExecutor caller(1);
+    for (const bool cancel_read : {false, true}) {
+        SCOPED_TRACE(cancel_read);
+        folly::CancellationSource cancel;
+        std::promise<void> entered, release;
+        auto released = release.get_future().share();
+        manager->after_read = [&](const std::string&) {
+            entered.set_value();
+            released.wait();
+        };
+        auto load = std::async(std::launch::async, [&] {
+            return folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancel.getToken(),
+                folly::coro::co_withExecutor(
+                    &caller, source->ReadEntryAsync("payload", false))));
+        });
+        bool resumed = false;
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            if (!resumed)
+                release.set_value();
+            if (load.valid())
+                load.wait();
+            manager->after_read = {};
+        });
+        ASSERT_EQ(entered.get_future().wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        auto marker =
+            folly::via(&caller, [] {}).via(&folly::InlineExecutor::instance());
+        EXPECT_TRUE(marker.wait(std::chrono::seconds(2)).isReady());
+        if (cancel_read)
+            cancel.requestCancellation();
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        release.set_value();
+        resumed = true;
+        if (cancel_read) {
+            ExpectError(FollyCancel, [&] { load.get(); });
+        } else {
+            EXPECT_EQ(load.get(), payload);
+        }
+    }
+    sink.ReleaseLocalStaging();
+}
 
 TEST_F(LegacyIndexLoadTest, SyncUnslicedReadDownloadsOnceWithoutRemoteProbes) {
     FILE_SLICE_SIZE.store(1024 * 1024);

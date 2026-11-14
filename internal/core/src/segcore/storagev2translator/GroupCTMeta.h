@@ -43,10 +43,10 @@ namespace milvus::segcore::storagev2translator {
 using SkipMetricsList = milvus::SkipMetricsList;
 using SkipMetricsByField = std::map<int64_t, SkipMetricsList>;
 
-// Target average byte size per storage-v2 cache cell. Parquet row groups
+// Target average byte size per field-data cell. Parquet row groups
 // are packed into cells so that `rgs_per_cell * avg_row_group_size ≈ target`.
 // Runtime-configurable via SetCellTargetSizeBytes (wired from paramtable
-// `queryNode.segcore.storageV2.cellTargetSizeBytes`).
+// `queryNode.segcore.load.fieldData.cellTargetSizeBytes`).
 inline std::atomic<int64_t>&
 cell_target_size_bytes_atomic() {
     static std::atomic<int64_t> instance{4LL * 1024 * 1024};  // init: 4 MiB

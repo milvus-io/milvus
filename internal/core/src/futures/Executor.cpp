@@ -22,7 +22,7 @@
 #include "folly/executors/FunctionScheduler.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "monitor/Monitor.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::futures {
 

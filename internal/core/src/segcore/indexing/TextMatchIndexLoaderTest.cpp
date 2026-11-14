@@ -38,7 +38,7 @@
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
 #include "segcore/indexing/TextMatchIndexLoader.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/test_utils/TextPublicationTestUtils.h"
@@ -109,13 +109,13 @@ class TextMatchIndexLoaderTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        old_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        old_enabled_ = milvus::storage::LoadAsyncReadEnabled();
         old_workers_ = storage::GetAsyncLoadThreadPoolSize();
         old_slots_ =
             storage::LoadAdmissionController::GetInstance().CapacitySlots();
         storage::SetAsyncLoadThreadPoolSize(1);
         storage::LoadAdmissionController::GetInstance().SetCapacitySlots(1);
-        storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+        milvus::storage::SetLoadAsyncReadEnabled(true);
     }
     void
     TearDown() override {
@@ -127,7 +127,7 @@ class TextMatchIndexLoaderTest : public ::testing::Test {
             admission.Release({0, 1});
         admission.SetCapacitySlots(old_slots_);
         storage::SetAsyncLoadThreadPoolSize(old_workers_);
-        storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled_);
+        milvus::storage::SetLoadAsyncReadEnabled(old_enabled_);
     }
     test::ScopedLoadTransientBudget budget_{64 * 1024 * 1024};
     bool old_enabled_{};
@@ -140,7 +140,7 @@ TEST_F(TextMatchIndexLoaderTest, CachedIndexCreatesRequestReaders) {
     for (const bool packed : {false, true}) {
         const auto stats = fixture.Publish(packed);
         for (const bool async : {false, true}) {
-            storagev2translator::SetStorageV2AsyncLoadEnabled(async);
+            milvus::storage::SetLoadAsyncReadEnabled(async);
             for (const bool warmup : {false, true}) {
                 SCOPED_TRACE(::testing::Message() << packed << async << warmup);
                 auto config = fixture.LoadConfig(stats, true);
@@ -168,7 +168,7 @@ TEST_F(TextMatchIndexLoaderTest, CachedIndexCreatesRequestReaders) {
 }
 
 TEST_F(TextMatchIndexLoaderTest, LegacyResourceEstimateIncludesNullableBitmap) {
-    storagev2translator::SetStorageV2AsyncLoadEnabled(false);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
     ASSERT_GT(stats.MemSize(), 0);
@@ -212,7 +212,7 @@ TEST_F(TextMatchIndexLoaderTest, LegacyReloadPinsModeAndRebindsCancellation) {
     for (const bool mmap : {false, true}) {
         for (const bool planned_async : {false, true}) {
             SCOPED_TRACE(::testing::Message() << mmap << "/" << planned_async);
-            storagev2translator::SetStorageV2AsyncLoadEnabled(planned_async);
+            milvus::storage::SetLoadAsyncReadEnabled(planned_async);
             fs->ResetCounts();
             auto config = fixture.LoadConfig(stats, mmap);
             TextMatchIndexLoader translator(
@@ -220,7 +220,7 @@ TEST_F(TextMatchIndexLoaderTest, LegacyReloadPinsModeAndRebindsCancellation) {
                 fixture.context,
                 config);
             const auto estimate = translator.EstimatedResources();
-            storagev2translator::SetStorageV2AsyncLoadEnabled(!planned_async);
+            milvus::storage::SetLoadAsyncReadEnabled(!planned_async);
             auto first = translator.CreateIndex(nullptr)->CreateReader(nullptr);
             CheckTextReader(*first);
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
@@ -401,15 +401,14 @@ TEST_F(TextMatchIndexLoaderTest,
     for (const bool mmap : {false, true}) {
         auto config = fixture.LoadConfig(stats, mmap);
         for (const bool planned_async : {false, true}) {
-            storagev2translator::SetStorageV2AsyncLoadEnabled(planned_async);
+            milvus::storage::SetLoadAsyncReadEnabled(planned_async);
             TextMatchIndexLoader translator(
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
                 fixture.context,
                 config);
             const auto estimate = translator.EstimatedResources();
             for (const bool current_async : {true, false}) {
-                storagev2translator::SetStorageV2AsyncLoadEnabled(
-                    current_async);
+                milvus::storage::SetLoadAsyncReadEnabled(current_async);
                 fs->ResetCounts();
                 auto cells =
                     translator.CreateIndex(nullptr)->CreateReader(nullptr);

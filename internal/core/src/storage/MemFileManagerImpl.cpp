@@ -18,7 +18,9 @@
 
 #include <atomic>
 #include <exception>
-#include <future>
+#include <folly/futures/Future.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -133,52 +135,70 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
 
 std::map<std::string, std::unique_ptr<DataCodec>>
 MemFileManagerImpl::LoadIndexToMemory(
-    const std::vector<std::string>& remote_files,
+    const std::vector<std::string>& files,
     milvus::proto::common::LoadPriority priority,
     folly::CancellationToken token) {
-    std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    std::vector<std::string> batch_files;
+    return folly::coro::blockingWait(
+        LoadIndexToMemoryAsync(files, priority, token));
+}
 
-    auto LoadBatchIndexFiles = [&]() {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-        std::vector<std::future<std::unique_ptr<DataCodec>>> index_datas;
-        index_datas.reserve(batch_files.size());
-        for (const auto& path : batch_files) {
-            index_datas.push_back(
-                pool.Submit([manager = rcm_, path, priority, token] {
-                    return ReadLegacyIndexFile(*manager, path, priority, token);
-                }));
+folly::coro::Task<std::map<std::string, std::unique_ptr<DataCodec>>>
+MemFileManagerImpl::LoadIndexToMemoryAsync(
+    const std::vector<std::string>& files,
+    milvus::proto::common::LoadPriority priority,
+    folly::CancellationToken token) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    token = folly::cancellation_token_merge(token, caller_token);
+    std::map<std::string, std::unique_ptr<DataCodec>> result;
+    const auto parallel_degree =
+        std::max<size_t>(1,
+                         DEFAULT_FIELD_MAX_MEMORY_LIMIT /
+                             std::max<int64_t>(1, FILE_SLICE_SIZE.load()));
+    auto& pool = ThreadPools::GetExecutor(milvus::PriorityForLoad(priority));
+    for (size_t begin = 0; begin < files.size();) {
+        const auto count = std::min(parallel_degree, files.size() - begin);
+        std::vector<folly::SemiFuture<std::unique_ptr<DataCodec>>> futures;
+        futures.reserve(count);
+        std::exception_ptr error;
+        try {
+            for (size_t i = 0; i < count; ++i) {
+                futures.push_back(
+                    folly::coro::co_withExecutor(
+                        &pool,
+                        ReadLegacyIndexFileAsync(
+                            *rcm_, files[begin + i], priority, token))
+                        .start());
+            }
+        } catch (...) {
+            error = std::current_exception();
         }
-        size_t idx = 0;
-        storage::ProcessFuturesInOrder(
-            index_datas, [&](std::unique_ptr<DataCodec> codec) {
-                auto file_name = batch_files[idx].substr(
-                    batch_files[idx].find_last_of('/') + 1);
-                file_to_index_data[file_name] = std::move(codec);
-                ++idx;
-            });
-    };
-
-    for (auto& file : remote_files) {
-        if (batch_files.size() >= parallel_degree) {
-            LoadBatchIndexFiles();
-            batch_files.clear();
+        for (size_t i = 0; i < futures.size(); ++i) {
+            auto read = co_await folly::coro::co_awaitTry(
+                folly::coro::co_withCancellation(folly::CancellationToken{},
+                                                 std::move(futures[i])));
+            if (read.hasException()) {
+                if (!error)
+                    error = read.exception().to_exception_ptr();
+            } else if (!error) {
+                try {
+                    const auto& path = files[begin + i];
+                    result[path.substr(path.find_last_of('/') + 1)] =
+                        std::move(read).value();
+                } catch (...) {
+                    error = std::current_exception();
+                }
+            }
         }
-        batch_files.emplace_back(file);
+        if (error)
+            std::rethrow_exception(error);
+        begin += count;
     }
-
-    if (batch_files.size() > 0) {
-        LoadBatchIndexFiles();
-    }
-
-    if (!(file_to_index_data.size() == remote_files.size())) {
+    if (result.size() != files.size()) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "inconsistent file num and index data num!");
     }
-    return file_to_index_data;
+    co_return result;
 }
 
 std::vector<FieldDataPtr>

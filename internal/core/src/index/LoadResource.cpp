@@ -46,7 +46,7 @@
 #include "index/IndexLoadUtils.h"
 #include "index/PackedIndexLoad.h"
 #include "index/IndexTypeAdapter.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/FileWriter.h"
@@ -729,7 +729,7 @@ ScalarIndexFileLoadResource(
                                     SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     const bool use_async_load = context.use_async_load.value_or(
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+        milvus::storage::LoadAsyncReadEnabled());
     if (version < 3 && index_params.at(INDEX_TYPE) != FMINDEX_INDEX_TYPE) {
         // Legacy async callers estimate their prepared source directly.
         auto resolved_params = index_params;

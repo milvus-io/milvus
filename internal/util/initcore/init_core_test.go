@@ -306,15 +306,15 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	})
 	assert.Equal(t, fallbackRatio, fanoutCoefficient)
 
-	previousReadWindow := getStorageV2AsyncLoadReadWindowSizeBytes()
+	previousReadWindow := getLoadFieldDataReadWindowSizeBytes()
 	t.Cleanup(func() {
-		pt.Reset(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key)
-		updateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
+		pt.Reset(pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes.Key)
+		updateLoadFieldDataReadWindowSizeBytes(previousReadWindow)
 	})
-	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
-	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
-	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
-	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes.Key, "0"))
+	assert.EqualValues(t, paramtable.DefaultLoadFieldDataReadWindowSizeBytes, getLoadFieldDataReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes.Key, "1048576"))
+	assert.EqualValues(t, 1048576, getLoadFieldDataReadWindowSizeBytes())
 }
 
 func TestRegisterConfigWatcherWithCatchUpSerializesInitialSyncAndUpdates(t *testing.T) {
@@ -375,43 +375,43 @@ func TestRegisterConfigWatcherWithCatchUpSerializesInitialSyncAndUpdates(t *test
 	assert.True(t, applied.Load(), "the concurrent update must be applied after the stale catch-up")
 }
 
-func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
+func TestRegisterLoadFieldDataReadWindowConfigCatchesUp(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
-	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	item := &pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes
+	previous := getLoadFieldDataReadWindowSizeBytes()
 	t.Cleanup(func() {
-		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+		updateLoadFieldDataReadWindowSizeBytes(previous)
 	})
 
 	assert.NoError(t, pt.Save(item.Key, "1048576"))
-	updateStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024)
-	registerStorageV2AsyncLoadReadWindowConfig(pt)
+	updateLoadFieldDataReadWindowSizeBytes(32 * 1024 * 1024)
+	registerLoadFieldDataReadWindowConfig(pt)
 
-	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.EqualValues(t, 1048576, getLoadFieldDataReadWindowSizeBytes())
 }
 
-func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
+func TestRegisterLoadFieldDataReadWindowConfigHandlesDelete(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
-	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	item := &pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes
+	previous := getLoadFieldDataReadWindowSizeBytes()
 	t.Cleanup(func() {
-		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+		updateLoadFieldDataReadWindowSizeBytes(previous)
 	})
 
 	assert.NoError(t, pt.Save(item.Key, "1048576"))
-	registerStorageV2AsyncLoadReadWindowConfig(pt)
-	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+	registerLoadFieldDataReadWindowConfig(pt)
+	assert.EqualValues(t, 1048576, getLoadFieldDataReadWindowSizeBytes())
 
 	assert.NoError(t, pt.Remove(item.Key))
-	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.EqualValues(t, paramtable.DefaultLoadFieldDataReadWindowSizeBytes, getLoadFieldDataReadWindowSizeBytes())
 }
 
 func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
+	item := &pt.QueryNodeCfg.LoadAsyncReadEnabled
 	assert.NoError(t, pt.Save(item.Key, "true"))
 
 	var applied atomic.Bool
@@ -712,16 +712,16 @@ func TestUpdateLoadAdmissionSlots(t *testing.T) {
 	})
 }
 
-func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
-	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+func TestUpdateLoadFieldDataReadWindowSizeBytes(t *testing.T) {
+	previous := getLoadFieldDataReadWindowSizeBytes()
 	t.Cleanup(func() {
-		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+		updateLoadFieldDataReadWindowSizeBytes(previous)
 	})
 
-	updateStorageV2AsyncLoadReadWindowSizeBytes(0)
-	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
-	updateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
-	assert.EqualValues(t, 16*1024*1024, getStorageV2AsyncLoadReadWindowSizeBytes())
+	updateLoadFieldDataReadWindowSizeBytes(0)
+	assert.EqualValues(t, paramtable.DefaultLoadFieldDataReadWindowSizeBytes, getLoadFieldDataReadWindowSizeBytes())
+	updateLoadFieldDataReadWindowSizeBytes(16 * 1024 * 1024)
+	assert.EqualValues(t, 16*1024*1024, getLoadFieldDataReadWindowSizeBytes())
 }
 
 func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {

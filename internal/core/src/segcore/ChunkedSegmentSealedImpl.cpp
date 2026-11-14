@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <ctime>
 #include <exception>
-#include <future>
+#include <folly/futures/Future.h>
 #include <iosfwd>
 #include <limits>
 #include <map>
@@ -150,7 +150,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/StatusToErrorCode.h"
@@ -160,7 +160,6 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -2828,8 +2827,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             FormatFieldIds(lazy_fields));
     }
 
-    const bool enable_async_load =
-        storagev2translator::StorageV2AsyncLoadEnabled();
+    const bool enable_async_load = milvus::storage::LoadAsyncReadEnabled();
     tasks = PrepareManifestLoadTasks(reader,
                                      schema_snapshot,
                                      segment_load_info,
@@ -2848,48 +2846,52 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         tasks.size(),
         cg_field_ids.size());
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_group_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
-        auto future = pool.Submit(
-            [this,
-             column_groups,
-             properties,
-             cg_index = task.column_group_index,
-             field_ids = std::move(task.field_ids),
-             &segment_load_info,
-             schema_snapshot,
-             eager_load = task.eager_load,
-             use_vortex = task.use_vortex,
-             size_estimate_state = std::move(task.size_estimate_state),
-             lazy_materialization = task.lazy_materialization,
-             enable_async_load,
-             preopened_chunk_reader = std::move(task.preopened_chunk_reader),
-             op_ctx,
-             is_replace,
-             &committer]() mutable {
-                CheckCancellation(
-                    op_ctx,
-                    id_,
-                    cg_index,
-                    "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-                LoadColumnGroup(column_groups,
-                                properties,
-                                cg_index,
-                                field_ids,
-                                segment_load_info,
-                                schema_snapshot,
-                                eager_load,
-                                op_ctx,
-                                is_replace,
-                                committer,
-                                std::move(size_estimate_state),
-                                std::move(preopened_chunk_reader),
-                                enable_async_load,
-                                lazy_materialization,
-                                use_vortex);
-            });
+        auto future =
+            folly::via(
+                &pool,
+                [this,
+                 column_groups,
+                 properties,
+                 cg_index = task.column_group_index,
+                 field_ids = std::move(task.field_ids),
+                 &segment_load_info,
+                 schema_snapshot,
+                 eager_load = task.eager_load,
+                 use_vortex = task.use_vortex,
+                 size_estimate_state = std::move(task.size_estimate_state),
+                 lazy_materialization = task.lazy_materialization,
+                 enable_async_load,
+                 preopened_chunk_reader =
+                     std::move(task.preopened_chunk_reader),
+                 op_ctx,
+                 is_replace,
+                 &committer]() mutable {
+                    CheckCancellation(
+                        op_ctx,
+                        id_,
+                        cg_index,
+                        "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                    LoadColumnGroup(column_groups,
+                                    properties,
+                                    cg_index,
+                                    field_ids,
+                                    segment_load_info,
+                                    schema_snapshot,
+                                    eager_load,
+                                    op_ctx,
+                                    is_replace,
+                                    committer,
+                                    std::move(size_estimate_state),
+                                    std::move(preopened_chunk_reader),
+                                    enable_async_load,
+                                    lazy_materialization,
+                                    use_vortex);
+                })
+                .semi();
         load_group_futures.emplace_back(std::move(future));
     }
     storage::WaitAllFutures(load_group_futures);
@@ -3093,104 +3095,105 @@ LoadGroupChunkMetadata(
     const std::vector<std::pair<FieldId, DataType>>& fields_for_stats,
     const std::string& debug_key) {
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+    auto& pool = ThreadPools::GetExecutor(ThreadPoolPriority::HIGH);
 
-    std::vector<std::future<FileMetadataLoadResult>> futures;
+    std::vector<folly::SemiFuture<FileMetadataLoadResult>> futures;
     futures.reserve(insert_files.size());
     for (const auto& file : insert_files) {
         // Futures are always joined below before this function returns, so
         // capturing loader inputs by reference is safe here.
-        futures.push_back(pool.Submit([&fs,
-                                       file,
-                                       &fields_for_stats,
-                                       &debug_key]() {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties(),
-                storage::GetArrowReaderProperties());
-            if (!result.ok()) {
-                ThrowInfo(
-                    milvus::storage::ArrowStatusToErrorCode(result.status()),
-                    "[StorageV2] Failed to create file row group reader: " +
-                        result.status().ToString());
-            }
+        futures.push_back(
+            folly::via(&pool, [&fs, file, &fields_for_stats, &debug_key]() {
+                auto result = milvus_storage::FileRowGroupReader::Make(
+                    fs,
+                    file,
+                    milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                    storage::GetReaderProperties(),
+                    storage::GetArrowReaderProperties());
+                if (!result.ok()) {
+                    ThrowInfo(
+                        milvus::storage::ArrowStatusToErrorCode(
+                            result.status()),
+                        "[StorageV2] Failed to create file row group reader: " +
+                            result.status().ToString());
+                }
 
-            auto reader = result.ValueOrDie();
-            FileMetadataLoadResult load_result;
-            auto file_metadata = reader->file_metadata();
-            load_result.row_group_meta =
-                file_metadata->GetRowGroupMetadataVector();
+                auto reader = result.ValueOrDie();
+                FileMetadataLoadResult load_result;
+                auto file_metadata = reader->file_metadata();
+                load_result.row_group_meta =
+                    file_metadata->GetRowGroupMetadataVector();
 
-            if (!fields_for_stats.empty()) {
-                auto field_id_mapping = file_metadata->GetFieldIDMapping();
-                auto parquet_metadata = file_metadata->GetParquetMetadata();
-                auto num_row_groups = parquet_metadata->num_row_groups();
-                // The metrics are positional (one entry per row group) and get
-                // mapped 1:1 onto cells downstream. But the cell layout is
-                // derived from the private ROW_GROUP_META_KEY vector
-                // (load_result.row_group_meta), while num_row_groups comes from
-                // the parquet footer: two independent sources that can disagree
-                // on a malformed/truncated footer. If they disagree here, any
-                // metric we build would land on the wrong cell and prune a row
-                // that actually matches. Leave no metrics for this file; the
-                // aggregate metrics-vs-cells count check in GroupChunkTranslator
-                // then disables pruning for the whole field (fail open), rather
-                // than risk a misaligned bound.
-                if (num_row_groups ==
-                    static_cast<int>(load_result.row_group_meta.size())) {
-                    // Build the deep-owning skip metrics HERE, while `reader`
-                    // (and so its parquet FileMetaData) is alive: for BYTE_ARRAY
-                    // columns parquet::Statistics exposes min/max as
-                    // string_views aliasing the thrift metadata owned by the
-                    // FileMetaData. Letting a Statistics escape this lambda and
-                    // reading min()/max() later is a use-after-free that yields
-                    // garbage skip bounds. Build() deep-copies everything it
-                    // needs, so the metrics are safe to hand out after the
-                    // reader closes.
-                    index::SkipIndexStatsBuilder skip_builder;
-                    for (const auto& [field_id, data_type] : fields_for_stats) {
-                        auto it = field_id_mapping.find(field_id.get());
-                        AssertInfo(it != field_id_mapping.end(),
-                                   "field id {} not found in field id mapping",
-                                   field_id.get());
-                        auto& per_rg =
-                            load_result
-                                .per_field_row_group_metrics[field_id.get()];
-                        per_rg.reserve(num_row_groups);
-                        for (int i = 0; i < num_row_groups; ++i) {
-                            auto column_chunk =
-                                parquet_metadata->RowGroup(i)->ColumnChunk(
-                                    it->second.col_index);
-                            per_rg.emplace_back(skip_builder.Build(
-                                data_type,
-                                column_chunk->is_stats_set()
-                                    ? column_chunk->statistics()
-                                    : nullptr));
+                if (!fields_for_stats.empty()) {
+                    auto field_id_mapping = file_metadata->GetFieldIDMapping();
+                    auto parquet_metadata = file_metadata->GetParquetMetadata();
+                    auto num_row_groups = parquet_metadata->num_row_groups();
+                    // The metrics are positional (one entry per row group) and get
+                    // mapped 1:1 onto cells downstream. But the cell layout is
+                    // derived from the private ROW_GROUP_META_KEY vector
+                    // (load_result.row_group_meta), while num_row_groups comes from
+                    // the parquet footer: two independent sources that can disagree
+                    // on a malformed/truncated footer. If they disagree here, any
+                    // metric we build would land on the wrong cell and prune a row
+                    // that actually matches. Leave no metrics for this file; the
+                    // aggregate metrics-vs-cells count check in GroupChunkTranslator
+                    // then disables pruning for the whole field (fail open), rather
+                    // than risk a misaligned bound.
+                    if (num_row_groups ==
+                        static_cast<int>(load_result.row_group_meta.size())) {
+                        // Build the deep-owning skip metrics HERE, while `reader`
+                        // (and so its parquet FileMetaData) is alive: for BYTE_ARRAY
+                        // columns parquet::Statistics exposes min/max as
+                        // string_views aliasing the thrift metadata owned by the
+                        // FileMetaData. Letting a Statistics escape this lambda and
+                        // reading min()/max() later is a use-after-free that yields
+                        // garbage skip bounds. Build() deep-copies everything it
+                        // needs, so the metrics are safe to hand out after the
+                        // reader closes.
+                        index::SkipIndexStatsBuilder skip_builder;
+                        for (const auto& [field_id, data_type] :
+                             fields_for_stats) {
+                            auto it = field_id_mapping.find(field_id.get());
+                            AssertInfo(
+                                it != field_id_mapping.end(),
+                                "field id {} not found in field id mapping",
+                                field_id.get());
+                            auto& per_rg =
+                                load_result.per_field_row_group_metrics
+                                    [field_id.get()];
+                            per_rg.reserve(num_row_groups);
+                            for (int i = 0; i < num_row_groups; ++i) {
+                                auto column_chunk =
+                                    parquet_metadata->RowGroup(i)->ColumnChunk(
+                                        it->second.col_index);
+                                per_rg.emplace_back(skip_builder.Build(
+                                    data_type,
+                                    column_chunk->is_stats_set()
+                                        ? column_chunk->statistics()
+                                        : nullptr));
+                            }
                         }
                     }
                 }
-            }
 
-            auto status = reader->Close();
-            if (!status.ok()) {
-                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
-                          "[StorageV2] metadata loader {} failed to close "
-                          "file reader for {} with error {}",
-                          debug_key,
-                          file,
-                          status.ToString());
-            }
-            return load_result;
-        }));
+                auto status = reader->Close();
+                if (!status.ok()) {
+                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                              "[StorageV2] metadata loader {} failed to close "
+                              "file reader for {} with error {}",
+                              debug_key,
+                              file,
+                              status.ToString());
+                }
+                return load_result;
+            }).semi());
     }
 
     auto futures_guard = folly::makeGuard([&futures]() {
         for (auto& future : futures) {
             if (future.valid()) {
                 try {
-                    future.get();
+                    std::move(future).get();
                 } catch (...) {
                 }
             }
@@ -3201,7 +3204,7 @@ LoadGroupChunkMetadata(
     metadata.row_group_meta_list.reserve(insert_files.size());
 
     for (auto& future : futures) {
-        auto load_result = future.get();
+        auto load_result = std::move(future).get();
         metadata.row_group_meta_list.push_back(
             std::move(load_result.row_group_meta));
         // Keep the metrics positional: one entry per row group in file order,
@@ -6455,8 +6458,8 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
     const SegmentLoadInfo& segment_load_info,
     const SealedFieldLayoutPtr& schema_snapshot,
     StagedStateCommitter& committer) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_index_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_index_futures;
     load_index_futures.reserve(infos.size());
     auto futures_guard = folly::makeGuard(
         [&load_index_futures]() { storage::DrainFutures(load_index_futures); });
@@ -6465,23 +6468,27 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
                    "field {} not found in schema when loading json stats",
                    field_id.get());
-        auto future = pool.Submit([this,
-                                   op_ctx,
-                                   field_id = field_id,
-                                   info = info_proto,
-                                   &segment_load_info,
-                                   &committer]() {
-            auto slot = BuildJsonKeyStatsIndex(
-                op_ctx, info, segment_load_info.GetInsertChannel());
-            if (slot == nullptr) {
-                return;
-            }
-            committer.Commit([field_id, slot = std::move(slot)](
-                                 RuntimeResourceState& runtime,
-                                 PublishedSegmentState&) mutable {
-                runtime.json_stats[field_id] = std::move(slot);
-            });
-        });
+        auto future =
+            folly::via(
+                &pool,
+                [this,
+                 op_ctx,
+                 field_id = field_id,
+                 info = info_proto,
+                 &segment_load_info,
+                 &committer]() {
+                    auto slot = BuildJsonKeyStatsIndex(
+                        op_ctx, info, segment_load_info.GetInsertChannel());
+                    if (slot == nullptr) {
+                        return;
+                    }
+                    committer.Commit([field_id, slot = std::move(slot)](
+                                         RuntimeResourceState& runtime,
+                                         PublishedSegmentState&) mutable {
+                        runtime.json_stats[field_id] = std::move(slot);
+                    });
+                })
+                .semi();
         load_index_futures.emplace_back(std::move(future));
     }
 
@@ -9457,8 +9464,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     for (const auto& [cg_index, field_ids] : lazy_cg_field_ids) {
         add_task(cg_index, field_ids, /*eager_load=*/false);
     }
-    const bool enable_async_load =
-        storagev2translator::StorageV2AsyncLoadEnabled();
+    const bool enable_async_load = milvus::storage::LoadAsyncReadEnabled();
     tasks = PrepareManifestLoadTasks(reader,
                                      schema_snapshot,
                                      segment_load_info,
@@ -9470,48 +9476,52 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         tasks.emplace_back(std::move(task));
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_group_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
-        auto future = pool.Submit(
-            [this,
-             column_groups,
-             properties,
-             cg_index = task.column_group_index,
-             field_ids = std::move(task.field_ids),
-             size_estimate_state = std::move(task.size_estimate_state),
-             lazy_materialization = task.lazy_materialization,
-             enable_async_load,
-             preopened_chunk_reader = std::move(task.preopened_chunk_reader),
-             &segment_load_info,
-             schema_snapshot,
-             eager_load = task.eager_load,
-             use_vortex = task.use_vortex,
-             op_ctx,
-             is_replace,
-             &committer]() mutable {
-                CheckCancellation(
-                    op_ctx,
-                    id_,
-                    cg_index,
-                    "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-                LoadColumnGroup(column_groups,
-                                properties,
-                                cg_index,
-                                field_ids,
-                                segment_load_info,
-                                schema_snapshot,
-                                eager_load,
-                                op_ctx,
-                                is_replace,
-                                committer,
-                                std::move(size_estimate_state),
-                                std::move(preopened_chunk_reader),
-                                enable_async_load,
-                                lazy_materialization,
-                                use_vortex);
-            });
+        auto future =
+            folly::via(
+                &pool,
+                [this,
+                 column_groups,
+                 properties,
+                 cg_index = task.column_group_index,
+                 field_ids = std::move(task.field_ids),
+                 size_estimate_state = std::move(task.size_estimate_state),
+                 lazy_materialization = task.lazy_materialization,
+                 enable_async_load,
+                 preopened_chunk_reader =
+                     std::move(task.preopened_chunk_reader),
+                 &segment_load_info,
+                 schema_snapshot,
+                 eager_load = task.eager_load,
+                 use_vortex = task.use_vortex,
+                 op_ctx,
+                 is_replace,
+                 &committer]() mutable {
+                    CheckCancellation(
+                        op_ctx,
+                        id_,
+                        cg_index,
+                        "ChunkedSegmentSealedImpl::LoadColumnGroup()");
+                    LoadColumnGroup(column_groups,
+                                    properties,
+                                    cg_index,
+                                    field_ids,
+                                    segment_load_info,
+                                    schema_snapshot,
+                                    eager_load,
+                                    op_ctx,
+                                    is_replace,
+                                    committer,
+                                    std::move(size_estimate_state),
+                                    std::move(preopened_chunk_reader),
+                                    enable_async_load,
+                                    lazy_materialization,
+                                    use_vortex);
+                })
+                .semi();
         load_group_futures.emplace_back(std::move(future));
     }
     storage::WaitAllFutures(load_group_futures);
@@ -9897,21 +9907,22 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 void
 ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids,
                                         milvus::OpContext* op_ctx) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> reload_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> reload_futures;
     for (auto& field_id : field_ids) {
-        auto future = pool.Submit([this, field_id, op_ctx]() {
-            auto column = get_column(field_id);
-            AssertInfo(column != nullptr,
-                       "cannot reload non-existing field column {}",
-                       field_id.get());
-            auto num_chunks = column->num_chunks();
-            std::vector<int64_t> chunk_ids(num_chunks);
-            for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
-                chunk_ids[chunk_id] = chunk_id;
-            }
-            column->PrefetchChunks(op_ctx, chunk_ids);
-        });
+        auto future =
+            folly::via(&pool, [this, field_id, op_ctx]() {
+                auto column = get_column(field_id);
+                AssertInfo(column != nullptr,
+                           "cannot reload non-existing field column {}",
+                           field_id.get());
+                auto num_chunks = column->num_chunks();
+                std::vector<int64_t> chunk_ids(num_chunks);
+                for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
+                    chunk_ids[chunk_id] = chunk_id;
+                }
+                column->PrefetchChunks(op_ctx, chunk_ids);
+            }).semi();
         reload_futures.push_back(std::move(future));
     }
 
@@ -9926,41 +9937,48 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
     const SealedFieldLayoutPtr& schema_snapshot,
     const SegmentLoadInfo& segment_load_info,
     StagedStateCommitter& committer) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_index_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_index_futures;
     load_index_futures.reserve(text_indexes_to_load.size());
 
     for (auto& [field_id, load_text_index_info] : text_indexes_to_load) {
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
                    "field {} not found in schema when loading text index",
                    field_id.get());
-        auto future = pool.Submit([this,
-                                   op_ctx,
-                                   field_id = field_id,
-                                   info = std::move(load_text_index_info),
-                                   &segment_load_info,
-                                   &committer]() mutable -> void {
-            ScopedTextIndexBuildGuard build_guard(*this, field_id);
-            build_guard.Register();
-            auto text_index =
-                BuildTextIndexFromFiles(op_ctx, info, segment_load_info);
-            committer.Commit([field_id, text_index = std::move(text_index)](
-                                 RuntimeResourceState& runtime,
-                                 PublishedSegmentState&) mutable {
-                auto entries = runtime.indexes.Entries(field_id);
-                AssertInfo(
-                    std::none_of(
-                        entries.begin(), entries.end(), is_text_registration),
-                    "text index for field {} already exists, "
-                    "refusing to reload",
-                    field_id.get());
-                auto replaced = runtime.indexes.Register(std::move(text_index));
-                AssertInfo(replaced == nullptr,
-                           "text index key unexpectedly replaced another "
-                           "generation");
-            });
-            build_guard.Commit();
-        });
+        auto future =
+            folly::via(
+                &pool,
+                [this,
+                 op_ctx,
+                 field_id = field_id,
+                 info = std::move(load_text_index_info),
+                 &segment_load_info,
+                 &committer]() mutable -> void {
+                    ScopedTextIndexBuildGuard build_guard(*this, field_id);
+                    build_guard.Register();
+                    auto text_index = BuildTextIndexFromFiles(
+                        op_ctx, info, segment_load_info);
+                    committer.Commit([field_id,
+                                      text_index = std::move(text_index)](
+                                         RuntimeResourceState& runtime,
+                                         PublishedSegmentState&) mutable {
+                        auto entries = runtime.indexes.Entries(field_id);
+                        AssertInfo(std::none_of(entries.begin(),
+                                                entries.end(),
+                                                is_text_registration),
+                                   "text index for field {} already exists, "
+                                   "refusing to reload",
+                                   field_id.get());
+                        auto replaced =
+                            runtime.indexes.Register(std::move(text_index));
+                        AssertInfo(
+                            replaced == nullptr,
+                            "text index key unexpectedly replaced another "
+                            "generation");
+                    });
+                    build_guard.Commit();
+                })
+                .semi();
         load_index_futures.emplace_back(std::move(future));
     }
 
@@ -9976,8 +9994,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_index_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_index_futures;
     load_index_futures.reserve(field_id_to_index_info.size());
 
     for (auto& pair : field_id_to_index_info) {
@@ -9988,41 +10006,51 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         auto& index_infos = pair.second;
         for (auto& load_index_info : index_infos) {
             auto* load_index_info_ptr = &load_index_info;
-            auto future = pool.Submit([this,
-                                       trace_ctx,
-                                       field_id,
-                                       load_index_info_ptr,
-                                       schema_snapshot,
-                                       op_ctx,
-                                       is_replace,
-                                       &committer]() mutable -> void {
-                // Early exit if cancelled while queued
-                CheckCancellation(op_ctx, id_, field_id.get(), "LoadIndex");
+            auto future =
+                folly::via(
+                    &pool,
+                    [this,
+                     trace_ctx,
+                     field_id,
+                     load_index_info_ptr,
+                     schema_snapshot,
+                     op_ctx,
+                     is_replace,
+                     &committer]() mutable -> void {
+                        // Early exit if cancelled while queued
+                        CheckCancellation(
+                            op_ctx, id_, field_id.get(), "LoadIndex");
 
-                LOG_INFO("Loading index for segment {} field {} with {} files",
-                         id_,
-                         field_id.get(),
-                         load_index_info_ptr->index_files.size());
+                        LOG_INFO(
+                            "Loading index for segment {} field {} with {} "
+                            "files",
+                            id_,
+                            field_id.get(),
+                            load_index_info_ptr->index_files.size());
 
-                if (CanLazyCreateSealedIndexSlot(*load_index_info_ptr)) {
-                    PrepareLazySealedIndexSlot(*load_index_info_ptr);
-                } else {
-                    LoadIndexData(trace_ctx, load_index_info_ptr, op_ctx);
-                }
+                        if (CanLazyCreateSealedIndexSlot(
+                                *load_index_info_ptr)) {
+                            PrepareLazySealedIndexSlot(*load_index_info_ptr);
+                        } else {
+                            LoadIndexData(
+                                trace_ctx, load_index_info_ptr, op_ctx);
+                        }
 
-                // RuntimeResourceState and staged PublishedSegmentState are
-                // shared batch-private objects. Keep expensive IO/build work
-                // parallel, then serialize the commit into staged state.
-                committer.Commit([&](RuntimeResourceState& runtime,
-                                     PublishedSegmentState& staged_state) {
-                    LoadIndex(*load_index_info_ptr,
-                              schema_snapshot,
-                              is_replace,
-                              &runtime,
-                              &staged_state,
-                              &committer);
-                });
-            });
+                        // RuntimeResourceState and staged PublishedSegmentState are
+                        // shared batch-private objects. Keep expensive IO/build work
+                        // parallel, then serialize the commit into staged state.
+                        committer.Commit(
+                            [&](RuntimeResourceState& runtime,
+                                PublishedSegmentState& staged_state) {
+                                LoadIndex(*load_index_info_ptr,
+                                          schema_snapshot,
+                                          is_replace,
+                                          &runtime,
+                                          &staged_state,
+                                          &committer);
+                            });
+                    })
+                    .semi();
 
             load_index_futures.push_back(std::move(future));
         }
@@ -10161,33 +10189,37 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         field_data_to_load.emplace_back(group_id, load_field_data_info);
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_field_futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> load_field_futures;
     load_field_futures.reserve(field_data_to_load.size());
 
     for (const auto& [field_id, load_field_data_info] : field_data_to_load) {
         // Create local copies to capture in lambda (C++17 compatible)
         const auto field_data = load_field_data_info;
         const auto captured_field_id = field_id;
-        auto future = pool.Submit([this,
-                                   field_data,
-                                   captured_field_id,
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   op_ctx,
-                                   is_replace,
-                                   &committer]() -> void {
-            CheckCancellation(op_ctx,
-                              id_,
-                              captured_field_id.get(),
-                              "ChunkedSegmentSealedImpl::LoadFieldData()");
-            LoadFieldData(field_data,
-                          segment_load_info,
-                          op_ctx,
-                          is_replace,
-                          schema_snapshot,
-                          committer);
-        });
+        auto future =
+            folly::via(&pool,
+                       [this,
+                        field_data,
+                        captured_field_id,
+                        &segment_load_info,
+                        schema_snapshot,
+                        op_ctx,
+                        is_replace,
+                        &committer]() -> void {
+                           CheckCancellation(
+                               op_ctx,
+                               id_,
+                               captured_field_id.get(),
+                               "ChunkedSegmentSealedImpl::LoadFieldData()");
+                           LoadFieldData(field_data,
+                                         segment_load_info,
+                                         op_ctx,
+                                         is_replace,
+                                         schema_snapshot,
+                                         committer);
+                       })
+                .semi();
 
         load_field_futures.push_back(std::move(future));
     }

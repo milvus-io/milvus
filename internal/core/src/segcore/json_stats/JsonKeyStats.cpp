@@ -80,7 +80,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/Utils.h"
 #include "segcore/default_fs.h"
 #include "segcore/json_stats/BsonInvertedIndexTranslator.h"
@@ -1955,10 +1955,9 @@ JsonKeyStats::LoadShreddingMeta(
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor({}, priority), inspect()));
     } else {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
         metadata.resize(files.size());
-        std::vector<std::future<void>> futures;
+        std::vector<folly::SemiFuture<folly::Unit>> futures;
         futures.reserve(files.size());
         auto drain = folly::makeGuard([&] {
             for (auto& future : futures) {
@@ -1983,11 +1982,11 @@ JsonKeyStats::LoadShreddingMeta(
             if (files[i].second) {
                 read();
             } else {
-                futures.push_back(pool.Submit(std::move(read)));
+                futures.push_back(folly::via(&pool, std::move(read)).semi());
             }
         }
         for (auto& future : futures) {
-            future.get();
+            std::move(future).get();
         }
     }
     storage::ThrowIfCancelled(token, "prepare JSON stats footers");
@@ -2426,7 +2425,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
                    OpContext* op_ctx) {
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
     index::IndexLoadContext preparation_ctx(
         op_ctx, GetValueFromConfig<int32_t>(config, LOAD_PRIORITY).value_or(0));
     auto* context = &preparation_ctx.ctx;

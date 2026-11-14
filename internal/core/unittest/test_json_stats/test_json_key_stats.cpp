@@ -67,7 +67,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "segcore/json_stats/BsonInvertedIndexTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
@@ -1898,13 +1898,11 @@ TEST_P(JsonStatsPreparationTest, PinsModeAndPreservesLegacyLayout) {
                                      bytes->data() + bytes->size())));
     }
     fs_ = fs;
-    const bool previous =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    auto restore = folly::makeGuard([&] {
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(previous);
-    });
+    const bool previous = milvus::storage::LoadAsyncReadEnabled();
+    auto restore = folly::makeGuard(
+        [&] { milvus::storage::SetLoadAsyncReadEnabled(previous); });
     // Explicit context mode must survive the opposite global rollout setting.
-    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(!use_async);
+    milvus::storage::SetLoadAsyncReadEnabled(!use_async);
     OpContext operation;
     operation.runtime_load_priority = proto::common::LoadPriority::LOW;
     Load("disable", &operation, use_async);
@@ -2326,13 +2324,12 @@ TEST_P(JsonKeyStatsAsyncLoadTest, HonorsRolloutForMmapEagerAndLazyLoad) {
     PrepareData(json_strings);
     BuildAndUpload();
 
-    auto previous_rollout =
-        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    ::SetStorageV2AsyncLoadEnabled(enable_async_load);
+    auto previous_rollout = milvus::storage::LoadAsyncReadEnabled();
+    ::SetLoadAsyncReadEnabled(enable_async_load);
 
     auto& pool = storage::LocalFileIOPool::GetInstance();
     auto cleanup_guard = folly::makeGuard([&]() {
-        ::SetStorageV2AsyncLoadEnabled(previous_rollout);
+        ::SetLoadAsyncReadEnabled(previous_rollout);
         pool.Configure(0);
     });
 

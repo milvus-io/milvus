@@ -90,7 +90,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
@@ -1061,18 +1061,16 @@ TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
 
 TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
     LazyColumnGroupGuard lazy_group_guard(true);
-    const auto previous_async =
-        storagev2translator::StorageV2AsyncLoadEnabled();
-    auto restore_async = folly::makeGuard([&] {
-        storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
-    });
+    const auto previous_async = milvus::storage::LoadAsyncReadEnabled();
+    auto restore_async = folly::makeGuard(
+        [&] { milvus::storage::SetLoadAsyncReadEnabled(previous_async); });
     auto policies =
         cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
     policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
     CacheWarmupPolicyGuard warmup_guard(policies);
     for (bool async_enabled : {false, true}) {
         SCOPED_TRACE(async_enabled);
-        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(async_enabled);
         auto schema = GenChunkedSegmentTestSchema(GetParam());
         schema->AddDebugArrayField("items[source]", DataType::INT32, true);
         auto label =
@@ -2715,12 +2713,11 @@ TEST_P(TestLazyManifest, LazyManifestDisabledKeepsEagerColumnGroup) {
 TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
     for (bool async_enabled : {false, true}) {
         SCOPED_TRACE(async_enabled);
-        const auto previous_async =
-            storagev2translator::StorageV2AsyncLoadEnabled();
+        const auto previous_async = milvus::storage::LoadAsyncReadEnabled();
         auto restore_async = folly::makeGuard([previous_async] {
-            storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+            milvus::storage::SetLoadAsyncReadEnabled(previous_async);
         });
-        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(async_enabled);
         LazyColumnGroupGuard lazy_group_guard(true);
         auto policies =
             cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();

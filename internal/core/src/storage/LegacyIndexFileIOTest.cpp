@@ -15,6 +15,8 @@
 #include "storage/Event.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/artifact/FileSource.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/PluginLoader.h"
 #include "storage/Util.h"
@@ -392,6 +394,60 @@ TEST_F(LegacyIndexFileIOTest, PathInspectionPreservesParentCancellation) {
         FAIL() << "expected inherited cancellation while waiting to inspect";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, AwaitableSyncMetadataInheritsCancellation) {
+    test::TmpPath directory;
+    auto manager =
+        std::make_shared<LocalChunkManager>(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    auto encoded = EncodeLargeDescriptor();
+    manager->Write(path, encoded.data(), encoded.size());
+    FileManagerContext context({1, 2, 3, 101}, {3, 101, 1000, 1}, manager, {});
+    V1RemoteSource source(context, {path});
+    for (int operation : {0, 1, 2}) {
+        SCOPED_TRACE(operation);
+        auto held = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
+            co_return co_await budget_.AcquireAsync(
+                {budget_.CapacityBytes(), 0}, LoadAdmissionPriority::High);
+        }());
+        folly::CancellationSource cancel;
+        std::promise<void> entered;
+        auto read = [&]() -> folly::coro::Task<void> {
+            entered.set_value();
+            if (operation == 0) {
+                co_await ReadLegacyIndexFileAsync(*manager, path, kPriority);
+            } else if (operation == 1) {
+                co_await InspectLegacyIndexFileSyncAsync(
+                    manager, {}, path, kPriority);
+            } else {
+                co_await source.EntrySizeAsync("legacy", false);
+            }
+        };
+        auto load = std::async(std::launch::async, [&] {
+            Run(folly::coro::co_withCancellation(cancel.getToken(), read()));
+        });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            held.Release();
+            if (load.valid())
+                load.wait();
+        });
+        ASSERT_EQ(entered.get_future().wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        cancel.requestCancellation();
+        const auto status = load.wait_for(std::chrono::seconds(2));
+        held.Release();
+        EXPECT_EQ(status, std::future_status::ready);
+        try {
+            load.get();
+            FAIL() << "expected cancelled descriptor admission";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
     }
 }
 

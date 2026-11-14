@@ -56,7 +56,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/Util.h"
@@ -156,7 +156,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       writeback_mode_(writeback_mode),
       load_priority_(load_priority),
       enable_async_load_(enable_async_load),
-      async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
+      async_read_window_bytes_(
+          milvus::storage::LoadFieldDataReadWindowSizeBytes()) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -676,10 +677,10 @@ ManifestGroupTranslator::get_cells_async(
         co_return co_await get_cells_via_async_pipeline(ctx,
                                                         std::move(cell_specs));
     }
-    co_return get_cells_legacy(ctx, cids, std::move(cell_specs));
+    co_return co_await get_cells_legacy(ctx, cids, std::move(cell_specs));
 }
 
-std::vector<ManifestGroupTranslator::CellResult>
+folly::coro::Task<ManifestGroupTranslator::CellResults>
 ManifestGroupTranslator::get_cells_legacy(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
@@ -692,7 +693,7 @@ ManifestGroupTranslator::get_cells_legacy(
     auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
-    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+    auto loaded_batches = co_await milvus::segcore::LoadCellBatchesAsync(
         ctx,
         std::move(cell_specs),
         std::move(factory),
@@ -708,10 +709,10 @@ ManifestGroupTranslator::get_cells_legacy(
         });
 
     LOG_DEBUG(
-        "[StorageV2] translator {} submits {} batch tasks for manifest "
+        "[StorageV2] translator {} completed {} batch tasks for manifest "
         "column group {}",
         key_,
-        load_futures.size(),
+        loaded_batches.size(),
         column_group_index_);
 
     std::unordered_map<milvus::cachinglayer::cid_t,
@@ -719,38 +720,17 @@ ManifestGroupTranslator::get_cells_legacy(
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    std::exception_ptr first_error;
-    for (auto& future : load_futures) {
-        try {
-            auto loaded_cells = future.get();
-            if (first_error) {
-                continue;
-            }
-            for (auto& loaded_cell : loaded_cells) {
-                try {
-                    CheckCancellation(ctx,
-                                      segment_id_,
-                                      "ManifestGroupTranslator::get_cells()");
-                    AssertInfo(loaded_cell.chunk != nullptr,
-                               "[StorageV2] translator {} cell {} is not "
-                               "finalized by batch task",
-                               key_,
-                               loaded_cell.cid);
-                    completed_cells[loaded_cell.cid] =
-                        std::move(loaded_cell.chunk);
-                } catch (...) {
-                    first_error = std::current_exception();
-                    break;
-                }
-            }
-        } catch (...) {
-            if (!first_error) {
-                first_error = std::current_exception();
-            }
+    for (auto& loaded_cells : loaded_batches) {
+        for (auto& loaded_cell : loaded_cells) {
+            CheckCancellation(
+                ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+            AssertInfo(loaded_cell.chunk != nullptr,
+                       "[StorageV2] translator {} cell {} is not finalized "
+                       "by batch task",
+                       key_,
+                       loaded_cell.cid);
+            completed_cells[loaded_cell.cid] = std::move(loaded_cell.chunk);
         }
-    }
-    if (first_error) {
-        std::rethrow_exception(first_error);
     }
 
     for (const auto cid : cids) {
@@ -762,7 +742,7 @@ ManifestGroupTranslator::get_cells_legacy(
         cells.emplace_back(cid, std::move(it->second));
     }
 
-    return cells;
+    co_return cells;
 }
 
 folly::coro::Task<ManifestGroupTranslator::CellResults>

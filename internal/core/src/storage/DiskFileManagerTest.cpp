@@ -27,7 +27,8 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
-#include <future>
+#include <functional>
+#include <folly/futures/Future.h>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
@@ -84,7 +85,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadReader.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
@@ -707,45 +708,56 @@ compute(int a) {
 }
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
-    auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test1");
-    std::cout << "current thread num" << thread_pool->GetThreadNum()
+    auto thread_pool = std::make_shared<folly::CPUThreadPoolExecutor>(
+        std::pair<size_t, size_t>{milvus::ComputeThreadPoolMaxThreads(10), 1},
+        std::make_shared<folly::NamedThreadFactory>("test1"));
+    thread_pool->setThreadDeathTimeout(std::chrono::seconds(2));
+    auto drain_pool = folly::makeGuard([&] { thread_pool->join(); });
+    std::cout << "current thread num" << thread_pool->numActiveThreads()
               << std::endl;
-    auto thread_num_1 = thread_pool->GetThreadNum();
+    auto thread_num_1 = thread_pool->numActiveThreads();
     EXPECT_GT(thread_num_1, 0);
 
-    auto fut = thread_pool->Submit(compute, 10);
-    auto res = fut.get();
+    auto fut = folly::via(thread_pool.get(), std::bind(compute, 10)).semi();
+    auto res = std::move(fut).get();
     EXPECT_EQ(res, 20);
 
-    std::vector<std::future<int>> futs;
+    std::vector<folly::SemiFuture<int>> futs;
     for (int i = 0; i < 10; ++i) {
-        futs.push_back(thread_pool->Submit(compute, i));
+        futs.push_back(
+            folly::via(thread_pool.get(), std::bind(compute, i)).semi());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    std::cout << "current thread num" << thread_pool->GetThreadNum()
+    std::cout << "current thread num" << thread_pool->numActiveThreads()
               << std::endl;
 
     for (int i = 0; i < 10; ++i) {
-        std::cout << futs[i].get() << std::endl;
+        std::cout << std::move(futs[i]).get() << std::endl;
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-    std::cout << "current thread num" << thread_pool->GetThreadNum()
+    std::cout << "current thread num" << thread_pool->numActiveThreads()
               << std::endl;
-    auto thread_num_2 = thread_pool->GetThreadNum();
+    auto thread_num_2 = thread_pool->numActiveThreads();
     EXPECT_EQ(thread_num_2, thread_num_1);
 }
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
-    auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test");
-    std::vector<std::future<int>> futures;
+    auto thread_pool = std::make_shared<folly::CPUThreadPoolExecutor>(
+        std::pair<size_t, size_t>{milvus::ComputeThreadPoolMaxThreads(10), 1},
+        std::make_shared<folly::NamedThreadFactory>("test"));
+    thread_pool->setThreadDeathTimeout(std::chrono::seconds(2));
+    auto drain_pool = folly::makeGuard([&] { thread_pool->join(); });
+    std::vector<folly::SemiFuture<int>> futures;
     auto start = chrono::system_clock::now();
     for (int i = 0; i < 10; i++) {
         futures.push_back(
-            thread_pool->Submit(test_worker, "test_id" + std::to_string(i)));
+            folly::via(thread_pool.get(),
+                       std::bind(test_worker, "test_id" + std::to_string(i)))
+                .semi());
     }
     for (auto& future : futures) {
-        EXPECT_EQ(future.get(), 1);
+        EXPECT_EQ(std::move(future).get(), 1);
     }
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::microseconds>(end - start);
@@ -764,14 +776,22 @@ test_exception(string s) {
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
     try {
-        auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test");
-        std::vector<std::future<int>> futures;
+        auto thread_pool = std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::pair<size_t, size_t>{milvus::ComputeThreadPoolMaxThreads(10),
+                                      1},
+            std::make_shared<folly::NamedThreadFactory>("test"));
+        thread_pool->setThreadDeathTimeout(std::chrono::seconds(2));
+        auto drain_pool = folly::makeGuard([&] { thread_pool->join(); });
+        std::vector<folly::SemiFuture<int>> futures;
         for (int i = 0; i < 10; i++) {
-            futures.push_back(thread_pool->Submit(
-                test_exception, "test_id" + std::to_string(i)));
+            futures.push_back(
+                folly::via(
+                    thread_pool.get(),
+                    std::bind(test_exception, "test_id" + std::to_string(i)))
+                    .semi());
         }
         for (auto& future : futures) {
-            future.get();
+            std::move(future).get();
         }
     } catch (std::exception& e) {
         EXPECT_EQ(std::string(e.what()), "run time error");

@@ -1745,7 +1745,7 @@ TEST(ExternalTakeTest,
     segment->SetReaderForTesting(std::move(reader));
     segment->SetUseTakeForOutputForTesting(true);
 
-    ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
     milvus::futures::getSearchFanoutCPUExecutor();
     const auto middle_submitted =
         milvus::monitor::internal_storage_pool_task_submitted_total_middle
