@@ -57,6 +57,10 @@
 #include "storage/LoadOverheadController.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/system/ThreadName.h>
+#include <future>
 #include "test_utils/Constants.h"
 #include "test_utils/CountedFileSystem.h"
 #include "storage/KeyRetriever.h"
@@ -301,6 +305,111 @@ TEST_P(GroupChunkTranslatorTest,
     EXPECT_EQ(translator->get_cells(nullptr, cids).size(), cids.size());
     EXPECT_GT(counts->footer_reads, before);
     EXPECT_EQ(counts->handles, 0);
+}
+
+TEST_P(GroupChunkTranslatorTest,
+       AsyncPreparationYieldsAndPreservesRequestedOrder) {
+    for (const auto priority : {proto::common::LoadPriority::HIGH,
+                                proto::common::LoadPriority::LOW}) {
+        SCOPED_TRACE(static_cast<int>(priority));
+        auto fs = std::make_shared<test::CountedFileSystem>(fs_);
+        std::vector<std::string> files;
+        auto translator = MakeFooterReuseTranslator(fs, files);
+        OpContext ctx;
+        ctx.runtime_load_priority = priority;
+        folly::CPUThreadPoolExecutor executor(1);
+        std::promise<std::string> opened;
+        auto opened_future = opened.get_future();
+        std::promise<void> release;
+        auto released = release.get_future().share();
+        std::atomic<bool> first_open{true};
+        fs->before_open = [&](const std::string&) {
+            if (first_open.exchange(false)) {
+                opened.set_value(folly::getCurrentThreadName().value_or(""));
+                released.wait();
+            }
+            return arrow::Status::OK();
+        };
+        const std::vector<cachinglayer::cid_t> cids{
+            translator->get_global_row_group_idx(1, 2),
+            translator->get_global_row_group_idx(0, 0),
+            translator->get_global_row_group_idx(1, 0)};
+        auto operation = std::async(std::launch::async, [&] {
+            return folly::coro::blockingWait(folly::coro::co_withExecutor(
+                folly::getKeepAliveToken(&executor),
+                translator->get_cells_async(&ctx, cids)));
+        });
+        auto unblock = folly::makeGuard([&] { release.set_value(); });
+        ASSERT_EQ(opened_future.wait_for(std::chrono::seconds(3)),
+                  std::future_status::ready);
+        const auto prefix = priority == proto::common::LoadPriority::HIGH
+                                ? "HIGH_SEGC_POOL"
+                                : "LOW_SEGC_POOL";
+        EXPECT_TRUE(opened_future.get().starts_with(prefix));
+        auto marker = std::make_shared<std::promise<void>>();
+        auto marker_future = marker->get_future();
+        executor.add([marker] { marker->set_value(); });
+        EXPECT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(operation.wait_for(std::chrono::milliseconds(20)),
+                  std::future_status::timeout);
+        release.set_value();
+        unblock.dismiss();
+        ASSERT_EQ(operation.wait_for(std::chrono::seconds(10)),
+                  std::future_status::ready);
+        const auto cells = operation.get();
+        ASSERT_EQ(cells.size(), cids.size());
+        for (size_t i = 0; i < cids.size(); ++i) {
+            EXPECT_EQ(cells[i].first, cids[i]);
+            EXPECT_GT(cells[i].second->RowNums(), 0);
+        }
+        EXPECT_EQ(fs->CountsFor(files[0])->handles.load(), 0);
+        EXPECT_EQ(fs->CountsFor(files[1])->handles.load(), 0);
+    }
+}
+
+TEST_P(GroupChunkTranslatorTest, AsyncCancellationDrainsPreparation) {
+    auto fs = std::make_shared<test::CountedFileSystem>(fs_);
+    std::vector<std::string> files;
+    auto translator = MakeFooterReuseTranslator(fs, files);
+    folly::CPUThreadPoolExecutor executor(1);
+    folly::CancellationSource cancellation;
+    std::promise<void> opened;
+    auto opened_future = opened.get_future();
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    fs->before_open = [&](const std::string&) {
+        opened.set_value();
+        released.wait();
+        return arrow::Status::OK();
+    };
+    const std::vector<cachinglayer::cid_t> cids{0};
+    auto operation = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(folly::coro::co_withExecutor(
+            &executor,
+            folly::coro::co_withCancellation(
+                cancellation.getToken(),
+                translator->get_cells_async(nullptr, cids))));
+    });
+    auto unblock = folly::makeGuard([&] { release.set_value(); });
+    ASSERT_EQ(opened_future.wait_for(std::chrono::seconds(3)),
+              std::future_status::ready);
+    cancellation.requestCancellation();
+    EXPECT_EQ(operation.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    release.set_value();
+    unblock.dismiss();
+    ASSERT_EQ(operation.wait_for(std::chrono::seconds(3)),
+              std::future_status::ready);
+    try {
+        operation.get();
+        FAIL() << "expected cancellation after draining preparation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(fs->CountsFor(files[0])->handles.load(), 0);
+    EXPECT_EQ(fs->CountsFor(files[0])->data_reads.load(), 0);
+    EXPECT_EQ(fs->CountsFor(files[1])->opens.load(), 0);
 }
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {

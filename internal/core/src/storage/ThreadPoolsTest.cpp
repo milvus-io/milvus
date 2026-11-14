@@ -19,6 +19,7 @@
 #include <atomic>
 #include <functional>
 #include <folly/futures/Future.h>
+#include <folly/coro/BlockingWait.h>
 #include "monitor/Monitor.h"
 #include "storage/Util.h"
 #include <future>
@@ -394,5 +395,30 @@ TEST(ThreadPool, RejectedBatchSubmissionReturnsAdmissionBytesAndSlots) {
     } catch (const std::system_error& error) {
         EXPECT_EQ(error.code(),
                   std::make_error_code(std::errc::not_enough_memory));
+    }
+    EXPECT_THROW(
+        folly::coro::blockingWait(segcore::LoadCellBatchesAsync(
+            nullptr,
+            {{0, 0, 0, 1, 8}},
+            [&](size_t, int64_t, int64_t, int64_t)
+                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+                ++reads;
+                return arrow::Status::IOError("rejected task must not read");
+            },
+            8,
+            proto::common::LoadPriority::HIGH,
+            [&](const std::vector<std::shared_ptr<arrow::Table>>&, int64_t) {
+                ++finalized;
+                return std::make_unique<GroupChunk>();
+            })),
+        std::system_error);
+    EXPECT_EQ(rejected->rejections, 2);
+    EXPECT_EQ(reads, 0);
+    EXPECT_EQ(finalized, 0);
+    const bool async_budget_returned =
+        budget.TryAcquire({8, 1}, storage::LoadAdmissionPriority::High);
+    EXPECT_TRUE(async_budget_returned);
+    if (async_budget_returned) {
+        budget.Release({8, 1});
     }
 }

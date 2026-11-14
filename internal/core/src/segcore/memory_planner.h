@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "folly/coro/Task.h"
 #include "common/Channel.h"
 #include "common/FieldData.h"
 #include "common/GroupChunk.h"
@@ -170,6 +171,20 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority,
                    CellFinalizeFunc finalize_cell);
+
+/**
+ * Await admission and HIGH/LOW worker completion for every planned batch.
+ * Owns specs and callbacks; op_ctx and references captured by callbacks remain
+ * borrowed until completion. On failure or cancellation, drains all issued work
+ * before propagating the error. Results preserve planned batch order.
+ */
+folly::coro::Task<std::vector<LoadedCellBatch>>
+LoadCellBatchesAsync(milvus::OpContext* op_ctx,
+                     std::vector<CellSpec> cell_specs,
+                     BatchReaderFactory reader_factory,
+                     int64_t memory_limit,
+                     milvus::proto::common::LoadPriority priority,
+                     CellFinalizeFunc finalize_cell);
 
 /**
  * Creates a BatchReaderFactory that reads from Parquet files via
