@@ -96,7 +96,7 @@ struct CompareElementFunc {
                const U* right,
                size_t size,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         // This is the original code, kept here for the documentation purposes

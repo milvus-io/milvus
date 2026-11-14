@@ -239,10 +239,10 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
  private:
     VectorPtr
-    EvalForIndexSegment(const TargetBitmap& bitmap_input);
+    EvalForIndexSegment(const TargetBitmapView& bitmap_input);
 
     VectorPtr
-    EvalForDataSegment(const TargetBitmap& bitmap_input);
+    EvalForDataSegment(const TargetBitmapView& bitmap_input);
 
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;

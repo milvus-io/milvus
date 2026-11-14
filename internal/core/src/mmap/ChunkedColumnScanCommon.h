@@ -326,7 +326,7 @@ struct TakeItemState {
 // outlive the result; callers do not manage backend Cell lifetimes.
 // A candidate mask selects which input positions belong to the request. Size()
 // preserves input indexing, but only selected positions may be read, including
-// in GetOwn() output. The immutable mask must also outlive the result.
+// in GetOwn() output. The immutable mask view and its backing storage must also outlive the result.
 // Reader-backed results may already contain one dense owned value array. Raw
 // CurrentCell results pin only the Cell used by the current borrowed access;
 // a view remains valid until switching Cells, GetOwn(), or result destruction.
@@ -523,7 +523,7 @@ struct TakeOptions {
     TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
     // Borrow the executor's candidate selection; excluded positions require
     // neither data nor validity. This is independent of the Cell data filter.
-    const TargetBitmap* candidate_mask = nullptr;
+    const TargetBitmapView* candidate_mask = nullptr;
 };
 
 enum class ScanReadMode {

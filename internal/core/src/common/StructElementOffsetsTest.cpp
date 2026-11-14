@@ -1587,3 +1587,27 @@ TEST_F(StructElementOffsetsTest, GrowingConcurrentWriters) {
         ASSERT_EQ(end, expected[row + 1]) << "row " << row;
     }
 }
+
+TEST_F(StructElementOffsetsTest, SelectionOnlyExpansionMatchesPairedAPI) {
+    const std::vector<int32_t> starts = {0, 0, 2, 67, 67, 68, 72};
+    StructElementOffsetsSealed sealed(starts);
+    StructElementOffsetsGrowing growing;
+    std::vector<int32_t> lengths;
+    for (size_t i = 1; i < starts.size(); ++i) {
+        lengths.push_back(starts[i] - starts[i - 1]);
+    }
+    growing.Insert(0, lengths.data(), lengths.size());
+    for (IStructElementOffsets* offsets :
+         {static_cast<IStructElementOffsets*>(&sealed),
+          static_cast<IStructElementOffsets*>(&growing)}) {
+        for (int start : {0, 1, 3, 6}) {
+            TargetBitmap rows(starts.size() - 1 - start, false);
+            for (size_t i = 0; i < rows.size(); ++i) rows[i] = i % 2 == 0;
+            TargetBitmap validity(rows.size(), false);
+            auto [expected, unused] = offsets->RowBitsetToElementBitset(
+                rows.view(), validity.view(), start);
+            auto actual = offsets->RowBitsetToElementBitset(rows.view(), start);
+            EXPECT_TRUE(actual == expected);
+        }
+    }
+}

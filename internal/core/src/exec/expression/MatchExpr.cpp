@@ -263,13 +263,29 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     const auto& candidates = context.get_bitmap_input();
     const bool has_candidates = !candidates.empty() && !candidates.all();
-    const bool select_rows =
-        has_candidates &&
-        (has_offset_input_ || inputs_[0]->SupportOffsetInput());
-    if (select_rows && !has_offset_input_) {
-        use_element_offsets_ = true;
+    bool sparse_batch = false;
+    FixedVector<int32_t> starts;
+    if (has_candidates && !has_offset_input_) {
+        starts.resize(batch_rows + 1);
+        struct_element_offsets->CopyRowElementStarts(
+            current_pos_, batch_rows, starts.data());
+        int64_t selected_elements = 0;
+        const int64_t total_elements = starts.back() - starts.front();
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            if (candidates[i]) {
+                selected_elements += starts[i + 1] - starts[i];
+            }
+        }
+        // Offsets pay for expansion and random row access. Keep dense batches
+        // sequential, and never replace an index query with raw-data gathers.
+        // This conservative 5% cutoff is based on elements, not parent rows.
+        if (total_elements > 0 && selected_elements <= total_elements / 20) {
+            inputs_[0]->WaitPrefetch();
+            sparse_batch = inputs_[0]->CanUseOffsetsForSequentialBatch();
+        }
     }
-    const bool use_offsets = has_offset_input_ || use_element_offsets_;
+    const bool use_offsets = has_offset_input_ || sparse_batch;
+    const bool select_rows = has_candidates && use_offsets;
     OffsetVector selected_rows;
     OffsetVector output_positions;
     const OffsetVector* row_offsets = input;
@@ -313,11 +329,8 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         elem_start = start_range.first;
         elem_count = end_range.first - elem_start;
         if (has_candidates) {
-            // Some element predicates require sequential execution. Keep their
-            // row cursors aligned and supply candidates in element coordinates.
-            FixedVector<int32_t> starts(batch_rows + 1);
-            struct_element_offsets->CopyRowElementStarts(
-                current_pos_, batch_rows, starts.data());
+            // Keep index/dense execution sequential and expose candidates in
+            // the same element coordinates as this batch's result.
             TargetBitmap element_candidates(elem_count, false);
             for (int64_t i = 0; i < batch_rows; ++i) {
                 if (candidates[i] && starts[i] < starts[i + 1]) {
@@ -345,6 +358,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     } else if (!use_offsets) {
         // Keep element-level child expressions aligned across all-empty batches.
         inputs_[0]->MoveCursor();
+    }
+    if (sparse_batch) {
+        // Offset Eval and offset short-circuiting leave sequential state alone.
+        // Advance every leaf once, including leaves skipped by AND/OR, so the
+        // next batch can use either sequential or offset execution safely.
+        inputs_[0]->AdvanceSequentialBatch();
     }
     if (match_result == nullptr) {
         AssertInfo(elem_count == 0,
