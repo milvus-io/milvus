@@ -12,6 +12,7 @@ package onnx
 
 import (
 	"context"
+	"math"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -89,6 +90,9 @@ func validateTensors(kind string, specs []TensorSpec, tensors []Tensor) error {
 			count, err := shapeSize(tensor.Shape)
 			if err != nil {
 				return err
+			}
+			if count > math.MaxInt64/int64(size) {
+				return tensorContractError(kind, "onnx: %s %q payload size overflows int64", kind, tensor.Name)
 			}
 			expectedBytes := count * int64(size)
 			if expectedBytes != int64(len(tensor.Data)) {

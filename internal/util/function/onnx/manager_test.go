@@ -46,6 +46,7 @@ type testSession struct {
 	close     atomic.Int32
 	active    atomic.Int32
 	maxActive atomic.Int32
+	closeFunc func()
 }
 
 func (s *testSession) Inputs() []TensorSpec {
@@ -68,6 +69,9 @@ func (s *testSession) MemoryBytes() uint64 {
 }
 func (s *testSession) Close() error {
 	s.close.Add(1)
+	if s.closeFunc != nil {
+		s.closeFunc()
+	}
 	return nil
 }
 func (s *testSession) Run(ctx context.Context, inputs []Tensor) ([]Tensor, error) {
@@ -404,4 +408,67 @@ func TestTensorConstructionRejectsMismatchedValues(t *testing.T) {
 	_, err := NewFloat32Tensor("input", []int64{1, 2}, []float32{1})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, context.Canceled))
+}
+
+func TestManagerRejectsExternalTensorData(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := t.TempDir() + "/external.onnx"
+	// ModelProto.graph.initializer[0].data_location = EXTERNAL.
+	modelBytes := []byte{0x3a, 0x04, 0x2a, 0x02, 0x70, 0x01}
+	require.NoError(t, os.WriteFile(model, modelBytes, 0o600))
+
+	_, err = manager.Acquire(context.Background(), model)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestManagerKeepsPendingCloseWithinLimits(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	var closeOnce sync.Once
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{closeFunc: func() {
+			closeOnce.Do(func() { close(closeStarted) })
+			<-closeRelease
+		}, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 1, MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	firstModel := newTestModel(t)
+	first, err := manager.Acquire(context.Background(), firstModel)
+	require.NoError(t, err)
+	first.Release()
+
+	closeDone := make(chan struct{})
+	go func() {
+		manager.removeAndClose(first.entry)
+		close(closeDone)
+	}()
+	<-closeStarted
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	_, err = manager.Acquire(context.Background(), secondModel)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceResourceInsufficient), merr.Code(err))
+
+	close(closeRelease)
+	<-closeDone
+	second, err := manager.Acquire(context.Background(), secondModel)
+	require.NoError(t, err)
+	second.Release()
+}
+
+func TestValidateTensorsRejectsPayloadSizeOverflow(t *testing.T) {
+	err := validateTensors("input", []TensorSpec{{Name: "input", DataType: DataTypeFloat32, Shape: []int64{-1}}}, []Tensor{{
+		Name: "input", DataType: DataTypeFloat32, Shape: []int64{math.MaxInt64},
+	}})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 }
