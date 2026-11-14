@@ -423,6 +423,10 @@ message SnapshotImportSource {
   // Versions 5-8 use a task-shared L0 inventory instead of fields 4/5.
   string source_channel = 7;
   int64 source_partition_id = 8;
+  // Versions 10-17 preserve the capabilities of versions 1-8 and permit
+  // StorageV2 Avro references. Mutually exclusive with manifest_path.
+  // A mixed job uses these versions for every segment, including StorageV3.
+  SnapshotImportV2Reference v2_reference = 9;
 }
 
 // Stored once per source scope in the job after Pending preparation.
@@ -632,4 +636,13 @@ message RoleCollectionVisibility {
 message CollectionVisibilityRule {
   string db_name = 1;
   string collection_name = 2;
+}
+
+message SnapshotImportV2Reference {
+  int64 segment_id = 1;
+  string snapshot_manifest_path = 2;
+  int32 snapshot_format_version = 3;
+  // Original self-contained bundle key prefix for rebasing Avro paths.
+  // Present but empty means the original bundle occupied the bucket root.
+  optional string original_key_prefix = 4;
 }

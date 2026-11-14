@@ -21,10 +21,12 @@ import (
 	"io"
 	"math"
 	"strings"
+	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -34,6 +36,7 @@ import (
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -73,6 +76,7 @@ type reader struct {
 	deleteBudget   int64
 	deleteMask     *rowDeleteMask
 	rawRow         int64
+	v2Input        *snapshotV2Input
 }
 
 // SourceEncryption is resolved by the task's factory, not by each record reader.
@@ -864,5 +868,184 @@ func (r *reader) Close() {
 	if r.snapshotSource != nil {
 		r.deleteData = nil
 		r.deleteMask = nil
+		r.v2Input = nil
+		r.insertLogs = nil
 	}
+}
+
+// snapshotV2Input is immutable after preparation. Bitmap scans and final reads
+// borrow the same ordered groups and physical field set for one task execution.
+// Accounting covers retained inputs and reader path copies, not transient Avro
+// decoding or native buffers (which use the existing row-buffer reservation).
+type snapshotV2Input struct {
+	binlogs []*datapb.FieldBinlog
+	deltas  []string
+	schema  *schemapb.CollectionSchema
+	options []storage.RwOption
+	bytes   int64
+}
+
+func (r *reader) prepareStorageV2Snapshot(segment *datapb.SegmentDescription, budget int64) (*snapshotV2Input, error) {
+	groups := segment.GetBinlogs()
+	if len(groups) == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("snapshot V2 segment has no binlog groups")
+	}
+	seen := make(map[int64]struct{}, len(groups))
+	chunks := len(groups[0].GetBinlogs())
+	// Validate the entire shape before footer IO. NewBinlogRecordReader indexes
+	// every group by the first group's chunk count, and sorts the outer slice.
+	for _, group := range groups {
+		if group == nil || chunks == 0 || len(group.GetBinlogs()) != chunks {
+			return nil, merr.WrapErrDataIntegrityMsg("snapshot V2 binlog groups have empty or unequal chunk counts")
+		}
+		if _, duplicate := seen[group.GetFieldID()]; duplicate {
+			return nil, merr.WrapErrDataIntegrityMsg("snapshot V2 contains duplicate column group %d", group.GetFieldID())
+		}
+		seen[group.GetFieldID()] = struct{}{}
+	}
+	input := &snapshotV2Input{bytes: 512}
+	charge := func(n int64) error {
+		if n > budget-input.bytes {
+			return merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot V2 inputs exceed reservation (%d bytes)", budget)
+		}
+		input.bytes += n
+		return nil
+	}
+	if err := charge(0); err != nil {
+		return nil, err
+	}
+	copyPath := func(log *datapb.Binlog) (string, error) {
+		if log == nil || strings.TrimSpace(log.GetLogPath()) == "" {
+			return "", merr.WrapErrDataIntegrityMsg("snapshot V2 contains an empty binlog path")
+		}
+		if r.validatePath != nil {
+			if err := r.validatePath(log.GetLogPath()); err != nil {
+				return "", err
+			}
+		}
+		path := snapshotstorage.NormalizeSnapshotObjectPath(log.GetLogPath())
+		// Include string headers, retained slice entries and reader path copies.
+		if err := charge(int64(len(path)) + 64); err != nil {
+			return "", err
+		}
+		return strings.Clone(path), nil
+	}
+	for _, group := range groups {
+		if err := charge(int64(unsafe.Sizeof(datapb.FieldBinlog{})) + 64 + int64(len(group.GetChildFields()))*8); err != nil {
+			return nil, err
+		}
+		copyGroup := &datapb.FieldBinlog{FieldID: group.GetFieldID(), ChildFields: append([]int64(nil), group.GetChildFields()...)}
+		for _, log := range group.GetBinlogs() {
+			path, err := copyPath(log)
+			if err != nil {
+				return nil, err
+			}
+			if err := charge(int64(unsafe.Sizeof(datapb.Binlog{})) + 16); err != nil {
+				return nil, err
+			}
+			copyGroup.Binlogs = append(copyGroup.Binlogs, &datapb.Binlog{LogPath: path})
+		}
+		input.binlogs = append(input.binlogs, copyGroup)
+	}
+	for _, group := range segment.GetDeltalogs() {
+		if group == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("snapshot V2 contains a nil delta group")
+		}
+		for _, log := range group.GetBinlogs() {
+			path, err := copyPath(log)
+			if err != nil {
+				return nil, err
+			}
+			input.deltas = append(input.deltas, path)
+		}
+	}
+	options := []storage.RwOption{
+		storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(r.storageConfig),
+		storage.WithBufferSize(32 * 1024 * 1024), storage.WithPluginContext(r.sourceEncryption.PluginContext),
+	}
+	present, err := storage.PackedBinlogPresentFields(r.ctx, input.binlogs, r.schema, options...)
+	if err != nil {
+		return nil, err
+	}
+	readSchema, err := selectImportFields(r.schema, func(id int64) bool { _, ok := present[id]; return ok })
+	if err != nil {
+		return nil, err
+	}
+	if r.sourceEncryption.Encrypted && typeutil.HasTextField(readSchema) {
+		return nil, merr.WrapErrOperationNotSupportedMsg("CMEK-protected snapshot-source import does not support TEXT/LOB fields")
+	}
+	if err := charge(int64(len(present))*32 + int64(proto.Size(readSchema))*2 + int64(len(readSchema.GetFields())+len(readSchema.GetStructArrayFields()))*256); err != nil {
+		return nil, err
+	}
+	input.schema = readSchema
+	input.options = append(options, storage.WithPresentFields(present))
+	return input, nil
+}
+
+// NewStorageV2SnapshotReader reads exact Avro-listed packed files without a
+// prefix scan. Shared tasks borrow the preparation owned by SnapshotL0Deletes.
+func NewStorageV2SnapshotReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
+	cfg *indexpb.StorageConfig, segment *datapb.SegmentDescription, start, end uint64, bufferSize int,
+	encryption SourceEncryption, source *internalpb.SnapshotImportSource, deleteBudget int64,
+	shared *SnapshotL0Deletes, validate func(string) error,
+) (*reader, error) {
+	if source.GetV2Reference() == nil {
+		return nil, merr.WrapErrServiceInternalMsg("snapshot V2 reader requires an Avro reference")
+	}
+	if deleteBudget <= 0 {
+		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
+	}
+	r := newReader(ctx, cm, schema, cfg, storage.StorageV2, bufferSize, "")
+	r.sourceEncryption, r.validatePath, r.snapshotSource = encryption, validate, source
+	var input *snapshotV2Input
+	var err error
+	if shared != nil {
+		input, r.deleteMask = shared.v2Inputs[maskKey(source)], shared.masks[maskKey(source)]
+		if input == nil || r.deleteMask == nil {
+			return nil, merr.WrapErrServiceInternalMsg("snapshot task has no prepared V2 input or bitmap")
+		}
+	} else {
+		input, err = r.prepareStorageV2Snapshot(segment, deleteBudget)
+		if err != nil {
+			return nil, err
+		}
+		deleteBudget -= input.bytes
+	}
+	r.v2Input, r.schema = input, input.schema
+	if start != 0 || end != math.MaxUint64 {
+		r.filters = append(r.filters, FilterWithTimeRange(start, end))
+	}
+	r.insertLogs = make(map[int64][]string, len(input.binlogs))
+	for _, group := range input.binlogs {
+		for _, log := range group.Binlogs {
+			r.insertLogs[group.FieldID] = append(r.insertLogs[group.FieldID], log.LogPath)
+		}
+	}
+	if shared == nil {
+		pk, err := typeutil.GetPrimaryFieldSchema(r.schema)
+		if err != nil {
+			return nil, err
+		}
+		merger, err := NewDeleteMerger(cm, cfg, pk.GetDataType(), r.retryAttempts, deleteBudget)
+		if err != nil {
+			return nil, err
+		}
+		r.deleteData, err = merger.Merge(ctx, input.deltas, start, end, true)
+		if err != nil {
+			return nil, err
+		}
+		filter, err := FilterWithDelete(r)
+		if err != nil {
+			return nil, err
+		}
+		r.filters = append(r.filters, filter)
+	}
+	rr, err := storage.NewBinlogRecordReader(ctx, append([]*datapb.FieldBinlog(nil), input.binlogs...), input.schema, input.options...)
+	if err != nil {
+		return nil, err
+	}
+	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, values []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(record, values, r.schema, true)
+	})
+	return r, nil
 }

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -100,6 +102,9 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.CollectionSchema, file *internalpb.ImportFile,
 	bufferSize int, deleteBudget int64, shared *binlog.SnapshotL0Deletes,
 ) (Reader, error) {
+	if shared == nil && SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
+		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "task-shared snapshot source requires prepared deletes")
+	}
 	if shared != nil && !SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
 		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a task-shared snapshot descriptor and prepared bitmaps")
 	}
@@ -150,11 +155,20 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 		return nil, err
 	}
 	sources := make([]*internalpb.SnapshotImportSource, len(files))
+	hasV2 := false
 	for i, file := range files {
 		sources[i] = file.GetSnapshotSource()
+		hasV2 = hasV2 || sources[i].GetV2Reference() != nil
 	}
-	return binlog.BuildSnapshotDeleteMasks(ctx, resolved.cm, schema, resolved.cfg, sources, source,
-		start, end, deleteBudget, bitmapBudget, resolved.encryption, validate)
+	if !hasV2 {
+		return binlog.BuildSnapshotDeleteMasks(ctx, resolved.cm, schema, resolved.cfg, sources, source,
+			start, end, deleteBudget, bitmapBudget, resolved.encryption, validate)
+	}
+	return binlog.BuildSnapshotDeleteMasksWithV2(ctx, resolved.cm, schema, resolved.cfg, sources, source,
+		start, end, deleteBudget, bitmapBudget, resolved.encryption, validate,
+		func(ctx context.Context, source *internalpb.SnapshotImportSource) (*datapb.SegmentDescription, error) {
+			return resolveSnapshotV2Source(ctx, resolved.cm, source, f.options)
+		})
 }
 
 // NewReader requires the caller's reserved positive delete budget for typed
@@ -177,14 +191,17 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	encryption binlog.SourceEncryption,
 ) (Reader, error) {
 	source := importFile.GetSnapshotSource()
-	if shared != nil {
+	capabilities, _ := DecodeSnapshotSourceVersion(source.GetVersion())
+	if source != nil && (shared != nil || capabilities.V2Reference) {
 		// Adapt only the validated reader view. Never expand L0 paths back
 		// into a segment or mutate the persisted descriptor: the reader must
 		// borrow the task's prepared bitmap instead of opening L0 again.
 		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		source.Version -= 4
-		source.SourceChannel = ""
-		source.SourcePartitionId = 0
+		source.Version = SnapshotSourceContractVersion(source)
+		if shared != nil {
+			source.SourceChannel = ""
+			source.SourcePartitionId = 0
+		}
 	}
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
@@ -198,6 +215,17 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
+				if source.GetV2Reference() != nil {
+					var segment *datapb.SegmentDescription
+					if shared == nil {
+						segment, err = resolveSnapshotV2Source(ctx, cm, source, options)
+						if err != nil {
+							return nil, err
+						}
+					}
+					return binlog.NewStorageV2SnapshotReader(ctx, cm, schema, storageConfig, segment,
+						tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
+				}
 				if shared != nil {
 					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
 						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
@@ -252,4 +280,67 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep, nullkey)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
+}
+
+// resolveSnapshotV2Source reads only the captured per-segment Avro. The top-level
+// metadata and live segment catalog are never consulted during worker execution.
+func resolveSnapshotV2Source(ctx context.Context, cm storage.ChunkManager, source *internalpb.SnapshotImportSource, options Options) (*datapb.SegmentDescription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ref := source.GetV2Reference()
+	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
+	layout, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options)
+	boundary := &snapshotstorage.SnapshotData{
+		Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
+		ManifestPaths: []string{ref.GetSnapshotManifestPath()},
+	}
+	if layout == "self-contained" {
+		boundary.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+	}
+	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot Avro", ref.GetSnapshotManifestPath(), ""); err != nil {
+		return nil, err
+	}
+	if err := snapshotstorage.ValidateExternalSnapshotPaths(uri, boundary, nil); err != nil {
+		return nil, err
+	}
+	segment, err := snapshotstorage.NewSnapshotReader(cm).ReadSegmentManifest(ctx, ref.GetSnapshotManifestPath(), int(ref.GetSnapshotFormatVersion()))
+	if err != nil {
+		return nil, err
+	}
+	if segment.GetSegmentId() != ref.GetSegmentId() || segment.GetStorageVersion() != storage.StorageV2 ||
+		segment.GetSegmentLevel() == datapb.SegmentLevel_L0 || segment.GetCommitTimestamp() != source.GetSourceCommitTimestamp() {
+		return nil, merr.WrapErrDataIntegrityMsg("snapshot Avro does not match its captured V2 source")
+	}
+	if source.GetSourceChannel() != "" && (segment.GetChannelName() != source.GetSourceChannel() || segment.GetPartitionId() != source.GetSourcePartitionId()) {
+		return nil, merr.WrapErrDataIntegrityMsg("snapshot Avro source scope changed")
+	}
+	// Retain only row and delete inputs, not Avro index/stats metadata.
+	segment = &datapb.SegmentDescription{Binlogs: segment.GetBinlogs(), Deltalogs: segment.GetDeltalogs()}
+	pathCM := cm
+	if ref.OriginalKeyPrefix != nil {
+		// A moved bundle can retain original-bucket URIs inside its Avro.
+		// Validate their shape now; prepareStorageV2Snapshot validates the
+		// rebased paths against the current bucket and bundle before any IO.
+		pathCM = nil
+	}
+	for _, groups := range [][]*datapb.FieldBinlog{segment.Binlogs, segment.Deltalogs} {
+		for _, group := range groups {
+			for _, log := range group.GetBinlogs() {
+				if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(pathCM, "snapshot binlog", log.GetLogPath(), ""); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if ref.OriginalKeyPrefix != nil {
+		root, found := snapshotstorage.DeriveSnapshotRootPath(uri)
+		if !found {
+			return nil, merr.WrapErrDataIntegrityMsg("cannot derive snapshot destination key prefix")
+		}
+		if err := snapshotstorage.RebaseSelfContainedSnapshotData(&snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{segment}}, ref.GetOriginalKeyPrefix(), root); err != nil {
+			return nil, err
+		}
+	}
+	return segment, nil
 }
