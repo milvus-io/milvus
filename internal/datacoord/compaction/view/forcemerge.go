@@ -34,6 +34,19 @@ const (
 	forceMergeKnapsackLossDivisor = int64(20)
 )
 
+// ClassifyOptimizeSize returns -1 for a small tail, 0 inside tolerance and
+// 1 for an oversized segment. The differences avoid an overflowing bound.
+func ClassifyOptimizeSize(size, expected int64) int {
+	allowance := expected / forceMergeKnapsackLossDivisor
+	if expected-size > allowance {
+		return -1
+	}
+	if size-expected > allowance {
+		return 1
+	}
+	return 0
+}
+
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {
 	Label         *CompactionGroupLabel
@@ -111,39 +124,50 @@ func (v *ForceMergeSegmentView) GetTriggerID() int64 {
 
 func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, targetCount int64) {
 	log := mlog.With(mlog.Int64("triggerID", v.TriggerID), mlog.String("label", v.Label.String()))
-	machineSafeSize := v.calculateMaxSafeSize()
-	if machineSafeSize < v.ConfigMaxSize {
-		log.Info(context.TODO(), "maxSafeSize is less than configMaxSize, set to configMaxSize",
+	return calculateForceMergeTargetSizeCount(context.TODO(), log, v.Topology, v.ConfigMaxSize, v.ExpectedTargetSize, v.GetTotalSize())
+}
+
+// CalculateForceMergeTargetSize calculates OPTIMIZE's fixed size from one
+// topology and the insert bytes of its entire initial scope.
+func CalculateForceMergeTargetSize(ctx context.Context, topology *CollectionTopology, minimumSize, inputSize int64, totalInsertBytes float64) int64 {
+	log := mlog.With(mlog.FieldCollectionID(topology.CollectionID))
+	size, _ := calculateForceMergeTargetSizeCount(ctx, log, topology, float64(minimumSize), float64(inputSize), totalInsertBytes)
+	return size
+}
+
+func calculateForceMergeTargetSizeCount(ctx context.Context, log *mlog.Logger, topology *CollectionTopology, minimumSize, inputSize, totalSize float64) (targetSize, targetCount int64) {
+	machineSafeSize := forceMergeMaxSafeSize(ctx, log, topology, minimumSize)
+	if machineSafeSize < minimumSize {
+		log.Info(ctx, "maxSafeSize is less than configMaxSize, set to configMaxSize",
 			mlog.Float64("maxSafeSize", machineSafeSize),
-			mlog.Float64("configMaxSize", v.ConfigMaxSize))
-		machineSafeSize = v.ConfigMaxSize
+			mlog.Float64("configMaxSize", minimumSize))
+		machineSafeSize = minimumSize
 	}
 
 	selectedTargetSize := machineSafeSize
-	if v.ExpectedTargetSize > 0 {
-		if v.ExpectedTargetSize <= machineSafeSize {
-			log.Info(context.TODO(), "using user-provided target size",
-				mlog.Float64("expectedTargetSize", v.ExpectedTargetSize),
+	if inputSize > 0 {
+		if inputSize <= machineSafeSize {
+			log.Info(ctx, "using user-provided target size",
+				mlog.Float64("expectedTargetSize", inputSize),
 				mlog.Float64("maxSafeSize", machineSafeSize))
-			selectedTargetSize = v.ExpectedTargetSize
+			selectedTargetSize = inputSize
 		} else {
-			log.Warn(context.TODO(), "user-provided target size exceeds maxSafeSize, using maxSafeSize",
-				mlog.Float64("expectedTargetSize", v.ExpectedTargetSize),
+			log.Warn(ctx, "user-provided target size exceeds maxSafeSize, using maxSafeSize",
+				mlog.Float64("expectedTargetSize", inputSize),
 				mlog.Float64("maxSafeSize", machineSafeSize))
 		}
 	}
 
 	selectedTargetSize = min(selectedTargetSize*(1+forceMergeSizeTolerance), machineSafeSize)
 	targetSize = forceMergeEffectiveSize(selectedTargetSize)
-	totalSize := v.GetTotalSize()
 	targetCount = estimatedForceMergeOutputCount(totalSize, targetSize)
 
-	queryNodeCount := int64(len(v.Topology.QueryNodeMemory))
-	numReplicas := int64(v.Topology.NumReplicas)
+	queryNodeCount := int64(len(topology.QueryNodeMemory))
+	numReplicas := int64(topology.NumReplicas)
 	if numReplicas == 0 {
 		numReplicas = 1
 	}
-	numShards := int64(v.Topology.NumShards)
+	numShards := int64(topology.NumShards)
 	if numShards == 0 {
 		numShards = 1
 	}
@@ -156,10 +180,10 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, ta
 	if perShardParallelism > 1 && targetCount < perShardParallelism {
 		desiredCount := perShardParallelism
 		adjustedTargetSize := totalSize / float64(desiredCount)
-		if adjustedTargetSize >= v.ConfigMaxSize {
+		if adjustedTargetSize >= minimumSize {
 			targetSize = min(targetSize, forceMergeEffectiveSize(math.Floor(adjustedTargetSize)))
 			targetCount = estimatedForceMergeOutputCount(totalSize, targetSize)
-			log.Info(context.TODO(), "adjusted target count for parallel loading per shard",
+			log.Info(ctx, "adjusted target count for parallel loading per shard",
 				mlog.Int64("queryNodeCount", queryNodeCount),
 				mlog.Int64("numReplicas", numReplicas),
 				mlog.Int64("numShards", numShards),
@@ -169,7 +193,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (targetSize int64, ta
 		}
 	}
 
-	log.Info(context.TODO(), "topology-aware force merge calculation",
+	log.Info(ctx, "topology-aware force merge calculation",
 		mlog.Int64("targetSegmentCount", targetCount),
 		mlog.Int64("targetSegmentSize", targetSize),
 		mlog.Int64("queryNodeCount", queryNodeCount),
@@ -215,19 +239,23 @@ func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 }
 
 func groupForceMergeSegments(segments []*meta.SegmentInfo, targetSize int64) [][]*meta.SegmentInfo {
+	return groupForceMergeInputs(segments, targetSize)
+}
+
+func groupForceMergeInputs[T Sizable](segments []T, targetSize int64) [][]T {
 	threeTargetCapacity := forceMergeRoundCapacity(targetSize, 3)
-	groups := make([][]*meta.SegmentInfo, 0, len(segments))
-	packable := make([]*meta.SegmentInfo, 0, len(segments))
+	groups := make([][]T, 0, len(segments))
+	packable := make([]T, 0, len(segments))
 	for _, segment := range segments {
 		residualSize := segment.GetResidualSegmentSize()
 		if residualSize > threeTargetCapacity {
-			groups = append(groups, []*meta.SegmentInfo{segment})
+			groups = append(groups, []T{segment})
 			continue
 		}
 		packable = append(packable, segment)
 	}
 
-	packer := NewSegmentPacker("force-merge-v1-multi-round", packable, nil)
+	packer := newCompactionPacker("force-merge-v1-multi-round", packable, nil)
 	lossAllowance := targetSize / forceMergeKnapsackLossDivisor
 	rounds := []struct {
 		capacity    int64
@@ -324,34 +352,38 @@ func peakForceMergeGroupInput(groups [][]*meta.SegmentInfo, targetSize int64) in
 
 func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
 	log := mlog.With(mlog.Int64("triggerID", v.TriggerID), mlog.String("label", v.Label.String()))
-	if len(v.Topology.QueryNodeMemory) == 0 || len(v.Topology.DataNodeMemory) == 0 {
-		log.Warn(context.TODO(), "No querynodes or datanodes in topology, using config size")
-		return v.ConfigMaxSize
+	return forceMergeMaxSafeSize(context.TODO(), log, v.Topology, v.ConfigMaxSize)
+}
+
+func forceMergeMaxSafeSize(ctx context.Context, log *mlog.Logger, topology *CollectionTopology, minimumSize float64) float64 {
+	if len(topology.QueryNodeMemory) == 0 || len(topology.DataNodeMemory) == 0 {
+		log.Warn(ctx, "No querynodes or datanodes in topology, using config size")
+		return minimumSize
 	}
 
 	// QueryNode constraint: use global minimum memory
 	querynodeMemoryFactor := paramtable.Get().DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat()
-	qnMaxSafeSize := float64(lo.Min(lo.Values(v.Topology.QueryNodeMemory))) / querynodeMemoryFactor
+	qnMaxSafeSize := float64(lo.Min(lo.Values(topology.QueryNodeMemory))) / querynodeMemoryFactor
 
 	// DataNode constraint: segments must fit in smallest DataNode
 	datanodeMemoryFactor := paramtable.Get().DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat()
-	dnMaxSafeSize := float64(lo.Min(lo.Values(v.Topology.DataNodeMemory))) / datanodeMemoryFactor
+	dnMaxSafeSize := float64(lo.Min(lo.Values(topology.DataNodeMemory))) / datanodeMemoryFactor
 
 	maxSafeSize := min(qnMaxSafeSize, dnMaxSafeSize)
-	if v.Topology.IsStandaloneMode && !v.Topology.IsPooling {
-		log.Info(context.TODO(), "force merge on standalone not pooling mode, half the max size",
+	if topology.IsStandaloneMode && !topology.IsPooling {
+		log.Info(ctx, "force merge on standalone not pooling mode, half the max size",
 			mlog.Float64("qnMaxSafeSize", qnMaxSafeSize),
 			mlog.Float64("dnMaxSafeSize", dnMaxSafeSize),
 			mlog.Float64("maxSafeSize/2", maxSafeSize/2),
-			mlog.Float64("configMaxSize", v.ConfigMaxSize))
+			mlog.Float64("configMaxSize", minimumSize))
 		// dn and qn are co-located, half the min
 		return maxSafeSize * 0.5
 	}
 
-	log.Info(context.TODO(), "force merge on cluster/pooling mode",
+	log.Info(ctx, "force merge on cluster/pooling mode",
 		mlog.Float64("qnMaxSafeSize", qnMaxSafeSize),
 		mlog.Float64("dnMaxSafeSize", dnMaxSafeSize),
 		mlog.Float64("maxSafeSize", maxSafeSize),
-		mlog.Float64("configMaxSize", v.ConfigMaxSize))
+		mlog.Float64("configMaxSize", minimumSize))
 	return maxSafeSize
 }

@@ -82,7 +82,7 @@ type CopySegmentChecker interface {
 }
 
 type RestoreCompactionScheduler interface {
-	EnqueueCompaction(*datapb.CompactionTask) error
+	EnqueueCompaction(context.Context, *datapb.CompactionTask, meta.CompactionAdmissionOptions) error
 	HasCompactionTask(int64) bool
 }
 type RestoreCompactionTasks interface {

@@ -52,6 +52,10 @@ type Broadcaster interface {
 	// ALTER, or nil if none exists. It does not wait for WAL append or ACKs.
 	GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error)
 
+	// TryLockResourceKeys orders local work against broadcasts without starting
+	// one. A nil release with no error means the requested keys are busy.
+	TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (release func(), err error)
+
 	// Close closes the broadcaster.
 	Close()
 }

@@ -25,8 +25,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
@@ -60,10 +60,12 @@ type CompactionInspector interface {
 	Start()
 	Stop()
 	// enqueueCompaction start to enqueue compaction task and return immediately
-	EnqueueCompaction(task *datapb.CompactionTask) error
+	EnqueueCompaction(ctx context.Context, task *datapb.CompactionTask, options AdmissionOptions) error
 	// isFull returns true if the task queue is full, or pending and running
 	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
+	attemptLimit(ctx context.Context, producer Producer, plans int) (int, string)
+	recordAdmissionDeferral(producer Producer, reason string)
 	// get compaction tasks by signal id
 	GetCompactionTasksNumBySignalID(signalID int64) int
 	GetCompactionInfo(ctx context.Context, signalID int64) *policy.CompactionInfo
@@ -76,6 +78,7 @@ var _ CompactionInspector = (*Inspector)(nil)
 type Inspector struct {
 	LookupRestoreJob func(context.Context, int64) *datapb.CopySegmentJob
 	queueTasks       *CompactionQueue
+	admission        *compactionAdmission
 
 	executingGuard lock.RWMutex
 	executingTasks map[int64]ctask.CompactionTask // planID -> task
@@ -104,44 +107,7 @@ type Inspector struct {
 }
 
 func (c *Inspector) GetCompactionInfo(ctx context.Context, triggerID int64) *policy.CompactionInfo {
-	tasks := c.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
-	info := policy.SummaryCompactionState(triggerID, tasks)
-	if triggerID == -1 {
-		return info
-	}
-
-	targetMeta := c.compactionTargetMeta
-	if targetMeta == nil {
-		return info
-	}
-	target, runtimeActive := targetMeta.GetCompactionTargetStatus(triggerID)
-	if target == nil {
-		return info
-	}
-	// An invalid or future task state must remain fail-closed. Target lifecycle
-	// state can refine pending/completed semantics, but cannot classify a task
-	// that summaryCompactionState did not recognize.
-	if info.UnclassifiedCnt != 0 {
-		return info
-	}
-	switch target.GetState() {
-	case datapb.TargetState_TARGET_STATE_ACTIVE:
-		if !runtimeActive {
-			info.State = commonpb.CompactionState_UndefiedState
-		} else {
-			// A target remains pending until reconciliation marks it inactive,
-			// even when an earlier event has already completed.
-			info.State = commonpb.CompactionState_Executing
-		}
-	case datapb.TargetState_TARGET_STATE_INACTIVE:
-		if info.ExecutingCnt != 0 {
-			return info
-		}
-		info.State = commonpb.CompactionState_Completed
-	default:
-		info.State = commonpb.CompactionState_UndefiedState
-	}
-	return info
+	return policy.SummaryCompactionState(triggerID, c.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID))
 }
 
 func (c *Inspector) GetCompactionTasksNumBySignalID(triggerID int64) int {
@@ -184,6 +150,17 @@ func NewCompactionInspector(mt meta.CompactionMeta,
 		analyzeScheduler:      analyzeScheduler,
 		ievm:                  ievm,
 	}
+}
+
+// InitAdmission validates and installs the process-wide new-task bucket
+// before DataCoord starts admitting work.
+func (c *Inspector) InitAdmission() error {
+	config, err := readAdmissionConfig()
+	if err != nil {
+		return err
+	}
+	c.admission = newCompactionAdmission(config)
+	return nil
 }
 
 func (c *Inspector) checkSchedule() {
@@ -314,7 +291,7 @@ func (c *Inspector) LoadMeta() {
 				continue
 			}
 
-			t, err := c.createCompactTask(task)
+			t, err := c.createCompactTask(context.TODO(), task)
 			if err != nil {
 				mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, defer cleanup",
 					mlog.Int64("planID", task.GetPlanID()),
@@ -594,47 +571,98 @@ func (c *Inspector) getCompactionTask(planID int64) ctask.CompactionTask {
 	return t
 }
 
-func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+func (c *Inspector) EnqueueCompaction(ctx context.Context, task *datapb.CompactionTask, options AdmissionOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if options.Producer != ProducerTBC {
+		metrics.DataCoordCompactionAdmission.WithLabelValues(options.Producer.String(), admissionTaskType(task.GetType()), "plan", "").Inc()
+	}
+	queued := false
+	if c.admission != nil {
+		if options.Producer >= meta.CompactionProducerCount {
+			return merr.WrapErrServiceInternalMsg("unknown compaction producer %d", options.Producer)
+		}
+		permit, reason := c.admission.acquire(ctx, options.Producer, c.remainingCapacity(options.DependencySort))
+		if permit == nil {
+			return c.admissionLimited(ctx, task, options.Producer, reason)
+		}
+		defer func() { permit.settle(queued) }()
+	}
+	if c.compactionTargetMeta != nil {
+		defer c.compactionTargetMeta.LockCollectionAdmission(task.GetCollectionID())()
+		if task.GetType() == datapb.CompactionType_ClusteringCompaction || options.SizeCompaction {
+			// A Target may have been created after the round took its snapshot.
+			// Defer the whole package when it now crosses an active scope.
+			if err := c.validateSizeAndClusteringAdmission(ctx, task, options.SizeCompaction); err != nil {
+				return err
+			}
+		}
+	}
+	if task.GetOutputSegmentCountHint() != 0 {
+		task = proto.CloneOf(task)
+		task.OutputSegmentCountHint = 0
+	}
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
-	t, err := c.createCompactTask(task)
+	t, err := c.createCompactTask(ctx, task)
 	if err != nil {
 		// Conflict is normal
 		if errors.Is(err, merr.ErrCompactionPlanConflict) {
-			log.RatedInfo(context.TODO(), rate.Limit(60), "Failed to create compaction task, compaction plan conflict", mlog.Err(err))
+			log.RatedInfo(ctx, rate.Limit(60), "Failed to create compaction task, compaction plan conflict", mlog.Err(err))
 		} else {
-			log.Warn(context.TODO(), "Failed to create compaction task, unable to create compaction task", mlog.Err(err))
+			log.Warn(ctx, "Failed to create compaction task, unable to create compaction task", mlog.Err(err))
 		}
 		return err
 	}
 
-	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
+	taskCreateTS, err := c.allocator.AllocTimestamp(ctx)
 	if err != nil {
-		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
-		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+		c.meta.SetSegmentsCompacting(context.WithoutCancel(ctx), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(ctx, "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
 		return err
 	}
 	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()
 	t.SetTask(t.ShadowClone(ctask.SetStartTime(startTime), ctask.SetCreateTs(taskCreateTS)))
 	err = t.SaveTaskMeta()
 	if err != nil {
-		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
-		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
+		c.meta.SetSegmentsCompacting(context.WithoutCancel(ctx), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(ctx, "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
 		return err
 	}
 	if err = c.submitTask(t); err != nil {
-		log.Warn(context.TODO(), "submit compaction task failed", mlog.Err(err))
-		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(ctx, "submit compaction task failed", mlog.Err(err))
+		c.meta.SetSegmentsCompacting(context.WithoutCancel(ctx), t.GetTaskProto().GetInputSegments(), false)
+		if c.admission != nil && errors.Is(err, errFull) {
+			return c.admissionLimited(ctx, task, options.Producer, admissionCapacityLimit)
+		}
 		return err
 	}
-	// After the queue accepted it: a full queue makes the trigger plan the
-	// same compaction again on its next tick.
+	queued = true
+	metrics.DataCoordCompactionAdmission.WithLabelValues(options.Producer.String(), admissionTaskType(task.GetType()), "enqueue", "").Inc()
 	recordCompactionType(task.GetType())
-	log.Info(context.TODO(), "Compaction plan submitted")
+	log.Info(ctx, "Compaction plan submitted")
+	return nil
+}
+
+func (c *Inspector) validateSizeAndClusteringAdmission(ctx context.Context, task *datapb.CompactionTask, sizeCompaction bool) error {
+	record, err := c.compactionTargetMeta.ActiveOptimize(ctx, task.GetCollectionID())
+	if err != nil || record == nil {
+		return err
+	}
+	for _, segment := range c.meta.GetSegmentInfos(task.GetInputSegments()) {
+		if !targets.OptimizeScopeContains(record, segment) {
+			continue
+		}
+		if sizeCompaction {
+			return merr.Wrapf(merr.ErrCompactionPlanConflict, "SIZE overlaps OPTIMIZE target %d", record.GetTargetID())
+		}
+		return clusteringOverlapsOptimize(record.GetTargetID())
+	}
 	return nil
 }
 
 // set segments compacting, one segment can only participate one compactionTask
-func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
+func (c *Inspector) createCompactTask(ctx context.Context, t *datapb.CompactionTask) (ctask.CompactionTask, error) {
 	var task ctask.CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
@@ -655,7 +683,7 @@ func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.Compactio
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
 		return nil, err
 	}
-	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
+	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(ctx, t.GetInputSegments())
 	if !exist {
 		return nil, merr.WrapErrIllegalCompactionPlan("segment not exist")
 	}
@@ -741,22 +769,53 @@ func (c *Inspector) cleanFailedTasks() {
 	c.cleaningGuard.Unlock()
 }
 
-// isFull returns true if the queue reaches its capacity, or pending and running
-// tasks reach dataCoord.compaction.maxTaskNum. Automatic compaction checks it
-// before planning and before each submission, so maxTaskNum is a soft cap.
+// isFull is the existing soft backlog check for the legacy selectors.
 func (c *Inspector) isFull() bool {
+	return c.remainingCapacity(false) == 0
+}
+
+func (c *Inspector) remainingCapacity(dependencySort bool) int {
 	pending := c.queueTasks.Len()
-	if pending >= c.queueTasks.capacity {
-		return true
+	available := int(^uint(0) >> 1)
+	if c.queueTasks.capacity > 0 {
+		available = max(0, c.queueTasks.capacity-pending)
 	}
-	maxTaskNum := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt()
-	if maxTaskNum <= 0 {
-		return false
+	if maxTasks := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt(); !dependencySort && maxTasks > 0 {
+		c.executingGuard.RLock()
+		running := len(c.executingTasks)
+		c.executingGuard.RUnlock()
+		available = min(available, max(0, maxTasks-pending-running))
 	}
-	c.executingGuard.RLock()
-	running := len(c.executingTasks)
-	c.executingGuard.RUnlock()
-	return pending+running >= maxTaskNum
+	return available
+}
+
+func (c *Inspector) attemptLimit(ctx context.Context, producer Producer, plans int) (int, string) {
+	capacity := c.remainingCapacity(false)
+	if c.admission == nil {
+		return min(capacity, plans), admissionCapacityLimit
+	}
+	return c.admission.attemptLimit(ctx, producer, capacity, plans)
+}
+
+func (c *Inspector) recordAdmissionDeferral(producer Producer, reason string) {
+	if c.admission != nil && (reason == admissionRateLimit || reason == admissionShareLimit) {
+		c.admission.recordDeferral(producer)
+	}
+}
+
+func (c *Inspector) admissionLimited(ctx context.Context, task *datapb.CompactionTask, producer Producer, reason string) error {
+	metrics.DataCoordCompactionAdmission.WithLabelValues(producer.String(), admissionTaskType(task.GetType()), "admission", reason).Inc()
+	mlog.RatedInfo(ctx, rate.Limit(1), "compaction task deferred at admission",
+		mlog.String("producer", producer.String()), mlog.String("reason", reason),
+		mlog.FieldCollectionID(task.GetCollectionID()), mlog.Int64("planID", task.GetPlanID()))
+	return ErrAdmissionLimited
+}
+
+func admissionTaskType(typ datapb.CompactionType) string {
+	if _, known := maxCompactionTaskExecutionDuration[typ]; !known {
+		return "other"
+	}
+	return typ.String()
 }
 
 func (c *Inspector) checkDelay(t ctask.CompactionTask) {

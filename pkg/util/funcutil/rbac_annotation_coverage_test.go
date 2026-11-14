@@ -58,6 +58,10 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"DeleteClientCommand": "root-only telemetry command deletion",
 	// DescribePrewarmTask only polls the state of an asynchronous prewarm job.
 	"DescribePrewarmTask": "async prewarm status polling",
+	// DescribeCompactionTarget authorizes the Target's stable collection ID in Proxy.
+	"DescribeCompactionTarget": "resource authorization in Proxy.DescribeCompactionTarget",
+	// DropCompactionTarget authorizes the Target's stable collection ID in Proxy.
+	"DropCompactionTarget": "resource authorization in Proxy.DropCompactionTarget",
 	// DescribeSegmentIndexData is an unimplemented feder endpoint that returns service-unavailable.
 	"DescribeSegmentIndexData": "unimplemented feder endpoint",
 	// Dummy is a legacy test/debug shim; query-mode dispatch is explicitly rejected.
@@ -98,6 +102,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"ListDatabases": "result-filtered by caller grants",
 	// ListImportTasks delegates persisted resource filtering to Proxy.ListImports.
 	"ListImportTasks": "resource filtering in Proxy.ListImports",
+	// ListCompactionTargets authorizes each stable collection ID in Proxy.
+	"ListCompactionTargets": "resource filtering in Proxy.ListCompactionTargets",
 	// ListIndexedSegment is an unimplemented feder endpoint that returns service-unavailable.
 	"ListIndexedSegment": "unimplemented feder endpoint",
 	// ListRefreshExternalCollectionJobs lists external-collection refresh jobs, optionally scoped by collection.

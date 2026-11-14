@@ -418,6 +418,37 @@ func GetManifestIndexInfosAsync(ctx context.Context, io *ManifestIOContext, mani
 	return manifestIndexInfos(manifest, manifestPath)
 }
 
+// ReadManifestInsertFormats reads the group formats of one committed revision.
+// The reader only projects insert groups containing files.
+func ReadManifestInsertFormats(ctx context.Context, io *ManifestIOContext, revision ManifestJSON, config *indexpb.StorageConfig) ([]string, error) {
+	manifest, err := getManifestRevisionAsync(ctx, io, revision, config)
+	if err != nil {
+		return nil, err
+	}
+	if manifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("manifest has no contents")
+	}
+	defer C.loon_manifest_destroy(manifest)
+	groups := &manifest.column_groups
+	if groups.column_group_array == nil && groups.num_of_column_groups > 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("manifest is missing its column groups")
+	}
+	var formats []string
+	for _, group := range unsafe.Slice(groups.column_group_array, int(groups.num_of_column_groups)) {
+		if group.num_of_files == 0 {
+			continue
+		}
+		if group.files == nil || group.format == nil || *group.format == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest insert group is missing its files or format")
+		}
+		format := C.GoString(group.format)
+		if !slices.Contains(formats, format) {
+			formats = append(formats, format)
+		}
+	}
+	return formats, ctx.Err()
+}
+
 func GetManifestLobFilesAsync(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig) ([]LobFileInfo, error) {
 	manifest, err := getManifestAsync(ctx, io, manifestPath, config)
 	if err != nil {
@@ -432,6 +463,10 @@ func getManifestAsync(ctx context.Context, io *ManifestIOContext, manifestPath s
 	if err != nil {
 		return nil, err
 	}
+	return getManifestRevisionAsync(ctx, io, revision, config)
+}
+
+func getManifestRevisionAsync(ctx context.Context, io *ManifestIOContext, revision ManifestJSON, config *indexpb.StorageConfig) (*C.LoonManifest, error) {
 	if err := io.acquire(ctx); err != nil {
 		return nil, err
 	}

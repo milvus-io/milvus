@@ -57,6 +57,7 @@ type IndexEngineVersionManager interface {
 	// Resolve methods: compute final build version considering target override and max clamp
 	ResolveVecIndexVersion() int32
 	ResolveScalarIndexVersion() int32
+	ResolveIndexVersionConditions(ctx context.Context) (vector, scalar IndexVersionCondition)
 
 	GetIndexNonEncoding() bool
 
@@ -392,52 +393,112 @@ func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion, co
 }
 
 // clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
-func clampVersion(v, minV, maxV int32, name string) int32 {
+func clampVersion(ctx context.Context, v, minV, maxV int32, name string) int32 {
 	if v < minV {
-		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" below cluster minimum, clamping",
+		mlog.RatedWarn(ctx, rate.Limit(60), name+" below cluster minimum, clamping",
 			mlog.Int32("target", v), mlog.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
-		mlog.RatedWarn(context.TODO(), rate.Limit(60), name+" exceeds cluster maximum, clamping",
+		mlog.RatedWarn(ctx, rate.Limit(60), name+" exceeds cluster maximum, clamping",
 			mlog.Int32("target", v), mlog.Int32("maximum", maxV))
 		v = maxV
 	}
 	return v
 }
 
-func (m *VersionManagerImpl) ResolveVecIndexVersion() int32 {
-	m.mu.Lock()
-	current, minimal, maximum := m.getCurrentVersion(), m.getMinimalVersion(), m.getMaximumVersion()
-	m.mu.Unlock()
+type IndexVersionMode string
 
-	version := current
-	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
-		target := Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
-		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
-			version = target
-		} else {
-			version = max(version, target)
-		}
+const (
+	IndexVersionAbsent  IndexVersionMode = "ABSENT"
+	IndexVersionAtLeast IndexVersionMode = "AT_LEAST"
+	IndexVersionExact   IndexVersionMode = "EXACT"
+)
+
+type IndexVersionCondition struct {
+	Mode    IndexVersionMode
+	Version int32
+}
+
+func (c IndexVersionCondition) ViolatedBy(version int32) bool {
+	switch c.Mode {
+	case IndexVersionAtLeast:
+		return version < c.Version
+	case IndexVersionExact:
+		return version != c.Version
+	default:
+		return false
 	}
-	return clampVersion(version, minimal, maximum, "targetVecIndexVersion")
+}
+
+func indexVersionMode(configured int64, force, auto bool) IndexVersionMode {
+	if force && configured != -1 {
+		return IndexVersionExact
+	}
+	if auto {
+		return IndexVersionAtLeast
+	}
+	return IndexVersionAbsent
+}
+
+// ResolveIndexVersionConditions derives both maintenance axes from the same
+// QueryNode sessions and uses each sampled override for both mode and version.
+func (m *VersionManagerImpl) ResolveIndexVersionConditions(ctx context.Context) (vector, scalar IndexVersionCondition) {
+	cfg := &Params.DataCoordCfg
+	auto := cfg.AutoUpgradeSegmentIndex.GetAsBool()
+	vecTarget := cfg.TargetVecIndexVersion.GetAsInt64()
+	scalarTarget := cfg.TargetScalarIndexVersion.GetAsInt64()
+	vector.Mode = indexVersionMode(vecTarget, cfg.ForceRebuildSegmentIndex.GetAsBool(), auto)
+	scalar.Mode = indexVersionMode(scalarTarget, cfg.ForceRebuildScalarSegmentIndex.GetAsBool(), auto)
+	if vector.Mode == IndexVersionAbsent && scalar.Mode == IndexVersionAbsent {
+		return vector, scalar
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if vector.Mode != IndexVersionAbsent {
+		vector.Version = m.resolveVectorIndexVersion(ctx, vecTarget, vector.Mode == IndexVersionExact)
+	}
+	if scalar.Mode != IndexVersionAbsent {
+		scalar.Version = m.resolveScalarIndexVersion(ctx, scalarTarget, scalar.Mode == IndexVersionExact)
+	}
+	return vector, scalar
+}
+
+func (m *VersionManagerImpl) ResolveVecIndexVersion() int32 {
+	cfg := &Params.DataCoordCfg
+	configured, force := cfg.TargetVecIndexVersion.GetAsInt64(), cfg.ForceRebuildSegmentIndex.GetAsBool()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.resolveVectorIndexVersion(context.TODO(), configured, force)
 }
 
 func (m *VersionManagerImpl) ResolveScalarIndexVersion() int32 {
+	cfg := &Params.DataCoordCfg
+	configured, force := cfg.TargetScalarIndexVersion.GetAsInt64(), cfg.ForceRebuildScalarSegmentIndex.GetAsBool()
 	m.mu.Lock()
-	current, minimal, maximum := m.getCurrentScalarVersion(), m.getMinimalScalarVersion(), m.getMaximumScalarVersion()
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	return m.resolveScalarIndexVersion(context.TODO(), configured, force)
+}
 
+func (m *VersionManagerImpl) resolveVectorIndexVersion(ctx context.Context, configured int64, force bool) int32 {
+	return resolveIndexVersion(ctx, configured, force, m.getCurrentVersion(), m.getMinimalVersion(), m.getMaximumVersion(), "targetVecIndexVersion")
+}
+
+func (m *VersionManagerImpl) resolveScalarIndexVersion(ctx context.Context, configured int64, force bool) int32 {
+	return resolveIndexVersion(ctx, configured, force, m.getCurrentScalarVersion(), m.getMinimalScalarVersion(), m.getMaximumScalarVersion(), "targetScalarIndexVersion")
+}
+
+func resolveIndexVersion(ctx context.Context, configured int64, force bool, current, minimal, maximum int32, name string) int32 {
 	version := current
-	if Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
-		target := Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
-		if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() {
-			version = target
+	if configured != -1 {
+		if force {
+			version = int32(configured)
 		} else {
-			version = max(version, target)
+			version = max(current, int32(configured))
 		}
 	}
-	return clampVersion(version, minimal, maximum, "targetScalarIndexVersion")
+	return clampVersion(ctx, version, minimal, maximum, name)
 }
 
 func (m *VersionManagerImpl) GetIndexNonEncoding() bool {

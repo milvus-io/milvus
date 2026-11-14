@@ -19,17 +19,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -53,7 +50,7 @@ func TestEstimateResultSegmentCount(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := estimateResultSegmentCount(test.totalSize, test.targetSize)
+			got := view.EstimateResultSegmentCount(test.totalSize, test.targetSize)
 			if got != test.want {
 				t.Fatalf("estimateResultSegmentCount(%v, %v) = %d, want %d", test.totalSize, test.targetSize, got, test.want)
 			}
@@ -251,14 +248,6 @@ func (s *CompactionTriggerManagerSuite) setIndexMeta(im *index.IndexMeta) {
 	}
 }
 
-// setCompactionTargetMeta installs targetMeta on the trigger manager and on its target reconciler.
-func (s *CompactionTriggerManagerSuite) setCompactionTargetMeta(targetMeta *targets.CompactionTargetMeta) {
-	s.triggerManager.compactionTargetMeta = targetMeta
-	if s.triggerManager.targetReconciler != nil {
-		s.triggerManager.targetReconciler.CompactionTargetMeta = targetMeta
-	}
-}
-
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := meta.NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{}, nil)
@@ -288,8 +277,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			// s.True(signal.isGlobal)
 			// s.False(signal.isForce)
@@ -331,8 +320,8 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			s.EqualValues(30000, task.GetPos().GetTimestamp())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
@@ -369,7 +358,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTickerSubmitsSortsFirstUntilFu
 	var submitted []int64
 	// The inspector is full once one task is submitted.
 	s.inspector.EXPECT().isFull().RunAndReturn(func() bool { return len(submitted) >= 1 })
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 		submitted = append(submitted, task.GetInputSegments()...)
 		return nil
 	})
@@ -399,23 +388,14 @@ func (s *CompactionTriggerManagerSuite) TestHandleSortSignal() {
 		setup(false)
 		s.inspector.EXPECT().isFull().Return(true).Once()
 		// No enqueueCompaction expectation is set, so a submission would fail the test.
-		s.triggerManager.handleSortSignal(context.Background(), segmentID)
-	})
-
-	s.Run("sort of a flushed segment is not capped without the sort sweep", func() {
-		paramtable.Get().Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
-		setup(false)
-		// No isFull expectation is set, so a check would fail the test.
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil).Once()
-		s.triggerManager.handleSortSignal(context.Background(), segmentID)
+		s.triggerManager.handleSortSignal(context.Background(), segmentID, false)
 	})
 
 	s.Run("sort of a clustering output is not capped", func() {
 		setup(true)
 		// No isFull expectation is set, so a check would fail the test.
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil).Once()
-		s.triggerManager.handleSortSignal(context.Background(), segmentID)
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, AdmissionOptions{Producer: ProducerTriggerManager, DependencySort: true}).Return(nil).Once()
+		s.triggerManager.handleSortSignal(context.Background(), segmentID, true)
 	})
 }
 
@@ -429,7 +409,7 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
 	s.triggerManager.handler = handler
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil)
 	// No isFull expectation is set, so a call would fail the test.
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil).Times(3)
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 
 	_, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
 		CollectionID: s.testLabel.CollectionID,
@@ -441,11 +421,6 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
 func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
 
 	handler := meta.NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{
@@ -471,65 +446,6 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	s.Error(err)
 	s.Contains(err.Error(), "external collection")
 	s.Zero(targetID)
-	s.Empty(records)
-}
-
-func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhenGuardEnabled() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
-
-	handler := meta.NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&meta.CollectionInfo{}, nil)
-	s.triggerManager.handler = handler
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
-	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
-
-	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
-		CollectionID: s.testLabel.CollectionID,
-		SegmentIds:   []int64{20, 10},
-	})
-
-	s.Require().NoError(err)
-	s.Equal(int64(100), targetID)
-	record := records[100]
-	s.Require().NotNil(record)
-	s.Equal(datapb.TargetIntent_INTENT_REWRITE, record.GetIntent())
-	s.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, record.GetState())
-	s.Equal(uint64(200), record.GetExpectedTS())
-	s.Equal(uint64(200), record.GetActivatedAtTS())
-	segmentIDs, ok := targets.CompactionTargetSegmentIDs(record)
-	s.True(ok)
-	s.Equal([]int64{10, 20}, segmentIDs)
-}
-
-func (s *CompactionTriggerManagerSuite) TestManualTriggerRejectsRewriteTargetWhenSnapshotBlocksCollection() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
-
-	catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(s.T())
-	targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
-	s.Require().NoError(err)
-	s.setCompactionTargetMeta(targetMeta)
-	snapshotMeta := snapshot.CreateTestSnapshotMetaLoaded(s.T())
-	s.meta.CompactionProtection = snapshotMeta
-	snapshotMeta.SetSnapshotPending(s.testLabel.CollectionID)
-
-	handler := meta.NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(&meta.CollectionInfo{}, nil)
-	s.triggerManager.handler = handler
-
-	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
-		CollectionID: s.testLabel.CollectionID,
-	})
-
-	s.ErrorIs(err, merr.ErrCompactionBlocked)
-	s.Zero(targetID)
-	s.Empty(records)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
@@ -713,8 +629,8 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(19530), nil).Maybe()
 
 	// Mock inspector to expect compaction enqueue
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
 			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
@@ -784,8 +700,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(503)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.EqualValues(planID, task.GetPlanID())
 				s.EqualValues(1001, task.GetTriggerID())
 				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
@@ -834,8 +750,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(603)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_SortCompaction, task.GetType())
 				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
 				return nil
@@ -874,8 +790,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 			planID  = int64(703)
 		)
 		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
 				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
 				return nil
@@ -921,8 +837,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
 		endID         = int64(808)
 	)
 	s.mockAlloc.EXPECT().AllocN(int64(8)).Return(startID, endID, nil).Once()
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.Equal(datapb.CompactionType_ClusteringCompaction, task.GetType())
 			s.EqualValues(planID, task.GetPlanID())
 			s.EqualValues(analyzeTaskID, task.GetAnalyzeTaskID())
@@ -965,8 +881,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
 		endID        = int64(503)
 	)
 	s.mockAlloc.EXPECT().AllocN(int64(3)).Return(startID, endID, nil).Once()
-	s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
+	s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 			s.EqualValues(planID, task.GetPlanID())
 			s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
 			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
@@ -1229,7 +1145,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				Schema: collectionSchema,
 			}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(errors.New("enqueue error")).Once()
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("enqueue error")).Once()
 
 		cv := makeBumpSchemaVersionView(triggerID)
 		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), cv)
@@ -1253,8 +1169,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				Properties: map[string]string{common.CollectionTTLConfigKey: "3600"},
 			}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.EqualValues(planID, task.GetPlanID())
 				s.EqualValues(triggerID, task.GetTriggerID())
 				s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, task.GetType())
@@ -1301,8 +1217,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&meta.CollectionInfo{ID: s.testLabel.CollectionID, Schema: liveSchema}, nil).Once()
 		s.triggerManager.handler = handler
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).
-			RunAndReturn(func(task *datapb.CompactionTask) error {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 				s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, task.GetType())
 				s.EqualValues(2, task.GetSchema().GetVersion())
 				s.Equal(frozenSchema, task.GetSchema())

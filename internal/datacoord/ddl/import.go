@@ -157,7 +157,7 @@ func (c *Callbacks) ValidateImportReplication(ctx context.Context, options []*co
 	if assignment == nil {
 		return nil
 	}
-	if !isReplicatingCluster(assignment.ReplicateConfiguration) {
+	if !replicateutil.HasReplicationTopology(assignment.ReplicateConfiguration) {
 		return nil
 	}
 

@@ -1,19 +1,17 @@
 package compaction
 
-const (
-	compactionFillRate = 0.85
-)
+import "github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 
 func compactionMiddleSize(idealSize int64) int64 {
 	return idealSize / 4
 }
 
 func compactionFullThreshold(idealSize int64) int64 {
-	return int64(float64(idealSize) * compactionFillRate)
+	return view.TwoTierFullThreshold(idealSize)
 }
 
 func compactionFragmentThreshold(idealSize int64) int64 {
-	return int64(float64(compactionMiddleSize(idealSize)) * compactionFillRate)
+	return view.TwoTierFragmentThreshold(idealSize)
 }
 
 func isFullSegment(idealSize, residualSize int64) bool {

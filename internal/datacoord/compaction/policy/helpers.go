@@ -46,63 +46,29 @@ func IsCollectionAutoCompactionEnabled(coll *meta.CollectionInfo) bool {
 	return enabled
 }
 
-func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
-	stats := segment.EnsureStats()
-	deltaLogCount := int(stats.GetDeltaBinlogCount())
-	totalDeletedRows := int(stats.GetDeleteNumRows())
-	totalDeleteLogSize := stats.GetDeltaBinlogSize()
-
-	// Too many deltalog files, accumulates IO count.
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
-		mlog.Info(context.TODO(), "delta logs file count exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int("delta log count", deltaLogCount),
-			mlog.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
-		)
-		return true
-	}
-
-	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
-		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("number of rows", segment.GetNumOfRows()),
-			mlog.Int("deleted rows", totalDeletedRows),
-			mlog.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
-		)
-		return true
-	}
-
-	// Delete size is too large, varchar PK tends to accumulates deltalog size.
-	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		mlog.Info(context.TODO(), "total delete entries size exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("numRows", segment.GetNumOfRows()),
-			mlog.Int64("delete entries size", totalDeleteLogSize),
-			mlog.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
-		)
-		return true
-	}
-
-	return false
+func CanTriggerSortCompaction(segment *meta.SegmentInfo) bool {
+	return MatchesSortCompaction(segment) && !segment.IsCompacting
 }
 
-func canTriggerSortCompaction(segment *meta.SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed &&
+func MatchesSortCompaction(segment *meta.SegmentInfo) bool {
+	return meta.IsSegmentHealthy(segment) &&
+		segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
-		!segment.GetIsImporting() &&
-		!segment.IsCompacting
+		!segment.GetIsSorted() && !segment.GetIsSortedByNamespace() &&
+		!segment.GetIsImporting()
 }
 
 func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
-	allDiskIndex := indexMeta.AllDenseWithDiskIndex(collectionID, schema)
-	if allDiskIndex {
+	if UsesDiskSegmentSize(indexMeta, collectionID, schema) {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
 	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+}
+
+func UsesDiskSegmentSize(indexMeta *index.IndexMeta, collectionID int64, schema *schemapb.CollectionSchema) bool {
+	return indexMeta != nil && indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 }
 
 func IsNormalManualCompactionCandidate(mt *meta.Meta, segment *meta.SegmentInfo) bool {
@@ -209,6 +175,10 @@ type CompactionInfo struct {
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
 // if not set, returns global auto compaction config.
 func GetCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+	return CollectionAutoCompactionEnabled(properties, Params.DataCoordCfg.EnableAutoCompaction.GetAsBool())
+}
+
+func CollectionAutoCompactionEnabled(properties map[string]string, defaultEnabled bool) (bool, error) {
 	// when collection is on truncating, disable auto compaction.
 	if _, ok := properties[common.CollectionOnTruncatingKey]; ok {
 		return false, nil
@@ -221,7 +191,7 @@ func GetCollectionAutoCompactionEnabled(properties map[string]string) (bool, err
 		}
 		return enabled, nil
 	}
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil
+	return defaultEnabled, nil
 }
 
 func GetCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMergeInfo {

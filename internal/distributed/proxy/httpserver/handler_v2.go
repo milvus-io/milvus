@@ -228,6 +228,10 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/snapshot/list":                "ListRestoreSnapshotJobs",
 	"/v2/vectordb/snapshots/create":                  "CreateSnapshot",
 	"/v2/vectordb/snapshots/drop":                    "DropSnapshot",
+	"/v2/vectordb/compaction_targets/create":         "CreateCompactionTarget",
+	"/v2/vectordb/compaction_targets/describe":       "DescribeCompactionTarget",
+	"/v2/vectordb/compaction_targets/list":           "ListCompactionTargets",
+	"/v2/vectordb/compaction_targets/drop":           "DropCompactionTarget",
 	"/v2/vectordb/snapshots/list":                    "ListSnapshots",
 	"/v2/vectordb/snapshots/describe":                "DescribeSnapshot",
 	"/v2/vectordb/snapshots/restore":                 "RestoreSnapshot",
@@ -403,6 +407,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(SnapshotJobCategory+DescribeExportAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getExportSnapshotState))))
 	router.POST(SnapshotJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getRestoreSnapshotState))))
 	router.POST(SnapshotJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRestoreSnapshotJobs))))
+	h.registerCompactionTargetRoutes(router)
 	router.POST(SnapshotCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CreateSnapshotReq{} }, wrapperTraceLog(h.createSnapshot))))
 	router.POST(SnapshotCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.dropSnapshot))))
 	router.POST(SnapshotCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listSnapshots))))
