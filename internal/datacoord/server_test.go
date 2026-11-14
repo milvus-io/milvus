@@ -3052,7 +3052,7 @@ func newMemoryMetaWithDomainMetas(t *testing.T) (*meta.Meta, *domainMetas, error
 	b := broker.NewMockBroker(t)
 	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
-	m, err := meta.NewMeta(context.Background(), catalog, nil, b, loadDomainMetas(catalog, nil, dm))
+	m, err := meta.NewMeta(context.Background(), catalog, nil, b, loadDomainMetas(catalog, nil, dm, false))
 	return m, dm, err
 }
 

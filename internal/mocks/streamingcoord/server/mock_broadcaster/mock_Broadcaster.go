@@ -6,7 +6,9 @@ import (
 	context "context"
 
 	broadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -149,6 +151,64 @@ func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetPendingSchemaTarget provides a mock function with given fields: collectionID
+func (_m *MockBroadcaster) GetPendingSchemaTarget(collectionID int64) (*broadcaster.SchemaTarget, error) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingSchemaTarget")
+	}
+
+	var r0 *broadcaster.SchemaTarget
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64) (*broadcaster.SchemaTarget, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(int64) *broadcaster.SchemaTarget); ok {
+		r0 = rf(collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*broadcaster.SchemaTarget)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) error); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_GetPendingSchemaTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingSchemaTarget'
+type MockBroadcaster_GetPendingSchemaTarget_Call struct {
+	*mock.Call
+}
+
+// GetPendingSchemaTarget is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockBroadcaster_Expecter) GetPendingSchemaTarget(collectionID interface{}) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	return &MockBroadcaster_GetPendingSchemaTarget_Call{Call: _e.mock.On("GetPendingSchemaTarget", collectionID)}
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) Run(run func(collectionID int64)) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) Return(_a0 *broadcaster.SchemaTarget, _a1 error) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) RunAndReturn(run func(int64) (*broadcaster.SchemaTarget, error)) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LegacyAck provides a mock function with given fields: ctx, broadcastID, vchannel
 func (_m *MockBroadcaster) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	ret := _m.Called(ctx, broadcastID, vchannel)
@@ -193,6 +253,79 @@ func (_c *MockBroadcaster_LegacyAck_Call) Return(_a0 error) *MockBroadcaster_Leg
 }
 
 func (_c *MockBroadcaster_LegacyAck_Call) RunAndReturn(run func(context.Context, uint64, string) error) *MockBroadcaster_LegacyAck_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TryLockResourceKeys provides a mock function with given fields: ctx, resourceKeys
+func (_m *MockBroadcaster) TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (func(), error) {
+	_va := make([]interface{}, len(resourceKeys))
+	for _i := range resourceKeys {
+		_va[_i] = resourceKeys[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TryLockResourceKeys")
+	}
+
+	var r0 func()
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) (func(), error)); ok {
+		return rf(ctx, resourceKeys...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) func()); ok {
+		r0 = rf(ctx, resourceKeys...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(func())
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...message.ResourceKey) error); ok {
+		r1 = rf(ctx, resourceKeys...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_TryLockResourceKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TryLockResourceKeys'
+type MockBroadcaster_TryLockResourceKeys_Call struct {
+	*mock.Call
+}
+
+// TryLockResourceKeys is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceKeys ...message.ResourceKey
+func (_e *MockBroadcaster_Expecter) TryLockResourceKeys(ctx interface{}, resourceKeys ...interface{}) *MockBroadcaster_TryLockResourceKeys_Call {
+	return &MockBroadcaster_TryLockResourceKeys_Call{Call: _e.mock.On("TryLockResourceKeys",
+		append([]interface{}{ctx}, resourceKeys...)...)}
+}
+
+func (_c *MockBroadcaster_TryLockResourceKeys_Call) Run(run func(ctx context.Context, resourceKeys ...message.ResourceKey)) *MockBroadcaster_TryLockResourceKeys_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ResourceKey, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ResourceKey)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_TryLockResourceKeys_Call) Return(release func(), err error) *MockBroadcaster_TryLockResourceKeys_Call {
+	_c.Call.Return(release, err)
+	return _c
+}
+
+func (_c *MockBroadcaster_TryLockResourceKeys_Call) RunAndReturn(run func(context.Context, ...message.ResourceKey) (func(), error)) *MockBroadcaster_TryLockResourceKeys_Call {
 	_c.Call.Return(run)
 	return _c
 }

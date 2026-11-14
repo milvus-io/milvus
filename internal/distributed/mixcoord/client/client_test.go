@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var mockErr = errors.New("mock grpc err")
@@ -3165,4 +3166,24 @@ func Test_ListRefreshExternalCollectionJobs(t *testing.T) {
 
 	_, err = client.ListRefreshExternalCollectionJobs(ctx, req)
 	assert.NotNil(t, err)
+}
+
+func TestCreateCompactionTargetPreservesStatusWithOneAttempt(t *testing.T) {
+	coordinator := mocks.NewMockDataCoordClient(t)
+	base := mocks.NewMockGrpcClient[MixCoordClient](t)
+	client := &Client{grpcClient: base}
+	request := &datapb.CreateCompactionTargetRequest{}
+	response := &datapb.CreateCompactionTargetResponse{Status: merr.Status(merr.ErrServiceNotReady)}
+	coordinator.EXPECT().CreateCompactionTarget(mock1.Anything, request).Return(response, nil).Once()
+	base.EXPECT().Call(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, call func(MixCoordClient) (any, error)) (any, error) {
+		assert.Equal(t, uint(1), retry.MaxAttemptsFromContextOrDefault(ctx, 10))
+		result, err := call(MixCoordClient{DataCoordClient: coordinator})
+		assert.NoError(t, err)
+		assert.Same(t, response, result)
+		// ClientBase normally converts a retriable business status to error.
+		return nil, merr.Error(response.GetStatus())
+	}).Once()
+	got, err := client.CreateCompactionTarget(t.Context(), request)
+	assert.NoError(t, err)
+	assert.Same(t, response, got)
 }

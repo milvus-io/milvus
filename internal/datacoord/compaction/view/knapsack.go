@@ -142,8 +142,12 @@ func (c *Knapsack[T]) PackWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 }
 
 func NewSegmentPacker(name string, candidates []*meta.SegmentInfo, compactTime *CompactTime) *Knapsack[*meta.SegmentInfo] {
+	return newCompactionPacker(name, candidates, compactTime)
+}
+
+func newCompactionPacker[T Sizable](name string, candidates []T, compactTime *CompactTime) *Knapsack[T] {
 	if compactTime != nil && compactTime.CollectionTTL > 0 {
-		return newKnapsack(name, candidates, func(a, b *meta.SegmentInfo) bool {
+		return newKnapsack(name, candidates, func(a, b T) bool {
 			if a.GetEarliestTs() != b.GetEarliestTs() {
 				return a.GetEarliestTs() < b.GetEarliestTs()
 			} else if a.GetResidualSegmentSize() != b.GetResidualSegmentSize() {
@@ -154,7 +158,7 @@ func NewSegmentPacker(name string, candidates []*meta.SegmentInfo, compactTime *
 			return a.GetID() < b.GetID()
 		})
 	}
-	return newKnapsack(name, candidates, func(a, b *meta.SegmentInfo) bool {
+	return newKnapsack(name, candidates, func(a, b T) bool {
 		if a.GetResidualSegmentSize() != b.GetResidualSegmentSize() {
 			return a.GetResidualSegmentSize() > b.GetResidualSegmentSize()
 		} else if a.GetSegmentSize() != b.GetSegmentSize() {

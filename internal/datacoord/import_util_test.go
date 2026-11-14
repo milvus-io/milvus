@@ -109,7 +109,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	tasks, err := bulkimport.NewImportTasks(fileGroups, job, alloc, mt, nil, 1*1024*1024*1024)
@@ -189,7 +189,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	tasks, err := bulkimport.NewImportTasks(fileGroups, job, alloc, mt, nil, 1*1024*1024*1024)
@@ -270,7 +270,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 	segment := &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -353,7 +353,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 	segment := &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -445,7 +445,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	segments, err := bulkimport.AssignSegments(job, task, alloc, mt, 1024)
@@ -492,7 +492,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	job := &bulkimport.Job{
@@ -593,7 +593,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	file1 := &internalpb.ImportFile{
@@ -917,7 +917,7 @@ func TestImportUtil_GetV3ImportProgress(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
@@ -1015,7 +1015,7 @@ func TestImportUtil_AssembleRequestCarriesIDRange(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 	err = mt.AddSegment(context.Background(), &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})
 	assert.NoError(t, err)

@@ -207,10 +207,195 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(s.mockCatalog)
 	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	s.handler = NewCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, s.mockCleaner, s.mockAlloc, nil, mockScheduler, mockScheduler, index.NewTestVersionManager())
 	s.mockHandler = meta.NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{}, nil).Maybe()
+}
+
+func (s *CompactionPlanHandlerSuite) TestSharedAdmissionLimitsNewTasksInLegacyMode() {
+	params := paramtable.Get()
+	params.Save("dataCoord.compaction.rateLimitTokens", "1")
+	params.Save("dataCoord.compaction.rateLimitInterval", "3600")
+	s.T().Cleanup(func() {
+		params.Reset("dataCoord.compaction.rateLimitTokens")
+		params.Reset("dataCoord.compaction.rateLimitInterval")
+	})
+
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
+	inspector := NewCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, s.mockAlloc, nil, nil, nil, index.NewTestVersionManager())
+	s.Require().NoError(inspector.InitAdmission())
+	ctx := s.T().Context()
+	s.Require().NoError(inspector.EnqueueCompaction(ctx, &datapb.CompactionTask{
+		PlanID: 1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10, 11},
+	}, AdmissionOptions{Producer: ProducerLegacyTrigger}))
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, &datapb.CompactionTask{
+		PlanID: 2, Type: datapb.CompactionType_Level0DeleteCompaction, InputSegments: []int64{12},
+	}, AdmissionOptions{Producer: ProducerTriggerManager}), ErrAdmissionLimited)
+	s.Equal(1, inspector.GetCompactionTasksNumBySignalID(0))
+	s.Len(s.compactionTaskMeta.GetCompactionTasksByTriggerID(0), 1)
+}
+
+func (s *CompactionPlanHandlerSuite) TestAdmissionRefundsAndRetainsLastValidConfiguration() {
+	params := paramtable.Get()
+	cfg := &Params.DataCoordCfg
+	params.Save(cfg.CompactionRateLimitTokens.Key, "1")
+	params.Save(cfg.CompactionRateLimitInterval.Key, "3600")
+	s.T().Cleanup(func() {
+		params.Reset(cfg.CompactionRateLimitTokens.Key)
+		params.Reset(cfg.CompactionRateLimitInterval.Key)
+	})
+	inspector := s.handler
+	s.Require().NoError(inspector.InitAdmission())
+	clock := inspector.admission.refilledAt
+	inspector.admission.now = func() time.Time { return clock }
+
+	ctx := s.T().Context()
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	inspector.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(catalog)
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetPlanID() == 1
+	})).Return(merr.ErrIoFailed).Once()
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetPlanID() == 2
+	})).Return(nil).Once()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Twice()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, []int64{10}).Return(true, true).Once()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, []int64{20}).Return(true, true).Once()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{10}, false).Once()
+
+	failed := &datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{10}}
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, failed, AdmissionOptions{Producer: ProducerImport}), merr.ErrIoFailed)
+	next := &datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_Level0DeleteCompaction, InputSegments: []int64{20}}
+	params.Save(cfg.CompactionRateLimitTokens.Key, "0")
+	s.Require().NoError(inspector.EnqueueCompaction(ctx, next, AdmissionOptions{Producer: ProducerTriggerManager}))
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, failed, AdmissionOptions{Producer: ProducerImport}), ErrAdmissionLimited)
+	s.Nil(inspector.getCompactionTask(1))
+	s.NotNil(inspector.getCompactionTask(2))
+
+	// The same invalid input must fail initial configuration.
+	s.Require().Error(inspector.InitAdmission())
+}
+
+func (s *CompactionPlanHandlerSuite) TestAdmissionAllowsOnlyExplicitDependencyPastBacklogCap() {
+	params := paramtable.Get()
+	cfg := &Params.DataCoordCfg
+	params.Save(cfg.CompactionMaxTaskNum.Key, "1")
+	params.Save(cfg.CompactionRateLimitTokens.Key, "2")
+	params.Save(cfg.CompactionRateLimitInterval.Key, "3600")
+	s.T().Cleanup(func() {
+		params.Reset(cfg.CompactionMaxTaskNum.Key)
+		params.Reset(cfg.CompactionRateLimitTokens.Key)
+		params.Reset(cfg.CompactionRateLimitInterval.Key)
+	})
+	inspector := s.handler
+	s.Require().NoError(inspector.InitAdmission())
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Twice()
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Twice()
+	ctx := s.T().Context()
+
+	parent := &datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_ClusteringCompaction, InputSegments: []int64{10}}
+	opts := AdmissionOptions{Producer: ProducerTriggerManager}
+	s.Require().NoError(inspector.EnqueueCompaction(ctx, parent, opts))
+	sort := &datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{20}}
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, sort, opts), ErrAdmissionLimited)
+	opts.DependencySort = true
+	s.Require().NoError(inspector.EnqueueCompaction(ctx, sort, opts))
+	sort = &datapb.CompactionTask{PlanID: 3, Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{30}}
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, sort, opts), ErrAdmissionLimited)
+	s.Nil(inspector.getCompactionTask(3))
+}
+
+func (s *CompactionPlanHandlerSuite) TestAdmissionRefundsQueueRejectionAndRecoveryDoesNotCharge() {
+	params := paramtable.Get()
+	cfg := &Params.DataCoordCfg
+	params.Save(cfg.CompactionTaskQueueCapacity.Key, "1")
+	params.Save(cfg.CompactionRateLimitTokens.Key, "1")
+	params.Save(cfg.CompactionRateLimitInterval.Key, "3600")
+	s.T().Cleanup(func() {
+		params.Reset(cfg.CompactionTaskQueueCapacity.Key)
+		params.Reset(cfg.CompactionRateLimitTokens.Key)
+		params.Reset(cfg.CompactionRateLimitInterval.Key)
+	})
+
+	ctx := s.T().Context()
+	inspector := NewCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, s.mockAlloc, nil, nil, nil, index.NewTestVersionManager())
+	s.Require().NoError(inspector.InitAdmission())
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Times(2)
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Times(3)
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{10}, false).Once()
+
+	failed := &datapb.CompactionTask{
+		PlanID: 1, TriggerID: 100, Type: datapb.CompactionType_Level0DeleteCompaction,
+		State: datapb.CompactionTaskState_pipelining, InputSegments: []int64{10}, NodeID: meta.NullNodeID,
+	}
+	// Fill the last queue slot through an existing-task requeue while the new
+	// task's metadata write is in progress.
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	inspector.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(catalog)
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetPlanID() == 1
+	})).RunAndReturn(func(context.Context, *datapb.CompactionTask) error {
+		requeued := ctask.NewMixCompactionTask(&datapb.CompactionTask{PlanID: 50}, nil, s.mockMeta, inspector.compactionTaskMeta, nil)
+		return inspector.submitTask(requeued)
+	}).Once()
+	s.Require().ErrorIs(inspector.EnqueueCompaction(ctx, failed, AdmissionOptions{Producer: ProducerTriggerManager}), ErrAdmissionLimited)
+	s.Require().Len(inspector.compactionTaskMeta.GetCompactionTasksByTriggerID(100), 1)
+	s.Zero(inspector.GetCompactionTasksNumBySignalID(100))
+	_, err := inspector.queueTasks.Dequeue()
+	s.Require().NoError(err)
+
+	// Recovery sees the durable task even though its initial enqueue failed.
+	inspector.LoadMeta()
+	s.Equal(1, inspector.GetCompactionTasksNumBySignalID(100))
+	_, err = inspector.queueTasks.Dequeue()
+	s.Require().NoError(err)
+
+	next := &datapb.CompactionTask{PlanID: 2, TriggerID: 200, Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{20}}
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetPlanID() == 2
+	})).Return(nil).Once()
+	s.Require().NoError(inspector.EnqueueCompaction(ctx, next, AdmissionOptions{Producer: ProducerImport}))
+	s.Equal(1, inspector.GetCompactionTasksNumBySignalID(200))
+}
+
+func (s *CompactionPlanHandlerSuite) TestAdmissionAlternatesContendedPartialRefills() {
+	params := paramtable.Get()
+	cfg := &Params.DataCoordCfg
+	params.Save(cfg.CompactionRateLimitTokens.Key, "2")
+	params.Save(cfg.CompactionRateLimitInterval.Key, "2")
+	s.T().Cleanup(func() {
+		params.Reset(cfg.CompactionRateLimitTokens.Key)
+		params.Reset(cfg.CompactionRateLimitInterval.Key)
+	})
+
+	inspector := s.handler
+	s.Require().NoError(inspector.InitAdmission())
+	clock := inspector.admission.refilledAt
+	inspector.admission.now = func() time.Time { return clock }
+	ctx := s.T().Context()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Times(5)
+	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Times(5)
+	submit := func(id int64, producer Producer) error {
+		return inspector.EnqueueCompaction(ctx, &datapb.CompactionTask{
+			PlanID: id, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{id},
+		}, AdmissionOptions{Producer: producer})
+	}
+	s.Require().NoError(submit(1, ProducerTBC))
+	s.Require().NoError(submit(2, ProducerTBC))
+	s.Require().ErrorIs(submit(3, ProducerTriggerManager), ErrAdmissionLimited)
+	clock = clock.Add(time.Second)
+	s.Require().ErrorIs(submit(4, ProducerTBC), ErrAdmissionLimited)
+	s.Require().NoError(submit(3, ProducerTriggerManager))
+	clock = clock.Add(time.Second)
+	s.Require().ErrorIs(submit(4, ProducerTBC), ErrAdmissionLimited)
+	s.Require().NoError(submit(5, ProducerTriggerManager))
+	clock = clock.Add(time.Second)
+	limit, _ := inspector.attemptLimit(ctx, ProducerTBC, 2)
+	s.Equal(1, limit)
+	s.Require().NoError(submit(4, ProducerTBC))
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -712,6 +897,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Twice()
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	mockScheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
@@ -728,12 +914,13 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 		Channel:   "ch-1",
 		Type:      datapb.CompactionType_MixCompaction,
 	}
-	err := handler.EnqueueCompaction(task)
+	err := handler.EnqueueCompaction(s.T().Context(), task, AdmissionOptions{Producer: ProducerTriggerManager})
 	s.NoError(err)
 	t := handler.getCompactionTask(1)
 	s.NotNil(t)
+	s.Equal(uint64(1000), t.GetTaskProto().GetCreateTs())
 	task.PlanID = 2
-	err = s.handler.EnqueueCompaction(task)
+	err = s.handler.EnqueueCompaction(s.T().Context(), task, AdmissionOptions{Producer: ProducerTriggerManager})
 	s.NoError(err)
 }
 
@@ -1296,7 +1483,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionComp
 		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
 	}
 
-	compactTask, err := handler.createCompactTask(t)
+	compactTask, err := handler.createCompactTask(s.T().Context(), t)
 	s.NoError(err)
 	s.NotNil(compactTask)
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, compactTask.GetTaskProto().GetType())
@@ -1315,7 +1502,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
 		Type:      datapb.CompactionType(9999),
 	}
 
-	compactTask, err := handler.createCompactTask(t)
+	compactTask, err := handler.createCompactTask(s.T().Context(), t)
 	s.Nil(compactTask)
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrIllegalCompactionPlan))

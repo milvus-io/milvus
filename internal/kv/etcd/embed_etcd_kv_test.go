@@ -882,6 +882,16 @@ func (s *EmbedEtcdKVSuite) TearDownTest() {
 	}
 }
 
+func (s *EmbedEtcdKVSuite) TestConditionalCreatePreservesExistingValue() {
+	ctx := s.T().Context()
+	const key = "conditional_create"
+	s.Require().NoError(s.kv.MultiSaveAndRemove(ctx, map[string]string{key: "first"}, nil, predicates.KeyNotExist(key)))
+	s.Require().Error(s.kv.MultiSaveAndRemove(ctx, map[string]string{key: "second"}, nil, predicates.KeyNotExist(key)))
+	current, err := s.kv.Load(ctx, key)
+	s.Require().NoError(err)
+	s.Equal("first", current)
+}
+
 func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	etcdKV := s.kv
 

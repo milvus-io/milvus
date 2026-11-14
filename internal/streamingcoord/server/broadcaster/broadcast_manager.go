@@ -45,6 +45,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		recoveryTasks = append(recoveryTasks, t)
 	}
 	tasks := make(map[uint64]*broadcastTask, len(recoveryTasks))
+	schemaTasks := newSchemaTaskIndex()
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
@@ -76,6 +77,8 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
 		}
 		tasks[task.Header().BroadcastID] = task
+		task.schemaTasks = schemaTasks
+		schemaTasks.update(task)
 		// Rebuild the idempotency index across EVERY state, tombstones included:
 		// a tombstoned task is exactly what a late retry must still hit.
 		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
@@ -85,6 +88,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		lifetime:           typeutil.NewLifetime(),
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
+		schemaTasks:        schemaTasks,
 		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
@@ -108,7 +112,8 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
+	schemaTasks        *schemaTaskIndex
+	idempotencyIndex   *idempotencyIndex // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
@@ -124,6 +129,24 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 // The message never leaves this cluster, so the replicate role is not checked.
 func (bm *broadcastTaskManager) WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
 	return bm.withResourceKeys(ctx, func(ctx context.Context) error { return ctx.Err() }, true, resourceKeys...)
+}
+
+func (bm *broadcastTaskManager) TryLockResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("broadcaster is closing")
+	}
+	guards, err := bm.resourceKeyLocker.FastLock(bm.appendSharedClusterRK(resourceKeys...)...)
+	if err != nil {
+		bm.lifetime.Done()
+		return nil, nil
+	}
+	return func() {
+		guards.Unlock()
+		bm.lifetime.Done()
+	}, nil
 }
 
 // withResourceKeys acquires the resource keys, then checks the cluster with checkCluster.
@@ -408,6 +431,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
+	newIncomingTask.schemaTasks = bm.schemaTasks
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return newIncomingTask, true
@@ -432,6 +456,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
+	newBroadcastTask.schemaTasks = bm.schemaTasks
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	return newBroadcastTask, true

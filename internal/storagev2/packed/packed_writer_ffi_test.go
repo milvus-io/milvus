@@ -300,6 +300,7 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: parquetOut})
 	parquetOut.Destroy()
 	require.NoError(t, err)
+	parquetManifest := manifest
 
 	committedBasePath, version, err := UnmarshalManifestPath(manifest)
 	require.NoError(t, err)
@@ -307,6 +308,17 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 	manifest, err = CommitManifestUpdates(committedBasePath, version, cfg, &ManifestUpdates{NewFiles: vortexOut})
 	vortexOut.Destroy()
 	require.NoError(t, err)
+
+	formats, err := ReadManifestInsertFormats(t.Context(), parquetManifest, cfg)
+	require.NoError(t, err)
+	require.Equal(t, []string{"parquet"}, formats)
+
+	formats, err = ReadManifestInsertFormats(t.Context(), manifest, cfg)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"parquet", "vortex"}, formats)
+
+	_, err = ReadManifestInsertFormats(t.Context(), MarshalManifestPath(basePath, ManifestEarliest), cfg)
+	require.Error(t, err)
 
 	format, err := ResolveManifestSingleWriterFormat(manifest, cfg, []string{"100"}, "")
 	require.NoError(t, err)

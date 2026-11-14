@@ -561,6 +561,16 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 	s.Empty(vs)
 }
 
+func (s *EtcdKVSuite) TestConditionalCreatePreservesExistingValue() {
+	ctx := s.T().Context()
+	const key = "conditional_create"
+	s.Require().NoError(s.etcdKV.MultiSaveAndRemove(ctx, map[string]string{key: "first"}, nil, predicates.KeyNotExist(key)))
+	s.Require().Error(s.etcdKV.MultiSaveAndRemove(ctx, map[string]string{key: "second"}, nil, predicates.KeyNotExist(key)))
+	current, err := s.etcdKV.Load(ctx, key)
+	s.Require().NoError(err)
+	s.Equal("first", current)
+}
+
 func (s *EtcdKVSuite) TestTxnWithPredicates() {
 	etcdKV := s.etcdKV
 

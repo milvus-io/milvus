@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -28,6 +29,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		mu:                   sync.Mutex{},
 		taskMetricsGuard:     m,
 		msg:                  msg,
+		schemaCollectionID:   schemaTargetCollectionID(msg),
 		task:                 proto,
 		dirty:                false, // the task is recovered from the recovery info, so it's persisted.
 		ackCallbackScheduler: ackCallbackScheduler,
@@ -67,10 +69,11 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 	m := metrics.NewBroadcastTask(msg.MessageType(), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, msg.BroadcastHeader().ResourceKeys.Collect())
 	header := msg.BroadcastHeader()
 	bt := &broadcastTask{
-		Binder:           mlog.Binder{},
-		taskMetricsGuard: m,
-		mu:               sync.Mutex{},
-		msg:              msg,
+		Binder:             mlog.Binder{},
+		taskMetricsGuard:   m,
+		mu:                 sync.Mutex{},
+		msg:                msg,
+		schemaCollectionID: schemaTargetCollectionID(msg),
 		task: &streamingpb.BroadcastTask{
 			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -100,6 +103,10 @@ func newBroadcastTaskFromImmutableMessage(msg message.ImmutableMessage, metrics 
 type broadcastTask struct {
 	mlog.Binder
 	*taskMetricsGuard
+
+	schemaCollectionID int64
+	schemaTasks        *schemaTaskIndex
+	schemaForTarget    *schemapb.CollectionSchema
 
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
@@ -559,11 +566,15 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	b.dirty = false
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
+		b.dirty = true
 		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err
+	}
+	if b.schemaTasks != nil {
+		b.schemaTasks.update(b)
 	}
 	b.ObserveStateChanged(b.task.State)
 	logger.Info(ctx, "save broadcast task done")

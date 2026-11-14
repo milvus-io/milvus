@@ -43,6 +43,11 @@ const (
 	DataCoord_ShowConfigurations_FullMethodName                   = "/milvus.proto.data.DataCoord/ShowConfigurations"
 	DataCoord_GetMetrics_FullMethodName                           = "/milvus.proto.data.DataCoord/GetMetrics"
 	DataCoord_ManualCompaction_FullMethodName                     = "/milvus.proto.data.DataCoord/ManualCompaction"
+	DataCoord_CreateCompactionTarget_FullMethodName               = "/milvus.proto.data.DataCoord/CreateCompactionTarget"
+	DataCoord_GetCompactionTargetBinding_FullMethodName           = "/milvus.proto.data.DataCoord/GetCompactionTargetBinding"
+	DataCoord_DescribeCompactionTarget_FullMethodName             = "/milvus.proto.data.DataCoord/DescribeCompactionTarget"
+	DataCoord_ListCompactionTargets_FullMethodName                = "/milvus.proto.data.DataCoord/ListCompactionTargets"
+	DataCoord_DropCompactionTarget_FullMethodName                 = "/milvus.proto.data.DataCoord/DropCompactionTarget"
 	DataCoord_GetCompactionState_FullMethodName                   = "/milvus.proto.data.DataCoord/GetCompactionState"
 	DataCoord_GetCompactionStateWithPlans_FullMethodName          = "/milvus.proto.data.DataCoord/GetCompactionStateWithPlans"
 	DataCoord_WatchChannels_FullMethodName                        = "/milvus.proto.data.DataCoord/WatchChannels"
@@ -119,6 +124,11 @@ type DataCoordClient interface {
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 	ManualCompaction(ctx context.Context, in *milvuspb.ManualCompactionRequest, opts ...grpc.CallOption) (*milvuspb.ManualCompactionResponse, error)
+	CreateCompactionTarget(ctx context.Context, in *CreateCompactionTargetRequest, opts ...grpc.CallOption) (*CreateCompactionTargetResponse, error)
+	GetCompactionTargetBinding(ctx context.Context, in *GetCompactionTargetBindingRequest, opts ...grpc.CallOption) (*GetCompactionTargetBindingResponse, error)
+	DescribeCompactionTarget(ctx context.Context, in *DescribeCompactionTargetRequest, opts ...grpc.CallOption) (*DescribeCompactionTargetResponse, error)
+	ListCompactionTargets(ctx context.Context, in *ListCompactionTargetsRequest, opts ...grpc.CallOption) (*ListCompactionTargetsResponse, error)
+	DropCompactionTarget(ctx context.Context, in *DropCompactionTargetRequest, opts ...grpc.CallOption) (*DropCompactionTargetResponse, error)
 	GetCompactionState(ctx context.Context, in *milvuspb.GetCompactionStateRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionStateResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, in *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error)
 	// Deprecated: Do not use.
@@ -361,6 +371,51 @@ func (c *dataCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetric
 func (c *dataCoordClient) ManualCompaction(ctx context.Context, in *milvuspb.ManualCompactionRequest, opts ...grpc.CallOption) (*milvuspb.ManualCompactionResponse, error) {
 	out := new(milvuspb.ManualCompactionResponse)
 	err := c.cc.Invoke(ctx, DataCoord_ManualCompaction_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) CreateCompactionTarget(ctx context.Context, in *CreateCompactionTargetRequest, opts ...grpc.CallOption) (*CreateCompactionTargetResponse, error) {
+	out := new(CreateCompactionTargetResponse)
+	err := c.cc.Invoke(ctx, DataCoord_CreateCompactionTarget_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) GetCompactionTargetBinding(ctx context.Context, in *GetCompactionTargetBindingRequest, opts ...grpc.CallOption) (*GetCompactionTargetBindingResponse, error) {
+	out := new(GetCompactionTargetBindingResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetCompactionTargetBinding_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) DescribeCompactionTarget(ctx context.Context, in *DescribeCompactionTargetRequest, opts ...grpc.CallOption) (*DescribeCompactionTargetResponse, error) {
+	out := new(DescribeCompactionTargetResponse)
+	err := c.cc.Invoke(ctx, DataCoord_DescribeCompactionTarget_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) ListCompactionTargets(ctx context.Context, in *ListCompactionTargetsRequest, opts ...grpc.CallOption) (*ListCompactionTargetsResponse, error) {
+	out := new(ListCompactionTargetsResponse)
+	err := c.cc.Invoke(ctx, DataCoord_ListCompactionTargets_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) DropCompactionTarget(ctx context.Context, in *DropCompactionTargetRequest, opts ...grpc.CallOption) (*DropCompactionTargetResponse, error) {
+	out := new(DropCompactionTargetResponse)
+	err := c.cc.Invoke(ctx, DataCoord_DropCompactionTarget_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -810,6 +865,11 @@ type DataCoordServer interface {
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	ManualCompaction(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
+	CreateCompactionTarget(context.Context, *CreateCompactionTargetRequest) (*CreateCompactionTargetResponse, error)
+	GetCompactionTargetBinding(context.Context, *GetCompactionTargetBindingRequest) (*GetCompactionTargetBindingResponse, error)
+	DescribeCompactionTarget(context.Context, *DescribeCompactionTargetRequest) (*DescribeCompactionTargetResponse, error)
+	ListCompactionTargets(context.Context, *ListCompactionTargetsRequest) (*ListCompactionTargetsResponse, error)
+	DropCompactionTarget(context.Context, *DropCompactionTargetRequest) (*DropCompactionTargetResponse, error)
 	GetCompactionState(context.Context, *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	GetCompactionStateWithPlans(context.Context, *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
 	// Deprecated: Do not use.
@@ -932,6 +992,21 @@ func (UnimplementedDataCoordServer) GetMetrics(context.Context, *milvuspb.GetMet
 }
 func (UnimplementedDataCoordServer) ManualCompaction(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ManualCompaction not implemented")
+}
+func (UnimplementedDataCoordServer) CreateCompactionTarget(context.Context, *CreateCompactionTargetRequest) (*CreateCompactionTargetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateCompactionTarget not implemented")
+}
+func (UnimplementedDataCoordServer) GetCompactionTargetBinding(context.Context, *GetCompactionTargetBindingRequest) (*GetCompactionTargetBindingResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCompactionTargetBinding not implemented")
+}
+func (UnimplementedDataCoordServer) DescribeCompactionTarget(context.Context, *DescribeCompactionTargetRequest) (*DescribeCompactionTargetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeCompactionTarget not implemented")
+}
+func (UnimplementedDataCoordServer) ListCompactionTargets(context.Context, *ListCompactionTargetsRequest) (*ListCompactionTargetsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCompactionTargets not implemented")
+}
+func (UnimplementedDataCoordServer) DropCompactionTarget(context.Context, *DropCompactionTargetRequest) (*DropCompactionTargetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropCompactionTarget not implemented")
 }
 func (UnimplementedDataCoordServer) GetCompactionState(context.Context, *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCompactionState not implemented")
@@ -1439,6 +1514,96 @@ func _DataCoord_ManualCompaction_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataCoordServer).ManualCompaction(ctx, req.(*milvuspb.ManualCompactionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_CreateCompactionTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCompactionTargetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CreateCompactionTarget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CreateCompactionTarget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CreateCompactionTarget(ctx, req.(*CreateCompactionTargetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_GetCompactionTargetBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCompactionTargetBindingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetCompactionTargetBinding(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetCompactionTargetBinding_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetCompactionTargetBinding(ctx, req.(*GetCompactionTargetBindingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_DescribeCompactionTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeCompactionTargetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).DescribeCompactionTarget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_DescribeCompactionTarget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).DescribeCompactionTarget(ctx, req.(*DescribeCompactionTargetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_ListCompactionTargets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCompactionTargetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).ListCompactionTargets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_ListCompactionTargets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).ListCompactionTargets(ctx, req.(*ListCompactionTargetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_DropCompactionTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropCompactionTargetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).DropCompactionTarget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_DropCompactionTarget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).DropCompactionTarget(ctx, req.(*DropCompactionTargetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2357,6 +2522,26 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ManualCompaction",
 			Handler:    _DataCoord_ManualCompaction_Handler,
+		},
+		{
+			MethodName: "CreateCompactionTarget",
+			Handler:    _DataCoord_CreateCompactionTarget_Handler,
+		},
+		{
+			MethodName: "GetCompactionTargetBinding",
+			Handler:    _DataCoord_GetCompactionTargetBinding_Handler,
+		},
+		{
+			MethodName: "DescribeCompactionTarget",
+			Handler:    _DataCoord_DescribeCompactionTarget_Handler,
+		},
+		{
+			MethodName: "ListCompactionTargets",
+			Handler:    _DataCoord_ListCompactionTargets_Handler,
+		},
+		{
+			MethodName: "DropCompactionTarget",
+			Handler:    _DataCoord_DropCompactionTarget_Handler,
 		},
 		{
 			MethodName: "GetCompactionState",

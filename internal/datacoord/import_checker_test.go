@@ -87,7 +87,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	s.NoError(err)
 
 	importMeta, err := bulkimport.NewImportMeta(context.TODO(), catalog, s.alloc, mt)
@@ -268,7 +268,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
 	cim := s.checker.Ci.(*compaction.MockCompactionInspector)
-	cim.EXPECT().EnqueueCompaction(mock.Anything).Return(nil)
+	cim.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, compaction.AdmissionOptions{Producer: compaction.ProducerImport, DependencySort: true}).Return(nil)
 
 	s.checker.CheckSortingJob(job)
 	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
@@ -2053,7 +2053,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm))
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, broker, loadDomainMetas(catalog, nil, dm, false))
 	assert.NoError(t, err)
 
 	importMeta, err := bulkimport.NewImportMeta(context.TODO(), catalog, alloc, mt)

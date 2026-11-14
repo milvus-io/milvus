@@ -63,6 +63,11 @@ service DataCoord {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
   rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
+  rpc CreateCompactionTarget(CreateCompactionTargetRequest) returns (CreateCompactionTargetResponse) {}
+  rpc GetCompactionTargetBinding(GetCompactionTargetBindingRequest) returns (GetCompactionTargetBindingResponse) {}
+  rpc DescribeCompactionTarget(DescribeCompactionTargetRequest) returns (DescribeCompactionTargetResponse) {}
+  rpc ListCompactionTargets(ListCompactionTargetsRequest) returns (ListCompactionTargetsResponse) {}
+  rpc DropCompactionTarget(DropCompactionTargetRequest) returns (DropCompactionTargetResponse) {}
   rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
@@ -480,6 +485,9 @@ message SegmentInfo {
   // instead of iterating Binlogs/Statslogs/Deltalogs for scheduling
   // decisions (compaction, load balancing, GC). See message Statistics.
   Statistics stats = 38;
+
+  // Admission timestamp of the task that rewrote these row records.
+  uint64 create_ts = 39;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1684,6 +1692,146 @@ enum CompactionTaskState {
   statistic = 10;
 }
 
+enum TargetState {
+  TARGET_STATE_ACTIVE = 0;
+  TARGET_STATE_INACTIVE = 1;
+}
+
+enum TargetIntent {
+  INTENT_UNKNOWN = 0;
+  INTENT_REWRITE = 1;
+  INTENT_SIZE = 2;
+  INTENT_SORT = 3;
+  INTENT_OPTIMIZE = 4;
+  INTENT_BACKFILL = 5;
+  INTENT_INDEX_VERSION = 6;
+  INTENT_SCHEMA_VERSION = 7;
+  INTENT_STORAGE_VERSION = 8;
+  INTENT_STORAGE_FORMAT = 9;
+  INTENT_DELETE_CLEANUP = 10;
+  INTENT_TTL = 11;
+}
+
+// A resolved collection identity for authorization, including the metadata
+// revision checked when Proxy authorized the current name.
+message CompactionTargetResource {
+  int64 collection_id = 1;
+  int64 db_id = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  uint64 revision = 5;
+  bool deleted = 6;
+}
+
+message CompactionTargetRewrite {
+  repeated int64 root_segment_ids = 1;
+}
+
+message CompactionTargetOptimize {
+  int64 input_target_size_bytes = 1;
+  int64 actual_target_size_bytes = 2;
+}
+
+message CreateCompactionTargetRequest {
+  common.MsgBase base = 1;
+  CompactionTargetResource collection = 2;
+  oneof target {
+    CompactionTargetRewrite rewrite = 3;
+    int64 input_target_size_bytes = 4;
+  }
+}
+
+message CreateCompactionTargetResponse {
+  common.Status status = 1;
+  int64 target_id = 2;
+  int64 total_rows = 3;
+  CompactionTargetOptimize optimize = 4;
+}
+
+message GetCompactionTargetBindingRequest {
+  common.MsgBase base = 1;
+  int64 target_id = 2;
+}
+
+message GetCompactionTargetBindingResponse {
+  common.Status status = 1;
+  CompactionTargetResource resource = 2;
+}
+
+message CompactionTargetReadModel {
+  int64 target_id = 1;
+  CompactionTargetResource resource = 2;
+  TargetIntent intent = 3;
+  TargetState state = 4;
+  uint64 created_at = 5;
+  uint64 stopped_at = 6;
+  string stop_reason = 7;
+  optional int64 total_rows = 8;
+  CompactionTargetRewrite rewrite = 9;
+  CompactionTargetOptimize optimize = 10;
+  optional int64 remaining_rows = 11;
+  uint64 checked_at = 12;
+  string message = 13;
+  optional bool enabled = 14;
+  map<string, string> parameters = 15;
+}
+
+message DescribeCompactionTargetRequest {
+  common.MsgBase base = 1;
+  int64 target_id = 2;
+  CompactionTargetResource collection = 3;
+}
+
+message DescribeCompactionTargetResponse {
+  common.Status status = 1;
+  CompactionTargetReadModel target = 2;
+}
+
+message ListCompactionTargetsRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  oneof collection_filter {
+    string collection_name = 3;
+    int64 collection_id = 4;
+  }
+  repeated TargetState states = 5;
+  bool include_system = 6;
+}
+
+message ListCompactionTargetsResponse {
+  common.Status status = 1;
+  repeated CompactionTargetReadModel targets = 2;
+}
+
+message DropCompactionTargetRequest {
+  common.MsgBase base = 1;
+  int64 target_id = 2;
+  CompactionTargetResource collection = 3;
+}
+
+message DropCompactionTargetResponse {
+  common.Status status = 1;
+}
+
+message CompactionTarget {
+  int64 targetID = 1;
+  int64 collectionID = 2;
+  TargetIntent intent = 3;
+  map<string, string> properties = 4;
+  uint64 expectedTS = 5;
+  int32 tail_limit = 6;
+  TargetState state = 7;
+  uint64 activatedAtTS = 8;
+  uint64 inactivatedAtTS = 9;
+  string stop_reason = 10;
+  optional int64 total_rows = 11;
+  CompactionTargetRewrite rewrite = 12;
+  CompactionTargetOptimize optimize = 13;
+  optional bool enabled = 14;
+  // Fences delayed conditional Standing updates when a condition is reverted.
+  uint64 condition_revision = 15;
+}
+
 message CompactionTask{
   int64 planID = 1;
   int64 triggerID = 2;
@@ -1714,9 +1862,14 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  uint64 create_ts = 30;
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
+  // Planning-time estimate used to allocate output IDs. Cleared before save.
+  int64 output_segment_count_hint = 32;
+  // Planning-time marker for checking SIZE against a newly active OPTIMIZE.
+  bool size_compaction_hint = 33;
 }
 
 message PartitionStatsInfo {

@@ -494,7 +494,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 
 	resp, err := kv.client.Txn(ctx1).If(cmps...).Then(ops...).Commit()
 	if err != nil {
-		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+		return merr.WrapErrIoFailedErr(err, "failed to execute transaction")
 	}
 
 	if !resp.Succeeded {
@@ -564,7 +564,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 
 	resp, err := kv.client.Txn(ctx1).If(cmps...).Then(ops...).Commit()
 	if err != nil {
-		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+		return merr.WrapErrIoFailedErr(err, "failed to execute transaction")
 	}
 
 	if !resp.Succeeded {

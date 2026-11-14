@@ -26,11 +26,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -638,6 +640,67 @@ func TestTxnWithPredicates(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 			}
+		})
+	}
+}
+
+func TestConditionalCreatePreservesExistingValue(t *testing.T) {
+	ctx := t.Context()
+	kv := NewTiKV(txnClient, "/tikv/test/conditional-create")
+	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
+
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"target": "first"}, nil, predicates.KeyNotExist("target")))
+	require.Error(t, kv.MultiSaveAndRemove(ctx, map[string]string{"target": "second"}, nil, predicates.KeyNotExist("target")))
+	current, err := kv.Load(ctx, "target")
+	require.NoError(t, err)
+	require.Equal(t, "first", current)
+
+	previousCommit := commitTxn
+	defer func() { commitTxn = previousCommit }()
+	commitTxn = func(context.Context, *transaction.KVTxn) error {
+		return tikverr.ErrResultUndetermined
+	}
+	err = kv.MultiSaveAndRemove(ctx, map[string]string{"new": "value"}, nil, predicates.KeyNotExist("new"))
+	require.True(t, tikverr.IsErrorUndetermined(err), "got %v", err)
+}
+
+func TestConditionalWriteSeesGuardChangedAfterTransactionBegan(t *testing.T) {
+	ctx := t.Context()
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_changed")
+	for _, initiallyPresent := range []bool{true, false} {
+		name := "new guard"
+		if initiallyPresent {
+			name = "changed guard"
+		}
+		t.Run(name, func(t *testing.T) {
+			guard := name + "/guard"
+			target := name + "/target"
+			predicate := predicates.KeyNotExist(guard)
+			if initiallyPresent {
+				require.NoError(t, kv.Save(ctx, guard, "original"))
+				predicate = predicates.ValueEqual(guard, "original")
+			}
+
+			oldBegin := beginTxn
+			t.Cleanup(func() { beginTxn = oldBegin })
+			changed := false
+			beginTxn = func(c *txnkv.Client) (*transaction.KVTxn, error) {
+				txn, err := oldBegin(c)
+				if err == nil && !changed {
+					changed = true
+					require.NoError(t, kv.Save(ctx, guard, "current"))
+				}
+				return txn, err
+			}
+
+			err := kv.MultiSaveAndRemove(ctx, map[string]string{target: "target value"}, nil,
+				predicates.KeyNotExist(target), predicate)
+			require.True(t, changed)
+			require.Error(t, err)
+			_, err = kv.Load(ctx, target)
+			require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+			require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{target: "target value"}, nil,
+				predicates.KeyNotExist(target), predicates.ValueEqual(guard, "current")))
 		})
 	}
 }

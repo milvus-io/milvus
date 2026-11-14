@@ -79,7 +79,13 @@ var _ CompactionInspector = (*spyCompactionInspector)(nil)
 func (h *spyCompactionInspector) RemoveTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
-func (h *spyCompactionInspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+func (h *spyCompactionInspector) attemptLimit(_ context.Context, _ Producer, plans int) (int, string) {
+	return plans, ""
+}
+
+func (h *spyCompactionInspector) recordAdmissionDeferral(Producer, string) {}
+
+func (h *spyCompactionInspector) EnqueueCompaction(_ context.Context, task *datapb.CompactionTask, _ AdmissionOptions) error {
 	t := ctask.NewMixCompactionTask(task, nil, h.meta, nil, index.NewTestVersionManager())
 	alloc := newMock0Allocator(h.t)
 	t.Allocator = alloc
@@ -1674,7 +1680,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo := trigger.ShouldDoSingleCompaction(info, &view.CompactTime{})
+	couldDo := trigger.ShouldDoSingleCompaction(t.Context(), info, &view.CompactTime{})
 	assert.True(t, couldDo)
 
 	// Test too many stats log
@@ -1692,7 +1698,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, &view.CompactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info, &view.CompactTime{})
 	assert.False(t, couldDo)
 
 	// Test expire triggered  compaction
@@ -1727,7 +1733,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &view.CompactTime{ExpireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info2, &view.CompactTime{ExpireTime: 300})
 	assert.False(t, couldDo)
 
 	// Opportunistic quantile-based ratio/size check has 20% bucket
@@ -1738,11 +1744,11 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// 10 MiB threshold and compaction triggers. (Legacy precise per-
 	// binlog sum would have been 100 × 100 KiB = 10 MiB, exactly at
 	// threshold; the approximate path now sits above it.)
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &view.CompactTime{ExpireTime: 600})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info2, &view.CompactTime{ExpireTime: 600})
 	assert.True(t, couldDo)
 
 	// expire time < Timestamp False
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &view.CompactTime{ExpireTime: 1200})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info2, &view.CompactTime{ExpireTime: 1200})
 	assert.True(t, couldDo)
 
 	// Test Delete triggered compaction
@@ -1777,7 +1783,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// deltalog is large enough, should do compaction
-	couldDo = trigger.ShouldDoSingleCompaction(info3, &view.CompactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info3, &view.CompactTime{})
 	assert.True(t, couldDo)
 
 	mockVersionManager := index.NewMockVersionManager(t)
@@ -1847,7 +1853,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
 	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
 	defer Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "false")
-	couldDo = trigger.ShouldDoSingleCompaction(info4, &view.CompactTime{ExpireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info4, &view.CompactTime{ExpireTime: 300})
 	assert.True(t, couldDo)
 
 	indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
@@ -1857,7 +1863,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		IndexFileKeys:       []string{"index1"},
 	})
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
-	couldDo = trigger.ShouldDoSingleCompaction(info5, &view.CompactTime{ExpireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info5, &view.CompactTime{ExpireTime: 300})
 	assert.False(t, couldDo)
 
 	Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
@@ -1867,7 +1873,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	forceRebuildVersionManager := index.NewMockVersionManager(t)
 	forceRebuildVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
 	trigger.indexEngineVersionManager = forceRebuildVersionManager
-	couldDo = trigger.ShouldDoSingleCompaction(info5, &view.CompactTime{ExpireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info5, &view.CompactTime{ExpireTime: 300})
 	assert.True(t, couldDo)
 
 	indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
@@ -1877,7 +1883,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		IndexFileKeys:       nil,
 	})
 	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
-	couldDo = trigger.ShouldDoSingleCompaction(info6, &view.CompactTime{ExpireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(t.Context(), info6, &view.CompactTime{ExpireTime: 300})
 	assert.False(t, couldDo)
 
 	// Test import segment: old row timestamps should not trigger TTL compaction when commit_timestamp is recent
@@ -1917,7 +1923,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		// Without commit_timestamp fix, all rows look expired (TimestampTo=1000 < expireTime=5000),
 		// and 100% expired ratio would trigger compaction. With the fix, commit_timestamp is used
 		// as the effective ts, which is far in the future, so no TTL compaction is triggered.
-		couldDo := trigger.ShouldDoSingleCompaction(importSegment, &view.CompactTime{ExpireTime: expireTime})
+		couldDo := trigger.ShouldDoSingleCompaction(t.Context(), importSegment, &view.CompactTime{ExpireTime: expireTime})
 		assert.False(t, couldDo, "import segment with recent commit_timestamp should not be TTL-compacted due to old row timestamps")
 	})
 }
@@ -1949,12 +1955,12 @@ func Test_compactionTrigger_shouldDoSingleCompaction_CommitTimestamp(t *testing.
 		},
 	}
 	// expireTime=1000: old binlog ts (500) < 1000, but commit_ts (2000) > 1000 → NOT expired
-	shouldCompact := trigger.ShouldDoSingleCompaction(importSeg, &view.CompactTime{ExpireTime: 1000})
+	shouldCompact := trigger.ShouldDoSingleCompaction(t.Context(), importSeg, &view.CompactTime{ExpireTime: 1000})
 	assert.False(t, shouldCompact,
 		"import segment with commit_ts=2000 must NOT be TTL-compacted at expireTime=1000")
 
 	// At expireTime=3000 > commit_ts=2000 → should compact
-	shouldCompact = trigger.ShouldDoSingleCompaction(importSeg, &view.CompactTime{ExpireTime: 3000})
+	shouldCompact = trigger.ShouldDoSingleCompaction(t.Context(), importSeg, &view.CompactTime{ExpireTime: 3000})
 	assert.True(t, shouldCompact,
 		"import segment with commit_ts=2000 MUST be TTL-compacted at expireTime=3000")
 
@@ -1973,7 +1979,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction_CommitTimestamp(t *testing.
 		},
 	}
 	// Normal: 500 < 1000 → should compact (old behavior unchanged)
-	shouldCompact = trigger.ShouldDoSingleCompaction(normalSeg, &view.CompactTime{ExpireTime: 1000})
+	shouldCompact = trigger.ShouldDoSingleCompaction(t.Context(), normalSeg, &view.CompactTime{ExpireTime: 1000})
 	assert.True(t, shouldCompact,
 		"normal segment with binlog ts=500 MUST be TTL-compacted at expireTime=1000 (unchanged behavior)")
 }
@@ -2428,7 +2434,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 				},
 			},
 		}, nil)
-		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).Return(nil)
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		tr.handleSignal(&CompactionSignal{
 			CollectionID: s.collectionID,
 			partitionID:  s.partitionID,
@@ -2469,13 +2475,13 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			endID   = int64(20004)
 		)
 		s.allocator.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
-		s.inspector.EXPECT().EnqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		s.inspector.EXPECT().EnqueueCompaction(mock.Anything, mock.MatchedBy(func(task *datapb.CompactionTask) bool {
 			s.EqualValues(planID, task.GetPlanID())
 			s.ElementsMatch([]int64{1}, task.GetInputSegments())
 			s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
 			s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
 			return true
-		})).Return(nil).Once()
+		}), mock.Anything).Return(nil).Once()
 
 		err := tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -3065,7 +3071,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			got := tr.generatePlans(t.Context(), tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
 			require.Len(t, got, len(tt.want))
 			for i, bucket := range got {
 				gotIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })
@@ -3378,7 +3384,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			got := tr.generatePlans(t.Context(), tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
 			require.Len(t, got, len(tt.want))
 			for i, bucket := range got {
 				gotIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })
@@ -3754,7 +3760,66 @@ func TestHasTooManyDeletions(t *testing.T) {
 			segment := &meta.SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: tc.numRows, Stats: tc.stats},
 			}
-			assert.Equal(t, tc.want, policy.HasTooManyDeletions(segment))
+			assert.Equal(t, tc.want, policy.HasTooManyDeletions(t.Context(), segment))
 		})
 	}
+}
+
+func TestLegacyCompactionTriggerHandsOffAutomaticMix(t *testing.T) {
+	paramtable.Init()
+	cfg := &Params.DataCoordCfg
+	for key, value := range map[string]string{
+		cfg.EnableAutoCompaction.Key:           "true",
+		cfg.IndexBasedCompaction.Key:           "false",
+		cfg.TwoTierCompaction.Key:              "true",
+		cfg.AutoUpgradeSegmentIndex.Key:        "false",
+		cfg.ForceRebuildSegmentIndex.Key:       "true",
+		cfg.ForceRebuildScalarSegmentIndex.Key: "false",
+		cfg.TargetVecIndexVersion.Key:          "2",
+		cfg.SingleCompactionRatioThreshold.Key: "0.2",
+	} {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+	const collectionID, staleID, deletedID, indexID int64 = 1, 10, 20, 30
+	mt := meta.NewTestMetaForCompactionTargets()
+	mt.AddCollection(&meta.CollectionInfo{ID: collectionID, Schema: meta.NewTestSchema()})
+	stale := &datapb.SegmentInfo{
+		ID: staleID, CollectionID: collectionID, PartitionID: 1, InsertChannel: "ch", NumOfRows: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsSorted: true,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 10}}}},
+	}
+	deletes := &datapb.SegmentInfo{
+		ID: deletedID, CollectionID: collectionID, PartitionID: 1, InsertChannel: "ch", NumOfRows: 10,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsSorted: true,
+		Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 10}}}},
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 5, MemorySize: 5}}}},
+	}
+	mt.Segments.SetSegment(staleID, meta.NewSegmentInfo(stale))
+	mt.Segments.SetSegment(deletedID, meta.NewSegmentInfo(deletes))
+	indexes := index.NewTestIndexMeta(collectionID, staleID, indexID, "HNSW", &model.SegmentIndex{
+		CollectionID: collectionID, SegmentID: staleID, IndexID: indexID,
+		CurrentIndexVersion: 1, IndexFileKeys: []string{"stale"},
+	})
+	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 2), meta: mt}
+	trigger := NewCompactionTrigger(mt, indexes, inspector, newMock0Allocator(t), meta.NewMockHandlerWithMeta(mt), index.NewIndexEngineVersionManager())
+	trigger.Start()
+	t.Cleanup(trigger.Stop)
+	runSignal := func(force bool) []int64 {
+		t.Helper()
+		_, err := trigger.TriggerCompaction(t.Context(), NewCompactionSignal().WithCollectionID(collectionID).WithIsForce(force))
+		require.NoError(t, err)
+		var inputs []int64
+		for len(inspector.spyChan) > 0 {
+			plan := <-inspector.spyChan
+			for _, segment := range plan.GetSegmentBinlogs() {
+				inputs = append(inputs, segment.GetSegmentID())
+			}
+		}
+		return inputs
+	}
+	require.ElementsMatch(t, []int64{staleID, deletedID}, runSignal(false))
+	trigger.SetStandingMix(true)
+	require.Empty(t, runSignal(false))
+	require.ElementsMatch(t, []int64{staleID, deletedID}, runSignal(true))
 }

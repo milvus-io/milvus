@@ -71,6 +71,7 @@ var (
 
 // Proxy of milvus
 type Proxy struct {
+	targetCompactionEnabled bool
 	milvuspb.UnimplementedMilvusServiceServer
 
 	ctx    context.Context
@@ -154,6 +155,8 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
+		targetCompactionEnabled: Params.DataCoordCfg.EnableCompaction.GetAsBool() &&
+			Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	hookutil.SetHook(connection.GetManager())

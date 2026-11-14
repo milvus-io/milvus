@@ -93,6 +93,7 @@ type Meta struct {
 	IndexCatalog         SegmentIndexCatalog
 	CompactionProtection CompactionProtection
 	Broker               broker.Broker
+	manifestFormats      manifestFormatReader
 
 	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
 	// groupID and guarded by segMu (the group record composes into the same
@@ -657,6 +658,7 @@ func (m *Meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(segment)...).Dec()
 
 	m.Segments.DropSegment(segmentID)
+	m.manifestFormats.cache.Delete(segmentID)
 	mlog.Info(context.TODO(), "meta update: dropping segment - complete",
 		mlog.Int64("segmentID", segmentID))
 	return nil
@@ -2488,6 +2490,7 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			Statslogs:           seg.GetField2StatslogPaths(),
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
+			CreateTs:            t.GetCreateTs(),
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
@@ -2598,6 +2601,7 @@ func (m *Meta) completeMixCompactionMutation(
 
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
+			CreateTs:            t.GetCreateTs(),
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 			Level:               datapb.SegmentLevel_L1,
 			StorageVersion:      compactToSegment.GetStorageVersion(),
@@ -3177,6 +3181,7 @@ func (m *Meta) CompleteSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
+		CreateTs:                  t.GetCreateTs(),
 		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
@@ -3437,6 +3442,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{oldSegment.GetID()},
+		CreateTs:                  t.GetCreateTs(),
 		IsSorted:                  oldSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),

@@ -104,7 +104,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
-	dataCoordServer := datacoord.CreateServer(c, factory)
+	dataCoordServer := datacoord.CreateServer(c, factory, datacoord.WithCompactionTargetCollection(rootCoordServer.CompactionTargetCollection))
 
 	return &mixCoordImpl{
 		ctx:              ctx,
@@ -1471,6 +1471,10 @@ func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSna
 
 func (s *mixCoordImpl) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
 	return s.datacoordServer.DropSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DropCollectionCompactionTargets(ctx context.Context, id int64) error {
+	return s.datacoordServer.DropCollectionCompactionTargets(ctx, id)
 }
 
 func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {

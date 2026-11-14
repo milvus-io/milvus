@@ -81,7 +81,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, s.broker, loadDomainMetas(s.catalog, nil, dm))
+	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, s.broker, loadDomainMetas(s.catalog, nil, dm, false))
 	s.NoError(err)
 	s.dm = &index.IndexTestMetas{IndexMeta: dm.indexMeta}
 	s.meta.AddCollection(&meta.CollectionInfo{
