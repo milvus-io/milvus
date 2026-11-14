@@ -7081,8 +7081,119 @@ class SelectionExpansionRecorder : public StructElementOffsetsSealed {
     mutable const void* selection_data = nullptr;
 };
 
+class NestedIndexRouteExprSet : public ExprSet {
+ public:
+    using ExprSet::ExprSet;
+    void
+    Eval(int32_t begin,
+         int32_t end,
+         bool initialize,
+         EvalCtx& ctx,
+         std::vector<VectorPtr>& results) override {
+        EXPECT_EQ(ctx.get_offset_input(), nullptr);
+        ++evals;
+        ExprSet::Eval(begin, end, initialize, ctx, results);
+    }
+    int evals = 0;
+};
+
 class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
  protected:
+    void
+    CheckCompositeNestedIndexRoute(bool is_and, bool negate) {
+        milvus::test::ExprBatchSizeGuard batch_guard(100);
+        constexpr int rows = 1000;
+        auto schema = std::make_shared<Schema>();
+        const auto pk = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        const auto field = schema->AddDebugArrayField(
+            "structA[price]", DataType::INT32, false);
+        auto generated = DataGen(schema, rows, 42, 0, 1, 1);
+        std::vector<int32_t> values;
+        for (auto& data : *generated.raw_->mutable_fields_data()) {
+            if (data.field_id() != field.get())
+                continue;
+            auto arrays = data.mutable_scalars()->mutable_array_data();
+            arrays->clear_data();
+            for (int row = 0; row < rows; ++row) {
+                values.push_back(row % 7);
+                arrays->add_data()->mutable_int_data()->add_data(values.back());
+            }
+        }
+        auto segment = CreateSealedWithFieldDataLoaded(schema, generated);
+        auto built_index =
+            BuildTestScalarIndex<int32_t>(index::families::kInverted,
+                                          values.size(),
+                                          values.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
+        LoadIndexInfo info{};
+        info.field_id = field.get();
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::INT32;
+        info.index_params["index_type"] = index::INVERTED_INDEX_TYPE;
+        SetTestIndexMetadata(info, *built_index, index::families::kInverted);
+        info.index =
+            CreateTestIndex("composite_nested", std::move(built_index));
+        segment->LoadIndex(info);
+        expr::ColumnInfo column(field, DataType::ARRAY);
+        column.element_type_ = DataType::INT32;
+        column.element_level_ = true;
+        proto::plan::GenericValue low, high;
+        low.set_int64_val(1);
+        high.set_int64_val(5);
+        expr::TypedExprPtr root = std::make_shared<expr::LogicalBinaryExpr>(
+            is_and ? expr::LogicalBinaryExpr::OpType::And
+                   : expr::LogicalBinaryExpr::OpType::Or,
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::GreaterThan, low),
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::LessThan, high));
+        if (negate)
+            root = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+        auto query = std::make_shared<QueryContext>(
+            "composite_nested", segment.get(), rows, MAX_TIMESTAMP);
+        query->set_active_element_count(rows);
+        auto logical = std::make_shared<plan::ElementFilterBitsNode>(
+            "composite_nested", root, "structA");
+        auto task = Task::Create(
+            "composite_nested", plan::PlanFragment(logical), 0, query);
+        DriverContext driver(task, 0, 0, 0, 0);
+        PhyElementFilterBitsNode node(0, &driver, logical);
+        ExecContext exec(query.get());
+        auto expressions = std::make_unique<NestedIndexRouteExprSet>(
+            std::vector<expr::TypedExprPtr>{root}, &exec, true);
+        auto* observed = expressions.get();
+        ASSERT_TRUE(observed->expr(0)->CanUseNestedIndex());
+        auto conjunction =
+            negate ? observed->expr(0)->GetInputsRef()[0] : observed->expr(0);
+        auto indexed_leaf = conjunction->GetInputsRef()[1];
+        conjunction->GetInputsRef()[1] =
+            std::make_shared<ConstantElementBitmapExpr>(true, true);
+        EXPECT_FALSE(observed->expr(0)->CanUseNestedIndex());
+        conjunction->GetInputsRef()[1] = indexed_leaf;
+        node.element_exprs_ = std::move(expressions);
+        TargetBitmap parents(rows, false), unused_validity(rows, false);
+        for (int row : {1, 3, 500, 700, 999})
+            parents[row] = true;  // 0.5%: capability decides mode.
+        auto offsets = segment->GetStructElementOffsets(field);
+        auto [filtered, valid] = node.EvaluateElementExpression(
+            parents.view(), unused_validity.view(), offsets.get());
+        EXPECT_EQ(observed->evals,
+                  10);  // Sequential batches; offset mode would evaluate once.
+        for (int row = 0; row < rows; ++row) {
+            const auto value = row % 7;
+            bool hit = is_and ? value > 1 && value < 5 : value > 1 || value < 5;
+            if (negate)
+                hit = !hit;
+            EXPECT_EQ(bool(filtered[row]), !(parents[row] && hit));
+            EXPECT_TRUE(valid[row]);
+        }
+    }
+
     void
     CheckOffsetValidity() {
         constexpr int64_t rows = 1000;
@@ -7277,6 +7388,17 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
         }
     }
 };
+
+TEST_F(ElementFilterBitsNodeCandidateTest,
+       CompositeNestedIndexSelectsFullMode) {
+    for (bool is_and : {false, true}) {
+        for (bool negate : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "and=" << is_and << ", not=" << negate);
+            CheckCompositeNestedIndexRoute(is_and, negate);
+        }
+    }
+}
 
 TEST_F(ElementFilterBitsNodeCandidateTest,
        FullModePassesAlignedElementCandidates) {
