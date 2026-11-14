@@ -66,6 +66,11 @@ func TestInternalDependencyErrorsAreSystemErrors(t *testing.T) {
 	_, err = (FuncBackend{}).Load(context.Background(), "model.onnx")
 	require.Error(t, err)
 	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	_, err = (FuncBackend{LoadFunc: func(context.Context, string) (Session, error) {
+		return nil, nil
+	}}).Load(context.Background(), "model.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
 }
 
 func (s *testSession) Inputs() []TensorSpec {
