@@ -157,19 +157,18 @@ func (m *Manager) Acquire(ctx context.Context, modelPath string) (*Lease, error)
 	if closed {
 		return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
 	}
-	sourcePath, snapshotPath, key, digest, err := m.modelKey(ctx, modelPath)
+	sourcePath, key, digest, err := m.modelKey(ctx, modelPath)
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(snapshotPath)
 	if lease, ok := m.tryAcquire(key); ok {
 		return lease, nil
 	}
 
-	return m.load(ctx, sourcePath, snapshotPath, key, digest)
+	return m.load(ctx, sourcePath, key, digest)
 }
 
-func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, digest string) (*Lease, error) {
+func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Lease, error) {
 	// Serializing loads keeps the configured resident-memory limit meaningful
 	// for backends that cannot estimate their native allocation before loading.
 	select {
@@ -216,15 +215,32 @@ func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, diges
 	if err := ctx.Err(); err != nil {
 		return nil, merr.Wrap(err, "onnx: model load canceled")
 	}
-	info, err := os.Stat(snapshotPath)
+	snapshotPath, snapshotDigest, err := snapshotModel(ctx, sourcePath, m.config.MaxModelBytes)
 	if err != nil {
-		return nil, merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", sourcePath)
+		if ctx.Err() != nil {
+			return nil, merr.Wrap(ctx.Err(), "onnx: snapshot model")
+		}
+		if errors.Is(err, errModelTooLarge) {
+			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size", sourcePath)
+		}
+		return nil, merr.WrapErrIoFailedErr(err, "onnx: snapshot model %q", sourcePath)
 	}
-	if !info.Mode().IsRegular() {
-		return nil, merr.WrapErrIoFailedMsg("onnx: model path %q is no longer a regular file", sourcePath)
+	defer os.Remove(snapshotPath)
+	if snapshotDigest != digest {
+		return nil, merr.WrapErrServiceUnavailableMsg("onnx: model changed while loading %q", sourcePath)
 	}
-	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
-		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", sourcePath, info.Size(), m.config.MaxModelBytes)
+	external, err := modelHasExternalData(ctx, snapshotPath)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, merr.Wrap(ctx.Err(), "onnx: inspect model")
+		}
+		if errors.Is(err, errModelProtoTooDeep) {
+			return nil, merr.WrapErrParameterInvalidMsg("onnx: model protobuf nesting exceeds limit")
+		}
+		return nil, merr.WrapErrIoFailedErr(err, "onnx: inspect model %q", sourcePath)
+	}
+	if external {
+		return nil, merr.WrapErrParameterInvalidMsg("onnx: models with external tensor data are not supported")
 	}
 	session, err := m.backend.Load(ctx, snapshotPath)
 	if err != nil {
@@ -236,14 +252,16 @@ func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, diges
 	if session == nil {
 		return nil, merr.WrapErrServiceInternalMsg("onnx: backend returned a nil session")
 	}
+	memory := session.MemoryBytes()
 	loadedDigest, err := hashFile(ctx, snapshotPath, m.config.MaxModelBytes)
 	if err != nil {
+		if ctx.Err() != nil {
+			discardSessionAsync(m, session, memory, sourcePath)
+			return nil, merr.Wrap(ctx.Err(), "onnx: verify model after load")
+		}
 		_ = session.Close()
 		if errors.Is(err, errModelTooLarge) {
 			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q grew beyond the configured model size", sourcePath)
-		}
-		if ctx.Err() != nil {
-			return nil, merr.Wrap(ctx.Err(), "onnx: verify model after load")
 		}
 		return nil, merr.WrapErrIoFailedErr(err, "onnx: verify model after load %q", sourcePath)
 	}
@@ -255,7 +273,6 @@ func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, diges
 		_ = session.Close()
 		return nil, err
 	}
-	memory := session.MemoryBytes()
 	for {
 		m.mu.Lock()
 		if m.closed {
@@ -296,57 +313,55 @@ func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, diges
 	return &Lease{entry: entry}, nil
 }
 
-func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, string, string, string, error) {
+func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, string, string, error) {
 	if modelPath == "" {
-		return "", "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path is empty")
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path is empty")
 	}
 	if strings.IndexByte(modelPath, 0) >= 0 {
-		return "", "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path contains NUL")
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path contains NUL")
 	}
 	abs, err := filepath.Abs(modelPath)
 	if err != nil {
-		return "", "", "", "", merr.WrapErrIoFailedErr(err, "onnx: resolve model path")
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: resolve model path")
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: stat model %q failed", abs)
+			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: stat model %q failed", abs)
 		}
-		return "", "", "", "", merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", abs)
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", abs)
 	}
 	if !info.Mode().IsRegular() {
-		return "", "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path %q is not a regular file", abs)
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path %q is not a regular file", abs)
 	}
 	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
-		return "", "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", abs, info.Size(), m.config.MaxModelBytes)
+		return "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", abs, info.Size(), m.config.MaxModelBytes)
 	}
-	snapshotPath, digest, err := snapshotModel(ctx, abs, m.config.MaxModelBytes)
+	digest, err := hashFile(ctx, abs, m.config.MaxModelBytes)
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", "", "", "", merr.Wrap(ctx.Err(), "onnx: snapshot model")
+			return "", "", "", merr.Wrap(ctx.Err(), "onnx: hash model")
 		}
 		if errors.Is(err, errModelTooLarge) {
-			return "", "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size", abs)
+			return "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size", abs)
 		}
-		return "", "", "", "", merr.WrapErrIoFailedErr(err, "onnx: snapshot model %q", abs)
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: hash model %q", abs)
 	}
-	external, err := modelHasExternalData(ctx, snapshotPath)
+	external, err := modelHasExternalData(ctx, abs)
 	if err != nil {
-		_ = os.Remove(snapshotPath)
 		if ctx.Err() != nil {
-			return "", "", "", "", merr.Wrap(ctx.Err(), "onnx: inspect model")
+			return "", "", "", merr.Wrap(ctx.Err(), "onnx: inspect model")
 		}
 		if errors.Is(err, errModelProtoTooDeep) {
-			return "", "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model protobuf nesting exceeds limit")
+			return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model protobuf nesting exceeds limit")
 		}
-		return "", "", "", "", merr.WrapErrIoFailedErr(err, "onnx: inspect model %q", abs)
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: inspect model %q", abs)
 	}
 	if external {
-		_ = os.Remove(snapshotPath)
-		return "", "", "", "", merr.WrapErrParameterInvalidMsg("onnx: models with external tensor data are not supported")
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: models with external tensor data are not supported")
 	}
 	key := m.backendName + ":" + m.backendVersion + ":" + digest
-	return abs, snapshotPath, key, digest, nil
+	return abs, key, digest, nil
 }
 
 func snapshotModel(ctx context.Context, path string, maxBytes int64) (string, string, error) {
@@ -746,7 +761,8 @@ func (m *Manager) evictIdleLocked(want int) []*managerEntry {
 }
 
 func (m *Manager) evictIdleForMemoryLocked(incoming uint64) []*managerEntry {
-	if m.config.MaxMemoryBytes == 0 || incoming <= m.config.MaxMemoryBytes-m.memBytes {
+	if m.config.MaxMemoryBytes == 0 ||
+		(m.memBytes <= m.config.MaxMemoryBytes && incoming <= m.config.MaxMemoryBytes-m.memBytes) {
 		return nil
 	}
 	return m.evictIdleLocked(len(m.entries))

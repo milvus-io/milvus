@@ -29,12 +29,16 @@ import (
 type testBackend struct {
 	loads atomic.Int32
 	new   func(string) *testSession
+	load  func(context.Context, string) (Session, error)
 }
 
 func (b *testBackend) Name() string    { return "test-onnxruntime" }
 func (b *testBackend) Version() string { return "test-1" }
-func (b *testBackend) Load(_ context.Context, path string) (Session, error) {
+func (b *testBackend) Load(ctx context.Context, path string) (Session, error) {
 	b.loads.Add(1)
+	if b.load != nil {
+		return b.load(ctx, path)
+	}
 	return b.new(path), nil
 }
 
@@ -556,6 +560,62 @@ func TestManagerCancelsWhileWaitingForEvictionClose(t *testing.T) {
 	second, err := manager.Acquire(context.Background(), secondModel)
 	require.NoError(t, err)
 	second.Release()
+}
+
+func TestManagerDiscardsCanceledPostLoadSessionAsynchronously(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session := &testSession{
+		memory: 16,
+		closeFunc: func() {
+			close(closeStarted)
+			<-closeRelease
+		},
+		run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+	}
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		cancel()
+		return session, nil
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	started := time.Now()
+	_, err = manager.Acquire(ctx, newTestModel(t))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(started), time.Second)
+	<-closeStarted
+	require.Equal(t, uint64(16), manager.MemoryBytes())
+
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
+func TestManagerEvictsIdleEntryWhenPendingMemoryExceedsLimit(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+
+	entry := &managerEntry{
+		key:       "idle",
+		session:   &testSession{},
+		memory:    8,
+		manager:   manager,
+		closeDone: make(chan struct{}),
+	}
+	manager.mu.Lock()
+	manager.entries[entry.key] = entry
+	manager.memBytes = 17
+	evicted := manager.evictIdleForMemoryLocked(1)
+	manager.mu.Unlock()
+
+	require.Len(t, evicted, 1)
+	startCloseEntries(evicted)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 9 }, time.Second, time.Millisecond)
+	manager.Close()
 }
 
 func wrapModelProtoField(field int, payload []byte) []byte {

@@ -40,9 +40,10 @@ example shows the lifecycle without requiring a native runtime in unit tests.
 
 ## Lifecycle and invariants
 
-1. `Acquire` checks the path and size, then copies the model into a private
-   snapshot while computing its digest. The backend loads that snapshot, so a
-   replacement of the original path cannot change the bytes being executed.
+1. `Acquire` hashes and inspects the source path before checking the cache. A
+   cache miss copies the model into a private snapshot after load admission,
+   then verifies the snapshot digest before backend loading. A replacement of
+   the original path cannot change the bytes being executed.
 2. Only a lease holds a positive session reference. Session removal and lease
    acquisition are synchronized by the manager mutex, so closing the manager
    cannot strand a reference or leak a native session.
