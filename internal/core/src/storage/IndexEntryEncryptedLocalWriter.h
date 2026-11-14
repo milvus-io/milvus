@@ -76,7 +76,7 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
     std::string edek_;
     size_t slice_size_;
 
-    ThreadPool& pool_;
+    folly::CPUThreadPoolExecutor& pool_;
     std::string local_path_;
     int local_fd_ = -1;
     size_t current_offset_ = 0;

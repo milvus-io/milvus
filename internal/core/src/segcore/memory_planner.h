@@ -20,7 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <future>
+#include <folly/futures/Future.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -126,7 +126,7 @@ struct LoadedCell {
 };
 
 using LoadedCellBatch = std::vector<LoadedCell>;
-using CellLoadFuture = std::future<LoadedCellBatch>;
+using CellLoadFuture = folly::SemiFuture<LoadedCellBatch>;
 
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
