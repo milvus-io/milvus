@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -188,6 +189,38 @@ ElementBitsetAnyReduce(const Starts& starts,
     }
 }
 
+// Scan the packed row bitmap by 64-bit words and merge adjacent selected
+// rows. Each run becomes one bulk bit-range fill (packed words plus masked
+// boundary words), so excluded rows never rewrite the zero-initialized output.
+template <typename Starts>
+TargetBitmap
+ExpandRowSelection(const TargetBitmapView& rows,
+                   int64_t row_start,
+                   const Starts& starts) {
+    const auto first_element = starts[row_start];
+    TargetBitmap result(starts[row_start + rows.size()] - first_element, false);
+    // Match ElementBitsetAnyReduce's packed-word traversal. Consume each
+    // input word once, even for heavily interleaved selections.
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr size_t kWordBits = 8 * sizeof(word_t);
+    for (size_t position = 0; position < rows.size(); position += kWordBits) {
+        const auto count = std::min(kWordBits, rows.size() - position);
+        word_t word = rows.read(position, count);
+        while (word != 0) {
+            const size_t first_bit = std::countr_zero(word);
+            const size_t last_bit =
+                first_bit + std::countr_one(word >> first_bit);
+            const auto first =
+                starts[row_start + position + first_bit] - first_element;
+            const auto last =
+                starts[row_start + position + last_bit] - first_element;
+            result.set(first, last - first, true);
+            word = last_bit == kWordBits ? 0 : word & (~word_t(0) << last_bit);
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 std::pair<int32_t, int32_t>
@@ -251,14 +284,7 @@ IStructElementOffsets::RowBitsetToElementBitset(const TargetBitmapView& rows,
                                                 int64_t row_start) const {
     FixedVector<int32_t> starts(rows.size() + 1);
     CopyRowElementStarts(row_start, rows.size(), starts.data());
-    TargetBitmap result(starts.back() - starts.front(), false);
-    for (size_t i = 0; i < rows.size(); ++i) {
-        if (rows[i]) {
-            result.set(
-                starts[i] - starts.front(), starts[i + 1] - starts[i], true);
-        }
-    }
-    return result;
+    return ExpandRowSelection(rows, 0, starts);
 }
 
 std::pair<TargetBitmap, TargetBitmap>
@@ -305,22 +331,7 @@ StructElementOffsetsSealed::RowBitsetToElementBitset(
                row_count,
                GetRowCount());
 
-    int64_t element_start = row_to_element_start_[row_start];
-    int64_t element_end = row_to_element_start_[row_start + row_count];
-    int64_t element_count = element_end - element_start;
-
-    TargetBitmap element_bitset(element_count);
-
-    for (int64_t i = 0; i < row_count; ++i) {
-        int64_t row_id = row_start + i;
-        int64_t start = row_to_element_start_[row_id] - element_start;
-        int64_t end = row_to_element_start_[row_id + 1] - element_start;
-        if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-        }
-    }
-
-    return element_bitset;
+    return ExpandRowSelection(row_bitset, row_start, row_to_element_start_);
 }
 
 FixedVector<int32_t>
@@ -776,23 +787,7 @@ StructElementOffsetsGrowing::RowBitsetToElementBitset(
                committed);
 
     ChunkedReader starts(starts_chunks_);
-    int64_t element_start = starts[row_start];
-    int64_t element_end = starts[row_start + row_count];
-    int64_t element_count = element_end - element_start;
-
-    TargetBitmap element_bitset(element_count);
-
-    // Use row-based iteration (more efficient than element-based)
-    for (int64_t i = 0; i < row_count; ++i) {
-        int64_t row_id = row_start + i;
-        int64_t start = starts[row_id] - element_start;
-        int64_t end = starts[row_id + 1] - element_start;
-        if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-        }
-    }
-
-    return element_bitset;
+    return ExpandRowSelection(row_bitset, row_start, starts);
 }
 
 FixedVector<int32_t>
