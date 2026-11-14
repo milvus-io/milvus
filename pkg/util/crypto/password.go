@@ -30,19 +30,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// BcryptMaxPasswordBytes is the maximum plaintext length representable by bcrypt.
-const BcryptMaxPasswordBytes = 72
+const (
+	// BcryptMaxPasswordBytes is the maximum plaintext length representable by bcrypt.
+	BcryptMaxPasswordBytes = 72
+
+	// PBKDF2MaxPasswordBytes bounds a plaintext password under pbkdf2-sha512.
+	// bcrypt truncates at 72 bytes and has no choice; PBKDF2 has no limit of its
+	// own, so this bound is what keeps a caller from choosing the input to a
+	// deliberately slow verification. 256 bytes leaves room for passphrases.
+	PBKDF2MaxPasswordBytes = 256
+)
+
+// MaxPasswordBytes is the longest password the configured algorithm can hash.
+// The create and change paths follow the algorithm rather than the configured
+// ceiling: proxy.maxPasswordLength may be raised above 72 for pbkdf2-sha512,
+// and a node switched back to bcrypt must not admit what bcrypt cannot hash.
+func MaxPasswordBytes() int {
+	if paramtable.Get().CommonCfg.PasswordHashAlgorithm.GetValue() == PasswordHashPBKDF2SHA512 {
+		return PBKDF2MaxPasswordBytes
+	}
+	return BcryptMaxPasswordBytes
+}
 
 // VerifyStoredPassword compares a plaintext password with a stored hash. The
 // algorithm comes from the format of the hash rather than from configuration,
 // so a credential keeps working after common.security.passwordHashAlgorithm
 // changes and on a CDC secondary configured differently from its primary.
-// A candidate that bcrypt cannot represent is a mismatch just like one that
-// does not match. A malformed stored hash is instead a credential-store failure
-// and must not be reported as a bad password, or an operator holding the right
-// one goes looking for the wrong problem.
+// A candidate past the bound of the hash's own algorithm is a mismatch just
+// like one that does not match, and is rejected before any derivation runs.
+// A malformed stored hash is instead a credential-store failure and must not be
+// reported as a bad password, or an operator holding the right one goes looking
+// for the wrong problem.
 func VerifyStoredPassword(ctx context.Context, storedHash, password string) error {
 	if strings.HasPrefix(storedHash, pbkdf2SHA512Prefix) {
+		if len(password) > PBKDF2MaxPasswordBytes {
+			return merr.WrapErrPrivilegeNotAuthenticated("invalid password")
+		}
 		return verifyPBKDF2SHA512(storedHash, password)
 	}
 	if len(password) > BcryptMaxPasswordBytes {

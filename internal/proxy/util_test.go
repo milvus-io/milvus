@@ -750,6 +750,25 @@ func TestValidatePassword(t *testing.T) {
 	assert.Error(t, res)
 }
 
+// proxy.maxPasswordLength can be raised for pbkdf2-sha512, but bcrypt still
+// truncates at 72 bytes: the limit that applies is the one the configured
+// algorithm can actually hash.
+func TestValidatePasswordFollowsTheHashAlgorithm(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(Params.ProxyCfg.MaxPasswordLength.Key, "256"))
+	defer params.Reset(Params.ProxyCfg.MaxPasswordLength.Key)
+	require.NoError(t, params.Save("common.security.passwordHashAlgorithm", crypto.PasswordHashBcrypt))
+	defer params.Reset("common.security.passwordHashAlgorithm")
+
+	passphrase := strings.Repeat("x", 100)
+	assert.Error(t, ValidatePassword(passphrase))
+
+	require.NoError(t, params.Save("common.security.passwordHashAlgorithm", crypto.PasswordHashPBKDF2SHA512))
+	assert.NoError(t, ValidatePassword(passphrase))
+	assert.NoError(t, ValidatePassword(strings.Repeat("x", 256)))
+	assert.Error(t, ValidatePassword(strings.Repeat("x", 257)))
+}
+
 func TestReplaceID2Name(t *testing.T) {
 	srcStr := "collection 432682805904801793 has not been loaded to memory or load failed"
 	dstStr := "collection default_collection has not been loaded to memory or load failed"

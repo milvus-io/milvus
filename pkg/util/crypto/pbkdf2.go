@@ -84,11 +84,8 @@ func pbkdf2SHA512(password, salt []byte, iterations, keyBytes int) []byte {
 
 // encryptPBKDF2SHA512 returns $pbkdf2-sha512$i=<iterations>$<base64 salt>$<base64 key>.
 func encryptPBKDF2SHA512(pwd string) (string, error) {
-	// The same limit bcrypt enforces, so that the algorithm in use does not
-	// decide which passwords are acceptable. proxy.maxPasswordLength and the
-	// management-plane verifier both assume it.
-	if len(pwd) > BcryptMaxPasswordBytes {
-		return "", merr.WrapErrParameterInvalidMsg("password length must not exceed %d bytes", BcryptMaxPasswordBytes)
+	if len(pwd) > PBKDF2MaxPasswordBytes {
+		return "", merr.WrapErrParameterInvalidMsg("password length must not exceed %d bytes", PBKDF2MaxPasswordBytes)
 	}
 	salt := make([]byte, pbkdf2SHA512SaltBytes)
 	if _, err := rand.Read(salt); err != nil {

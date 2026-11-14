@@ -1149,6 +1149,10 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 		params.Save("proxy.maxPasswordLength", "100")
+		assert.Equal(t, 100, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "256")
+		assert.Equal(t, 256, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "257")
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 		params.Save("proxy.maxPasswordLength", "-10")
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
