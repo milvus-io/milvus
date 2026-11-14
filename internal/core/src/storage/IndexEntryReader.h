@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <folly/futures/Future.h>
+#include <folly/coro/Task.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -53,6 +54,40 @@ class IndexEntryReader {
          ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
+
+    // Await admission and HIGH/LOW work; all issued work drains before return.
+    // The reader, input and referenced arguments must outlive each task.
+    static folly::coro::Task<std::unique_ptr<IndexEntryReader>>
+    OpenAsync(std::shared_ptr<milvus::InputStream> input,
+              int64_t file_size,
+              int64_t collection_id = 0,
+              ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
+              folly::CancellationToken token = {});
+
+    folly::coro::Task<Entry>
+    ReadEntryAsync(const std::string& name);
+
+    folly::coro::Task<void>
+    ReadEntryStreamAtAsync(
+        const std::string& name,
+        std::function<void(size_t, const uint8_t*, size_t)> write);
+
+    folly::coro::Task<void>
+    ReadEntryStreamAsync(const std::string& name,
+                         std::function<void(const uint8_t*, size_t)> consume,
+                         size_t slice_size = DefaultEntryStreamSliceSize());
+
+    folly::coro::Task<void>
+    ReadEntriesToFilesAsync(
+        const std::vector<std::pair<std::string, std::string>>& paths);
+    folly::coro::Task<void>
+    ReadEntryStreamToFileAsync(const std::string& name,
+                               const std::string& path,
+                               io::Priority priority = io::Priority::MIDDLE);
+    folly::coro::Task<void>
+    ReadEntriesStreamToFilesAsync(
+        const std::vector<std::pair<std::string, std::string>>& paths,
+        io::Priority priority = io::Priority::MIDDLE);
 
     // Sequential operations may reuse parsed directory/metadata with a fresh
     // cancellation token and priority. Never change these during an active read.
@@ -141,18 +176,18 @@ class IndexEntryReader {
     void
     CheckCancelled(const std::string& operation) const;
 
-    Entry
+    folly::coro::Task<Entry>
     ReadPlainEntry(const EntryMeta& meta);
-    Entry
+    folly::coro::Task<Entry>
     ReadEncryptedEntry(const EntryMeta& meta);
 
-    void
+    folly::coro::Task<void>
     ReadPlainEntryStream(const EntryMeta& meta,
                          const std::function<void(const uint8_t* data,
                                                   size_t len)>& slice_consumer,
                          size_t slice_size);
 
-    void
+    folly::coro::Task<void>
     ReadEncryptedEntryStream(
         const EntryMeta& meta,
         const std::function<void(const uint8_t* data, size_t len)>&
@@ -216,7 +251,7 @@ class IndexEntryReader {
 
     struct EntryStreamFailure;
 
-    void
+    folly::coro::Task<void>
     SubmitEntryStreamDownloadTasks(
         const EntryMeta& meta,
         EntryStreamDownloadState& state,
