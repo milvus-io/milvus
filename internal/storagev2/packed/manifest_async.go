@@ -101,7 +101,13 @@ func (io *ManifestIOContext) init() {
 func (io *ManifestIOContext) runWorker() {
 	defer io.workers.Done()
 	for task := range io.tasks {
+		// The native task performs blocking manifest I/O on this goroutine's
+		// OS thread. Bound worker execution by the process-wide manifest FFI
+		// budget, not just this context's capacity: many short-lived contexts
+		// (GC, copy-segment, backfill, index reads) share one process.
+		acquireManifestFFI(context.Background())
 		C.milvusRunManifestTask(task.run, task.data)
+		releaseManifestFFI()
 		io.taskMu.Lock()
 		io.pendingTasks--
 		io.taskMu.Unlock()
