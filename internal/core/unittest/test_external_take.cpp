@@ -48,6 +48,7 @@
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_reference.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "monitor/Monitor.h"
@@ -3646,31 +3647,30 @@ TEST(InjectExtfsAllowlist, CaseSensitiveAllowlist) {
     // The non-allowlisted upper-case variant must not land under its own
     // name or be silently case-folded into the lowercase slot.
     EXPECT_EQ(props.count("extfs.42.Access_Key_Id"), 0u);
-    // String fields are NOT Layer-0 zero-initialized (loon rejects empty
-    // enum-constrained values); the case-variant bypass attempt must leave
-    // extfs.42.access_key_id absent from the map entirely.
-    EXPECT_EQ(props.count("extfs.42.access_key_id"), 0u);
+    // Layer 0 empties static credentials; the case-variant bypass attempt
+    // must not fill the lowercase slot.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")), "");
 }
 
 TEST(InjectExtfsAllowlist, EmptySpecNoExtfsSection) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     // Spec without extfs makes Layer 2 a no-op. Layer 0 writes the bool-
-    // valued extfs fields as "false". String fields are NOT zero-initialized
-    // (loon would reject empty values on enum-constrained keys), so they
-    // stay absent from the map unless Layer 1 URI-derive or Layer 2 spec
-    // merge provides a value. The namespace is sparsely populated, never
-    // carrying fs.* baseline leakage.
+    // valued extfs fields as "false" and empties static credentials. Other
+    // string fields are NOT zero-initialized (loon would reject empty values
+    // on enum-constrained keys), so they stay absent from the map unless
+    // Layer 1 URI-derive or Layer 2 spec merge provides a value. The
+    // namespace never carries fs.* baseline leakage.
     std::string spec = R"({"format":"parquet"})";
 
     // Use a full Milvus-form URI so host=endpoint, path[0]=bucket.
     ::InjectExternalSpecProperties(
         props, coll_id, "s3://s3.amazonaws.com/my-bucket/key", spec);
 
-    // Credential fields absent — spec provides none and Layer 0 does not
-    // zero-init strings.
-    EXPECT_EQ(props.count("extfs.42.access_key_id"), 0u);
-    EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
+    // Static credentials are empty rather than absent: an absent key would
+    // take milvus-storage's "minioadmin" default.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")), "");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_value")), "");
     EXPECT_EQ(props.count("extfs.42.region"), 0u);
     // use_iam stays "false" (the use_iam leak regression guard on C++ side).
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
@@ -3936,7 +3936,7 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
               "https://broker.example.com/v1/credentials/assume-role");
     EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
-    EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_value")), "");
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
 }
 
@@ -4789,4 +4789,556 @@ TEST(InjectExtfsAllowlist, BrokerEndpointNormalization) {
                             "https://broker/a:b"}) {
         EXPECT_FALSE(NormalizeBrokerEndpoint(raw).ok()) << raw;
     }
+}
+
+TEST(InjectExtfsAllowlist, GcpBrokerTargetAndEndpoint) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string target = "reader@project.iam.gserviceaccount.com";
+    const nlohmann::json valid = {{"format", "parquet"},
+                                  {"extfs",
+                                   {{"cloud_provider", "gcp"},
+                                    {"gcp_target_service_account", target},
+                                    {"credential_endpoint", endpoint}}}};
+    milvus_storage::api::Properties props;
+    InjectExternalSpecProperties(props, 42, "gs://bucket/path", valid.dump());
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "https://storage.googleapis.com");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
+    auto config = milvus_storage::FilesystemCache::resolve_config(
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        "gs://storage.googleapis.com/bucket/path");
+    ASSERT_TRUE(config.ok()) << config.status();
+    EXPECT_EQ(config->gcp_target_service_account, target);
+    EXPECT_EQ(config->credential_endpoint, endpoint);
+    EXPECT_EQ(config->access_key_id, "");
+    EXPECT_EQ(config->access_key_value, "");
+    EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+    auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
+    ASSERT_TRUE(provider.ok()) << provider.status();
+    EXPECT_TRUE((*provider)->IssuesBearerToken());
+    EXPECT_EQ((*provider)->Identity().find("broker:"), 0u);
+
+    auto reject = [&](const nlohmann::json& spec) {
+        milvus_storage::api::Properties denied;
+        EXPECT_ANY_THROW(InjectExternalSpecProperties(
+            denied, 42, "gs://bucket/path", spec.dump()));
+    };
+    auto spec = valid;
+    spec["extfs"].erase("gcp_target_service_account");
+    reject(spec);
+    spec = valid;
+    spec["extfs"]["use_iam"] = "true";
+    reject(spec);
+    spec = valid;
+    spec["extfs"]["access_key_id"] = "key";
+    reject(spec);
+    spec = valid;
+    spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+    reject(spec);
+    for (const auto* key : {"role_arn",
+                            "external_id",
+                            "session_name",
+                            "access_key_id",
+                            "access_key_value",
+                            "azure_client_id",
+                            "azure_tenant_id"}) {
+        spec = valid;
+        spec["extfs"][key] = "inactive";
+        reject(spec);
+    }
+    for (const auto* lifetime : {"900", "3600"}) {
+        spec = valid;
+        spec["extfs"]["load_frequency"] = lifetime;
+        milvus_storage::api::Properties accepted;
+        EXPECT_NO_THROW(InjectExternalSpecProperties(
+            accepted, 42, "gs://bucket/path", spec.dump()));
+    }
+    for (const auto* lifetime : {"899", "3601"}) {
+        spec = valid;
+        spec["extfs"]["load_frequency"] = lifetime;
+        reject(spec);
+    }
+    for (const auto& address : {"http://storage.googleapis.com",
+                                "https://storage.googleapis.com.evil.example",
+                                "https://googleapis.com"}) {
+        spec = valid;
+        spec["extfs"]["endpoint_url"] = address;
+        reject(spec);
+    }
+    spec = valid;
+    spec["extfs"]["use_ssl"] = "false";
+    reject(spec);
+}
+
+// Direct target-SA impersonation keeps using the node identity; target alone
+// selects impersonation, and use_iam=true is accepted as an optional spelling.
+TEST(InjectExtfsAllowlist, GcpTargetServiceAccountWithOptionalIam) {
+    const std::string target = "reader@project.iam.gserviceaccount.com";
+    for (bool use_iam : {false, true}) {
+        nlohmann::json spec = {{"format", "parquet"},
+                               {"extfs",
+                                {{"cloud_provider", "gcp"},
+                                 {"gcp_target_service_account", target}}}};
+        if (use_iam) {
+            spec["extfs"]["use_iam"] = "true";
+        }
+        milvus_storage::api::Properties props;
+        InjectExternalSpecProperties(
+            props, 42, "gs://bucket/path", spec.dump());
+        EXPECT_EQ(std::get<std::string>(
+                      props.at("extfs.42.gcp_target_service_account")),
+                  target);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")),
+                  use_iam ? "true" : "false");
+        EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+
+        // The resolved filesystem must not inherit the library's default
+        // HMAC keys, or GCP rejects them next to the target service account
+        // while Talon is disabled.
+        auto config = milvus_storage::FilesystemCache::resolve_config(
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            "gs://storage.googleapis.com/bucket/path");
+        ASSERT_TRUE(config.ok()) << config.status();
+        EXPECT_EQ(config->access_key_id, "");
+        EXPECT_EQ(config->access_key_value, "");
+        EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+        auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
+        ASSERT_TRUE(provider.ok()) << provider.status();
+        EXPECT_TRUE((*provider)->IssuesBearerToken());
+        EXPECT_EQ((*provider)->Identity(), "impersonate:" + target);
+    }
+}
+
+TEST(InjectExtfsAllowlist, GcpPlainIamKeepsTrustedEndpointPolicy) {
+    // Injection must preserve plain IAM's existing endpoint policy. Actual
+    // Bearer delivery still depends on the operator-trusted registry entry.
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    for (const auto* endpoint :
+         {"https://gcs.internal:9443", "http://gcs.internal:9000"}) {
+        nlohmann::json spec = {{"format", "parquet"},
+                               {"extfs",
+                                {{"cloud_provider", "gcp"},
+                                 {"use_iam", "true"},
+                                 {"endpoint_url", endpoint}}}};
+        milvus_storage::api::Properties props;
+        InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  endpoint);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "true");
+        EXPECT_EQ(
+            std::get<std::string>(props.at("extfs.42.use_ssl")),
+            std::string(endpoint).find("https://") == 0 ? "true" : "false");
+
+        // The same endpoint is forbidden for a target, with or without a Broker.
+        spec["extfs"]["gcp_target_service_account"] =
+            "reader@project.iam.gserviceaccount.com";
+        for (bool broker : {false, true}) {
+            if (broker) {
+                spec["extfs"].erase("use_iam");
+                spec["extfs"]["credential_endpoint"] =
+                    "https://broker.example.com/v1/credentials/assume-role";
+            }
+            milvus_storage::api::Properties denied;
+            EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                denied, 42, "s3://bucket/path", spec.dump()));
+        }
+    }
+}
+
+// With a Broker endpoint, use_iam selects the Broker's own identity. Provider
+// selection here requires the storage version that implements Broker IAM.
+TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const nlohmann::json valid = {{"format", "parquet"},
+                                  {"extfs",
+                                   {{"cloud_provider", "gcp"},
+                                    {"use_iam", "true"},
+                                    {"credential_endpoint", endpoint}}}};
+    milvus_storage::api::Properties props;
+    InjectExternalSpecProperties(props, 42, "gs://bucket/path", valid.dump());
+    auto config = milvus_storage::FilesystemCache::resolve_config(
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        "gs://storage.googleapis.com/bucket/path");
+    ASSERT_TRUE(config.ok()) << config.status();
+    EXPECT_TRUE(config->use_iam);
+    EXPECT_TRUE(config->gcp_target_service_account.empty());
+    EXPECT_EQ(config->credential_endpoint, endpoint);
+    EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+    auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
+    ASSERT_TRUE(provider.ok()) << provider.status();
+    EXPECT_TRUE((*provider)->IssuesBearerToken());
+    EXPECT_EQ((*provider)->Identity(), "broker-iam:" + endpoint);
+
+    // Without a Broker endpoint the same IAM flag still selects node IAM.
+    auto node_config = *config;
+    node_config.credential_endpoint.clear();
+    auto node_provider =
+        milvus_storage::BuildGcpProviderFromConfig(node_config);
+    ASSERT_TRUE(node_provider.ok()) << node_provider.status();
+    EXPECT_EQ((*node_provider)->Identity(), "iam");
+
+    auto reject = [&](const nlohmann::json& spec) {
+        milvus_storage::api::Properties denied;
+        EXPECT_ANY_THROW(InjectExternalSpecProperties(
+            denied, 42, "gs://bucket/path", spec.dump()));
+    };
+    auto spec = valid;
+    spec["extfs"]["use_iam"] = "false";
+    reject(spec);
+    for (const auto* key : {"gcp_target_service_account",
+                            "role_arn",
+                            "external_id",
+                            "session_name",
+                            "access_key_id",
+                            "access_key_value",
+                            "azure_client_id",
+                            "azure_tenant_id"}) {
+        spec = valid;
+        spec["extfs"][key] = "inactive";
+        reject(spec);
+    }
+    spec = valid;
+    spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+    reject(spec);
+    for (const auto* lifetime : {"900", "3600"}) {
+        spec = valid;
+        spec["extfs"]["load_frequency"] = lifetime;
+        milvus_storage::api::Properties accepted;
+        EXPECT_NO_THROW(InjectExternalSpecProperties(
+            accepted, 42, "gs://bucket/path", spec.dump()));
+    }
+    for (const auto* lifetime : {"899", "3601"}) {
+        spec = valid;
+        spec["extfs"]["load_frequency"] = lifetime;
+        reject(spec);
+    }
+    for (const auto* address :
+         {"http://storage.googleapis.com", "https://custom.example"}) {
+        spec = valid;
+        spec["extfs"]["endpoint_url"] = address;
+        reject(spec);
+    }
+    spec = valid;
+    spec["extfs"]["use_ssl"] = "false";
+    reject(spec);
+}
+
+TEST(InjectExtfsAllowlist, AzureBrokerIamAndTargetModes) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    for (const auto* use_iam : {"true", "false", ""}) {
+        SCOPED_TRACE(use_iam);
+        const bool iam = std::string(use_iam) == "true";
+        nlohmann::json valid = {{"format", "parquet"},
+                                {"extfs",
+                                 {{"cloud_provider", "azure"},
+                                  {"region", "westus3"},
+                                  {"access_key_id", "account"},
+                                  {"credential_endpoint", endpoint}}}};
+        if (use_iam[0] != '\0') {
+            valid["extfs"]["use_iam"] = use_iam;
+        }
+        if (!iam) {
+            valid["extfs"]["azure_client_id"] = "client";
+            valid["extfs"]["azure_tenant_id"] = "tenant";
+        }
+        milvus_storage::api::Properties props;
+        InjectExternalSpecProperties(
+            props, 42, "azure://core.windows.net/container/path", valid.dump());
+        auto config = milvus_storage::FilesystemCache::resolve_config(
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            "azure://core.windows.net/container/path");
+        ASSERT_TRUE(config.ok()) << config.status();
+        EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+        EXPECT_EQ(config->use_iam, iam);
+        EXPECT_EQ(config->credential_endpoint, endpoint);
+        EXPECT_EQ(config->access_key_id, "account");
+        EXPECT_EQ(config->region, "westus3");
+        EXPECT_EQ(config->bucket_name, "container");
+        EXPECT_EQ(config->azure_client_id, iam ? "" : "client");
+        EXPECT_EQ(config->azure_tenant_id, iam ? "" : "tenant");
+        EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+
+        auto inject = [&](const nlohmann::json& spec) {
+            milvus_storage::api::Properties result;
+            InjectExternalSpecProperties(
+                result,
+                42,
+                "azure://core.windows.net/container/path",
+                spec.dump());
+            return result;
+        };
+        for (const auto* key : {"access_key_id", "region"}) {
+            auto spec = valid;
+            spec["extfs"].erase(key);
+            if (iam && std::string(key) == "region") {
+                EXPECT_NO_THROW(inject(spec));
+            } else {
+                EXPECT_ANY_THROW(inject(spec));
+            }
+        }
+        for (const auto* key :
+             {"access_key_value", "role_arn", "gcp_target_service_account"}) {
+            auto spec = valid;
+            spec["extfs"][key] = "inactive";
+            EXPECT_ANY_THROW(inject(spec));
+        }
+        // Target mode predates Broker IAM: persisted specs may carry the S3
+        // role fields, which Azure never reads.
+        for (const auto* key : {"external_id", "session_name"}) {
+            auto spec = valid;
+            spec["extfs"][key] = "unused";
+            if (iam) {
+                EXPECT_ANY_THROW(inject(spec));
+            } else {
+                EXPECT_NO_THROW(inject(spec));
+            }
+        }
+        if (iam) {
+            // Without a region the host of a Milvus-form URI is the storage
+            // authority, including at a container root. The storage URI
+            // parser needs the separator after the container.
+            auto root = valid;
+            root["extfs"].erase("region");
+            milvus_storage::api::Properties root_props;
+            InjectExternalSpecProperties(root_props,
+                                         42,
+                                         "azure://core.windows.net/container/",
+                                         root.dump());
+            auto root_config = milvus_storage::FilesystemCache::resolve_config(
+                std::make_shared<const milvus_storage::api::Properties>(
+                    root_props),
+                "azure://core.windows.net/container/");
+            ASSERT_TRUE(root_config.ok()) << root_config.status();
+            EXPECT_EQ(root_config->address, "core.windows.net");
+            EXPECT_EQ(root_config->bucket_name, "container");
+            EXPECT_TRUE(root_config->region.empty());
+        }
+        auto spec = valid;
+        spec["extfs"]["anonymous"] = "true";
+        EXPECT_ANY_THROW(inject(spec));
+        for (const auto* key : {"azure_client_id", "azure_tenant_id"}) {
+            spec = valid;
+            if (iam)
+                spec["extfs"][key] = "inactive";
+            else
+                spec["extfs"].erase(key);
+            EXPECT_ANY_THROW(inject(spec));
+        }
+        spec = valid;
+        spec["extfs"]["credential_endpoint"] = endpoint + "/unlisted";
+        EXPECT_ANY_THROW(inject(spec));
+        spec = valid;
+        spec["extfs"]["azure_credential_endpoint"] = endpoint + "/conflict";
+        EXPECT_ANY_THROW(inject(spec));
+        spec = valid;
+        spec["extfs"]["azure_credential_endpoint"] =
+            "HTTPS://BROKER.example.com:443/v1/credentials/assume-role";
+        auto aliased = inject(spec);
+        EXPECT_EQ(aliased.count("extfs.42.azure_credential_endpoint"), 0u);
+        spec["extfs"].erase("credential_endpoint");
+        EXPECT_NO_THROW(inject(spec));
+        if (iam) {
+            for (const auto* lifetime : {"900", "3600"}) {
+                spec = valid;
+                spec["extfs"]["load_frequency"] = lifetime;
+                EXPECT_NO_THROW(inject(spec));
+            }
+            for (const auto* lifetime : {"899", "3601"}) {
+                spec = valid;
+                spec["extfs"]["load_frequency"] = lifetime;
+                EXPECT_ANY_THROW(inject(spec));
+            }
+        }
+    }
+}
+
+// A target role goes through the Broker on Aliyun and Tencent as it does on
+// AWS: the role reaches milvus-storage, which names the cloud in the request.
+TEST(InjectExtfsAllowlist, S3BrokerTargetRoleAcrossClouds) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::vector<std::pair<std::string, std::string>> roles = {
+        {"aws", "arn:aws:iam::123456789012:role/reader"},
+        {"aliyun", "acs:ram::1234567890123456:role/reader"},
+        {"tencent", "qcs::cam::uin/100000000001:roleName/reader"}};
+    for (const auto& [cloud, role] : roles) {
+        SCOPED_TRACE(cloud);
+        const nlohmann::json valid = {{"format", "parquet"},
+                                      {"extfs",
+                                       {{"cloud_provider", cloud},
+                                        {"region", "us-west-2"},
+                                        {"role_arn", role},
+                                        {"external_id", "external-id"},
+                                        {"credential_endpoint", endpoint}}}};
+        for (const auto* use_iam : {"false", ""}) {
+            auto spec = valid;
+            if (use_iam[0] != '\0') {
+                spec["extfs"]["use_iam"] = use_iam;
+            }
+            milvus_storage::api::Properties props;
+            props["milvus.talon.external_mode"] = uint32_t{2};
+            InjectExternalSpecProperties(
+                props, 42, "s3://bucket/path", spec.dump());
+            auto address = std::get<std::string>(props.at("extfs.42.address"));
+            auto scheme_end = address.find("://");
+            if (scheme_end != std::string::npos) {
+                address = address.substr(scheme_end + 3);
+            }
+            auto config = milvus_storage::FilesystemCache::resolve_config(
+                std::make_shared<const milvus_storage::api::Properties>(props),
+                "s3://" + address + "/bucket/path");
+            ASSERT_TRUE(config.ok()) << config.status();
+            EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+            EXPECT_FALSE(config->use_iam);
+            EXPECT_EQ(config->cloud_provider, cloud);
+            EXPECT_EQ(config->role_arn, role);
+            EXPECT_EQ(config->external_id, "external-id");
+            EXPECT_EQ(config->credential_endpoint, endpoint);
+            EXPECT_EQ(config->access_key_id, "");
+            EXPECT_EQ(config->access_key_value, "");
+            EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+        }
+        // A target role and the Broker's own identity are different modes.
+        auto spec = valid;
+        spec["extfs"]["use_iam"] = "true";
+        milvus_storage::api::Properties denied;
+        EXPECT_ANY_THROW(InjectExternalSpecProperties(
+            denied, 42, "s3://bucket/path", spec.dump()));
+    }
+}
+
+// A Broker or Bearer lifetime is plain decimal digits. milvus-storage parses
+// it with std::from_chars, which rejects a sign, so accepted values are
+// carried through to the storage configuration.
+TEST(InjectExtfsAllowlist, CredentialLifetimeIsPlainDecimal) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    struct Mode {
+        std::string name;
+        std::string source;
+        std::string resolved;
+        nlohmann::json extfs;
+    };
+    const std::vector<Mode> modes = {
+        {"gcp broker target",
+         "gs://bucket/path",
+         "gs://storage.googleapis.com/bucket/path",
+         {{"cloud_provider", "gcp"},
+          {"gcp_target_service_account",
+           "reader@project.iam.gserviceaccount.com"},
+          {"credential_endpoint", endpoint}}},
+        {"gcp broker iam",
+         "gs://bucket/path",
+         "gs://storage.googleapis.com/bucket/path",
+         {{"cloud_provider", "gcp"},
+          {"use_iam", "true"},
+          {"credential_endpoint", endpoint}}},
+        {"gcp direct target",
+         "gs://bucket/path",
+         "gs://storage.googleapis.com/bucket/path",
+         {{"cloud_provider", "gcp"},
+          {"gcp_target_service_account",
+           "reader@project.iam.gserviceaccount.com"}}},
+        {"azure broker iam",
+         "azure://core.windows.net/container/path",
+         "azure://core.windows.net/container/path",
+         {{"cloud_provider", "azure"},
+          {"use_iam", "true"},
+          {"access_key_id", "account"},
+          {"credential_endpoint", endpoint}}}};
+    for (const auto& mode : modes) {
+        SCOPED_TRACE(mode.name);
+        const std::vector<std::pair<std::string, int32_t>> accepted = {
+            {"900", 900}, {"0900", 900}, {"3600", 3600}};
+        for (const auto& [lifetime, seconds] : accepted) {
+            SCOPED_TRACE(lifetime);
+            nlohmann::json spec = {{"format", "parquet"},
+                                   {"extfs", mode.extfs}};
+            spec["extfs"]["load_frequency"] = lifetime;
+            milvus_storage::api::Properties props;
+            InjectExternalSpecProperties(props, 42, mode.source, spec.dump());
+            auto config = milvus_storage::FilesystemCache::resolve_config(
+                std::make_shared<const milvus_storage::api::Properties>(props),
+                mode.resolved);
+            ASSERT_TRUE(config.ok()) << config.status();
+            EXPECT_EQ(config->load_frequency, seconds);
+        }
+        for (const auto* lifetime : {"+900",
+                                     "-900",
+                                     " 900",
+                                     "900 ",
+                                     "9e2",
+                                     "0x384",
+                                     "900.0",
+                                     "99999999999999999999"}) {
+            SCOPED_TRACE(lifetime);
+            nlohmann::json spec = {{"format", "parquet"},
+                                   {"extfs", mode.extfs}};
+            spec["extfs"]["load_frequency"] = lifetime;
+            milvus_storage::api::Properties denied;
+            EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                denied, 42, mode.source, spec.dump()));
+        }
+    }
+}
+
+// Go admission stores extfs values as strings, with null for an unset field.
+// Any other value is corrupted or bypassed metadata: skipping it could select
+// another credential mode, so injection fails.
+TEST(InjectExtfsAllowlist, NonStringExtfsValueIsRejected) {
+    const std::vector<std::string> rejected = {
+        R"({"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true","credential_endpoint":1}})",
+        R"({"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":true}})",
+        R"({"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":["sk"]}})",
+        R"({"format":"parquet","extfs":{"cloud_provider":"aws","region":{"name":"us-west-2"},"use_iam":"true"}})"};
+    for (const auto& spec : rejected) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        EXPECT_ANY_THROW(
+            InjectExternalSpecProperties(props, 42, "s3://bucket/path", spec));
+    }
+
+    milvus_storage::api::Properties props;
+    InjectExternalSpecProperties(
+        props,
+        42,
+        "s3://bucket/path",
+        R"({"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true","role_arn":null,"credential_endpoint":null,"unknown_key":1}})");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "true");
+    EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+    EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+    EXPECT_EQ(props.count("extfs.42.unknown_key"), 0u);
 }

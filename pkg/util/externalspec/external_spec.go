@@ -383,7 +383,8 @@ func RedactCollectionSchemaForLog(schema *schemapb.CollectionSchema) *schemapb.C
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one
 // credential mode (AK/SK, role_arn, use_iam=true, gcp_target_service_account,
 // Azure credential broker, anonymous=true), and region for AWS-family
-// schemes. role_arn subsumes use_iam (do not double-count). No inheritance
+// schemes. role_arn and gcp_target_service_account subsume use_iam
+// (do not double-count). No inheritance
 // from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
 	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
@@ -430,7 +431,28 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	if err != nil {
 		return err
 	}
-	hasS3Broker := brokerEndpoint != "" && cp != CloudProviderAzure
+	hasGCPBroker := brokerEndpoint != "" && cp == CloudProviderGCP
+	if hasGCPBroker {
+		brokerIAM := extfs[ExtfsKeyUseIAM] == "true"
+		if brokerIAM && extfs[ExtfsKeyGCPTargetServiceAccount] != "" {
+			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account conflicts with GCP credential broker IAM")
+		}
+		if !brokerIAM && extfs[ExtfsKeyGCPTargetServiceAccount] == "" {
+			return merr.WrapErrParameterMissingMsg("extfs.gcp_target_service_account is required for GCP credential broker without use_iam=true")
+		}
+		// Match native injection: the endpoint selects the Broker, and use_iam
+		// selects its own identity instead of a target service account.
+		for _, key := range []string{
+			ExtfsKeyRoleARN, ExtfsKeyExternalID, ExtfsKeySessionName,
+			ExtfsKeyAccessKeyID, ExtfsKeyAccessKeyValue,
+			ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID,
+		} {
+			if extfs[key] != "" {
+				return merr.WrapErrParameterInvalidMsg("extfs.%s conflicts with GCP credential broker", key)
+			}
+		}
+	}
+	hasS3Broker := brokerEndpoint != "" && cp != CloudProviderAzure && cp != CloudProviderGCP
 	if hasS3Broker {
 		if rawCP == "" {
 			return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required for credential broker")
@@ -448,19 +470,47 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 				"Azure credential broker mode requires scheme=%q and extfs.cloud_provider=%q, got scheme=%q cloud_provider=%q",
 				SchemeAzure, CloudProviderAzure, scheme, cp)
 		}
-		for _, required := range []struct {
+		brokerIAM := extfs[ExtfsKeyUseIAM] == "true"
+		requiredFields := []struct {
 			key   string
 			value string
 		}{
-			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
-			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
 			{ExtfsKeyCredentialEndpoint, brokerEndpoint},
 			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
-			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
-		} {
+		}
+		if !brokerIAM {
+			for _, key := range []string{ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID, ExtfsKeyRegion} {
+				requiredFields = append(requiredFields, struct{ key, value string }{key, extfs[key]})
+			}
+		}
+		for _, required := range requiredFields {
 			if required.value == "" {
 				return merr.WrapErrParameterMissingMsg(
 					"extfs.%s is required for Azure credential broker mode", required.key)
+			}
+		}
+		// Target mode predates Broker IAM, and refresh revalidates persisted
+		// specs: it keeps accepting external_id and session_name, which Azure
+		// never reads. Broker IAM is new and rejects every credential field it
+		// does not use.
+		forbidden := []string{ExtfsKeyAccessKeyValue, ExtfsKeyRoleARN, ExtfsKeyGCPTargetServiceAccount}
+		if brokerIAM {
+			forbidden = append(forbidden, ExtfsKeyExternalID, ExtfsKeySessionName, ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID)
+		}
+		for _, key := range forbidden {
+			if extfs[key] != "" {
+				return merr.WrapErrParameterInvalidMsg("extfs.%s conflicts with Azure credential broker mode", key)
+			}
+		}
+		if extfs[ExtfsKeyAnonymous] == "true" {
+			return merr.WrapErrParameterInvalidMsg("extfs.anonymous=true conflicts with Azure credential broker mode")
+		}
+		if raw := extfs[ExtfsKeyLoadFrequency]; brokerIAM && raw != "" && !isCredentialLifetime(raw) {
+			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for Azure credential broker IAM")
+		}
+		if brokerIAM {
+			if err := validateAzureBrokerIAMSource(u, externalSource, extfs); err != nil {
+				return err
 			}
 		}
 	}
@@ -476,8 +526,8 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	hasAKOnly := !hasAzureBroker && !hasAzureIAM &&
 		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
-	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
 	hasGCPImpersonation := extfs[ExtfsKeyGCPTargetServiceAccount] != ""
+	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN && !hasGCPImpersonation && !hasAzureBroker
 	hasAnonymous := extfs[ExtfsKeyAnonymous] == "true"
 
 	if hasAKOnly {
@@ -498,12 +548,22 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 
 	if hasGCPImpersonation {
-		if scheme != "" && scheme != SchemeGS && scheme != SchemeGCS && cp != CloudProviderGCP {
-			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account is only valid for GCP (scheme=gs/gcs or cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
+		if cp != CloudProviderGCP {
+			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account requires cloud_provider=gcp")
 		}
 		sa := extfs[ExtfsKeyGCPTargetServiceAccount]
 		if !strings.Contains(sa, "@") || !strings.HasSuffix(sa, ".gserviceaccount.com") {
 			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account must be a GCP service account email ending in .gserviceaccount.com, got %q", sa)
+		}
+	}
+	// Both Broker modes and direct target impersonation carry Bearer tokens.
+	// Preserve endpoint admission for existing plain node IAM configurations.
+	if hasGCPImpersonation || hasGCPBroker {
+		if err := validateGCPTokenLifetime(extfs); err != nil {
+			return err
+		}
+		if err := validateGCPBearerEndpoint(u, scheme, extfs, hasEndpointURL); err != nil {
+			return err
 		}
 	}
 
@@ -545,13 +605,168 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			pathSegs = 0
 		}
 		if pathSegs <= 1 {
+			// An Azure container name cannot contain a dot, so a dotted
+			// azure:// host is the storage address, and
+			// azure://core.windows.net/<container>/ is a Milvus-form URI at a
+			// container root: the host is the endpoint and needs no
+			// derivation. The trailing slash is required because the storage
+			// URI parser needs the separator after the container. Native
+			// injection splits the raw source, so a percent-encoded "%2F" is
+			// not that separator.
+			azureContainerRoot := cp == CloudProviderAzure && pathSegs == 1 &&
+				strings.HasSuffix(u.EscapedPath(), "/") && strings.Contains(u.Hostname(), ".")
 			// AWS-form: endpoint must be derivable from the user-supplied
 			// cloud_provider + region. cp=minio has no canonical endpoint
 			// and must use Milvus-form URI to embed the host explicitly.
-			if DeriveEndpoint(cp, extfs[ExtfsKeyRegion]) == "" {
-				return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
+			if !azureContainerRoot && DeriveEndpoint(cp, extfs[ExtfsKeyRegion]) == "" {
+				return errUnresolvableEndpoint(externalSource, cp)
 			}
 		}
+	}
+	return nil
+}
+
+// errUnresolvableEndpoint names the source without a query or fragment: a
+// caller may have put a signed token there, and the error is logged.
+func errUnresolvableEndpoint(externalSource, cp string) error {
+	return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", RedactExternalSource(externalSource), cp)
+}
+
+// azureStorageAuthorities are the only addresses milvus-storage sends an
+// Azure identity credential or Broker SAS to.
+var azureStorageAuthorities = map[string]bool{
+	"core.windows.net":       true,
+	"core.chinacloudapi.cn":  true,
+	"core.usgovcloudapi.net": true,
+	"core.cloudapi.de":       true,
+}
+
+// azureContainerNamePattern is the Azure container naming rule the
+// credential Broker enforces: 3-63 lowercase letters, digits and single
+// hyphens, starting and ending with a letter or digit.
+var azureContainerNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func isValidAzureContainerName(name string) bool {
+	return azureContainerNamePattern.MatchString(name) && !strings.Contains(name, "--")
+}
+
+// validateAzureBrokerIAMSource admits the two source shapes that
+// milvus-storage reads with a Broker SAS, over HTTPS only:
+//
+//   - azure://<authority>/<container>/[<path>]: an Azure container name
+//     cannot contain a dot, so a dotted host is the address. It must be one of
+//     the Azure Storage authorities exactly as milvus-storage compares it, and
+//     the storage URI parser needs the separator after the container.
+//   - azure://<container>/[<path>]: the region supplies the authority.
+//
+// The Broker rejects invalid container names, so both shapes check them here.
+// Native injection splits the raw source, so the container is read from the
+// escaped path: a percent-encoded separator or letter is not the name the
+// reader will use. Broker IAM is new, so rejecting other shapes fails no
+// persisted spec.
+func validateAzureBrokerIAMSource(source *url.URL, externalSource string, extfs map[string]string) error {
+	if extfs[ExtfsKeyUseSSL] == "false" {
+		return merr.WrapErrParameterInvalidMsg("extfs.use_ssl=false conflicts with Azure credential broker IAM: the SAS is only sent over HTTPS")
+	}
+	if source == nil {
+		return nil
+	}
+	if strings.Contains(source.Host, ".") {
+		if !azureStorageAuthorities[source.Host] {
+			return merr.WrapErrParameterInvalidMsg(
+				"Azure credential broker IAM requires the source host to be a lowercase Azure Storage authority without a port (core.windows.net, core.chinacloudapi.cn, core.usgovcloudapi.net or core.cloudapi.de), got %q: use azure://<authority>/<container>/<path>, or azure://<container>/<path> with extfs.region",
+				source.Host)
+		}
+		container, _, hasSeparator := strings.Cut(strings.TrimPrefix(source.EscapedPath(), "/"), "/")
+		if !hasSeparator || !isValidAzureContainerName(container) {
+			return merr.WrapErrParameterInvalidMsg(
+				"Azure credential broker IAM requires azure://%s/<container>/[<path>] with a valid container name followed by \"/\", got container %q",
+				source.Host, container)
+		}
+		return nil
+	}
+	if !isValidAzureContainerName(source.Host) {
+		return merr.WrapErrParameterInvalidMsg(
+			"Azure credential broker IAM requires the source host to be an Azure Storage authority or a valid container name, got %q",
+			source.Host)
+	}
+	if extfs[ExtfsKeyRegion] == "" {
+		return errUnresolvableEndpoint(externalSource, CloudProviderAzure)
+	}
+	return nil
+}
+
+// Broker and GCP target credentials accept lifetimes in [900, 3600], matching
+// the milvus-storage provider contract.
+const (
+	minCredentialLifetimeSeconds = 900
+	maxCredentialLifetimeSeconds = 3600
+)
+
+// isCredentialLifetime reports whether raw is a plain decimal number of
+// seconds in [900, 3600]. milvus-storage parses the value with
+// std::from_chars, which rejects a sign, so "+900" must fail admission instead
+// of failing every read.
+func isCredentialLifetime(raw string) bool {
+	if strings.TrimLeft(raw, "0123456789") != "" {
+		return false
+	}
+	seconds, err := strconv.ParseInt(raw, 10, 32)
+	return err == nil && seconds >= minCredentialLifetimeSeconds && seconds <= maxCredentialLifetimeSeconds
+}
+
+func validateGCPTokenLifetime(extfs map[string]string) error {
+	raw := extfs[ExtfsKeyLoadFrequency]
+	if raw == "" || isCredentialLifetime(raw) {
+		return nil
+	}
+	return merr.WrapErrParameterInvalidMsg(
+		"extfs.%s must be an integer in [%d, %d] for a GCP target or credential broker, got %q", ExtfsKeyLoadFrequency,
+		minCredentialLifetimeSeconds, maxCredentialLifetimeSeconds, raw)
+}
+
+// effectiveUseSSL follows the property layering in InjectExternalSpecProperties
+// (internal/core/src/storage/loon_ffi/util.cpp): a non-empty extfs.use_ssl
+// wins; a missing or empty one leaves the scheme default in place, which is
+// plain HTTP only for minio:// (C++ DeriveUseSSLFromScheme). endpoint_url
+// overrides both and is handled by the caller. Keep the two in lockstep.
+func effectiveUseSSL(scheme string, extfs map[string]string) bool {
+	if v := extfs[ExtfsKeyUseSSL]; v != "" {
+		return v == "true"
+	}
+	return strings.ToLower(scheme) != SchemeMinIO
+}
+
+// validateGCPBearerEndpoint requires the endpoint that receives an OAuth2
+// bearer token to be a Google API host over HTTPS. The endpoint follows the
+// resolution in InjectExternalSpecProperties
+// (internal/core/src/storage/loon_ffi/util.cpp): extfs.endpoint_url when set,
+// else the URI host when it is a cloud endpoint host (Milvus-form), else the
+// endpoint derived for cloud_provider=gcp (AWS-form); use_ssl likewise comes
+// from endpoint_url, else extfs.use_ssl, else the source scheme default.
+func validateGCPBearerEndpoint(source *url.URL, sourceScheme string, extfs map[string]string, hasEndpointURL bool) error {
+	scheme := "http"
+	if effectiveUseSSL(sourceScheme, extfs) {
+		scheme = "https"
+	}
+	host := strings.TrimPrefix(DeriveEndpoint(CloudProviderGCP, ""), "https://")
+	if hasEndpointURL {
+		endpoint, err := url.Parse(extfs[ExtfsKeyEndpointURL])
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("extfs.endpoint_url is not a valid URL")
+		}
+		scheme, host = strings.ToLower(endpoint.Scheme), endpoint.Hostname()
+	} else if source != nil && IsCloudEndpointHost(source.Host) {
+		host = source.Hostname()
+	}
+	if scheme != "https" {
+		return merr.WrapErrParameterInvalidMsg(
+			"GCP bearer credentials require HTTPS so the OAuth2 token is not sent in clear text: remove extfs.use_ssl=false or use an https extfs.endpoint_url")
+	}
+	if !strings.HasSuffix(strings.ToLower(host), ".googleapis.com") {
+		return merr.WrapErrParameterInvalidMsg(
+			"GCP bearer credentials are only supported for Google Cloud Storage endpoints (*.googleapis.com), got host %q",
+			host)
 	}
 	return nil
 }
@@ -731,7 +946,7 @@ func redactExtfsSecrets(spec map[string]json.RawMessage) error {
 // validateS3Broker validates the effective mode before ordinary credential counting.
 func validateS3Broker(cp string, extfs map[string]string) error {
 	if cp != CloudProviderAWS && cp != CloudProviderAliyun && cp != CloudProviderTencent {
-		return merr.WrapErrParameterInvalidMsg("credential broker requires cloud_provider=aws, aliyun, tencent or azure")
+		return merr.WrapErrParameterInvalidMsg("credential broker requires cloud_provider=aws, aliyun, tencent, gcp or azure")
 	}
 	if extfs[ExtfsKeyRegion] == "" {
 		return merr.WrapErrParameterMissingMsg("extfs.region is required for credential broker")
@@ -751,11 +966,8 @@ func validateS3Broker(cp string, extfs map[string]string) error {
 	if extfs[ExtfsKeyAnonymous] == "true" {
 		return merr.WrapErrParameterInvalidMsg("anonymous conflicts with credential broker mode")
 	}
-	if value := extfs[ExtfsKeyLoadFrequency]; value != "" {
-		duration, err := strconv.ParseInt(value, 10, 32)
-		if err != nil || duration < 900 || duration > 3600 {
-			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for credential broker")
-		}
+	if value := extfs[ExtfsKeyLoadFrequency]; value != "" && !isCredentialLifetime(value) {
+		return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for credential broker")
 	}
 	return nil
 }
