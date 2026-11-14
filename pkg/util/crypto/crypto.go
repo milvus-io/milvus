@@ -7,6 +7,15 @@ import (
 	"encoding/hex"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+// Values of common.security.passwordHashAlgorithm.
+const (
+	PasswordHashBcrypt       = "bcrypt"
+	PasswordHashPBKDF2SHA512 = "pbkdf2-sha512" //nolint:gosec // algorithm name, not a credential
 )
 
 func SHA256(src string, salt string) string {
@@ -18,14 +27,24 @@ func SHA256(src string, salt string) string {
 	return s
 }
 
-// PasswordEncrypt encrypt password
+// PasswordEncrypt hashes a password with the algorithm selected by
+// common.security.passwordHashAlgorithm. An unrecognized value is an error
+// rather than a fallback, so that a typo cannot quietly keep producing bcrypt
+// hashes on a deployment that asked for something else.
 func PasswordEncrypt(pwd string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
+	switch algorithm := paramtable.Get().CommonCfg.PasswordHashAlgorithm.GetValue(); algorithm {
+	case PasswordHashBcrypt:
+		bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+		if err != nil {
+			return "", err
+		}
 
-	return string(bytes), err
+		return string(bytes), err
+	case PasswordHashPBKDF2SHA512:
+		return encryptPBKDF2SHA512(pwd)
+	default:
+		return "", merr.WrapErrServiceInternalMsg("unsupported common.security.passwordHashAlgorithm %q", algorithm)
+	}
 }
 
 func Base64Decode(pwd string) (string, error) {
