@@ -1,0 +1,458 @@
+diff --git a/internal/datacoord/externalrefresh/checker.go b/internal/datacoord/externalrefresh/checker.go
+index 865ff9933e..d787a95cce 100644
+--- a/internal/datacoord/externalrefresh/checker.go
++++ b/internal/datacoord/externalrefresh/checker.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+ 	"github.com/milvus-io/milvus/internal/datacoord/index"
+ 	"github.com/milvus-io/milvus/internal/datacoord/meta"
++	"github.com/milvus-io/milvus/internal/util/paimone2ehook"
+ 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+ 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+ 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+@@ -167,6 +168,12 @@ func (c *externalCollectionRefreshChecker) processJobs() {
+ // state transition. Idempotent — repeated calls short-circuit on terminal
+ // state and source/spec equality.
+ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollectionRefreshJob) {
++	if !job.GetSegmentsApplied() &&
++		(job.GetState() == indexpb.JobState_JobStateInit || job.GetState() == indexpb.JobState_JobStateInProgress || job.GetState() == indexpb.JobState_JobStateRetry) &&
++		paimone2ehook.HoldApply(job.GetJobId(), job.GetCollectionId(), job.GetExternalSpec()) {
++		c.tryTimeoutJob(job)
++		return
++	}
+ 	// Retry Phase B task creation for jobs that are still in Init with no
+ 	// tasks (i.e. the async submission attempt did not land tasks yet).
+ 	// This is the safety-net retry path: the WAL ack callback already kicked
+diff --git a/internal/datacoord/index/task.go b/internal/datacoord/index/task.go
+index e1b4f78a21..a2a450f3bb 100644
+--- a/internal/datacoord/index/task.go
++++ b/internal/datacoord/index/task.go
+@@ -725,9 +725,12 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
+ 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
+ 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
+ 	req := &workerpb.CreateJobRequest{
+-		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
+-		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
+-		BuildID:                   it.BuildID,
++		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
++		IndexFilePrefix: path.Join(it.chunkManager.RootPath(), common.SegmentIndexV0Path),
++		BuildID:         it.BuildID,
++		// Test-image-only: expose actual index identity to the keyed L3 barrier.
++		IndexID:                   segIndex.IndexID,
++		IndexName:                 it.indexMeta.GetIndexNameByID(segIndex.CollectionID, segIndex.IndexID),
+ 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+ 		IndexVersion:              segIndex.IndexVersion + 1,
+ 		StorageConfig:             meta.CreateStorageConfig(),
+diff --git a/internal/datanode/index/task_index.go b/internal/datanode/index/task_index.go
+index b4dd4c57ae..2f8688482f 100644
+--- a/internal/datanode/index/task_index.go
++++ b/internal/datanode/index/task_index.go
+@@ -30,6 +30,7 @@ import (
+ 	"github.com/milvus-io/milvus/internal/datanode/util"
+ 	"github.com/milvus-io/milvus/internal/storage"
+ 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
++	"github.com/milvus-io/milvus/internal/util/paimone2ehook"
+ 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
+ 	"github.com/milvus-io/milvus/pkg/v3/common"
+ 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+@@ -401,6 +402,14 @@ func (it *indexBuildTask) createBuilder(ctx context.Context) error {
+ }
+ 
+ func (it *indexBuildTask) Execute(ctx context.Context) error {
++	if err := paimone2ehook.WaitIndex(ctx, paimone2ehook.IndexTask{
++		CollectionID: it.req.GetCollectionID(), SegmentID: it.req.GetSegmentID(), BuildID: it.req.GetBuildID(),
++		FieldID: it.req.GetField().GetFieldID(), IndexID: it.req.GetIndexID(),
++		FieldName: it.req.GetField().GetName(), IndexName: it.req.GetIndexName(),
++		Manifest: it.req.GetManifest(), ExternalSpec: it.req.GetExternalSpec(),
++	}); err != nil {
++		return err
++	}
+ 	if it.index == nil {
+ 		return merr.WrapErrServiceInternalMsg("index input has not been prepared")
+ 	}
+diff --git a/internal/util/paimone2ehook/hook.go b/internal/util/paimone2ehook/hook.go
+new file mode 100644
+index 0000000000..11b8e8cc34
+--- /dev/null
++++ b/internal/util/paimone2ehook/hook.go
+@@ -0,0 +1,194 @@
++// Licensed to the LF AI & Data foundation under one
++// or more contributor license agreements. See the NOTICE file
++// distributed with this work for additional information
++// regarding copyright ownership. The ASF licenses this file
++// to you under the Apache License, Version 2.0 (the
++// "License"); you may not use this file except in compliance
++// with the License. You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++// Test-image-only hooks. This file is delivered as an opt-in patch, never as a
++// production change or part of the L0/L1/L2 image.
++package paimone2ehook
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/milvus-io/milvus/pkg/v3/util/merr"
++)
++
++const Directory = "/tmp/milvus-paimon-e2e-hooks"
++
++var hookDirectory = Directory
++
++type Gate struct {
++	Lease        string `json:"lease"`
++	CollectionID int64  `json:"collection_id"`
++	SnapshotID   int64  `json:"snapshot_id"`
++	Phase        string `json:"phase"`
++	FieldName    string `json:"field_name"`
++	IndexName    string `json:"index_name"`
++}
++
++type event struct {
++	Lease            string `json:"lease"`
++	CollectionID     int64  `json:"collection_id"`
++	TargetSnapshotID int64  `json:"target_snapshot_id"`
++	TaskSnapshotID   *int64 `json:"task_spec_snapshot_id,omitempty"`
++	Phase            string `json:"phase"`
++	JobID            int64  `json:"job_id,omitempty"`
++	SegmentID        int64  `json:"segment_id,omitempty"`
++	BuildID          int64  `json:"build_id,omitempty"`
++	FieldID          int64  `json:"field_id,omitempty"`
++	IndexID          int64  `json:"index_id,omitempty"`
++	FieldName        string `json:"field_name,omitempty"`
++	IndexName        string `json:"index_name,omitempty"`
++	Manifest         string `json:"manifest_path,omitempty"`
++	ObservedAt       int64  `json:"observed_at"`
++}
++
++type IndexTask struct {
++	CollectionID, SegmentID, BuildID, FieldID, IndexID int64
++	FieldName, IndexName, Manifest, ExternalSpec       string
++}
++
++func newEvent(value Gate) event {
++	return event{Lease: value.Lease, CollectionID: value.CollectionID, TargetSnapshotID: value.SnapshotID,
++		Phase: value.Phase, ObservedAt: time.Now().UnixMilli()}
++}
++
++func snapshotID(spec string) *int64 {
++	var decoded struct {
++		SnapshotID json.RawMessage `json:"snapshot_id"`
++	}
++	if json.Unmarshal([]byte(spec), &decoded) != nil {
++		return nil
++	}
++	parsed, err := strconv.ParseInt(strings.Trim(string(decoded.SnapshotID), `"`), 10, 64)
++	if err != nil {
++		return nil
++	}
++	return &parsed
++}
++
++func init() {
++	if err := os.MkdirAll(Directory, 0700); err != nil {
++		panic(err)
++	}
++	if err := os.WriteFile(filepath.Join(Directory, "ready.json"), []byte(`{"protocol":1,"source_commit":"4f95cb61","test_image_only":true}`), 0600); err != nil {
++		panic(err)
++	}
++}
++
++func gate(kind string, collectionID int64) (*Gate, error) {
++	data, err := os.ReadFile(filepath.Join(hookDirectory, kind+"-"+strconv.FormatInt(collectionID, 10)))
++	if os.IsNotExist(err) {
++		return nil, nil
++	}
++	if err != nil {
++		return nil, err
++	}
++	var value Gate
++	if err := json.Unmarshal(data, &value); err != nil {
++		return nil, err
++	}
++	if value.CollectionID != collectionID || collectionID <= 0 || value.SnapshotID < 0 || len(value.Lease) != 32 || strings.ContainsAny(value.Lease, "/\\.") {
++		return nil, merr.WrapErrServiceInternalMsg("invalid Paimon test gate")
++	}
++	return &value, nil
++}
++
++func record(kind string, value event) error {
++	key := fmt.Sprintf("seen-%s-%s-%d-%d-%d", kind, value.Lease, value.JobID, value.SegmentID, value.BuildID)
++	final := filepath.Join(hookDirectory, key)
++	if _, err := os.Stat(final); err == nil {
++		return nil
++	} else if !os.IsNotExist(err) {
++		return err
++	}
++	file, err := os.CreateTemp(hookDirectory, ".writing-event-")
++	if err != nil {
++		return err
++	}
++	defer os.Remove(file.Name())
++	if err := json.NewEncoder(file).Encode(value); err != nil {
++		file.Close()
++		return err
++	}
++	if err := file.Close(); err != nil {
++		return err
++	}
++	// Link publishes complete bytes atomically and never overwrites a prior event.
++	if err := os.Link(file.Name(), final); err != nil && !os.IsExist(err) {
++		return err
++	}
++	return nil
++}
++
++// HoldApply returns to the caller rather than blocking its checker goroutine.
++// The normal checker still advances the job's timeout state on every tick.
++func HoldApply(jobID, collectionID int64, spec string) bool {
++	value, err := gate("apply", collectionID)
++	if err != nil || value == nil || value.Phase != "before-apply" {
++		return false
++	}
++	snapshot := snapshotID(spec)
++	if snapshot == nil || *snapshot != value.SnapshotID {
++		return false
++	}
++	observed := newEvent(*value)
++	observed.JobID, observed.TaskSnapshotID = jobID, snapshot
++	return record("apply", observed) == nil
++}
++
++// WaitIndex holds only this collection's newly executing index tasks. The
++// dedicated driver arms it after every S1 index has genuinely completed.
++func WaitIndex(ctx context.Context, task IndexTask) error {
++	for {
++		value, err := gate("index", task.CollectionID)
++		if err != nil {
++			return err
++		}
++		if value == nil {
++			return nil
++		}
++		if value.Phase != "after-apply" && value.Phase != "wait-disabled" {
++			return merr.WrapErrServiceInternalMsg("invalid Paimon index gate phase")
++		}
++		if value.FieldName == "" || value.IndexName == "" {
++			return merr.WrapErrServiceInternalMsg("Paimon test gate must select a field and index")
++		}
++		if task.FieldName != value.FieldName || task.IndexName != value.IndexName {
++			return nil
++		}
++		observed := newEvent(*value)
++		observed.SegmentID, observed.BuildID = task.SegmentID, task.BuildID
++		observed.FieldID, observed.IndexID = task.FieldID, task.IndexID
++		observed.FieldName, observed.IndexName, observed.Manifest = task.FieldName, task.IndexName, task.Manifest
++		// The collection spec can predate segment publication; the driver binds
++		// actual task manifest/segment to S2 and never treats this as its pin.
++		observed.TaskSnapshotID = snapshotID(task.ExternalSpec)
++		if err := record("index", observed); err != nil {
++			return err
++		}
++		select {
++		case <-ctx.Done():
++			return ctx.Err()
++		case <-time.After(100 * time.Millisecond):
++		}
++	}
++}
+diff --git a/internal/util/paimone2ehook/hook_test.go b/internal/util/paimone2ehook/hook_test.go
+new file mode 100644
+index 0000000000..cf03a9262c
+--- /dev/null
++++ b/internal/util/paimone2ehook/hook_test.go
+@@ -0,0 +1,180 @@
++// Licensed to the LF AI & Data foundation under one
++// or more contributor license agreements. See the NOTICE file
++// distributed with this work for additional information
++// regarding copyright ownership. The ASF licenses this file
++// to you under the Apache License, Version 2.0 (the
++// "License"); you may not use this file except in compliance
++// with the License. You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package paimone2ehook
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/milvus-io/milvus/pkg/v3/util/merr"
++)
++
++func prepare(t *testing.T, kind, phase string) string {
++	t.Helper()
++	previous := hookDirectory
++	hookDirectory = t.TempDir()
++	t.Cleanup(func() { hookDirectory = previous })
++	data, err := json.Marshal(Gate{Lease: "0123456789abcdef0123456789abcdef", CollectionID: 41, SnapshotID: 4, Phase: phase, FieldName: "embedding", IndexName: "embedding"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	name := filepath.Join(hookDirectory, kind+"-"+strconv.Itoa(41))
++	if err := os.WriteFile(name, data, 0600); err != nil {
++		t.Fatal(err)
++	}
++	return name
++}
++
++func TestApplyGateScopesCollectionAndSnapshot(t *testing.T) {
++	prepare(t, "apply", "before-apply")
++	if !HoldApply(1, 41, `{"snapshot_id":"4"}`) {
++		t.Fatal("matching apply was not gated")
++	}
++	if HoldApply(2, 42, `{"snapshot_id":"4"}`) {
++		t.Fatal("gated another collection")
++	}
++	if HoldApply(3, 41, `{"snapshot_id":2}`) {
++		t.Fatal("gated another snapshot")
++	}
++	if err := WaitIndex(context.Background(), task(41, 1, 1)); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestIndexGateUnblocksWithoutCancellingBuild(t *testing.T) {
++	name := prepare(t, "index", "after-apply")
++	done := make(chan error, 1)
++	go func() { done <- WaitIndex(context.Background(), task(41, 11, 22)) }()
++	deadline := time.Now().Add(2 * time.Second)
++	for {
++		events, err := filepath.Glob(filepath.Join(hookDirectory, "seen-index-*"))
++		if err != nil {
++			t.Fatal(err)
++		}
++		if len(events) > 0 {
++			data, err := os.ReadFile(events[0])
++			if err != nil {
++				t.Fatal(err)
++			}
++			var observed event
++			if err := json.Unmarshal(data, &observed); err != nil {
++				t.Fatalf("published incomplete event: %v", err)
++			}
++			if observed.TargetSnapshotID != 4 || observed.TaskSnapshotID == nil || *observed.TaskSnapshotID != 2 || observed.Manifest != "manifest-s2" || observed.FieldID != 100 || observed.IndexID != 101 {
++				t.Fatalf("event did not report actual task identity: %+v", observed)
++			}
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("index never reached the gate")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	select {
++	case err := <-done:
++		t.Fatalf("gate released before removal: %v", err)
++	default:
++	}
++	if err := os.Remove(name); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case err := <-done:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-time.After(2 * time.Second):
++		t.Fatal("build did not resume")
++	}
++}
++
++func TestIndexGatePreservesCancellation(t *testing.T) {
++	prepare(t, "index", "after-apply")
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if err := WaitIndex(ctx, task(41, 1, 2)); !errors.Is(err, context.Canceled) {
++		t.Fatalf("got %v", err)
++	}
++	if err := WaitIndex(context.Background(), task(42, 1, 2)); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestMalformedTestGateIsAnInternalFailure(t *testing.T) {
++	prepare(t, "index", "unknown-test-phase")
++	if err := WaitIndex(context.Background(), task(41, 1, 2)); !errors.Is(err, merr.ErrServiceInternal) {
++		t.Fatalf("invalid test harness state must not become a user parameter error: %v", err)
++	}
++}
++
++func task(collection, segment, build int64) IndexTask {
++	return IndexTask{CollectionID: collection, SegmentID: segment, BuildID: build, FieldID: 100, IndexID: 101, FieldName: "embedding", IndexName: "embedding", Manifest: "manifest-s2", ExternalSpec: `{"snapshot_id":"2"}`}
++}
++
++func TestIndexGateScopesFieldAndIndex(t *testing.T) {
++	prepare(t, "index", "after-apply")
++	for _, selector := range []string{"field", "index"} {
++		request := task(41, 1, 2)
++		if selector == "field" {
++			request.FieldName = "other"
++		} else {
++			request.IndexName = "other"
++		}
++		ctx, cancel := context.WithCancel(context.Background())
++		cancel()
++		if err := WaitIndex(ctx, request); err != nil {
++			t.Fatalf("held an unrelated %s: %v", selector, err)
++		}
++	}
++	events, _ := filepath.Glob(filepath.Join(hookDirectory, "seen-index-*"))
++	if len(events) != 0 {
++		t.Fatal("recorded unrelated tasks")
++	}
++}
++
++func TestEventPublicationIsAtomic(t *testing.T) {
++	prepare(t, "index", "after-apply")
++	value := event{Lease: "0123456789abcdef0123456789abcdef", Manifest: strings.Repeat("manifest", 300000)}
++	done := make(chan error, 1)
++	go func() { done <- record("index", value) }()
++	deadline := time.Now().Add(2 * time.Second)
++	for {
++		names, _ := filepath.Glob(filepath.Join(hookDirectory, "seen-index-*"))
++		if len(names) != 0 {
++			data, err := os.ReadFile(names[0])
++			var observed event
++			if err != nil || json.Unmarshal(data, &observed) != nil || observed.Manifest != value.Manifest {
++				t.Fatal("reader observed a partially written event")
++			}
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("event was never published")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	if err := <-done; err != nil {
++		t.Fatal(err)
++	}
++}

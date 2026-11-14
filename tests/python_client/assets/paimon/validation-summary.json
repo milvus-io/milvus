@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-13",
+  "server_commit": "4f95cb61d849bd4ecb03fa1f641179825a58b05d",
+  "storage_commit": "5c2ea329889e30d94b4e65209c0bc782256e7a95",
+  "python_e2e_base": "22341c46c91a3a573b794dd853c5739c62ba71cc",
+  "bundle_sha256": "1972bb57e692e02b1173f97ee534b1f6bb6e4b3af5b6742b4f84517043f14496",
+  "ordinary_deployment": "paimon-51897-e2e",
+  "ordinary_image": "harbor.tencent-stage.zilliz.cn/manta/milvus:pr-51897-4f95cb6",
+  "levels": {
+    "L0": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "task_id": "pysdk-e2e-local-yanliang-test-paimon-ext-22341c4-fc6e8f13-u3805",
+      "runner_summary": "====================== 2 passed, 154 deselected in 22.85s ======================",
+      "raw_log_sha256": "3d2c35e510ca35f3907fb39a4023658aea2df860f287df1cf0062d0a28f42dbe"
+    },
+    "L1": {
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "task_id": "pysdk-e2e-local-yanliang-test-paimon-ext-22341c4-c5fb58c1-u3805",
+      "runner_summary": "======================== 24 passed in 132.61s (0:02:12) ========================",
+      "raw_log_sha256": "427f1aaa1ef0b61b728be151d307b6a236295fe1e747d7cc53d061f981380c97"
+    },
+    "L2": {
+      "passed": 131,
+      "failed": 0,
+      "skipped": 0,
+      "task_id": "pysdk-e2e-local-yanliang-test-paimon-ext-22341c4-b41fed80-u3805",
+      "runner_summary": "======================= 131 passed in 216.83s (0:03:36) ========================",
+      "raw_log_sha256": "25b7ad91e97d9645a324af1f777bc31b2cdaef9e01a8aaddef02115553d5fc8e"
+    }
+  },
+  "l3_final": {
+    "status": "passed",
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "duration_seconds": 312.72,
+    "deployment": "paimon-51897-l3",
+    "build_id": "build-local-yanliang-qia-test-paimon-4f95cb6-ffe49186218d-u3805",
+    "image": "harbor.tencent-stage.zilliz.cn/manta/milvus:local-u3805-test-paimon-external-l3-hooks-4f95cb6-ffe49186218d",
+    "image_digest": "sha256:b7f17f78117fc119ddef8064b8307632d37d7b9fdd015bf5eddc41c8d56b5478",
+    "hook_patch_sha256": "86748955e27ec123a551b76c957208aa6945479aec5c6052371b23a3847048d9",
+    "junit_sha256": "aef6edafc3736ce5aa8995f5dc30763eed75717d263a9f54c5d4efd3f0140f42",
+    "phase_evidence": "l3-phase-evidence.json"
+  },
+  "coverage_complete": false,
+  "coverage_report": "../../scripts/paimon/IMPLEMENTATION_REPORT.md",
+  "auxiliary": {
+    "python_helpers_passed": 86,
+    "go_hook_tests_passed": 6,
+    "ruff_files_passed": 12,
+    "ordinary_collected": 157,
+    "l3_collected": 3,
+    "ci_contract_tests_passed": 10
+  },
+  "final_deployment_checks": [
+    {
+      "deployment": "paimon-51897-e2e",
+      "status": "Healthy",
+      "updated": true,
+      "image": "harbor.tencent-stage.zilliz.cn/manta/milvus:pr-51897-4f95cb6",
+      "version": {
+        "version": "pr-51897-20261113-4f95cb61d84",
+        "build_time": "Fri Nov 13 06:54:26 UTC 2026",
+        "git_commit": "4f95cb61d84",
+        "go_version": "go version go1.26.10 linux/amd64",
+        "deploy_mode": "STANDALONE"
+      },
+      "collections": []
+    },
+    {
+      "deployment": "paimon-51897-l3",
+      "status": "Healthy",
+      "updated": true,
+      "image": "harbor.tencent-stage.zilliz.cn/manta/milvus:local-u3805-test-paimon-external-l3-hooks-4f95cb6-ffe49186218d",
+      "version": {
+        "version": "test-paimon-external-l3-hooks-20261113-4f95cb6",
+        "build_time": "Fri Nov 13 08:24:26 UTC 2026",
+        "git_commit": "4f95cb6",
+        "go_version": "go version go1.26.10 linux/amd64",
+        "deploy_mode": "STANDALONE"
+      },
+      "collections": [],
+      "runtime_config": {
+        "dataCoord.externalCollection.refreshWaitForIndex": false,
+        "dataCoord.externalCollectionJobTimeout": 600
+      },
+      "active_gates": [],
+      "active_control_lease": false,
+      "overrides": {
+        "dataCoord.externalCollection.refreshWaitForIndex": [],
+        "dataCoord.externalCollectionJobTimeout": []
+      }
+    }
+  ],
+  "ci_integration_evidence": "ci-validation-summary.json"
+}

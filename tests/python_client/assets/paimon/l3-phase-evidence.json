@@ -1,0 +1,608 @@
+[
+  {
+    "case": "test_refresh_timeout_publication_contract[after-apply]",
+    "seconds": 116.55,
+    "inspections": [
+      {
+        "actual_index_tasks": [
+          {
+            "build_id": "470432797471967967",
+            "collection_id": "470432797469967796",
+            "field_id": 104,
+            "field_name": "embedding",
+            "index_id": "470432797470467833",
+            "index_name": "embedding",
+            "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797469967796/470432797469967797/470432797471467959\",\"size\":3823}",
+            "observed_at": 1794558822521,
+            "phase": "after-apply",
+            "segment_id": "470432797471467959",
+            "target_snapshot_id": 4,
+            "task_spec_snapshot_id": 4
+          }
+        ],
+        "apply_blocked_before_publication": false,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 0,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 4096,
+          "state": "InProgress",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 1794558822097,
+        "job_id": "470432797471467953",
+        "live_segments": [
+          {
+            "id": "470432797471467959",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": true,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 0,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558821509,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInit"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558822071,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInProgress"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558842209,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558842758,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            }
+          ],
+          "wait_seen": {
+            "collection_id": "470432797469967796",
+            "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+            "index_wait_started_time": 1794558822097,
+            "job_id": "470432797471467953",
+            "observed_at": 1794558841663,
+            "segments_applied": true,
+            "snapshot_id": 4,
+            "start_time": 1794558821869,
+            "state": "RefreshInProgress"
+          },
+          "sample_count": 39
+        },
+        "raw_job_state": "RefreshFailed",
+        "s2_indexes_blocked": true,
+        "segments_applied": true
+      },
+      {
+        "actual_index_tasks": [
+          {
+            "build_id": "470432797471967967",
+            "collection_id": "470432797469967796",
+            "field_id": 104,
+            "field_name": "embedding",
+            "index_id": "470432797470467833",
+            "index_name": "embedding",
+            "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797469967796/470432797469967797/470432797471467959\",\"size\":3823}",
+            "observed_at": 1794558822521,
+            "phase": "after-apply",
+            "segment_id": "470432797471467959",
+            "target_snapshot_id": 4,
+            "task_spec_snapshot_id": 4
+          }
+        ],
+        "apply_blocked_before_publication": false,
+        "background_index_completed_without_refresh_retry": true,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 4096,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 0,
+          "state": "Finished",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 1794558822097,
+        "job_id": "470432797471467953",
+        "live_segments": [
+          {
+            "id": "470432797471467959",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": true,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 0,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558821509,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInit"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558822071,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInProgress"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558842209,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558866917,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            }
+          ],
+          "wait_seen": {
+            "collection_id": "470432797469967796",
+            "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+            "index_wait_started_time": 1794558822097,
+            "job_id": "470432797471467953",
+            "observed_at": 1794558841663,
+            "segments_applied": true,
+            "snapshot_id": 4,
+            "start_time": 1794558821869,
+            "state": "RefreshInProgress"
+          },
+          "sample_count": 82
+        },
+        "raw_job_state": "RefreshFailed",
+        "s2_indexes_blocked": false,
+        "segments_applied": true
+      },
+      {
+        "actual_index_tasks": [
+          {
+            "build_id": "470432797471967967",
+            "collection_id": "470432797469967796",
+            "field_id": 104,
+            "field_name": "embedding",
+            "index_id": "470432797470467833",
+            "index_name": "embedding",
+            "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797469967796/470432797469967797/470432797471467959\",\"size\":3823}",
+            "observed_at": 1794558822521,
+            "phase": "after-apply",
+            "segment_id": "470432797471467959",
+            "target_snapshot_id": 4,
+            "task_spec_snapshot_id": 4
+          }
+        ],
+        "apply_blocked_before_publication": false,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 4096,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 0,
+          "state": "Finished",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 1794558822097,
+        "job_id": "470432797471467953",
+        "live_segments": [
+          {
+            "id": "470432797471467959",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": true,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 0,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558821509,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInit"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558822071,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshInProgress"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558842209,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            },
+            {
+              "collection_id": "470432797469967796",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+              "index_wait_started_time": 1794558822097,
+              "job_id": "470432797471467953",
+              "observed_at": 1794558877823,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794558821869,
+              "state": "RefreshFailed"
+            }
+          ],
+          "wait_seen": {
+            "collection_id": "470432797469967796",
+            "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_21e40ee6ce",
+            "index_wait_started_time": 1794558822097,
+            "job_id": "470432797471467953",
+            "observed_at": 1794558841663,
+            "segments_applied": true,
+            "snapshot_id": 4,
+            "start_time": 1794558821869,
+            "state": "RefreshInProgress"
+          },
+          "sample_count": 100
+        },
+        "raw_job_state": "RefreshFailed",
+        "s2_indexes_blocked": false,
+        "segments_applied": true
+      }
+    ]
+  },
+  {
+    "case": "test_refresh_timeout_publication_contract[before-apply]",
+    "seconds": 114.564,
+    "inspections": [
+      {
+        "actual_index_tasks": [],
+        "apply_blocked_before_publication": true,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 4096,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 0,
+          "state": "Finished",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 0,
+        "job_id": "470432797472968571",
+        "live_segments": [
+          {
+            "id": "470432797472468483",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": false,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558922411,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshInit"
+            },
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558943043,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshFailed"
+            },
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558946782,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshFailed"
+            }
+          ],
+          "sample_count": 40
+        },
+        "raw_job_state": "RefreshFailed",
+        "s2_indexes_blocked": false,
+        "segments_applied": false
+      },
+      {
+        "actual_index_tasks": [],
+        "apply_blocked_before_publication": true,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 4096,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 0,
+          "state": "Finished",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 0,
+        "job_id": "470432797472968571",
+        "live_segments": [
+          {
+            "id": "470432797473468902",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": false,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558922411,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshInit"
+            },
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558943043,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshFailed"
+            },
+            {
+              "collection_id": "470432797472468474",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_5a33497b57",
+              "index_wait_started_time": 0,
+              "job_id": "470432797472968571",
+              "observed_at": 1794558984477,
+              "segments_applied": false,
+              "snapshot_id": 4,
+              "start_time": 1794558922594,
+              "state": "RefreshFailed"
+            }
+          ],
+          "sample_count": 100
+        },
+        "raw_job_state": "RefreshFailed",
+        "s2_indexes_blocked": false,
+        "segments_applied": false
+      }
+    ]
+  },
+  {
+    "case": "test_refresh_timeout_publication_contract[wait-disabled]",
+    "seconds": 81.41,
+    "inspections": [
+      {
+        "actual_index_tasks": [
+          {
+            "build_id": "470432797474969250",
+            "collection_id": "470432797473969129",
+            "field_id": 104,
+            "field_name": "embedding",
+            "index_id": "470432797474469144",
+            "index_name": "embedding",
+            "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797473969129/470432797473969130/470432797474469243\",\"size\":3831}",
+            "observed_at": 1794559037457,
+            "phase": "wait-disabled",
+            "segment_id": "470432797474469243",
+            "target_snapshot_id": 4,
+            "task_spec_snapshot_id": 4
+          }
+        ],
+        "apply_blocked_before_publication": false,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 0,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 4096,
+          "state": "InProgress",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 0,
+        "job_id": "470432797474469238",
+        "live_segments": [
+          {
+            "id": "470432797474469243",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": false,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797473969129",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_228339265f",
+              "index_wait_started_time": 0,
+              "job_id": "470432797474469238",
+              "observed_at": 1794559037048,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794559036951,
+              "state": "RefreshCompleted"
+            },
+            {
+              "collection_id": "470432797473969129",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_228339265f",
+              "index_wait_started_time": 0,
+              "job_id": "470432797474469238",
+              "observed_at": 1794559038252,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794559036951,
+              "state": "RefreshCompleted"
+            }
+          ],
+          "sample_count": 3
+        },
+        "raw_job_state": "RefreshCompleted",
+        "s2_indexes_blocked": true,
+        "segments_applied": true
+      },
+      {
+        "actual_index_tasks": [
+          {
+            "build_id": "470432797474969250",
+            "collection_id": "470432797473969129",
+            "field_id": 104,
+            "field_name": "embedding",
+            "index_id": "470432797474469144",
+            "index_name": "embedding",
+            "manifest_path": "{\"ver\":1,\"base_path\":\"files/insert_log/470432797473969129/470432797473969130/470432797474469243\",\"size\":3831}",
+            "observed_at": 1794559037457,
+            "phase": "wait-disabled",
+            "segment_id": "470432797474469243",
+            "target_snapshot_id": 4,
+            "task_spec_snapshot_id": 4
+          }
+        ],
+        "apply_blocked_before_publication": false,
+        "background_index_completed_without_refresh_retry": false,
+        "duplicate_logical_application": false,
+        "index_stats": {
+          "field_name": "embedding",
+          "index_name": "embedding",
+          "index_type": "IVF_FLAT",
+          "indexed_rows": 4096,
+          "metric_type": "L2",
+          "nlist": "32",
+          "pending_index_rows": 0,
+          "state": "Finished",
+          "total_rows": 4096
+        },
+        "index_wait_started_time": 0,
+        "job_id": "470432797474469238",
+        "live_segments": [
+          {
+            "id": "470432797474469243",
+            "rows": 4096
+          }
+        ],
+        "observed_in_progress_with_index_wait": false,
+        "phase_observations": {
+          "samples": [
+            {
+              "collection_id": "470432797473969129",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_228339265f",
+              "index_wait_started_time": 0,
+              "job_id": "470432797474469238",
+              "observed_at": 1794559037048,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794559036951,
+              "state": "RefreshCompleted"
+            },
+            {
+              "collection_id": "470432797473969129",
+              "collection_name": "TestPaimonRefreshIndexTimeoutIndepe_test_refresh_timeout_publication_contract_228339265f",
+              "index_wait_started_time": 0,
+              "job_id": "470432797474469238",
+              "observed_at": 1794559082106,
+              "segments_applied": true,
+              "snapshot_id": 4,
+              "start_time": 1794559036951,
+              "state": "RefreshCompleted"
+            }
+          ],
+          "sample_count": 71
+        },
+        "raw_job_state": "RefreshCompleted",
+        "s2_indexes_blocked": false,
+        "segments_applied": true
+      }
+    ]
+  }
+]

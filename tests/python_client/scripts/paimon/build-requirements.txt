@@ -1,0 +1,5 @@
+# Offline fixture construction only. Ordinary E2E uses the existing requirements.txt.
+pyarrow==23.0.1
+vortex-data==0.56.0
+fastavro==1.13.1
+backports.zstd==1.8.0
