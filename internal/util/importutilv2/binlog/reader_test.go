@@ -2045,6 +2045,125 @@ func TestStorageV3Reader_BackupFieldSelection(t *testing.T) {
 	require.True(t, target.GetEnableDynamicField())
 }
 
+func TestStorageV3Reader_StoredNullDefaults(t *testing.T) {
+	paramtable.Init()
+	for _, format := range []string{"vortex", "parquet"} {
+		t.Run(format, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+			source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+			}})
+			group := storagecommon.ColumnGroup{GroupID: 0}
+			for i, field := range source.GetFields() {
+				group.Columns = append(group.Columns, i)
+				group.Fields = append(group.Fields, field.GetFieldID())
+			}
+			segmentPath := storage.SegmentManifestBasePath(root, 1, 2, 3)
+			writer, err := storage.NewPackedRecordBatchWriter(segmentPath, source, 0, 0,
+				[]storagecommon.ColumnGroup{group}, cfg, nil, format, []string{format})
+			require.NoError(t, err)
+			defer writer.Abort()
+			var values []*storage.Value
+			for i, value := range []any{nil, int64(0), int64(5)} {
+				values = append(values, &storage.Value{Value: map[int64]any{
+					0: int64(i), 1: int64(100), 100: int64(i), 101: value,
+				}})
+			}
+			record, err := storage.ValueSerializer(values, source)
+			require.NoError(t, err)
+			defer record.Release()
+			require.NoError(t, writer.Write(record))
+			output, err := writer.Close()
+			require.NoError(t, err)
+			defer output.Destroy()
+			manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(segmentPath, packed.ManifestEarliest),
+				cfg, &packed.ManifestUpdates{NewFiles: output})
+			require.NoError(t, err)
+
+			defaultValue := &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
+			for _, tc := range []struct {
+				name         string
+				nullable     bool
+				defaultValue *schemapb.ValueField
+				wantFirst    any
+				wantErr      bool
+			}{
+				{name: "nullable_default", nullable: true, defaultValue: defaultValue, wantFirst: int64(42)},
+				{name: "nullable_no_default", nullable: true},
+				{name: "required_no_default", wantErr: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					target := typeutil.Clone(source)
+					field := typeutil.GetField(target, 101)
+					field.Nullable = tc.nullable
+					field.DefaultValue = tc.defaultValue
+					before := typeutil.Clone(target)
+					r, err := NewStorageV3ManifestReader(ctx, storage.NewLocalChunkManager(), target, cfg,
+						manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, nil)
+					require.NoError(t, err)
+					defer r.Close()
+					require.Equal(t, before, target, "reader must not mutate the task's target schema")
+					require.Equal(t, field.GetNullable(), typeutil.GetField(r.schema, 101).GetNullable(),
+						"logical conversion must retain target nullability")
+					var got []any
+					for {
+						data, err := r.Read()
+						if tc.wantErr {
+							require.Error(t, err, "stored NULL cannot be read with a non-nullable schema")
+							require.NotErrorIs(t, err, io.EOF)
+							require.Nil(t, data)
+							return
+						}
+						if err == io.EOF {
+							break
+						}
+						require.NoError(t, err)
+						for i := 0; i < data.GetRowNum(); i++ {
+							require.Equal(t, int64(len(got)), data.Data[100].GetRow(i))
+							got = append(got, data.Data[101].GetRow(i))
+						}
+					}
+					require.Equal(t, []any{tc.wantFirst, int64(0), int64(5)}, got)
+				})
+			}
+		})
+	}
+}
+
+func TestStorageV3Reader_DeserializeFailureClosesReader(t *testing.T) {
+	paramtable.Init()
+	source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_VarChar},
+	}})
+	record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{
+		0: int64(1), 1: int64(100), 100: int64(1), 101: "invalid int64",
+	}}}, source)
+	require.NoError(t, err)
+	owner := &storageV3DeltaRecordReader{record: record}
+	defer owner.Close()
+	target := typeutil.Clone(source)
+	typeutil.GetField(target, 101).DataType = schemapb.DataType_Int64
+	r := newReader(context.Background(), nil, target, nil, storage.StorageV3, 1024, "")
+	r.dr = storage.NewDeserializeReader(owner, func(record storage.Record, values []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(record, values, target, true)
+	})
+	defer r.Close()
+
+	data, err := r.Read()
+	require.Error(t, err)
+	require.NotErrorIs(t, err, io.EOF)
+	require.Nil(t, data)
+	require.Nil(t, r.dr)
+	require.Nil(t, owner.record, "failed read must release the borrowed Arrow record")
+	next, nextErr := r.Read()
+	require.Nil(t, next)
+	require.Same(t, err, nextErr, "retry must not skip the rejected batch")
+}
+
 func TestStorageV3Reader_ManifestFieldSelectionErrors(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
@@ -2559,6 +2678,7 @@ func TestStorageV3Reader_SourceTimestampInvariant(t *testing.T) {
 				arrowPK := arrow.PrimitiveTypes.Int64
 				if pkType == schemapb.DataType_VarChar {
 					pk, arrowPK = "key", arrow.BinaryTypes.String
+					schema.Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}
 				}
 				builder := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{
 					{Name: "row_id", Type: arrow.PrimitiveTypes.Int64},

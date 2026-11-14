@@ -1020,7 +1020,7 @@ The V1 binlog and V3 snapshot readers use the same field-selection function:
 
 Source and target AutoID settings need not match: both PreImport and Import use
 the existing backup behavior that preserves source PKs. Stored function outputs
-are imported without rerunning functions. Source nullable/default definitions,
+are imported without rerunning functions. Source default definitions,
 partition/clustering markers, collection properties, shard counts and indexes
 are not restored or compared for equality. Target routing and writing remain
 the standard Import path. Present NULL values and decoding failures retain
@@ -1035,11 +1035,31 @@ unchanged. StorageV2's legacy packed-binlog path is not modified by this change.
 ### 11.1 Validation and Filling in Both Phases
 
 DataCoord checks that source/target schemas exist and the collections are
-eligible, but does not compare schema identity, names or types. The DataNode
+eligible, but does not require schema identity or compare field names. For
+matching physical FieldIDs, it requires equal `nullable` settings, even when the
+target has a default. Missing fields retain the existing filling rules. It
+rejects different data types when either field
+is a vector (including ArrayOfVector). For the same fixed-dimensional vector
+type, it rejects different dimensions and ArrayOfVector element types or
+`element_nullable` settings before opening the native reader. ArrayOfVector
+uses `list<Binary>` for nullable elements and `list<FixedSizeBinary>` otherwise.
+The existing Proxy import gate still rejects targets with element-nullable arrays.
+Equal-width
+element types such as Float16Vector and BFloat16Vector are not interchangeable:
+interpreting source buffers with the target type or width can otherwise
+hide a mismatch from row-level checks. Sparse vectors have no fixed dimension.
+The DataNode
 reader checks required physical fields against each exact manifest and decodes
 present columns with the target schema. Missing required columns or decoding
 errors can therefore fail an admitted task/job; request acceptance is not a
-promise that every segment can be decoded.
+promise that every segment can be decoded. A missing or invalid target dimension
+is classified as a system error because the target schema comes from collection
+metadata; malformed source dimensions retain input-error classification.
+
+For matching VarChar fields, DataCoord requires the source `max_length` to
+be no greater than the target `max_length`. A narrower target is rejected
+at admission and Pending preparation, even when the stored values would fit.
+The reader does not add per-value length checks.
 
 Both phases retain the full target task schema while projecting only the
 reader schema. Filling occurs at the point the existing pipeline needs it:
@@ -1069,10 +1089,13 @@ For ordinary fields, whole-column absence and a stored NULL are separate paths:
 | Physical column absent | Has a default | Omit from reader; fill target default later, with the PreImport routing exception above |
 | Physical column absent | Nullable, no default | Omit from reader; Import fills NULL |
 | Physical column absent | Required, no default | Reader initialization fails |
-| Column present, row is NULL | Has a default | Shared deserializer substitutes the target default in both phases |
+| Column present, row is NULL | Nullable, has a default | Shared deserializer substitutes the target default in both phases |
 | Column present, row is NULL | Nullable, no default | Preserve NULL |
 | Column present, row is NULL | Non-nullable, no default | Reject during row conversion |
 
+Source/target nullable mismatches are rejected at admission and Pending
+preparation; a target default does not permit importing a nullable source into a
+non-nullable target. The native reader uses the target schema unchanged.
 `ValueDeserializerWithSchema` applies the present-NULL rule before timestamp
 and delete filtering. A non-NULL stored value must decode as the target type;
 it is not replaced merely because the target has a default. Missing dynamic

@@ -753,6 +753,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			break
 		}
 		if err != nil {
+			r.readErr = err
+			r.Close()
 			return nil, err
 		}
 		// Validate before any range/delete filter can hide an invalid row.
