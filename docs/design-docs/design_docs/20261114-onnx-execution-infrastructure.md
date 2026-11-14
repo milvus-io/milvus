@@ -50,8 +50,9 @@ example shows the lifecycle without requiring a native runtime in unit tests.
    return when its context is canceled.
 4. Resident memory is charged only after a session passes signature validation.
    Evicted sessions are removed from the cache under the manager mutex but stay
-   charged until native teardown completes. Waiting for that teardown honors
-   the caller's context.
+   charged until native teardown completes. A loaded session discarded after
+   cancellation is charged the same way. Waiting for teardown honors the
+   caller's context.
 5. Inference admission uses a weighted semaphore. Cancellation while waiting
    for admission returns without invoking the backend.
 6. A caller tensor must match name, type, rank, every static dimension and

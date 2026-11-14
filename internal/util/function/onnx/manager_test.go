@@ -57,6 +57,15 @@ func TestInternalDependencyErrorsAreSystemErrors(t *testing.T) {
 	_, err = NewRunner(nil)
 	require.Error(t, err)
 	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = NewManager(FuncBackend{LoadFunc: func(context.Context, string) (Session, error) {
+		return nil, nil
+	}}, Config{})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	_, err = (FuncBackend{}).Load(context.Background(), "model.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
 }
 
 func (s *testSession) Inputs() []TensorSpec {
@@ -536,7 +545,9 @@ func TestManagerCancelsWhileWaitingForEvictionClose(t *testing.T) {
 	_, err = manager.Acquire(ctx, secondModel)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	<-closeStarted
+	require.Equal(t, uint64(32), manager.MemoryBytes())
 	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
 	second, err := manager.Acquire(context.Background(), secondModel)
 	require.NoError(t, err)
 	second.Release()

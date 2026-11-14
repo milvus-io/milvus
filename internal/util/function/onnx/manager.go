@@ -118,7 +118,7 @@ func NewManager(backend Backend, config Config) (*Manager, error) {
 	}
 	backendName, backendVersion := backend.Name(), backend.Version()
 	if backendName == "" || backendVersion == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("onnx: backend name and runtime version are required")
+		return nil, merr.WrapErrServiceInternalMsg("onnx: backend name and runtime version are required")
 	}
 	config, err := config.normalized()
 	if err != nil {
@@ -278,7 +278,7 @@ func (m *Manager) load(ctx context.Context, sourcePath, snapshotPath, key, diges
 		}
 		startCloseEntries(evicted)
 		if err := waitForClose(ctx, evicted); err != nil {
-			closeSessionAsync(session)
+			discardSessionAsync(m, session, memory, sourcePath)
 			return nil, merr.Wrap(err, "onnx: evict idle sessions for memory")
 		}
 	}
@@ -763,10 +763,19 @@ func startCloseEntries(entries []*managerEntry) {
 	}()
 }
 
-func closeSessionAsync(session Session) {
-	go func() {
-		_ = session.Close()
-	}()
+func discardSessionAsync(m *Manager, session Session, memory uint64, path string) {
+	entry := &managerEntry{
+		path:      path,
+		session:   session,
+		memory:    memory,
+		manager:   m,
+		closeDone: make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.pendingSessions++
+	m.memBytes += memory
+	m.mu.Unlock()
+	startCloseEntries([]*managerEntry{entry})
 }
 
 func waitForClose(ctx context.Context, entries []*managerEntry) error {

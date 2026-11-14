@@ -155,7 +155,7 @@ func (b FuncBackend) Load(ctx context.Context, path string) (Session, error) {
 		return nil, merr.WrapErrServiceInternalMsg("onnx: backend loader is nil")
 	}
 	if b.BackendName == "" || b.RuntimeVersion == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("onnx: backend name and runtime version are required")
+		return nil, merr.WrapErrServiceInternalMsg("onnx: backend name and runtime version are required")
 	}
 	return b.LoadFunc(ctx, path)
 }
