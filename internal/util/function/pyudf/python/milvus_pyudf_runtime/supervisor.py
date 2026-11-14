@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Linux/macOS process supervision. Never import gRPC/PyArrow or start threads here."""
+"""Linux/macOS process supervision. Import gRPC/PyArrow only in worker children."""
 
 from __future__ import annotations
 

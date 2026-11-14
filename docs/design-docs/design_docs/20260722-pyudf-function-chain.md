@@ -137,9 +137,12 @@ is checked before creation; cancellation after creation does not stop Python.
 
 ### Python supervisor
 
-The supervisor stays single-threaded and does not import gRPC, PyArrow, or user
-models before `fork`. Runtime package exports are lazy so importing the
-supervisor does not initialize worker dependencies.
+The supervisor does not import gRPC, PyArrow, or user models before `fork`.
+Runtime package exports are lazy so importing the
+supervisor does not initialize worker dependencies. This does not require the
+whole process to have exactly one native OS thread: the product image's jemalloc
+allocator may create background threads. Its fork handling must be validated
+with worker startup, replacement, and shutdown tests in the image configuration.
 
 During fork, the supervisor blocks TERM/INT. Each child restores default signal
 handling and the previous signal mask, then imports and starts its worker.
@@ -173,7 +176,9 @@ Go process.
 Linux and macOS are the target platforms. macOS fork safety and port-reuse
 behavior require native validation; Linux test results do not establish macOS
 traffic distribution or throughput. The supervisor must remain free of
-background threads and worker-library initialization before every fork.
+worker-library initialization before every fork. Tests check dependency imports
+and worker lifecycle behavior rather than imposing a Python or OS thread-count
+limit. This does not establish fork safety for arbitrary threaded libraries.
 
 ## 4. Go client and connection reuse
 
