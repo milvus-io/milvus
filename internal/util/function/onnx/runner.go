@@ -25,7 +25,7 @@ type Runner struct {
 
 func NewRunner(manager *Manager) (*Runner, error) {
 	if manager == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("onnx: manager is nil")
+		return nil, merr.WrapErrServiceInternalMsg("onnx: manager is nil")
 	}
 	return &Runner{manager: manager}, nil
 }

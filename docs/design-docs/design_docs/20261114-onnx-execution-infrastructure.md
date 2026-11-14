@@ -40,17 +40,18 @@ example shows the lifecycle without requiring a native runtime in unit tests.
 
 ## Lifecycle and invariants
 
-1. `Acquire` checks the path and size before hashing the model. It rechecks the
-   digest after the backend returns. A replacement during load is rejected and
-   the new session is closed.
+1. `Acquire` checks the path and size, then copies the model into a private
+   snapshot while computing its digest. The backend loads that snapshot, so a
+   replacement of the original path cannot change the bytes being executed.
 2. Only a lease holds a positive session reference. Session removal and lease
    acquisition are synchronized by the manager mutex, so closing the manager
    cannot strand a reference or leak a native session.
 3. Loads use a cancellable gate. A caller waiting behind another model load can
    return when its context is canceled.
 4. Resident memory is charged only after a session passes signature validation.
-   Evicted sessions are removed from accounting under the manager mutex and
-   closed after unlocking it.
+   Evicted sessions are removed from the cache under the manager mutex but stay
+   charged until native teardown completes. Waiting for that teardown honors
+   the caller's context.
 5. Inference admission uses a weighted semaphore. Cancellation while waiting
    for admission returns without invoking the backend.
 6. A caller tensor must match name, type, rank, every static dimension and
@@ -67,11 +68,11 @@ typed backend errors intact.
 
 ## Validation plan
 
-Focused tests cover session reuse, content changes, single-load behavior,
-idle release, memory and concurrency limits, admission cancellation, inference
-failures, malformed outputs, unknown runtime types, oversized models and
-replacement during load. Race-enabled tests and `go vet` are required for the
-package.
+Focused tests cover session reuse, content changes, pinned snapshots,
+single-load behavior, idle release, memory and concurrency limits, admission
+cancellation, eviction cancellation, inference failures, malformed outputs,
+unknown runtime types, oversized models, malformed model nesting and path
+replacement. Race-enabled tests and `go vet` are required for the package.
 
 The package tests use a fake backend. They do not claim ONNX Runtime numerical
 parity or native executor integration; those require a pinned runtime adapter

@@ -49,6 +49,16 @@ type testSession struct {
 	closeFunc func()
 }
 
+func TestInternalDependencyErrorsAreSystemErrors(t *testing.T) {
+	_, err := NewManager(nil, Config{})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = NewRunner(nil)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+}
+
 func (s *testSession) Inputs() []TensorSpec {
 	if s.inputs != nil {
 		return s.inputs
@@ -460,9 +470,76 @@ func TestModelProtoScanBoundsNesting(t *testing.T) {
 	model = wrapModelProtoField(7, model)
 	path := t.TempDir() + "/deep.onnx"
 	require.NoError(t, os.WriteFile(path, model, 0o600))
-	external, err := modelHasExternalData(context.Background(), path)
+	_, err := modelHasExternalData(context.Background(), path)
+	require.ErrorIs(t, err, errModelProtoTooDeep)
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
 	require.NoError(t, err)
-	require.False(t, external)
+	defer manager.Close()
+	_, err = manager.Acquire(context.Background(), path)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestManagerLoadsPinnedModelSnapshot(t *testing.T) {
+	model := newTestModel(t)
+	require.NoError(t, os.WriteFile(model, []byte("model A"), 0o600))
+	var loaded []byte
+	backend := &testBackend{new: func(path string) *testSession {
+		require.NoError(t, os.WriteFile(model, []byte("model B"), 0o600))
+		loaded, _ = os.ReadFile(path)
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	lease, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	lease.Release()
+	require.Equal(t, []byte("model A"), loaded)
+}
+
+func TestManagerRejectsNULModelPath(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	_, err = manager.Acquire(context.Background(), "model\x00.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+}
+
+func TestManagerCancelsWhileWaitingForEvictionClose(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{memory: 16, closeFunc: func() {
+			select {
+			case <-closeStarted:
+			default:
+				close(closeStarted)
+			}
+			<-closeRelease
+		}, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 2, MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	first.Release()
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = manager.Acquire(ctx, secondModel)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	<-closeStarted
+	close(closeRelease)
+	second, err := manager.Acquire(context.Background(), secondModel)
+	require.NoError(t, err)
+	second.Release()
 }
 
 func wrapModelProtoField(field int, payload []byte) []byte {
