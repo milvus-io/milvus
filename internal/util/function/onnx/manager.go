@@ -355,7 +355,7 @@ func snapshotModel(ctx context.Context, path string, maxBytes int64) (string, st
 		return "", "", err
 	}
 	defer source.Close()
-	snapshot, err := os.CreateTemp(filepath.Dir(path), ".milvus-onnx-*"+filepath.Ext(path))
+	snapshot, err := os.CreateTemp("", ".milvus-onnx-*"+filepath.Ext(path))
 	if err != nil {
 		return "", "", err
 	}
