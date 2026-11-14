@@ -86,6 +86,7 @@ type managerEntry struct {
 	closed  atomic.Bool
 	closeMu sync.Mutex
 	timer   *time.Timer
+	timerID uint64
 	manager *Manager
 }
 
@@ -212,7 +213,7 @@ func (m *Manager) load(ctx context.Context, path, key, digest string) (*Lease, e
 		return nil, merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", path)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, merr.WrapErrParameterInvalidMsg("onnx: model path %q is not a regular file", path)
+		return nil, merr.WrapErrIoFailedMsg("onnx: model path %q is no longer a regular file", path)
 	}
 	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
 		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", path, info.Size(), m.config.MaxModelBytes)
@@ -316,6 +317,9 @@ func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, strin
 	}
 	external, err := modelHasExternalData(ctx, abs)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", "", "", merr.Wrap(ctx.Err(), "onnx: inspect model")
+		}
 		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: inspect model %q", abs)
 	}
 	if external {
@@ -616,19 +620,27 @@ func (m *Manager) scheduleIdleClose(entry *managerEntry) {
 	if entry.timer != nil {
 		entry.timer.Stop()
 	}
+	entry.timerID++
+	timerID := entry.timerID
 	entry.timer = time.AfterFunc(m.config.IdleTTL, func() {
-		m.removeAndClose(entry)
+		m.removeAndCloseTimer(entry, timerID)
 	})
 	m.mu.Unlock()
 }
 
 func (m *Manager) removeAndClose(entry *managerEntry) {
+	m.removeAndCloseTimer(entry, 0)
+}
+
+func (m *Manager) removeAndCloseTimer(entry *managerEntry, timerID uint64) {
 	m.mu.Lock()
-	if m.entries[entry.key] != entry || entry.refs.Load() != 0 {
+	if (timerID != 0 && entry.timerID != timerID) || m.entries[entry.key] != entry || entry.refs.Load() != 0 {
 		m.mu.Unlock()
 		return
 	}
 	delete(m.entries, entry.key)
+	entry.timerID++
+	entry.timer = nil
 	m.markClosingLocked(entry)
 	m.mu.Unlock()
 	entry.close()
@@ -644,10 +656,12 @@ func (m *Manager) evictIdleLocked(want int) []*managerEntry {
 			continue
 		}
 		delete(m.entries, key)
-		m.markClosingLocked(entry)
+		entry.timerID++
 		if entry.timer != nil {
 			entry.timer.Stop()
 		}
+		entry.timer = nil
+		m.markClosingLocked(entry)
 		evicted = append(evicted, entry)
 	}
 	return evicted

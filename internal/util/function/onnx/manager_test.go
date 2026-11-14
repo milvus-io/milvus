@@ -469,6 +469,30 @@ func TestManagerKeepsPendingCloseWithinLimits(t *testing.T) {
 	second.Release()
 }
 
+func TestManagerIgnoresStaleIdleTimer(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	lease, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	entry := lease.entry
+	lease.Release()
+	manager.mu.Lock()
+	staleTimerID := entry.timerID
+	manager.mu.Unlock()
+
+	lease, err = manager.Acquire(context.Background(), entry.path)
+	require.NoError(t, err)
+	lease.Release()
+	manager.removeAndCloseTimer(entry, staleTimerID)
+
+	require.Equal(t, 1, manager.SessionCount())
+	require.Equal(t, int32(0), entry.session.(*testSession).close.Load())
+}
+
 func TestValidateTensorsRejectsPayloadSizeOverflow(t *testing.T) {
 	err := validateTensors("input", []TensorSpec{{Name: "input", DataType: DataTypeFloat32, Shape: []int64{-1}}}, []Tensor{{
 		Name: "input", DataType: DataTypeFloat32, Shape: []int64{math.MaxInt64},
