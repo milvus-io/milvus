@@ -55,7 +55,7 @@ type Client struct {
 
 	metadataHeaders map[string]string
 
-	collCache *CollectionCache
+	collCache *collectionCache
 
 	// Telemetry manager for metrics collection and heartbeat
 	telemetry *ClientTelemetryManager
@@ -84,7 +84,7 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	c.collCache = NewCollectionCache(func(ctx context.Context, collName string) (*entity.Collection, error) {
+	c.collCache = newCollectionCache(func(ctx context.Context, collName string) (*entity.Collection, error) {
 		return c.DescribeCollection(ctx, NewDescribeCollectionOption(collName))
 	})
 
@@ -247,9 +247,14 @@ func (c *Client) connectInternal(ctx context.Context) error {
 
 	c.config.setServerInfo(resp.GetServerInfo().GetBuildTags())
 	c.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
-	if c.collCache != nil {
-		c.collCache.Reset()
-	}
+	// No collection-cache reset here. connectInternal runs on the initial
+	// connect (the cache is still empty) and on UseDatabase (database switch).
+	// Cache entries are keyed by (database, collection), so switching
+	// databases isolates entries naturally and does not require a full reset -
+	// this mirrors the java/cpp SDKs, whose process-wide caches are keyed by
+	// (endpoint, database, collection). A reset would only be needed when
+	// reconnecting to a different server/environment, which this client does
+	// not currently do.
 
 	return nil
 }

@@ -43,6 +43,7 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 	defer func() {
 		c.recordOperation("Search", collectionName, startTime, err)
 	}()
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(c.getCurrentDB(), collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 
 	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {
@@ -375,6 +376,7 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 	defer func() {
 		c.recordOperation("Query", collectionName, startTime, err)
 	}()
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(c.getCurrentDB(), collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 
 	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {
@@ -439,6 +441,7 @@ func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, ca
 	defer func() {
 		c.recordOperation("HybridSearch", collectionName, startTime, err)
 	}()
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(c.getCurrentDB(), collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 
 	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {

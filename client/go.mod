@@ -17,7 +17,6 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/x448/float16 v0.8.4
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
 )
