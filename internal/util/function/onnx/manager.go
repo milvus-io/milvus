@@ -33,6 +33,7 @@ const (
 	defaultMaxConcurrency = 4
 	defaultIdleTTL        = 5 * time.Minute
 	maxHashBuffer         = 1 << 20
+	maxModelProtoDepth    = 32
 )
 
 var (
@@ -386,7 +387,7 @@ func modelHasExternalData(ctx context.Context, path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	found, err := scanModelProto(ctx, file, 0, info.Size(), modelProtoModel)
+	found, err := scanModelProto(ctx, file, 0, info.Size(), modelProtoModel, 0)
 	if errors.Is(err, errMalformedModelProto) {
 		return false, nil
 	}
@@ -396,7 +397,10 @@ func modelHasExternalData(ctx context.Context, path string) (bool, error) {
 	return found, nil
 }
 
-func scanModelProto(ctx context.Context, file *os.File, offset, length int64, kind modelProtoKind) (bool, error) {
+func scanModelProto(ctx context.Context, file *os.File, offset, length int64, kind modelProtoKind, depth int) (bool, error) {
+	if depth > maxModelProtoDepth {
+		return false, errMalformedModelProto
+	}
 	if length < 0 || offset < 0 || offset > int64(^uint64(0)>>1)-length {
 		return false, errMalformedModelProto
 	}
@@ -443,7 +447,7 @@ func scanModelProto(ctx context.Context, file *os.File, offset, length int64, ki
 			if !ok {
 				continue
 			}
-			found, err := scanModelProto(ctx, file, childStart, int64(length), childKind)
+			found, err := scanModelProto(ctx, file, childStart, int64(length), childKind, depth+1)
 			if err != nil || found {
 				return found, err
 			}
@@ -468,10 +472,10 @@ func modelProtoChild(kind modelProtoKind, field int) (modelProtoKind, bool) {
 		switch field {
 		case 7:
 			return modelProtoGraph, true
-		case 8:
-			return modelProtoFunction, true
 		case 20:
 			return modelProtoTrainingInfo, true
+		case 25:
+			return modelProtoFunction, true
 		}
 	case modelProtoGraph:
 		switch field {
@@ -501,9 +505,9 @@ func modelProtoChild(kind modelProtoKind, field int) (modelProtoKind, bool) {
 		}
 	case modelProtoFunction:
 		switch field {
-		case 4:
-			return modelProtoNode, true
 		case 7:
+			return modelProtoNode, true
+		case 11:
 			return modelProtoAttribute, true
 		}
 	case modelProtoTrainingInfo:

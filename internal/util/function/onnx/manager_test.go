@@ -432,6 +432,62 @@ func TestManagerRejectsExternalTensorData(t *testing.T) {
 	require.Equal(t, int32(0), backend.loads.Load())
 }
 
+func TestManagerRejectsExternalTensorDataInLocalFunction(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := t.TempDir() + "/function-external.onnx"
+	// ModelProto.functions[0].attribute_proto[0].t.data_location = EXTERNAL.
+	modelBytes := []byte{0xca, 0x01, 0x06, 0x5a, 0x04, 0x2a, 0x02, 0x70, 0x01}
+	require.NoError(t, os.WriteFile(model, modelBytes, 0o600))
+
+	_, err = manager.Acquire(context.Background(), model)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestModelProtoScanBoundsNesting(t *testing.T) {
+	model := []byte{}
+	for i := 0; i < maxModelProtoDepth+2; i++ {
+		model = wrapModelProtoField(6, model)
+		model = wrapModelProtoField(5, model)
+		model = wrapModelProtoField(1, model)
+	}
+	model = wrapModelProtoField(7, model)
+	path := t.TempDir() + "/deep.onnx"
+	require.NoError(t, os.WriteFile(path, model, 0o600))
+	external, err := modelHasExternalData(context.Background(), path)
+	require.NoError(t, err)
+	require.False(t, external)
+}
+
+func wrapModelProtoField(field int, payload []byte) []byte {
+	tag := uint64(field<<3 | 2)
+	encoded := []byte{byte(tag)}
+	for tag >= 0x80 {
+		encoded[len(encoded)-1] = byte(tag&0x7f | 0x80)
+		tag >>= 7
+		encoded = append(encoded, byte(tag))
+	}
+	length := uint64(len(payload))
+	for {
+		b := byte(length & 0x7f)
+		length >>= 7
+		if length != 0 {
+			b |= 0x80
+		}
+		encoded = append(encoded, b)
+		if length == 0 {
+			break
+		}
+	}
+	return append(encoded, payload...)
+}
+
 func TestManagerKeepsPendingCloseWithinLimits(t *testing.T) {
 	closeStarted := make(chan struct{})
 	closeRelease := make(chan struct{})
