@@ -215,6 +215,16 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 	if err := ctx.Err(); err != nil {
 		return nil, merr.Wrap(err, "onnx: model load canceled")
 	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return nil, merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", sourcePath)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, merr.WrapErrServiceUnavailableMsg("onnx: model path %q is no longer a regular file", sourcePath)
+	}
+	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
+		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", sourcePath, info.Size(), m.config.MaxModelBytes)
+	}
 	snapshotPath, snapshotDigest, err := snapshotModel(ctx, sourcePath, m.config.MaxModelBytes)
 	if err != nil {
 		if ctx.Err() != nil {
