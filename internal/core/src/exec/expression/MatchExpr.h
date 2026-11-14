@@ -63,10 +63,8 @@ class PhyMatchFilterExpr : public Expr {
                     ? active_count_ - current_pos_
                     : batch_size_;
             current_pos_ += real_batch_size;
-            if (!use_element_offsets_) {
-                for (auto& input : inputs_) {
-                    input->MoveCursor();
-                }
+            for (auto& input : inputs_) {
+                input->MoveCursor();
             }
         }
     }
@@ -112,9 +110,6 @@ class PhyMatchFilterExpr : public Expr {
     segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t active_count_;
     int64_t current_pos_{0};
-    // Once candidates require sparse element evaluation, keep the child in
-    // offset mode. Its sequential cursors no longer track the parent batches.
-    bool use_element_offsets_{false};
     int64_t batch_size_;
     int64_t size_per_chunk_;
 };

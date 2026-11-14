@@ -59,7 +59,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
+        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
@@ -138,7 +138,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
+        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
@@ -212,7 +212,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
+        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
@@ -296,7 +296,8 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 VectorPtr
-PhyGISFunctionFilterExpr::EvalForDataSegment(const TargetBitmap& bitmap_input) {
+PhyGISFunctionFilterExpr::EvalForDataSegment(
+    const TargetBitmapView& bitmap_input) {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -496,7 +497,7 @@ DWithinCandidates(const index::ISpatialReader& reader,
 
 VectorPtr
 PhyGISFunctionFilterExpr::EvalForIndexSegment(
-    const TargetBitmap& bitmap_input) {
+    const TargetBitmapView& bitmap_input) {
     AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {

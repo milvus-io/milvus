@@ -246,6 +246,21 @@ StructElementOffsetsSealed::CopyRowElementStarts(int64_t row_start,
                 sizeof(int32_t) * (row_count + 1));
 }
 
+TargetBitmap
+IStructElementOffsets::RowBitsetToElementBitset(const TargetBitmapView& rows,
+                                                int64_t row_start) const {
+    FixedVector<int32_t> starts(rows.size() + 1);
+    CopyRowElementStarts(row_start, rows.size(), starts.data());
+    TargetBitmap result(starts.back() - starts.front(), false);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i]) {
+            result.set(
+                starts[i] - starts.front(), starts[i + 1] - starts[i], true);
+        }
+    }
+    return result;
+}
+
 std::pair<TargetBitmap, TargetBitmap>
 StructElementOffsetsSealed::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
@@ -277,6 +292,35 @@ StructElementOffsetsSealed::RowBitsetToElementBitset(
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+TargetBitmap
+StructElementOffsetsSealed::RowBitsetToElementBitset(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    int64_t element_start = row_to_element_start_[row_start];
+    int64_t element_end = row_to_element_start_[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+
+    TargetBitmap element_bitset(element_count);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = row_to_element_start_[row_id] - element_start;
+        int64_t end = row_to_element_start_[row_id + 1] - element_start;
+        if (start < end) {
+            element_bitset.set(start, end - start, row_bitset[i]);
+        }
+    }
+
+    return element_bitset;
 }
 
 FixedVector<int32_t>
@@ -715,6 +759,40 @@ StructElementOffsetsGrowing::RowBitsetToElementBitset(
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+TargetBitmap
+StructElementOffsetsGrowing::RowBitsetToElementBitset(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed);
+
+    ChunkedReader starts(starts_chunks_);
+    int64_t element_start = starts[row_start];
+    int64_t element_end = starts[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+
+    TargetBitmap element_bitset(element_count);
+
+    // Use row-based iteration (more efficient than element-based)
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = starts[row_id] - element_start;
+        int64_t end = starts[row_id + 1] - element_start;
+        if (start < end) {
+            element_bitset.set(start, end - start, row_bitset[i]);
+        }
+    }
+
+    return element_bitset;
 }
 
 FixedVector<int32_t>
