@@ -1,0 +1,551 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+package onnx
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/sync/semaphore"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+const (
+	defaultMaxSessions    = 32
+	defaultMaxConcurrency = 4
+	defaultIdleTTL        = 5 * time.Minute
+	maxHashBuffer         = 1 << 20
+)
+
+var errModelTooLarge = errors.New("onnx: model exceeds configured size")
+
+// Config bounds resident sessions, inference calls, and runtime memory.
+// Zero values select conservative defaults, except MaxMemoryBytes where zero
+// means unlimited (the runtime remains bounded by MaxSessions).
+type Config struct {
+	MaxSessions    int
+	MaxConcurrency int
+	MaxMemoryBytes uint64
+	IdleTTL        time.Duration
+	MaxModelBytes  int64
+}
+
+func (c Config) normalized() (Config, error) {
+	if c.MaxSessions == 0 {
+		c.MaxSessions = defaultMaxSessions
+	}
+	if c.MaxConcurrency == 0 {
+		c.MaxConcurrency = defaultMaxConcurrency
+	}
+	if c.IdleTTL == 0 {
+		c.IdleTTL = defaultIdleTTL
+	}
+	if c.MaxSessions < 1 {
+		return Config{}, merr.WrapErrParameterInvalidMsg("onnx: max sessions must be positive")
+	}
+	if c.MaxConcurrency < 1 {
+		return Config{}, merr.WrapErrParameterInvalidMsg("onnx: max concurrency must be positive")
+	}
+	if c.IdleTTL < 0 {
+		return Config{}, merr.WrapErrParameterInvalidMsg("onnx: idle TTL cannot be negative")
+	}
+	if c.MaxModelBytes < 0 {
+		return Config{}, merr.WrapErrParameterInvalidMsg("onnx: max model bytes cannot be negative")
+	}
+	return c, nil
+}
+
+type managerEntry struct {
+	key     string
+	path    string
+	session Session
+	memory  uint64
+	refs    atomic.Int64
+	closing atomic.Bool
+	closed  atomic.Bool
+	closeMu sync.Mutex
+	timer   *time.Timer
+	manager *Manager
+}
+
+// Manager owns loaded CPU sessions and their lifecycle. A session remains
+// alive while a Lease is held; idle sessions are evicted after IdleTTL.
+type Manager struct {
+	backend        Backend
+	backendName    string
+	backendVersion string
+	config         Config
+	sem            *semaphore.Weighted
+
+	mu       sync.Mutex
+	entries  map[string]*managerEntry
+	memBytes uint64
+	closed   bool
+	loadMu   chan struct{}
+}
+
+// NewManager validates the runtime policy and creates an empty session cache.
+func NewManager(backend Backend, config Config) (*Manager, error) {
+	if backend == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("onnx: backend is nil")
+	}
+	backendName, backendVersion := backend.Name(), backend.Version()
+	if backendName == "" || backendVersion == "" {
+		return nil, merr.WrapErrParameterInvalidMsg("onnx: backend name and runtime version are required")
+	}
+	config, err := config.normalized()
+	if err != nil {
+		return nil, err
+	}
+	return &Manager{
+		backend:        backend,
+		backendName:    backendName,
+		backendVersion: backendVersion,
+		config:         config,
+		sem:            semaphore.NewWeighted(int64(config.MaxConcurrency)),
+		entries:        make(map[string]*managerEntry),
+		loadMu:         newLoadGate(),
+	}, nil
+}
+
+func newLoadGate() chan struct{} {
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
+	return gate
+}
+
+// Acquire returns a lease for the content-addressed model at modelPath.
+// Loads are serialized, so concurrent callers never create duplicate runtime
+// sessions for the same model/runtime version.
+func (m *Manager) Acquire(ctx context.Context, modelPath string) (*Lease, error) {
+	if m == nil {
+		return nil, merr.WrapErrServiceInternalMsg("onnx: manager is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, merr.Wrap(err, "onnx: acquire canceled")
+	}
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
+	}
+	path, key, digest, err := m.modelKey(ctx, modelPath)
+	if err != nil {
+		return nil, err
+	}
+	if lease, ok := m.tryAcquire(key); ok {
+		return lease, nil
+	}
+
+	return m.load(ctx, path, key, digest)
+}
+
+func (m *Manager) load(ctx context.Context, path, key, digest string) (*Lease, error) {
+	// Serializing loads keeps the configured resident-memory limit meaningful
+	// for backends that cannot estimate their native allocation before loading.
+	select {
+	case <-ctx.Done():
+		return nil, merr.Wrap(ctx.Err(), "onnx: model load canceled")
+	case <-m.loadMu:
+	}
+	defer func() { m.loadMu <- struct{}{} }()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
+	}
+	if existing := m.entries[key]; existing != nil && !existing.closing.Load() {
+		existing.refs.Add(1)
+		m.mu.Unlock()
+		return &Lease{entry: existing}, nil
+	}
+	var evicted []*managerEntry
+	if len(m.entries) >= m.config.MaxSessions {
+		evicted = m.evictIdleLocked(len(m.entries) - m.config.MaxSessions + 1)
+		if len(m.entries) >= m.config.MaxSessions {
+			m.mu.Unlock()
+			closeEntries(evicted)
+			return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "onnx: maximum resident sessions (%d) reached", m.config.MaxSessions)
+		}
+	}
+	m.mu.Unlock()
+	closeEntries(evicted)
+
+	if err := ctx.Err(); err != nil {
+		return nil, merr.Wrap(err, "onnx: model load canceled")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", path)
+	}
+	if info.IsDir() {
+		return nil, merr.WrapErrParameterInvalidMsg("onnx: model path %q is a directory", path)
+	}
+	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
+		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", path, info.Size(), m.config.MaxModelBytes)
+	}
+	session, err := m.backend.Load(ctx, path)
+	if err != nil {
+		if session != nil {
+			_ = session.Close()
+		}
+		return nil, merr.Wrap(err, "onnx: load model")
+	}
+	if session == nil {
+		return nil, merr.WrapErrServiceInternalMsg("onnx: backend returned a nil session")
+	}
+	loadedDigest, err := hashFile(ctx, path, m.config.MaxModelBytes)
+	if err != nil {
+		_ = session.Close()
+		if errors.Is(err, errModelTooLarge) {
+			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q grew beyond the configured model size", path)
+		}
+		if ctx.Err() != nil {
+			return nil, merr.Wrap(ctx.Err(), "onnx: verify model after load")
+		}
+		return nil, merr.WrapErrIoFailedErr(err, "onnx: verify model after load %q", path)
+	}
+	if loadedDigest != digest {
+		_ = session.Close()
+		return nil, merr.WrapErrServiceUnavailableMsg("onnx: model changed while loading %q", path)
+	}
+	if err := validateSessionSpecs(session); err != nil {
+		_ = session.Close()
+		return nil, err
+	}
+	memory := session.MemoryBytes()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		_ = session.Close()
+		return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
+	}
+	if m.config.MaxMemoryBytes > 0 && memory > m.config.MaxMemoryBytes-m.memBytes {
+		evicted := m.evictIdleForMemoryLocked(memory)
+		available := m.config.MaxMemoryBytes - m.memBytes
+		if memory > available {
+			m.mu.Unlock()
+			closeEntries(evicted)
+			_ = session.Close()
+			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: resident session memory limit exceeded (%d > %d bytes)", memory, available)
+		}
+		m.mu.Unlock()
+		closeEntries(evicted)
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			_ = session.Close()
+			return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
+		}
+	}
+	if m.config.MaxMemoryBytes > 0 && memory > m.config.MaxMemoryBytes-m.memBytes {
+		available := m.config.MaxMemoryBytes - m.memBytes
+		m.mu.Unlock()
+		_ = session.Close()
+		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: resident session memory limit exceeded (%d > %d bytes)", memory, available)
+	}
+	if existing := m.entries[key]; existing != nil {
+		existing.refs.Add(1)
+		m.mu.Unlock()
+		_ = session.Close()
+		return &Lease{entry: existing}, nil
+	}
+	entry := &managerEntry{key: key, path: path, session: session, memory: memory, manager: m}
+	entry.refs.Store(1)
+	m.entries[key] = entry
+	m.memBytes += memory
+	m.mu.Unlock()
+	return &Lease{entry: entry}, nil
+}
+
+func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, string, string, error) {
+	if modelPath == "" {
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path is empty")
+	}
+	abs, err := filepath.Abs(modelPath)
+	if err != nil {
+		return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: resolve model path")
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: stat model %q failed", abs)
+		}
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", abs)
+	}
+	if info.IsDir() {
+		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path %q is a directory", abs)
+	}
+	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
+		return "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", abs, info.Size(), m.config.MaxModelBytes)
+	}
+	digest, err := hashFile(ctx, abs, m.config.MaxModelBytes)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", "", "", merr.Wrap(ctx.Err(), "onnx: hash model")
+		}
+		if errors.Is(err, errModelTooLarge) {
+			return "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size", abs)
+		}
+		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: hash model %q", abs)
+	}
+	key := m.backendName + ":" + m.backendVersion + ":" + digest
+	return abs, key, digest, nil
+}
+
+func hashFile(ctx context.Context, path string, maxBytes int64) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	buffer := make([]byte, maxHashBuffer)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		read, readErr := file.Read(buffer)
+		if read > 0 {
+			total += int64(read)
+			if maxBytes > 0 && total > maxBytes {
+				return "", errModelTooLarge
+			}
+			if _, err := hash.Write(buffer[:read]); err != nil {
+				return "", err
+			}
+		}
+		if readErr == io.EOF {
+			return hex.EncodeToString(hash.Sum(nil)), nil
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+	}
+}
+
+func (m *Manager) tryAcquire(key string) (*Lease, bool) {
+	m.mu.Lock()
+	entry := m.entries[key]
+	m.mu.Unlock()
+	return m.acquireEntry(entry)
+}
+
+func (m *Manager) acquireEntry(entry *managerEntry) (*Lease, bool) {
+	if entry == nil || entry.manager != m {
+		return nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.entries[entry.key] != entry || entry.closing.Load() {
+		return nil, false
+	}
+	entry.refs.Add(1)
+	return &Lease{entry: entry}, true
+}
+
+// Lease keeps one model session resident until Release. Release is idempotent.
+type Lease struct {
+	entry    *managerEntry
+	released atomic.Bool
+}
+
+func (l *Lease) Session() Session {
+	if l == nil || l.entry == nil || l.released.Load() {
+		return nil
+	}
+	return l.entry.session
+}
+
+// Identity is the content and runtime version identity used by the cache.
+// It is stable for the lifetime of a lease.
+func (l *Lease) Identity() string {
+	if l == nil || l.entry == nil {
+		return ""
+	}
+	return l.entry.key
+}
+
+// Run executes one inference under the manager's concurrency bound.
+func (l *Lease) Run(ctx context.Context, inputs []Tensor) ([]Tensor, error) {
+	if l == nil || l.entry == nil || l.released.Load() {
+		return nil, merr.WrapErrServiceInternalMsg("onnx: lease is released")
+	}
+	if err := l.entry.manager.sem.Acquire(ctx, 1); err != nil {
+		return nil, merr.Wrap(err, "onnx: inference admission")
+	}
+	defer l.entry.manager.sem.Release(1)
+	outputs, err := l.entry.session.Run(ctx, inputs)
+	if err != nil {
+		return nil, merr.Wrap(err, "onnx: inference failed")
+	}
+	return outputs, nil
+}
+
+func (l *Lease) Release() {
+	if l == nil || l.entry == nil || !l.released.CompareAndSwap(false, true) {
+		return
+	}
+	entry := l.entry
+	refs := entry.refs.Add(-1)
+	if refs == 0 && entry.closing.Load() {
+		entry.close()
+		return
+	}
+	if refs == 0 {
+		entry.manager.scheduleIdleClose(entry)
+	}
+}
+
+func (m *Manager) scheduleIdleClose(entry *managerEntry) {
+	if m.config.IdleTTL == 0 {
+		m.removeAndClose(entry)
+		return
+	}
+	m.mu.Lock()
+	if m.entries[entry.key] != entry || entry.refs.Load() != 0 || m.closed {
+		m.mu.Unlock()
+		return
+	}
+	if entry.timer != nil {
+		entry.timer.Stop()
+	}
+	entry.timer = time.AfterFunc(m.config.IdleTTL, func() {
+		m.removeAndClose(entry)
+	})
+	m.mu.Unlock()
+}
+
+func (m *Manager) removeAndClose(entry *managerEntry) {
+	m.mu.Lock()
+	if m.entries[entry.key] != entry || entry.refs.Load() != 0 {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.entries, entry.key)
+	if memory := entry.memory; m.memBytes >= memory {
+		m.memBytes -= memory
+	} else {
+		m.memBytes = 0
+	}
+	entry.closing.Store(true)
+	m.mu.Unlock()
+	entry.close()
+}
+
+func (m *Manager) evictIdleLocked(want int) []*managerEntry {
+	if want <= 0 {
+		return nil
+	}
+	evicted := make([]*managerEntry, 0, want)
+	for key, entry := range m.entries {
+		if len(evicted) >= want || entry.refs.Load() != 0 {
+			continue
+		}
+		delete(m.entries, key)
+		if memory := entry.memory; m.memBytes >= memory {
+			m.memBytes -= memory
+		} else {
+			m.memBytes = 0
+		}
+		entry.closing.Store(true)
+		if entry.timer != nil {
+			entry.timer.Stop()
+		}
+		evicted = append(evicted, entry)
+	}
+	return evicted
+}
+
+func (m *Manager) evictIdleForMemoryLocked(incoming uint64) []*managerEntry {
+	if m.config.MaxMemoryBytes == 0 || incoming <= m.config.MaxMemoryBytes-m.memBytes {
+		return nil
+	}
+	return m.evictIdleLocked(len(m.entries))
+}
+
+func closeEntries(entries []*managerEntry) {
+	for _, entry := range entries {
+		entry.close()
+	}
+}
+
+func (e *managerEntry) close() {
+	e.closeMu.Lock()
+	defer e.closeMu.Unlock()
+	if !e.closed.CompareAndSwap(false, true) {
+		return
+	}
+	if e.session != nil {
+		if err := e.session.Close(); err != nil {
+			mlog.Warn(context.TODO(), "close onnx session failed", mlog.String("model", e.path), mlog.Err(err))
+		}
+	}
+}
+
+// Close evicts idle sessions immediately and defers active session destruction
+// until their leases are released.
+func (m *Manager) Close() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
+	entries := make([]*managerEntry, 0, len(m.entries))
+	for _, entry := range m.entries {
+		entry.closing.Store(true)
+		entries = append(entries, entry)
+	}
+	m.entries = make(map[string]*managerEntry)
+	m.memBytes = 0
+	m.mu.Unlock()
+	for _, entry := range entries {
+		if entry.refs.Load() == 0 {
+			entry.close()
+		}
+	}
+}
+
+// SessionCount reports resident sessions. A session being loaded is excluded.
+func (m *Manager) SessionCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.entries)
+}
+
+// MemoryBytes reports the native memory charged to resident sessions.
+func (m *Manager) MemoryBytes() uint64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.memBytes
+}
