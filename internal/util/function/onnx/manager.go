@@ -188,7 +188,7 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 		return &Lease{entry: existing}, nil
 	}
 	var evicted []*managerEntry
-	if m.sessionCountLocked() >= m.config.MaxSessions && m.pendingSessions == 0 {
+	if m.sessionCountLocked() >= m.config.MaxSessions {
 		evicted = m.evictIdleLocked(1)
 	}
 	m.mu.Unlock()

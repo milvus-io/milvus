@@ -618,6 +618,36 @@ func TestManagerEvictsIdleEntryWhenPendingMemoryExceedsLimit(t *testing.T) {
 	manager.Close()
 }
 
+func TestManagerEvictsIdleEntryWhileAnotherSessionIsClosing(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 2, IdleTTL: time.Hour})
+	require.NoError(t, err)
+
+	idle := &managerEntry{
+		key:       "idle",
+		session:   &testSession{},
+		memory:    8,
+		manager:   manager,
+		closeDone: make(chan struct{}),
+	}
+	manager.mu.Lock()
+	manager.entries[idle.key] = idle
+	manager.pendingSessions = 1 // another entry is already closing
+	manager.mu.Unlock()
+
+	lease, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	lease.Release()
+
+	// The pending close is only represented in this focused admission test.
+	manager.mu.Lock()
+	manager.pendingSessions = 0
+	manager.mu.Unlock()
+	manager.Close()
+}
+
 func wrapModelProtoField(field int, payload []byte) []byte {
 	tag := uint64(field<<3 | 2)
 	encoded := []byte{byte(tag)}
