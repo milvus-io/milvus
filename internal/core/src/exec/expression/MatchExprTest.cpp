@@ -970,7 +970,7 @@ class MatchExprCandidateTest : public ::testing::TestWithParam<bool> {
     int64_t saved_batch_size_;
 };
 
-TEST_P(MatchExprCandidateTest, SequentialSparseEmptySkippedAndDenseBatches) {
+TEST_P(MatchExprCandidateTest, SequentialEmptySkippedAndDenseBatches) {
     for (auto type : types_) {
         for (int64_t threshold : {0, 1, 2, 4}) {
             SCOPED_TRACE(::testing::Message() << "type=" << int(type)
@@ -1018,12 +1018,12 @@ TEST_P(MatchExprCandidateTest, SequentialSparseEmptySkippedAndDenseBatches) {
                 }
                 EXPECT_TRUE(candidates == ctx.get_bitmap_input());
             }
-            // Sparse batches advance the sequential cursor too, allowing the
-            // next dense batch to resume sequential execution.
-            EXPECT_EQ(child->moves, 4);
+            // These two-row batches exceed the row-selectivity cutoff even
+            // when their selected elements are sparse.
+            EXPECT_EQ(child->moves, 3);
             ASSERT_EQ(child->offset_calls.size(), 4);
             EXPECT_EQ(child->offset_calls,
-                      (std::vector<bool>{false, true, false, false}));
+                      (std::vector<bool>{false, false, false, false}));
             VectorPtr exhausted;
             match->Eval(ctx, exhausted);
             EXPECT_EQ(exhausted, nullptr);
@@ -1075,7 +1075,7 @@ TEST_P(MatchExprCandidateTest, EmptyCandidatesSkipIndexEvaluationAndPrefetch) {
 }
 
 TEST_P(MatchExprCandidateTest,
-       ElementSelectivityControlsEachBatchIndependently) {
+       DenseCandidateRowsStaySequentialDespiteSparseElements) {
     for (bool select_long_row : {false, true}) {
         std::shared_ptr<RecordingMatchElementExpr> child;
         auto match = MakeMatch(expr::MatchType::MatchAny, 0, 2, child);
@@ -1096,7 +1096,7 @@ TEST_P(MatchExprCandidateTest,
               expr::MatchType::MatchAny,
               0);
         ASSERT_EQ(child->offset_calls.size(), 1);
-        EXPECT_EQ(child->offset_calls.back(), !select_long_row);
+        EXPECT_FALSE(child->offset_calls.back());
         ctx.clear_bitmap_input();
         match->Eval(ctx, result);
         Check(result,
@@ -1233,10 +1233,10 @@ TEST_P(MatchExprCandidateTest, AndOrPropagateCandidatesIncludingUnknown) {
 }
 
 TEST_P(MatchExprCandidateTest,
-       SparseShortCircuitThenDenseKeepsAllLeafCursorsAligned) {
+       ShortCircuitThenDenseKeepsAllLeafCursorsAligned) {
     ScopedSchemaHandle handle(*schema_);
-    // The sparse batch contains only row 3 (one of 66 elements). Its first
-    // element term is FALSE, so the second leaf is never evaluated by offsets.
+    // The masked batch contains only row 3 (one of 66 elements). Its first
+    // element term is FALSE, so the second leaf can be short-circuited.
     // The following dense batch must still start both leaves at parent row 4.
     const auto bytes = handle.Parse(
         "id != 2 && match_any(struct_array, $[sub_int] != 67 && $[sub_int] >= "
@@ -1595,6 +1595,150 @@ TEST_P(MatchExprCandidateTest, SequentialOnlyChildReceivesElementCandidates) {
         }
     }
     EXPECT_EQ(child->moves, 4);
+}
+
+TEST(MatchExprRouting, BothRowAndElementSelectivityGateSparseBatches) {
+    constexpr int64_t batch_rows = 40;
+    constexpr int64_t row_count = 6 * batch_rows;
+    const auto saved_batch_size =
+        EXEC_EVAL_EXPR_BATCH_SIZE.exchange(batch_rows);
+    auto batch_guard = folly::makeGuard([saved_batch_size] {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+    });
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto field = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
+    std::vector<int64_t> ids(row_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<proto::schema::ScalarField> arrays(row_count);
+    std::vector<int64_t> starts{0};
+    for (int64_t row = 0; row < row_count; ++row) {
+        const auto length = row % batch_rows == 0 ? 3000 : 1;
+        for (int64_t i = 0; i < length; ++i) {
+            arrays[row].mutable_int_data()->add_data(starts.back() + i);
+        }
+        starts.push_back(starts.back() + length);
+    }
+    auto insert = std::make_unique<InsertRecordProto>();
+    auto id_data =
+        CreateDataArrayFrom(ids.data(), nullptr, row_count, (*schema)[pk]);
+    insert->mutable_fields_data()->AddAllocated(id_data.release());
+    auto array_data = CreateDataArrayFrom(
+        arrays.data(), nullptr, row_count, (*schema)[field]);
+    insert->mutable_fields_data()->AddAllocated(array_data.release());
+    insert->set_num_rows(row_count);
+    GeneratedData generated(std::move(insert));
+    generated.schema_ = schema;
+    generated.row_ids_ = ids;
+    generated.timestamps_.assign(ids.begin(), ids.end());
+    TargetBitmap data(starts.back(), true);
+    TargetBitmap valid(starts.back(), true);
+    for (int64_t i = 0; i < starts.back(); ++i) {
+        data[i] = i % 3 != 0;
+        valid[i] = i % 5 != 0;
+    }
+    for (bool sealed : {false, true}) {
+        SCOPED_TRACE(sealed);
+        std::unique_ptr<SegmentInternalInterface> segment;
+        if (sealed) {
+            segment = CreateSealedWithFieldDataLoaded(schema, generated);
+        } else {
+            auto growing = CreateGrowingSegment(schema, empty_index_meta);
+            growing->PreInsert(row_count);
+            growing->Insert(0,
+                            row_count,
+                            ids.data(),
+                            generated.timestamps_.data(),
+                            generated.SharedRaw());
+            segment = std::move(growing);
+        }
+        exec::QueryContext query(
+            "row_selectivity", segment.get(), row_count, MAX_TIMESTAMP);
+        exec::ExecContext exec(&query);
+        for (const auto type : {expr::MatchType::MatchAny,
+                                expr::MatchType::MatchAll,
+                                expr::MatchType::MatchLeast,
+                                expr::MatchType::MatchMost,
+                                expr::MatchType::MatchExact}) {
+            auto child = std::make_shared<RecordingMatchElementExpr>(
+                starts, data, valid, batch_rows);
+            auto logical = std::make_shared<expr::MatchExpr>(
+                "struct_array", type, 1, expr::TypedExprPtr{});
+            exec::PhyMatchFilterExpr match({child},
+                                           logical,
+                                           "row_gate",
+                                           nullptr,
+                                           segment.get(),
+                                           row_count,
+                                           batch_rows);
+            exec::EvalCtx ctx(&exec);
+            for (int batch = 0; batch < 6; ++batch) {
+                TargetBitmap candidates(batch_rows, false);
+                // 2.5%, exactly 5%, 7.5%, 97.5% short rows; then one long
+                // row (2.5% rows but >98% elements), followed by a full batch.
+                const int short_rows = batch < 3 ? batch + 1 : 39;
+                for (int i = 1; i <= short_rows; ++i) candidates[i] = true;
+                if (batch == 4) {
+                    candidates.reset();
+                    candidates[0] = true;
+                }
+                if (batch == 5)
+                    candidates.set();
+                ctx.set_bitmap_input(candidates.view());
+                VectorPtr result;
+                match.Eval(ctx, result);
+                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                ASSERT_NE(output, nullptr);
+                TargetBitmapView hits(output->GetRawData(), output->size());
+                for (int i = 0; i < batch_rows; ++i) {
+                    if (!candidates[i])
+                        continue;
+                    const auto row = batch * batch_rows + i;
+                    EXPECT_EQ(
+                        hits[i],
+                        MatchSingleRowReference(starts[row],
+                                                starts[row + 1] - starts[row],
+                                                data,
+                                                valid,
+                                                type,
+                                                1));
+                }
+            }
+            EXPECT_EQ(
+                child->offset_calls,
+                (std::vector<bool>{true, true, false, false, false, false}));
+            EXPECT_EQ(child->moves, 2);
+        }
+        // A short-circuited offset batch must advance both real AND leaves
+        // before the next batch resumes sequential evaluation.
+        ScopedSchemaHandle handle(*schema);
+        const auto bytes = handle.Parse(
+            "match_any(struct_array, $[sub_int] >= 3090 && $[sub_int] >= "
+            "6000)");
+        auto plan =
+            CreateRetrievePlanByExpr(schema, bytes.data(), bytes.size());
+        auto filter = std::dynamic_pointer_cast<const plan::FilterBitsNode>(
+            plan->plan_node_->plannodes_->sources().front());
+        ASSERT_NE(filter, nullptr);
+        exec::ExprSet expressions({filter->filter()}, &exec);
+        exec::EvalCtx ctx(&exec);
+        TargetBitmap candidates(batch_rows, false);
+        candidates[1] = true;
+        ctx.set_bitmap_input(candidates.view());
+        std::vector<VectorPtr> result;
+        expressions.Eval(ctx, result);
+        auto first = std::dynamic_pointer_cast<ColumnVector>(result[0]);
+        ASSERT_NE(first, nullptr);
+        EXPECT_FALSE(TargetBitmapView(first->GetRawData(), first->size())[1]);
+        ctx.clear_bitmap_input();
+        expressions.Eval(ctx, result);
+        auto second = std::dynamic_pointer_cast<ColumnVector>(result[0]);
+        ASSERT_NE(second, nullptr);
+        EXPECT_TRUE(
+            TargetBitmapView(second->GetRawData(), second->size()).all());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(GrowingAndSealed,
