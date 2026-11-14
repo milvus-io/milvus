@@ -128,7 +128,7 @@ func NewBaseTable(opts ...Option) *BaseTable {
 	defaultConfig := &baseTableConfig{
 		configDir:       initConfPath(),
 		yamlFiles:       defaultYaml,
-		refreshInterval: 5 * time.Second,
+		refreshInterval: defaultRefreshInterval,
 		skipRemote:      false,
 		skipEnv:         false,
 	}
