@@ -3,6 +3,8 @@ package queryclient
 import (
 	"context"
 
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -16,14 +18,18 @@ type compositeViewQueryServiceClient struct {
 
 type StreamingNodeViewQueryServiceClient interface {
 	SearchOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	SearchOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	QueryOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 }
 
 type QueryNodeViewQueryServiceClient interface {
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	SearchOnViewStream(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	QueryOnViewStream(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 }
 
 func NewCompositeViewQueryServiceClient(streamingNode StreamingNodeViewQueryServiceClient, queryNode QueryNodeViewQueryServiceClient) ViewQueryServiceClient {
@@ -44,12 +50,34 @@ func (c *compositeViewQueryServiceClient) SearchOnView(ctx context.Context, node
 	}
 }
 
+func (c *compositeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+	switch typed := node.(type) {
+	case qviews.StreamingNode:
+		return c.streamingNode.SearchOnViewStream(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
+	case qviews.QueryNode:
+		return c.queryNode.SearchOnViewStream(ctx, typed.ID, req)
+	default:
+		return nil, invalidWorkNodeError(node)
+	}
+}
+
 func (c *compositeViewQueryServiceClient) QueryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	switch typed := node.(type) {
 	case qviews.StreamingNode:
 		return c.streamingNode.QueryOnView(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
 	case qviews.QueryNode:
 		return c.queryNode.QueryOnView(ctx, typed.ID, req)
+	default:
+		return nil, invalidWorkNodeError(node)
+	}
+}
+
+func (c *compositeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+	switch typed := node.(type) {
+	case qviews.StreamingNode:
+		return c.streamingNode.QueryOnViewStream(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
+	case qviews.QueryNode:
+		return c.queryNode.QueryOnViewStream(ctx, typed.ID, req)
 	default:
 		return nil, invalidWorkNodeError(node)
 	}

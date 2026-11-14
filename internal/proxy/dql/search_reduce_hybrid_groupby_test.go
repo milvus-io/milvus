@@ -18,6 +18,7 @@ package dql
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,9 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -49,8 +54,12 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 		namespace       bool
 		allNullTemplate bool
 		legacyTemplate  bool
+		weighted        bool
+		workerChain     bool
 	}{
 		{name: "no output fields", policy: "OutputFields"},
+		{name: "weighted fusion", policy: "OutputFields", weighted: true},
+		{name: "L1 sub-search", policy: "OutputFields", workerChain: true},
 		{name: "namespace output vector", policy: "OutputVector", namespace: true},
 		{name: "namespace always", policy: "Always", namespace: true},
 		{name: "all-null vector template", policy: "Always", namespace: true, allNullTemplate: true},
@@ -58,6 +67,10 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			paramtable.Get().Save(policyKey, tc.policy)
+			strategy, params := "rrf", `{"k": 60}`
+			if tc.weighted {
+				strategy, params = "weighted", `{"weights": [0.3, 0.7]}`
+			}
 			ctx := context.Background()
 			span := trace.SpanFromContext(ctx)
 			schema := &schemapb.CollectionSchema{
@@ -91,8 +104,8 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 					SearchParams: []*commonpb.KeyValuePair{
 						{Key: LimitKey, Value: "3"},
 						{Key: GroupByFieldKey, Value: "group"},
-						{Key: RankTypeKey, Value: "rrf"},
-						{Key: ParamsKey, Value: `{"k": 60}`},
+						{Key: RankTypeKey, Value: strategy},
+						{Key: ParamsKey, Value: params},
 					},
 				},
 				tr: timerecord.NewTimeRecorder("test"),
@@ -118,8 +131,32 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 					},
 				})
 			}
+			if tc.workerChain {
+				task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			}
 			require.NoError(t, task.initAdvancedSearchRequest(ctx))
 			require.False(t, task.needRequery)
+			for _, sub := range task.SubReqs {
+				require.Equal(t, internalpb.SearchType_DEFAULT, sub.GetSearchType())
+			}
+			require.True(t, task.supportsStreamingReduce(), "initialized Hybrid Group By must use the streaming path")
+			task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{{}}
+			require.False(t, task.supportsStreamingReduce(), "Hybrid sub-search function chains remain Batch-only")
+			if tc.workerChain {
+				task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			} else {
+				task.request.SubReqs[0].FunctionChains = nil
+			}
+			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
+			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+			streamKey := paramtable.Get().ProxyCfg.EnableReduceStream.Key
+			oldStream := paramtable.Get().ProxyCfg.EnableReduceStream.GetValue()
+			t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(streamKey, oldStream)) })
+			for _, enabled := range []bool{true, false} {
+				require.NoError(t, paramtable.Get().Save(streamKey, strconv.FormatBool(enabled)))
+				require.NoError(t, task.executeByQueryView(ctx))
+				require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
+			}
 
 			// QueryNode returns requested output columns, including the PK even
 			// when the client did not request any output fields. Put an empty
@@ -230,10 +267,48 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				require.Equal(t, []bool{true, false, true, true, true, false}, typeutil.GetFieldDataValidData(group))
 				require.Equal(t, expectedGroups, group.GetScalars().GetStringData().GetData())
 			}
+			requests, err := viewquery.BuildSubSearchRequests(task.SearchRequest)
+			require.NoError(t, err)
+			streams := make([]searchreducestream.ReduceStream, len(requests))
+			for reqIdx, request := range requests {
+				var children []searchreducestream.ReduceStream
+				for _, shard := range wireResults {
+					sub := shard.SubResults[reqIdx]
+					data := &schemapb.SearchResultData{}
+					require.NoError(t, proto.Unmarshal(sub.GetSlicedBlob(), data))
+					// Workers export one scalar slot per row, unlike the compact Batch fixture.
+					for i, field := range data.GetGroupByFieldValues() {
+						builder, err := typeutil.NewFieldDataBuilder(field.GetType(), true, typeutil.GetSizeOfIDs(data.GetIds()))
+						require.NoError(t, err)
+						iter := typeutil.GetDataIterator(field)
+						for row := 0; row < typeutil.GetSizeOfIDs(data.GetIds()); row++ {
+							builder.Add(iter(row))
+						}
+						data.GroupByFieldValues[i] = builder.Build()
+						data.GroupByFieldValues[i].FieldId = field.GetFieldId()
+						data.GroupByFieldValues[i].FieldName = field.GetFieldName()
+					}
+					chunk := &internalpb.SearchResults{Status: merr.Success(), NumQueries: sub.GetNumQueries(), TopK: sub.GetTopK(), MetricType: sub.GetMetricType(), ResultData: data}
+					chunks, err := searchreducestream.SplitSearchResult(chunk, 1)
+					require.NoError(t, err)
+					children = append(children, &searchTaskReduceStream{chunks: chunks})
+				}
+				streams[reqIdx], err = searchreducestream.NewHybridGroupReduceStream(request, children, 1)
+				require.NoError(t, err)
+			}
+			streamed, scoreInfos, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
+			require.NoError(t, err)
+			for i := range results {
+				fillFieldNames(task.schema.CollectionSchema, streamed[i].GetResults())
+				require.True(t, proto.Equal(results[i].GetResults(), streamed[i].GetResults()), "batch=%s\nstream=%s", results[i].GetResults(), streamed[i].GetResults())
+			}
 			ranker, err := newRerankOperator(task, nil)
 			require.NoError(t, err)
 			ranked, err := ranker.run(ctx, span, reduced...)
 			require.NoError(t, err)
+			streamRanked, err := ranker.run(ctx, span, streamed, scoreInfos)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(ranked[0].(*milvuspb.SearchResults), streamRanked[0].(*milvuspb.SearchResults)))
 			assembler, err := newHybridAssembleOperator(task, nil)
 			require.NoError(t, err)
 			var assembled []any
@@ -241,6 +316,9 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				assembled, err = assembler.run(ctx, span, results, ranked[0])
 			})
 			require.NoError(t, err)
+			streamAssembled, err := assembler.run(ctx, span, streamed, streamRanked[0])
+			require.NoError(t, err)
+			require.True(t, proto.Equal(assembled[0].(*milvuspb.SearchResults), streamAssembled[0].(*milvuspb.SearchResults)))
 			result := assembled[0].(*milvuspb.SearchResults).GetResults()
 			require.Equal(t, []int64{3, 3}, result.GetTopks())
 			ids := result.GetIds().GetIntId().GetData()
@@ -249,7 +327,9 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				fromFirst = fromFirst || id < 100
 				fromSecond = fromSecond || id > 100
 			}
-			require.True(t, fromFirst && fromSecond, "assembly must read field rows from both ANN subrequests")
+			if !tc.weighted {
+				require.True(t, fromFirst && fromSecond, "assembly must read field rows from both ANN subrequests")
+			}
 			require.Equal(t, ids, reduce.FindFieldDataByID(result.FieldsData, 100).GetScalars().GetLongData().GetData())
 			if tc.namespace {
 				value := reduce.FindFieldDataByID(result.FieldsData, 103)

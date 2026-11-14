@@ -254,7 +254,8 @@ func buildMergedIDs(results []*internalpb.RetrieveResults, selectedRows []rowRef
 // the function falls back to template-based inference for backward compatibility.
 func buildMergedFieldDataRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx]
-	isNullable := fieldSchema != nil && fieldSchema.GetNullable()
+	isNullable := (fieldSchema != nil && fieldSchema.GetNullable()) ||
+		(fieldSchema == nil && len(typeutil.GetFieldDataValidData(template)) > 0)
 
 	newFd := &schemapb.FieldData{
 		Type:      template.GetType(),
@@ -574,7 +575,8 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 // fieldSchema may be nil for system fields or tests; in that case we fall back
 // to scanning results for the first non-nil Data to infer the type.
 func buildMergedVectorFieldRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, startRow, endRow, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.VectorField, error) {
-	isNullable := fieldSchema != nil && fieldSchema.GetNullable()
+	isNullable := (fieldSchema != nil && fieldSchema.GetNullable()) ||
+		(fieldSchema == nil && len(typeutil.GetFieldDataValidData(results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx])) > 0)
 
 	// Determine DataType and dim from schema (preferred) or from result data (fallback).
 	dataType := schemapb.DataType_None
@@ -1812,8 +1814,8 @@ func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 // getRowCount returns the number of rows in the result.
 func getRowCount(result *internalpb.RetrieveResults) int {
 	// Try to get count from IDs first (most reliable)
-	if result.GetIds() != nil {
-		return typeutil.GetSizeOfIDs(result.GetIds())
+	if idCount := typeutil.GetSizeOfIDs(result.GetIds()); idCount > 0 {
+		return idCount
 	}
 
 	// Fall back to field data

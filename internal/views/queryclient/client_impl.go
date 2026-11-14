@@ -58,15 +58,10 @@ func NewViewQueryClient(
 	retrieveReducerBuilder reducer.RetrieveResultReducerBuilder,
 	requeryRunner RequeryRunner,
 ) ViewQueryClient {
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = defaultMaxRetries
-	}
-	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
-	shardClient.queryHook = cfg.QueryHook
-	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
+	legacy := newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver)
 	return &viewQueryClientImpl{
-		shardClient:            shardClient,
-		legacyClient:           &legacyClient{shardClient: shardClient, shardResolver: shardResolver},
+		shardClient:            legacy.shardClient,
+		legacyClient:           legacy,
 		shardResolver:          shardResolver,
 		fieldFetchPlanner:      fieldFetchPlanner,
 		rerankerBuilder:        rerankerBuilder,
@@ -83,7 +78,7 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 
 // Search implements ViewQueryClient.Search.
 func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+	defer func() { err = ToMilvusError(err) }()
 	// === Stage: Plan ===
 
 	// Resolve vchannels first — the provider reports the collection's shard layout;
@@ -183,7 +178,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (r
 
 // Query implements ViewQueryClient.Query.
 func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+	defer func() { err = ToMilvusError(err) }()
 	// === Stage: Plan ===
 
 	// Resolve vchannels first — the provider reports the collection's shard layout;

@@ -212,6 +212,57 @@ func TestCommonConfigCollectionLevelMetricsMode(t *testing.T) {
 	assert.Equal(t, metrics.CollectionLevelMetricsModeAggregate, aggregateConfig.CollectionLevelMetricsMode.GetValue())
 }
 
+func TestProxyQueryViewStreamingConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	config := proxyConfig{}
+	config.init(base)
+	assert.False(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256*1024, config.ReduceStreamChunkBytes.GetAsInt())
+	assert.NoError(t, base.Save(config.EnableReduceStream.Key, "true"))
+	assert.NoError(t, base.Save(config.ReduceStreamChunkBytes.Key, "128"))
+	assert.True(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 128, config.ReduceStreamChunkBytes.GetAsInt())
+
+	t.Setenv("PROXY_QUERYVIEW_ENABLEREDUCESTREAM", "true")
+	t.Setenv("PROXY_QUERYVIEW_REDUCESTREAMCHUNKBYTES", "256")
+	envBase := NewBaseTable(SkipRemote(true))
+	t.Cleanup(envBase.mgr.Close)
+	envConfig := proxyConfig{}
+	envConfig.init(envBase)
+	assert.True(t, envConfig.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256, envConfig.ReduceStreamChunkBytes.GetAsInt())
+}
+
+func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	path := filepath.Join(dir, "milvus.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("proxy:\n  queryView:\n    enableReduceStream: false\n    reduceStreamChunkBytes: 262144\n"), 0o600))
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(10*time.Millisecond))
+	t.Cleanup(base.mgr.Close)
+	cfg := proxyConfig{}
+	cfg.init(base)
+	for _, name := range []string{"EnableReduceStream", "ReduceStreamChunkBytes"} {
+		field, ok := reflect.TypeOf(&cfg).Elem().FieldByName(name)
+		require.True(t, ok)
+		require.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	require.False(t, cfg.EnableReduceStream.GetAsBool())
+	require.Equal(t, 262144, cfg.ReduceStreamChunkBytes.GetAsInt())
+	for _, tc := range []struct {
+		enabled bool
+		bytes   int
+	}{{true, 64}, {true, 128}, {false, 256}} {
+		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %d\n", tc.enabled, tc.bytes)
+		require.NoError(t, os.WriteFile(path+".tmp", []byte(body), 0o600))
+		require.NoError(t, os.Rename(path+".tmp", path))
+		require.Eventually(t, func() bool {
+			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.bytes
+		}, 5*time.Second, 10*time.Millisecond)
+	}
+}
+
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
 	Init()
 	params := Get()

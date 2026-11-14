@@ -1,0 +1,405 @@
+package dql
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/reduce"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func TestHybridStreamingEligibility(t *testing.T) {
+	task := newQueryViewSearchTask(t, nil, 1)
+	task.IsIterator, task.IsAdvanced = false, true
+	task.rerankMeta = &legacyRerankMeta{}
+	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 4, SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
+	require.True(t, task.supportsStreamingReduce())
+	for _, kind := range []hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructEmbList} {
+		task.hybridSubSearchInfos = []hybridSubSearchInfo{{Kind: kind}}
+		for _, elementLevel := range []bool{false, true} {
+			task.hybridElementLevel = elementLevel
+			require.True(t, task.supportsStreamingReduce())
+		}
+	}
+	task.GroupByFieldIds = []int64{101}
+	require.True(t, task.supportsStreamingReduce())
+	task.GroupByFieldIds = nil
+	task.orderByFields = []OrderByField{{FieldID: 101}}
+	require.False(t, task.supportsStreamingReduce())
+	task.orderByFields = nil
+	task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+	require.True(t, task.supportsStreamingReduce())
+	task.SubReqs[0].SearchType = internalpb.SearchType_DEFAULT
+	require.False(t, task.supportsStreamingReduce())
+	task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
+	task.SubReqs[0].GroupByFieldId = 101
+	require.True(t, task.supportsStreamingReduce())
+	task.SubReqs[0].GroupByFieldId = 0
+	task.rerankMeta = &functionChainRerankMeta{}
+	require.True(t, task.supportsStreamingReduce())
+}
+
+func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
+	firstChunk := newFinalSearchChunk([]int64{10, 20, 30, 40}, []float32{.9, .8, .7, .6}, "first")
+	secondChunk := newFinalSearchChunk([]int64{50, 60}, []float32{-.1, -.2}, "second")
+	secondChunk.MetricType = "L2"
+	firstChunk.FeatureBits, secondChunk.FeatureBits = 1, 2
+	first := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: firstChunk}}}
+	second := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: secondChunk}}}
+	legacy := &fakeLegacyQueryClient{
+		searchResult: &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{first, second}},
+	}
+	task := newQueryViewSearchTask(t, legacy, 1)
+	task.IsIterator, task.IsAdvanced = false, true
+	task.rerankMeta = &legacyRerankMeta{}
+	task.SubReqs = []*internalpb.SubSearchRequest{
+		{Nq: 1, Topk: 4, Offset: 1, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+		{Nq: 1, Topk: 2, MetricType: "L2", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+	}
+	require.NoError(t, task.Execute(context.Background()))
+	require.Empty(t, task.resultBuf.Collect())
+	require.Nil(t, task.reducedResult)
+	require.Len(t, task.reducedSubResults, 2)
+	require.Equal(t, []int64{20, 30, 40}, task.reducedSubResults[0].GetResults().GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{50, 60}, task.reducedSubResults[1].GetResults().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{.1, .2}, task.reducedSubResults[1].GetResults().GetScores())
+	require.Equal(t, []searchScoreInfo{newSearchScoreInfo("IP", false), newSearchScoreInfo("L2", false)}, task.reducedSubScoreInfos)
+	require.EqualValues(t, 3, task.reducedFeatureBits)
+	require.Equal(t, 1, first.closeCalls)
+	require.Equal(t, 1, second.closeCalls)
+}
+
+func TestHybridStreamingRetriesWholeAttemptOnUnavailable(t *testing.T) {
+	for _, afterChunk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after_chunk_%t", afterChunk), func(t *testing.T) {
+			failed := &fakeLegacySearchStream{}
+			if afterChunk {
+				failed.recv = append(failed.recv, fakeLegacySearchRecv{chunk: newFinalSearchChunk([]int64{10}, []float32{.9}, "failed")})
+			}
+			failed.recv = append(failed.recv, fakeLegacySearchRecv{err: status.Error(codes.Unavailable, "worker unavailable")})
+			sibling := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{20}, []float32{.8}, "failed")}}}
+			first := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{30, 31}, []float32{.9, .8}, "replacement")}}}
+			second := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{40, 41}, []float32{.9, .8}, "replacement")}}}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
+			legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
+				if attempt == 1 {
+					return &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{failed, sibling}}, nil
+				}
+				return &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{first, second}}, nil
+			}
+			task := newQueryViewSearchTask(t, legacy, 2)
+			task.IsIterator, task.IsAdvanced = false, true
+			task.rerankMeta = &legacyRerankMeta{}
+			task.SubReqs = []*internalpb.SubSearchRequest{
+				{Nq: 1, Topk: 2, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+				{Nq: 1, Topk: 2, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER},
+			}
+			require.NoError(t, task.Execute(t.Context()))
+			require.Equal(t, 2, legacy.searchCalled)
+			require.Len(t, legacy.lastSearchRequest.RetryErrors, 1)
+			require.Equal(t, codes.Unavailable, status.Code(legacy.lastSearchRequest.RetryErrors[0]))
+			require.Equal(t, 1, failed.closeCalls)
+			require.Equal(t, 1, sibling.closeCalls)
+			require.Equal(t, 1, first.closeCalls)
+			require.Equal(t, 1, second.closeCalls)
+			require.Equal(t, []int64{30, 31}, task.reducedSubResults[0].GetResults().GetIds().GetIntId().GetData())
+			require.Equal(t, []int64{40, 41}, task.reducedSubResults[1].GetResults().GetIds().GetIntId().GetData())
+			require.Equal(t, map[string]uint64{"replacement": 1}, task.queryChannelsTs)
+		})
+	}
+}
+
+func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
+	for _, nq := range []int64{1, 2} {
+		for _, metric := range []string{"IP", "L2"} {
+			for _, groupSize := range []int64{1, 2} {
+				for _, chunkBytes := range []int{1, 128, 256 * 1024} {
+					t.Run(fmt.Sprintf("nq=%d/%s/group=%d/chunk=%d", nq, metric, groupSize, chunkBytes), func(t *testing.T) {
+						request := &internalpb.SearchRequest{Nq: nq, Topk: 3, Offset: 1, MetricType: metric, GroupSize: groupSize, GroupByFieldIds: []int64{101}}
+						info := reduce.NewReduceSearchResultInfo(nq, request.GetTopk()).WithMetricType(metric).
+							WithGroupSize(groupSize).WithGroupByFieldIdsFromProto(0, request.GetGroupByFieldIds())
+						hits := [][][]groupStreamHit{
+							{{{1, .99, int64(10)}, {2, .95, int64(20)}, {3, .90, int64(10)}}, {{11, .99, int64(50)}, {12, .80, int64(60)}}},
+							{{{4, .98, int64(10)}, {5, .95, int64(30)}, {6, .80, int64(30)}}, {{13, .97, int64(50)}, {14, .90, int64(70)}}},
+							{{{7, .97, int64(20)}, {8, .90, int64(40)}}, {{15, .95, int64(70)}}},
+							{{}, {}},
+						}
+						var batchShards []*schemapb.SearchResultData
+						var shardStreams []searchreducestream.ReduceStream
+						for shard := 0; shard < 2; shard++ {
+							var workers []*internalpb.SearchResults
+							var children []searchreducestream.ReduceStream
+							for _, nodeHits := range hits[shard*2 : shard*2+2] {
+								node := groupStreamResult(t, request, nodeHits[:nq], false)
+								workers = append(workers, proto.Clone(node).(*internalpb.SearchResults))
+								chunks, err := searchreducestream.SplitSearchResult(node, chunkBytes)
+								require.NoError(t, err)
+								children = append(children, &searchTaskReduceStream{chunks: chunks})
+							}
+							batch, err := segments.ReduceSearchOnQueryNode(context.Background(), workers, info)
+							require.NoError(t, err)
+							decoded, err := decodeSearchResults(context.Background(), []*internalpb.SearchResults{batch})
+							require.NoError(t, err)
+							require.Len(t, decoded, 1)
+							batchShards = append(batchShards, decoded[0])
+							stream, err := searchreducestream.NewShardReduceStream(request, children, chunkBytes)
+							require.NoError(t, err)
+							shardStreams = append(shardStreams, stream)
+						}
+						batch, err := reduceAdvanceGroupBy(context.Background(), batchShards, nq, request.GetTopk(), schemapb.DataType_Int64, metric, request.GetGroupByFieldIds(), false)
+						require.NoError(t, err)
+						stream, err := searchreducestream.NewHybridGroupReduceStream(request, shardStreams, chunkBytes)
+						require.NoError(t, err)
+						defer stream.Close()
+						task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
+						actual, _, err := task.consumeSearchResultStream(stream, request, newSearchScoreInfo(metric, false), func(*internalpb.SearchResults) {})
+						require.NoError(t, err)
+						require.True(t, proto.Equal(batch.GetResults(), actual.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), actual.GetResults())
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestHybridGroupStreamingEmptyCandidates(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 3, MetricType: "IP", GroupSize: 1, GroupByFieldIds: []int64{101}}
+	stream, err := searchreducestream.NewHybridGroupReduceStream(request, nil, 128)
+	require.NoError(t, err)
+	defer stream.Close()
+	task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
+	result, _, err := task.consumeSearchResultStream(stream, request, newSearchScoreInfo("IP", false), func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, []int64{0, 0}, result.GetResults().GetTopks())
+	require.Zero(t, typeutil.GetSizeOfIDs(result.GetResults().GetIds()))
+}
+
+type blockedHybridSearchStream struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (s *blockedHybridSearchStream) Recv() (*internalpb.SearchResults, error) {
+	<-s.closed
+	return nil, io.ErrClosedPipe
+}
+
+func (s *blockedHybridSearchStream) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+func (*blockedHybridSearchStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestHybridStreamFailureUnblocksSibling(t *testing.T) {
+	failure := errors.New("failed sub-search")
+	failed := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{err: failure}}}
+	blocked := &blockedHybridSearchStream{closed: make(chan struct{})}
+	task := newQueryViewSearchTask(t, nil, 1)
+	task.IsAdvanced = true
+	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 2}, {Nq: 1, Topk: 2}}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := task.consumeHybridResultStreams([]searchreducestream.ReduceStream{failed, blocked}, func(*internalpb.SearchResults) {})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, failure)
+	case <-time.After(5 * time.Second):
+		blocked.Close()
+		t.Fatal("Hybrid failure did not unblock its sibling stream")
+	}
+	require.Equal(t, 1, failed.closeCalls)
+}
+
+func (s *SearchPipelineSuite) TestHybridStreamingHandoffMatchesBatch() {
+	for _, strategy := range []string{"rrf", "weighted"} {
+		s.Run(strategy, func() {
+			task := getHybridSearchTask("test_collection", [][]string{{"1", "2"}, {"3", "4"}}, nil)
+			params := `{"k":60}`
+			if strategy == "weighted" {
+				params = `{"weights":[0.3,0.7]}`
+			}
+			task.rerankMeta = newRerankMetaFromLegacy([]*commonpb.KeyValuePair{{Key: "strategy", Value: strategy}, {Key: "params", Value: params}})
+			task.rankParams.limit, task.rankParams.offset = 3, 1
+			task.SubReqs[0].Offset, task.SubReqs[1].Topk = 2, 5
+			inputs := []*internalpb.SearchResults{genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)}
+			p, err := newPipeline(hybridSearchPipe, task)
+			s.Require().NoError(err)
+			s.Require().NoError(p.AddNodes(task, endNode))
+			batch, _, err := p.Run(context.Background(), s.span, inputs, segcore.StorageCost{})
+			s.Require().NoError(err)
+			op, err := newHybridSearchReduceOperator(task, nil)
+			s.Require().NoError(err)
+			reduced, err := op.run(context.Background(), s.span, inputs)
+			s.Require().NoError(err)
+			streamed, _, err := p.RunFromReduced(context.Background(), s.span, reduced[0].([]*milvuspb.SearchResults), reduced[1].([]searchScoreInfo), segcore.StorageCost{})
+			s.Require().NoError(err)
+			s.Equal(batch.GetResults(), streamed.GetResults())
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
+	cases := []struct {
+		name         string
+		kinds        [2]hybridSubSearchKind
+		elementLevel bool
+		collapse     elementCollapseConfig
+	}{
+		{"native-elements", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructElement}, true, defaultElementCollapseConfig()},
+		{"mixed-max", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, defaultElementCollapseConfig()},
+		{"different-parents", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructElement}, false, defaultElementCollapseConfig()},
+		{"mixed-sum", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, elementCollapseConfig{Strategy: elementCollapseSum}},
+		{"mixed-avg", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, elementCollapseConfig{Strategy: elementCollapseAvg}},
+		{"mixed-topk-sum", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2}},
+		{"mixed-topk-avg", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, elementCollapseConfig{Strategy: elementCollapseTopKAvg, TopK: 2}},
+		{"embedding-list", [2]hybridSubSearchKind{hybridSubSearchStructEmbList, hybridSubSearchStructEmbList}, false, defaultElementCollapseConfig()},
+		{"element-and-list", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructEmbList}, false, defaultElementCollapseConfig()},
+		{"worker-l0-l1", [2]hybridSubSearchKind{hybridSubSearchNormal, hybridSubSearchNormal}, false, defaultElementCollapseConfig()},
+	}
+	for _, tc := range cases {
+		for _, metric := range []string{"IP", "L2"} {
+			if metric == "L2" && isElementCollapseSumFamily(tc.collapse.Strategy) {
+				continue // The existing API rejects sum-family collapse for L2.
+			}
+			for _, strategy := range []string{"rrf", "weighted", "function-score"} {
+				for _, nq := range []int64{1, 2} {
+					for _, emptyFirst := range []bool{false, true} {
+						s.Run(fmt.Sprintf("%s/%s/%s/nq%d/empty%t", tc.name, metric, strategy, nq, emptyFirst), func() {
+							task := getHybridSearchTask("test_collection", [][]string{{"1", "2"}, {"3", "4"}}, nil)
+							task.Nq, task.hybridElementLevel = nq, tc.elementLevel
+							params := `{"k":60}`
+							if strategy == "weighted" {
+								params = `{"weights":[0.3,0.7]}`
+							}
+							if strategy != "function-score" {
+								task.rerankMeta = newRerankMetaFromLegacy([]*commonpb.KeyValuePair{{Key: "strategy", Value: strategy}, {Key: "params", Value: params}})
+							}
+							if tc.name == "worker-l0-l1" {
+								task.request.FunctionScore = nil
+								if strategy == "function-score" {
+									return // function_score with sub-search chains is rejected by request validation.
+								}
+								task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{
+									l0FunctionChain(mapOp("$score", "num_combine", columnArg("$score"), columnArg("$score"))),
+									l1LimitFunctionChain(2),
+								}
+								task.queryInfos = []*planpb.QueryInfo{{}, {}}
+							}
+							task.rankParams.limit, task.rankParams.offset, task.rankParams.roundDecimal = 2, 1, -1
+							task.hybridSubSearchInfos = make([]hybridSubSearchInfo, 2)
+							batch := make([]*milvuspb.SearchResults, 2)
+							streams := make([]searchreducestream.ReduceStream, 2)
+							rewritten := task.subSearchScoresRewritten()
+							s.Equal([]bool{tc.name == "worker-l0-l1", false}, rewritten)
+							for index, kind := range tc.kinds {
+								task.SubReqs[index].Nq, task.SubReqs[index].Topk = nq, 4
+								task.SubReqs[index].Offset = int64(index)
+								task.SubReqs[index].MetricType, task.SubReqs[index].SearchType = metric, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
+								if tc.name == "worker-l0-l1" && index == 0 {
+									task.SubReqs[index].SearchType = internalpb.SearchType_DEFAULT
+								}
+								task.hybridSubSearchInfos[index] = hybridSubSearchInfo{Kind: kind, Collapse: tc.collapse}
+								request, err := viewquery.BuildSubSearchRequest(task.SearchRequest, task.SubReqs[index])
+								s.Require().NoError(err)
+								data := make([]*schemapb.SearchResultData, 2)
+								children := make([]searchreducestream.ReduceStream, 2)
+								for channel := range children {
+									chunk := &internalpb.SearchResults{NumQueries: nq, TopK: 4, MetricType: metric, ResultData: &schemapb.SearchResultData{NumQueries: nq, TopK: 4, Ids: &schemapb.IDs{}}}
+									for query := int64(0); query < nq; query++ {
+										count := int64(3)
+										if emptyFirst && index == 0 {
+											count = 0
+										}
+										chunk.ResultData.Topks = append(chunk.ResultData.Topks, count)
+										for row := int64(0); row < count; row++ {
+											pk := 1 + int64(channel) + row*2
+											if kind == hybridSubSearchStructElement && row < 2 {
+												pk = 1 + int64(channel)
+											}
+											typeutil.AppendPKs(chunk.ResultData.Ids, pk+query*10)
+											score := float32(1) - float32(channel)*.1 - float32(row)*.2
+											if metric == "L2" {
+												score -= 1.1
+											}
+											chunk.ResultData.Scores = append(chunk.ResultData.Scores, score)
+											if kind == hybridSubSearchStructElement {
+												if chunk.ResultData.ElementIndices == nil {
+													chunk.ResultData.ElementIndices = &schemapb.LongArray{}
+												}
+												chunk.ResultData.ElementIndices.Data = append(chunk.ResultData.ElementIndices.Data, row%2)
+											}
+										}
+									}
+									data[channel] = proto.Clone(chunk.ResultData).(*schemapb.SearchResultData)
+									chunks, err := searchreducestream.SplitSearchResult(chunk, 20)
+									s.Require().NoError(err)
+									// Duplicate worker replies must retain distinct elements of the same PK.
+									workers := make([]searchreducestream.ReduceStream, 2)
+									for worker := range workers {
+										leaf := &fakeLegacySearchStream{}
+										for _, part := range chunks {
+											leaf.recv = append(leaf.recv, fakeLegacySearchRecv{chunk: part})
+										}
+										workers[worker] = leaf
+									}
+									children[channel], err = searchreducestream.NewShardReduceStream(request, workers, 20)
+									s.Require().NoError(err)
+								}
+								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset(), scoreRewrittenAt(rewritten, index))
+								s.Require().NoError(err)
+								streams[index], err = searchreducestream.NewReduceStream(request, children, 20)
+								s.Require().NoError(err)
+							}
+							s.Require().True(task.supportsStreamingReduce())
+							streamed, scoreInfos, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
+							s.Require().NoError(err)
+							for i := range batch {
+								s.Equal(newSearchScoreInfo(metric, scoreRewrittenAt(rewritten, i)), scoreInfos[i])
+								if len(batch[i].GetResults().GetScores()) == 0 {
+									s.Empty(streamed[i].GetResults().GetScores())
+									s.Zero(typeutil.GetSizeOfIDs(streamed[i].GetResults().GetIds()))
+									s.Equal(batch[i].GetResults().GetTopks(), streamed[i].GetResults().GetTopks())
+									continue
+								}
+								s.True(proto.Equal(batch[i].GetResults(), streamed[i].GetResults()), "Batch: %v; Streaming: %v", batch[i], streamed[i])
+							}
+							pipeline, err := newPipeline(hybridSearchPipe, task)
+							s.Require().NoError(err)
+							s.Require().NoError(pipeline.AddNodes(task, endNode))
+							expected, _, err := pipeline.RunFromReduced(context.Background(), s.span, batch, scoreInfos, segcore.StorageCost{})
+							s.Require().NoError(err)
+							actual, _, err := pipeline.RunFromReduced(context.Background(), s.span, streamed, scoreInfos, segcore.StorageCost{})
+							s.Require().NoError(err)
+							s.Equal(expected.GetResults(), actual.GetResults())
+						})
+					}
+				}
+			}
+		}
+	}
+}

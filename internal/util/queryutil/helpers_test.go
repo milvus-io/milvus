@@ -150,6 +150,11 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 	fd := merged.FieldsData[0]
 	assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(fd))
 	assert.Equal(t, []int64{10, 20, 30}, fd.GetScalars().GetLongData().GetData())
+
+	merged, err = buildMergedRetrieveResults(results, selectedRows, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
+	assert.Equal(t, []int64{10, 20, 30}, merged.FieldsData[0].GetScalars().GetLongData().GetData())
 }
 
 func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {

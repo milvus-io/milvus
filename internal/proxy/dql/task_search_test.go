@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -62,6 +64,175 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type searchTaskReduceStream struct {
+	chunks []*internalpb.SearchResults
+}
+
+func (s *searchTaskReduceStream) Recv() (*internalpb.SearchResults, error) {
+	if len(s.chunks) == 0 {
+		return nil, io.EOF
+	}
+	chunk := s.chunks[0]
+	s.chunks = s.chunks[1:]
+	return chunk, nil
+}
+
+func (*searchTaskReduceStream) Close() error {
+	return nil
+}
+
+func (*searchTaskReduceStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
+	output := &schemapb.SearchResultData{
+		NumQueries: 2,
+		TopK:       2,
+		Ids:        &schemapb.IDs{},
+		Topks:      make([]int64, 2),
+	}
+	seenPerQuery := make([]int64, 2)
+	chunks := []*schemapb.SearchResultData{
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{3, 1},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{10, 11, 12, 20}},
+			}},
+			Scores: []float32{-0.1, -0.2, -0.3, -1.0},
+		},
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{0, 2},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{21, 22}},
+			}},
+			Scores: []float32{-1.1, -1.2},
+		},
+	}
+
+	for _, chunk := range chunks {
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, newSearchScoreInfo(metric.L2, false), false)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, []int64{11, 12, 21, 22}, output.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.2, 0.3, 1.1, 1.2}, output.GetScores())
+	require.Equal(t, []int64{2, 2}, output.GetTopks())
+}
+
+func TestAppendFinalSearchChunkRejectsMalformedShape(t *testing.T) {
+	for _, invalid := range []string{"nq", "counts", "output_counts", "counters", "scores", "elements", "negative_count", "hit_count"} {
+		t.Run(invalid, func(t *testing.T) {
+			chunk := newFinalSearchChunk([]int64{10}, []float32{1}, "v1").ResultData
+			output := &schemapb.SearchResultData{NumQueries: 1, Topks: []int64{0}, Ids: &schemapb.IDs{}}
+			seen := []int64{0}
+			switch invalid {
+			case "nq":
+				chunk.NumQueries = 2
+			case "counts":
+				chunk.Topks = nil
+			case "output_counts":
+				output.Topks = nil
+			case "counters":
+				seen = nil
+			case "scores":
+				chunk.Scores = nil
+			case "elements":
+				chunk.ElementIndices = &schemapb.LongArray{}
+			case "negative_count":
+				chunk.Topks[0] = -1
+			case "hit_count":
+				chunk.Topks[0] = 2
+			}
+			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, newSearchScoreInfo(metric.IP, false), false)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Empty(t, output.GetScores())
+		})
+	}
+}
+
+func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 3, Offset: 1}
+	first := newFinalSearchChunk([]int64{10, 11, 20}, []float32{9, 8, 7}, "v1")
+	first.ResultData.NumQueries, first.ResultData.Topks = 2, []int64{2, 1}
+	last := newFinalSearchChunk([]int64{21, 22}, []float32{6, 5}, "v1")
+	last.ResultData.NumQueries, last.ResultData.Topks = 2, []int64{0, 2}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first, last, nil}}
+
+	result, _, err := (&SearchTask{}).consumeSearchResultStream(stream, request, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, result.Results.Topks)
+	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
+	require.Len(t, stream.chunks, 1, "Proxy must not pull again to fill the exhausted first vector")
+}
+
+func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
+	task := &SearchTask{
+		SearchRequest: &internalpb.SearchRequest{Nq: 1, Topk: 3, Offset: 1},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       2,
+				Topks:      []int64{2},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 11}},
+				}},
+				Scores: []float32{-0.1, -0.2},
+			},
+		},
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				Topks:      []int64{1},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{12}},
+				}},
+				Scores: []float32{-0.3},
+			},
+		},
+	}}
+
+	result, scoreInfo, err := task.consumeSearchResultStream(stream, task.SearchRequest, newSearchScoreInfo(metric.L2, false), func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, newSearchScoreInfo(metric.L2, false), scoreInfo)
+	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.1, 0.2, 0.3}, result.GetResults().GetScores())
+	require.Equal(t, []int64{3}, result.GetResults().GetTopks())
+}
+
+func TestConsumeSearchResultStreamScoreInfo(t *testing.T) {
+	for _, rewritten := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rewritten=%t", rewritten), func(t *testing.T) {
+			chunk := newFinalSearchChunk([]int64{10, 11}, []float32{-0.1, -0.2}, "v1")
+			chunk.MetricType = metric.L2
+			stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{chunk}}
+			request := &internalpb.SearchRequest{Nq: 1, Topk: 2}
+			result, info, err := (&SearchTask{}).consumeSearchResultStream(stream, request,
+				newSearchScoreInfo("", rewritten), func(*internalpb.SearchResults) {})
+			require.NoError(t, err)
+			require.Equal(t, searchScoreInfo{MetricType: metric.L2, Rewritten: rewritten, LargerIsBetter: rewritten}, info)
+			expected := []float32{0.1, 0.2}
+			if rewritten {
+				expected = []float32{-0.1, -0.2}
+			}
+			require.Equal(t, expected, result.GetResults().GetScores())
+			require.Equal(t, []int64{10, 11}, result.GetResults().GetIds().GetIntId().GetData())
+		})
+	}
+}
 
 func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testing.T) {
 	aggCtx, err := search_agg.NewContext(1, []search_agg.LevelContext{{OwnFieldIDs: []int64{101}, Size: 1}}, nil, nil)
@@ -5377,6 +5548,27 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		}
 	}
 
+	for _, grouped := range []bool{false, true} {
+		for _, ordered := range []bool{false, true} {
+			t.Run(fmt.Sprintf("empty_function_score/grouped=%t/ordered=%t", grouped, ordered), func(t *testing.T) {
+				request := newRequest()
+				request.FunctionScore = &schemapb.FunctionScore{}
+				if grouped {
+					request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: "ts"})
+				}
+				if ordered {
+					request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+				}
+				task := newTask(request)
+				require.NoError(t, task.initSearchRequest(ctx))
+				require.Nil(t, task.rerankMeta)
+				assert.Equal(t, grouped, task.supportsStreamingReduce())
+				task.SearchType = internalpb.SearchType(-1)
+				assert.False(t, task.supportsStreamingReduce())
+			})
+		}
+	}
+
 	t.Run("ordinary search initializes function chain rerank meta", func(t *testing.T) {
 		task := newTask(newFunctionChainRequest())
 
@@ -5392,6 +5584,37 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Equal(t, internalpb.SearchType_DEFAULT, task.SearchType)
+		assert.True(t, task.supportsStreamingReduce())
+	})
+
+	t.Run("ordinary boost-only search uses configured reduction", func(t *testing.T) {
+		for _, count := range []int{1, 2} {
+			request := newRequest()
+			request.FunctionScore = &schemapb.FunctionScore{}
+			for range count {
+				request.FunctionScore.Functions = append(request.FunctionScore.Functions, &schemapb.FunctionSchema{
+					Type:   schemapb.FunctionType_Rerank,
+					Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "boost"}, {Key: "filter", Value: "ts > 50"}, {Key: "weight", Value: "2"}},
+				})
+			}
+			task := newTask(request)
+			require.NoError(t, task.initSearchRequest(ctx))
+			require.Nil(t, task.rerankMeta)
+			require.True(t, task.supportsStreamingReduce())
+			plan := &planpb.PlanNode{}
+			require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+			require.Len(t, plan.GetScorers(), count)
+			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
+			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+			key := paramtable.Get().ProxyCfg.EnableReduceStream.Key
+			original := paramtable.Get().ProxyCfg.EnableReduceStream.GetValue()
+			t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(key, original)) })
+			for _, enabled := range []bool{false, true} {
+				require.NoError(t, paramtable.Get().Save(key, strconv.FormatBool(enabled)))
+				require.NoError(t, task.executeByQueryView(ctx))
+				require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
+			}
+		}
 	})
 
 	t.Run("ordinary search rejects order by with function chains", func(t *testing.T) {
@@ -5422,6 +5645,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.True(t, task.needRequery)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5436,6 +5660,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+		assert.True(t, task.supportsStreamingReduce())
 	})
 
 	t.Run("ordinary search rejects missing function score input field", func(t *testing.T) {
@@ -5534,6 +5759,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5547,6 +5773,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5559,6 +5786,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		task := newTask(request)
 
 		require.NoError(t, task.initSearchRequest(ctx))
+		assert.True(t, task.supportsStreamingReduce())
 		meta, ok := task.rerankMeta.(*functionChainRerankMeta)
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
