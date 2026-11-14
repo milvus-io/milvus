@@ -25,6 +25,8 @@ Each record contains:
 - explicit RequiredFields and LoadFields preload hints;
 - exact field-to-index references: each LoadFieldConfig contains field_id and
   repeated index_ids, including all selected JSON path indexes for a field;
+- a persisted `auto_load` source flag, used by preparation priority only when the
+  target shard has no healthy Up View;
 - replica IDs, resource groups and priorities; target node placement belongs
   to Balancer and actual lifecycle state belongs to ShardViewRegistry.
 
@@ -238,3 +240,21 @@ retains its lease semantics for replica retirement. Balancer applies the control
 already-Down Views. DDL callbacks only withdraw intent and wait; they never
 modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
 the release completion fence.
+
+### AutoLoad source
+
+QueryCoord passes the loading source explicitly through its internal load helper;
+LoadCollectionRequest remains unchanged. AlterLoadConfigMessageHeader carries
+`auto_load` across durable broadcast replay into CollectionLoadConfig. Recovery,
+cloning and immutable cache publication preserve the flag. The Balancer reads
+it from its existing configuration snapshot; no separate waiter registry is needed.
+
+Completing readiness or canceling a query does not clear the source. Partition
+creation/partial release, replica adjustment and Schema/Index revisions preserve
+it. An explicit manual LoadCollection/LoadPartitions publishes false; refresh-only
+loads retain the existing intent. Full Release removes it with the load records.
+
+Recent traffic without a healthy Up View still selects the recovery baseline
+and traffic bonus first. Otherwise AutoLoad without a healthy Up View selects
++10, even with cold access history. AutoLoad with a healthy Up View follows
+ordinary active/cold handoff scoring. Existing QueryView priorities stay immutable.

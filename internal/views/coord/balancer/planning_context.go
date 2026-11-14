@@ -29,7 +29,6 @@ type balanceInput interface {
 
 type planningContext struct {
 	feedback            ViewFeedbackReader
-	autoLoad            *AutoLoadDemand
 	preparationFeedback *preparationSnapshot
 	priorityNow         time.Time
 	recovery            *publishedRecoveryBase

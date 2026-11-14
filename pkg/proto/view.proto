@@ -37,6 +37,8 @@ message CollectionLoadConfig {
     repeated LoadReplicaConfig replicas = 7;
     // True for an explicitly chosen replica configuration; false follows cluster defaults.
     bool user_specified_replica_mode = 8;
+    // Loading intent created by AutoLoad. Boost preparation only while the shard lacks a healthy Up view.
+    bool auto_load = 9;
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.

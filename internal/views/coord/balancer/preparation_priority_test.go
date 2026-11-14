@@ -35,7 +35,9 @@ func TestPreparationPriorityScenarios(t *testing.T) {
 		{"same-share", time.Minute, true, false, false, 500, 1000, 17},
 		{"auto-unknown", 0, false, false, true, 0, 0, 10},
 		{"auto-cold", time.Hour, true, false, true, 0, 0, 10},
-		{"auto-incomplete-existing-up", time.Hour, true, true, true, 0, 0, 10},
+		{"auto-cold-handoff", time.Hour, true, true, true, 0, 0, -10},
+		{"auto-active-handoff", time.Minute, true, true, true, 100, 100, 2},
+		{"auto-unknown-handoff", 0, false, true, true, 0, 0, -10},
 		{"manual-unknown", 0, false, false, false, 0, 0, 0},
 		{"cold-recovery", time.Hour, true, false, false, 100, 100, -5},
 		{"cold-handoff", time.Hour, true, true, false, 100, 100, -10},
@@ -118,7 +120,7 @@ func TestPreparationPriorityCapturesRGReplicaRateShares(t *testing.T) {
 }
 
 func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
-	mockey.PatchConvey("health is per shard; stopping still serves; pending AutoLoad expires with its operation", t, func() {
+	mockey.PatchConvey("health is per shard; stopping still serves; persisted AutoLoad boosts only shards without healthy Up views", t, func() {
 		cfg := cfgFor(10, 1, nil, nil)
 		cache := newTestCache(cfg)
 		id := qviews.ShardID{ReplicaID: 1, VChannel: "p_10v0"}
@@ -129,8 +131,7 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		mockey.Mock((*viewfeedback.ReplicaFeedbackStore).GetViewFeedback).To(func(_ *viewfeedback.ReplicaFeedbackStore, _ int64) (*viewfeedback.Snapshot, bool) {
 			return sample, sample != nil
 		}).Build()
-		demand := &AutoLoadDemand{}
-		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(&viewfeedback.ReplicaFeedbackStore{}), WithAutoLoadDemand(demand)), nil)
+		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(&viewfeedback.ReplicaFeedbackStore{})), nil)
 		p := b.preparationPriorities()
 		require.EqualValues(t, 4, p.preparationPriority(id))
 		require.EqualValues(t, 20, p.preparationPriority(other), "another shard's Up does not cover this shard")
@@ -143,37 +144,46 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		require.EqualValues(t, 20, b.preparationPriorities().preparationPriority(id))
 		sample = &viewfeedback.Snapshot{LastAccessUnixNanos: time.Now().Add(-time.Hour).UnixNano()}
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
-		finish := demand.Begin(10)
+		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
+		cfg.AutoLoad = true
+		cache.PublishLoadConfig(10, cfg, 2)
 		auto := b.preparationPriorities()
-		require.EqualValues(t, 12, auto.preparationPriority(id), "new query demand overrides cold history")
-		finish()
-		require.EqualValues(t, 12, auto.preparationPriority(id), "captured operation remains immutable")
+		require.EqualValues(t, 12, auto.preparationPriority(id), "AutoLoad with no healthy Up overrides cold history")
+		cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+		require.EqualValues(t, -8, b.preparationPriorities().preparationPriority(id), "AutoLoad does not boost a cold handoff")
+		cache.PublishNode(1, nil)
+		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
+		cfg.AutoLoad = false
+		cache.PublishLoadConfig(10, cfg, 3)
+		require.EqualValues(t, 12, auto.preparationPriority(id), "captured load config remains immutable")
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
 		sample = nil
 		require.EqualValues(t, 2, b.preparationPriorities().preparationPriority(id))
-		finish = demand.Begin(10)
-		b = NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithAutoLoadDemand(demand)), nil)
+		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
+		cfg.AutoLoad = true
+		cache.PublishLoadConfig(10, cfg, 4)
+		b = NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(), nil)
 		require.EqualValues(t, 12, b.preparationPriorities().preparationPriority(id), "AutoLoad does not require feedback")
-		finish()
 	})
 }
 
 func TestPreparationPriorityPlanPublishesImmutableControl(t *testing.T) {
 	cfg := cfgFor(10, 1, []int64{1}, nil)
+	cfg.AutoLoad = true
 	cache := newTestCache(cfg)
 	id := qviews.ShardID{ReplicaID: 1, VChannel: "p_10v0"}
 	publishTestData(cache, 10, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
 		11: {SegmentID: 11, PartitionID: 1, LogicalSize: 100},
 	}, shardDataView(id.VChannel, 1, 11))
 	publishTestNodes(cache, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
-	var demand AutoLoadDemand
-	policy := NewDefaultBalancePolicy(WithAutoLoadDemand(&demand))
-	finish := demand.Begin(10)
+	policy := NewDefaultBalancePolicy()
 	plan := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id)
 	view := plan.Prepares[id].Build()
 	require.EqualValues(t, 12, view.GetMeta().GetControl().GetPreparationPriority())
-	finish()
+	cfg = cfg.Clone()
+	cfg.AutoLoad = false
+	cache.PublishLoadConfig(10, cfg, 2)
 	require.EqualValues(t, 12, view.GetMeta().GetControl().GetPreparationPriority())
 	next := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, next.Prepares, id)

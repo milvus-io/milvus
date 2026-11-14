@@ -13,7 +13,6 @@ import (
 // row predictions remain in the cache and call-local planning context respectively.
 type DefaultBalancePolicy struct {
 	feedback ViewFeedbackReader
-	autoLoad *AutoLoadDemand
 	mu       sync.Mutex
 	layouts  layoutManager
 	fanouts  map[qviews.ShardID]int
@@ -48,7 +47,6 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 	snap := newPlanningContext(reader)
 	snap.feedback = p.feedback
-	snap.autoLoad = p.autoLoad
 	dirty = p.layouts.prepare(snap, dirty)
 	if p.fanouts == nil {
 		p.fanouts = make(map[qviews.ShardID]int)

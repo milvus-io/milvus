@@ -24,7 +24,7 @@ func preparationPriority(config commonpb.LoadPriority, feedback *viewfeedback.Sn
 	switch {
 	case recent && !hasUp:
 		base, trafficLimit = 10, 8
-	case autoLoad:
+	case autoLoad && !hasUp:
 		base = 10
 	case recent:
 		trafficLimit = 2
@@ -60,7 +60,6 @@ func WithViewFeedbackReader(reader ViewFeedbackReader) PolicyOption {
 type preparationSnapshot struct {
 	replicas   map[int64]*viewfeedback.Snapshot
 	groupRates map[string]float64
-	autoLoads  map[int64]bool
 }
 
 func (p *planningContext) preparationPriority(id qviews.ShardID) int32 {
@@ -70,10 +69,8 @@ func (p *planningContext) preparationPriority(id qviews.ShardID) int32 {
 	}
 	replica := findReplica(cfg, id.ReplicaID)
 	p.capturePreparationFeedback()
-	if _, captured := p.preparationFeedback.autoLoads[cfg.CollectionID]; !captured {
-		p.preparationFeedback.autoLoads[cfg.CollectionID] = p.autoLoad != nil && p.autoLoad.Pending(cfg.CollectionID)
-	}
-	return preparationPriority(replica.Priority, p.preparationFeedback.replicas[id.ReplicaID], p.preparationFeedback.groupRates[replica.ResourceGroup], healthyUp(p, id), p.preparationFeedback.autoLoads[cfg.CollectionID], p.priorityNow)
+
+	return preparationPriority(replica.Priority, p.preparationFeedback.replicas[id.ReplicaID], p.preparationFeedback.groupRates[replica.ResourceGroup], healthyUp(p, id), cfg.AutoLoad, p.priorityNow)
 }
 
 // Capture on first use, once per operation. Reads are O(replica count), without
@@ -82,7 +79,7 @@ func (p *planningContext) capturePreparationFeedback() {
 	if p.preparationFeedback != nil {
 		return
 	}
-	p.preparationFeedback = &preparationSnapshot{replicas: make(map[int64]*viewfeedback.Snapshot), groupRates: make(map[string]float64), autoLoads: make(map[int64]bool)}
+	p.preparationFeedback = &preparationSnapshot{replicas: make(map[int64]*viewfeedback.Snapshot), groupRates: make(map[string]float64)}
 	if p.feedback == nil {
 		return
 	}
@@ -107,7 +104,6 @@ func (b *DefaultBalancer) preparationPriorities() *planningContext {
 	p := newPlanningContext(b.cache)
 	if policy, ok := b.policy.(*DefaultBalancePolicy); ok {
 		p.feedback = policy.feedback
-		p.autoLoad = policy.autoLoad
 	}
 	return p
 }

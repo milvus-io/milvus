@@ -56,7 +56,7 @@ func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 		captured = msg
 	})
 
-	require.NoError(t, server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
+	require.NoError(t, server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, false, &querypb.LoadCollectionRequest{
 		CollectionID: collectionID,
 	}))
 	require.NotNil(t, captured)

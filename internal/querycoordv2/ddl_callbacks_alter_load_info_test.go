@@ -119,7 +119,7 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 						PartitionIDs: []int64{autoscalePrecheckTestPartitionID},
 					})
 				} else {
-					err = server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
+					err = server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, false, &querypb.LoadCollectionRequest{
 						CollectionID: autoscalePrecheckTestCollectionID, ReplicaNumber: 1,
 					})
 				}

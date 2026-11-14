@@ -23,11 +23,11 @@ ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力�
 | 场景（按判断顺序） | 基础分 | 流量分上限 | 含配置后的范围 |
 | --- | --- | --- | --- |
 | 近期访问，缺少存活 UpView | +10 | 8 | [10,20] |
-| 有待完成的 AutoLoad/readiness 请求 | +10 | 0 | [10,12] |
+| LoadConfig.AutoLoad 且缺少存活 UpView | +10 | 0 | [10,12] |
 | 近期访问，已有存活 UpView | 0 | 2 | [0,4] |
 | 无近期访问，已有存活 UpView（冷 handoff） | -10 | 0 | [-10,-8] |
-| 已知长期无访问，缺少存活 UpView（冷恢复） | -5 | 0 | [-5,-3] |
-| 无访问历史、无存活 UpView、无 AutoLoad 需求（首次/手动加载） | 0 | 0 | [0,2] |
+| 非 AutoLoad，已知长期无访问，缺少存活 UpView（冷恢复） | -5 | 0 | [-5,-3] |
+| 无访问历史、无存活 UpView、非 AutoLoad（首次/手动加载） | 0 | 0 | [0,2] |
 
 - 配置偏移：HIGH（含 proto 默认值）+2，LOW 0，未知 enum 0。不使用 enum 底层数值。
 - 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤2 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
@@ -135,7 +135,7 @@ Store 已将各 shard 的窗口 rate 按 collection 的全部 shard 数平均成
 
 ```text
 recent = LastAccessTime != 0 && now - LastAccessTime <= 2min
-(base, limit) = SelectScenario(recent, healthyUp, pendingAutoLoad, knownHistory)
+(base, limit) = SelectScenario(recent, healthyUp, LoadConfig.AutoLoad, knownHistory)
 share = clamp(replica.Last6Windows / same_RG_total, 0, 1)
 traffic = round(limit * log1p(100 * share) / log1p(100))
 P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
@@ -151,15 +151,17 @@ P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
 
 这里消费既有状态和拓扑，不通过 ViewFeedback 再建立可服务状态。SN 故障由现有 PChannel assignment/恢复链路处理，不向 QN 节点表混入 SN。恢复同 identity 的 SN UpView 仍保留持久化 priority，不因故障重打分；此限制来自 immutable 约束。本次不改变 SN 故障恢复或 View 生命周期。
 
-### 4.4 AutoLoad 需求的生命周期
+### 4.4 持久化 AutoLoad 来源
 
-AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。在共享 singleflight 操作开始时登记 collection 的 `AutoLoadDemand.Begin`，在成功、错误、服务停止或操作超时退出时释放。已存在 LoadConfig 但尚不满足 readiness 的请求也登记，因为用户此时确实在等待。已经 Ready 的快速路径不登记。
+AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。需要创建加载配置时，调用共享的内部 `loadCollection(ctx, req, true)`；公开 `LoadCollection` 入口传 false。来源通过内部显式参数传递，不修改 `LoadCollectionRequest` RPC。健康检查、资源准入、错误返回和指标仍共用同一加载流程。
 
-`AutoLoadDemand` 是独立的内存需求标记，按 collection 计数，`Pending(collectionID)` 提供 O(1) 读取。它不修改 ViewFeedback、不伪造 LastAccessTime/rate、不持久化、不创建 goroutine/timer。并发登记只有最后一次释放才移除；单个 Proxy 取消不提前清除仍在执行的共享加载操作。Coord 重启后由重试请求重新登记，不保留永久 AutoLoad 属性。
+`AlterLoadConfigMessageHeader.auto_load` 随广播持久化和回放，并投影为版本化 `CollectionLoadConfig.auto_load` / `loadmgr.LoadConfig.AutoLoad`。Balancer 从已有不可变 LoadConfig 快照直接读取，不再维护 AutoLoadDemand、等待计数、额外锁或注入接口。Coord 重启直接从 LoadConfig 恢复标识，无需等待查询重试重建需求。
 
-默认策略通过 `WithAutoLoadDemand` 注入；本轮首次对某个 collection 评分时捕获其 pending 值，后续复用。未注入反馈读取器时不扫描全部 collection；AutoLoad 仅按需读取目标 collection。AutoLoad 可覆盖已知冷历史，表示新出现的查询需求；近期访问且缺 UpView 的故障恢复先匹配恢复分支，与 AutoLoad 共用 +10 基准并保留最多 +8 的流量加分。手动首次加载无历史时自然落在普通档，不额外建立持久化的手动加载标记。
+评分按顺序匹配：近期访问且没有健康 UpView 时，使用 +10 基准和最多 +8 的流量分；否则 `AutoLoad && !healthyUp` 使用 +10 基准，不要求访问历史为空。有健康 UpView 时 AutoLoad 不加分，按原有近期访问或冷 handoff 规则评分。因此 AutoLoad 的冷恢复也使用 +10，这是持久化加载策略，不是“当前存在等待请求”的推断。HIGH 的 +2 配置偏移保持不变。
 
-已接受的 Preparing View 不因新 AutoLoad 请求到达而重新创建或调分。统计和请求需求只影响以后正常创建的 View，配置与场景输入不会被节点重新计算。
+标识与当前加载配置同生命周期：完成 readiness、单个查询取消或请求超时不清除它；分区创建/部分释放、replica 调整和 Schema/Index 派生版本保留它。显式手动 LoadCollection/LoadPartitions 的新配置写入 false；Load 的 refresh 模式只刷新数据，不改加载来源。完整 Release 删除配置及标识，下次加载重新确定来源。来源本身变化也按既有版本化 LoadConfig 路径发布，不原地修改已发布对象。
+
+查询等待一个已有的手动 LoadConfig 时，不再登记临时 AutoLoad 加分。已接受的 Preparing View 不因查询到达或来源改变而重新打分；只有以后正常创建的 View 使用当时的配置、反馈和节点状态。
 
 ## 5. 固定 View 优先级与共享任务优先级
 
