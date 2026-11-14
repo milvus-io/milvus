@@ -278,12 +278,14 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto& starts = batch_offsets.starts;
     int64_t selected_elements = 0;
     if (has_candidates && !has_offset_input_) {
+        int64_t selected_row_count = 0;
         starts.resize(batch_rows + 1);
         struct_element_offsets->CopyRowElementStarts(
             current_pos_, batch_rows, starts.data());
         const int64_t total_elements = starts.back() - starts.front();
         for (int64_t i = 0; i < batch_rows; ++i) {
             if (candidates[i]) {
+                ++selected_row_count;
                 selected_elements += starts[i + 1] - starts[i];
             }
         }
@@ -307,8 +309,10 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         // Offsets pay for expansion and random row access. Keep dense batches
         // sequential, and never replace an index query with raw-data gathers.
-        // This conservative 5% cutoff is based on elements, not parent rows.
-        if (total_elements > 0 && selected_elements <= total_elements / 20) {
+        // Limit both per-row lookup work and element expansion. Skewed arrays
+        // can select few elements while still requiring nearly every row.
+        if (total_elements > 0 && selected_elements <= total_elements / 20 &&
+            selected_row_count <= batch_rows / 20) {
             inputs_[0]->WaitPrefetch();
             sparse_batch = inputs_[0]->CanUseOffsetsForSequentialBatch();
         }
