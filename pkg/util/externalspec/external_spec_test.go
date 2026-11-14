@@ -954,7 +954,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			value string
 		}{
 			{name: "account_key", key: "access_key_value", value: "base64key"},
-			{name: "workload_identity", key: "use_iam", value: "true"},
+			{name: "broker_iam_with_target_fields", key: "use_iam", value: "true"},
 			{name: "role_arn", key: "role_arn", value: "arn:aws:iam::1:role/r"},
 			{name: "gcp_impersonation", key: "gcp_target_service_account", value: "sa@proj.iam.gserviceaccount.com"},
 			{name: "anonymous", key: "anonymous", value: "true"},
@@ -965,7 +965,8 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 				extfs[test.key] = test.value
 				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "credential modes are mutually exclusive")
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "conflicts with Azure credential broker")
 			})
 		}
 	})
@@ -1024,7 +1025,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"cloud_provider":             "azure",
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "only valid for GCP")
+		assert.Contains(t, err.Error(), "requires cloud_provider=gcp")
 	})
 }
 
@@ -1248,7 +1249,7 @@ func TestCredentialBrokerModesAndPolicy(t *testing.T) {
 			require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
 		})
 	}
-	for _, cloud := range []string{"gcp", "huawei", "minio"} {
+	for _, cloud := range []string{"huawei", "minio"} {
 		require.Error(t, ValidateExtfsComplete("s3://bucket/key", map[string]string{"cloud_provider": cloud, "region": "r", "use_iam": "true", "credential_endpoint": endpoint}))
 	}
 	extfs := map[string]string{"cloud_provider": "azure", "access_key_id": "account", "region": "westus3", "azure_client_id": "client", "azure_tenant_id": "tenant", "azure_credential_endpoint": endpoint}
