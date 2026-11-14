@@ -1334,8 +1334,10 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Doc: `Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
 pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
 Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
-Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.`,
-		DefaultValue: "bcrypt",
+Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.
+Builds with MILVUS_NO_BCRYPT=ON (-tags nobcrypt) leave bcrypt out: they always use pbkdf2-sha512 and cannot verify existing bcrypt hashes.`,
+		DefaultValue: defaultPasswordHashAlgorithm,
+		Formatter:    formatPasswordHashAlgorithm,
 		Export:       true,
 		Sensitivity:  NonSensitive,
 	}

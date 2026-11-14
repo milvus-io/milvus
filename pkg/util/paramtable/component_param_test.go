@@ -888,7 +888,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.defaultRootPassword", "defaultMilvus")
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
 
-		assert.Equal(t, "bcrypt", Params.PasswordHashAlgorithm.GetValue())
+		assert.Equal(t, defaultPasswordHashAlgorithm, Params.PasswordHashAlgorithm.GetValue())
 
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())

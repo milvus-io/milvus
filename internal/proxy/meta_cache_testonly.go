@@ -25,7 +25,6 @@ import (
 	"context"
 
 	"github.com/stretchr/testify/mock"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -68,14 +67,14 @@ func InitEmptyMetaCacheForTest() *MetaCache {
 		// package-wide per-test engine setup cheap and avoids the -race timeout.
 		// Mirrors internal/util/adminauth/verifier_test.go. Production
 		// crypto.PasswordEncrypt (DefaultCost) is untouched.
-		encryptedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+		encryptedPassword, err := mockPasswordHash(password)
 		if err != nil {
 			panic(err)
 		}
 		return &rootcoordpb.GetCredentialResponse{
 			Status:   merr.Success(),
 			Username: username,
-			Password: string(encryptedPassword),
+			Password: encryptedPassword,
 		}
 	}
 	mixcoord.EXPECT().GetCredential(
