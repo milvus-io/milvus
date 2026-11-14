@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/dml"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -58,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1068,6 +1070,7 @@ func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
 		c.Next()
 	})
 	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		handlerCtx <- c
 		<-c.Request.Context().Done()
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(12345), HTTPReturnMessage: "late write"})
@@ -1165,11 +1168,67 @@ func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
 	assert.True(t, errors.Is(<-observed, context.Canceled))
 }
 
+func TestConditionalUpsertTimeoutResponse(t *testing.T) {
+	paramtable.Init()
+	for _, timerExit := range []bool{false, true} {
+		for _, submitted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("timer=%t/submitted=%t", timerExit, submitted), func(t *testing.T) {
+				key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
+				require.NoError(t, paramtable.Get().Save(key, "20"))
+				t.Cleanup(func() { paramtable.Get().Reset(key) })
+				timer := time.NewTimer(time.Hour)
+				defer timer.Stop()
+				patch := mockey.Mock(time.NewTimer).Return(timer).Build()
+				defer patch.UnPatch()
+				release, done := make(chan struct{}), make(chan struct{})
+				defer func() {
+					close(release)
+					<-done
+				}()
+				router := gin.New()
+				router.POST("/upsert", upsertTimeoutMiddleware(func(c *gin.Context) {
+					defer close(done)
+					state := requestutil.ConditionalWriteStateFromContext(c.Request.Context())
+					if submitted {
+						assert.True(t, state.TryAppend())
+					}
+					if timerExit {
+						timer.Reset(0)
+						<-release
+						assert.Equal(t, submitted, state.TryAppend(), "a pre-submission timeout must close the append gate")
+						return
+					}
+					task := dml.NewUpsertTask(c.Request.Context(), &proxy.Proxy{}, &milvuspb.UpsertRequest{
+						WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT},
+					}, nil)
+					err := task.WaitToFinish()
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+				}))
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/upsert", nil))
+				var body ReturnErrMsg
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+				want := merr.TimeoutCode
+				if submitted {
+					want = 112
+				}
+				require.Equal(t, want, body.Code)
+				if timerExit {
+					require.Equal(t, http.StatusRequestTimeout, response.Code)
+				} else {
+					require.Equal(t, http.StatusOK, response.Code)
+				}
+			})
+		}
+	}
+}
+
 func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 	ginHandler := gin.Default()
 	app := ginHandler.Group("")
 	path := "/middleware/timeout/deadline"
 	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		deadline, ok := c.Request.Context().Deadline()
 		assert.True(t, ok)
 		assert.LessOrEqual(t, time.Until(deadline), 3*time.Second)

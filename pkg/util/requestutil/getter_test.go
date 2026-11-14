@@ -74,6 +74,52 @@ func TestGetCollectionNameFromRequest(t *testing.T) {
 	}
 }
 
+func TestConditionalWriteState(t *testing.T) {
+	assert.Nil(t, ConditionalWriteStateFromContext(context.Background()))
+	ctx, state := WithConditionalWriteState(context.Background())
+	nested, same := WithConditionalWriteState(ctx)
+	assert.Equal(t, ctx, nested)
+	assert.Same(t, state, same)
+	assert.Same(t, state, ConditionalWriteStateFromContext(ctx))
+	assert.True(t, state.TryAppend())
+	assert.True(t, state.TryAppend(), "later attempts retain the submission state")
+	err := state.Cancel(context.DeadlineExceeded)
+	assert.EqualValues(t, 112, merr.Code(err))
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, err, state.Cancel(err))
+	assert.False(t, merr.IsRetryableErr(err))
+
+	var canceled ConditionalWriteState
+	assert.Equal(t, context.DeadlineExceeded, canceled.Cancel(context.DeadlineExceeded))
+	assert.Equal(t, context.Canceled, canceled.Cancel(context.Canceled))
+	assert.False(t, canceled.TryAppend(), "a pre-submission timeout must prevent a late append")
+}
+
+func TestConditionalWriteStateSubmissionRacesCancellation(t *testing.T) {
+	for range 100 {
+		var state ConditionalWriteState
+		start := make(chan struct{})
+		appended := make(chan bool, 1)
+		canceled := make(chan error, 1)
+		go func() {
+			<-start
+			appended <- state.TryAppend()
+		}()
+		go func() {
+			<-start
+			canceled <- state.Cancel(context.DeadlineExceeded)
+		}()
+		close(start)
+		won, err := <-appended, <-canceled
+		if won {
+			assert.EqualValues(t, 112, merr.Code(err))
+		} else {
+			assert.Equal(t, context.DeadlineExceeded, err)
+			assert.False(t, state.TryAppend())
+		}
+	}
+}
+
 func TestGetDbNameFromRequest(t *testing.T) {
 	type args struct {
 		req interface{}

@@ -461,6 +461,22 @@ func (s *Suite) TestDeleteAndUpsertModes() {
 		})
 		s.Require().NoError(err, "transport error")
 	}
+	conditionalUpsert := func(op milvuspb.WriteCondition_Op, policy milvuspb.WriteCondition_MissingRowPolicy, version int64) {
+		result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+			CollectionName: name,
+			FieldsData: []*schemapb.FieldData{
+				pk(), newInt64Column("f0", []int64{version, version}),
+			},
+			NumRows:       rows,
+			PartialUpdate: true,
+			WriteCondition: &milvuspb.WriteCondition{
+				Field: "f0", Op: op, OnMissing: policy,
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(commonpb.ErrorCode_Success, result.GetStatus().GetErrorCode(), result.GetStatus().GetReason())
+		s.Equal(int64(rows), result.GetUpsertCnt())
+	}
 	op := func(field string, t schemapb.FieldPartialUpdateOp_OpType, path string) *schemapb.FieldPartialUpdateOp {
 		return &schemapb.FieldPartialUpdateOp{FieldName: field, Op: t, Path: path}
 	}
@@ -521,6 +537,27 @@ func (s *Suite) TestDeleteAndUpsertModes() {
 				upsert(true, []*schemapb.FieldData{pk(), meta()}, op(writesMeta, schemapb.FieldPartialUpdateOp_PATH_REPLACE, `["k"]`))
 			},
 			want: map[string]int64{"upsert_mode=merge": 1, "field_ops=PATH_REPLACE": 1, "upsert_fields|2-4": 1},
+		},
+		{
+			name: "conditional GT with insert policy",
+			run: func() {
+				conditionalUpsert(milvuspb.WriteCondition_GT, milvuspb.WriteCondition_INSERT_IF_MISSING, 1)
+			},
+			want: map[string]int64{"upsert_mode=merge": 1, "upsert_fields|2-4": 1, "upsert_write_condition=gt": 1, "upsert_on_missing=insert": 1},
+		},
+		{
+			name: "conditional GTE with skip policy",
+			run: func() {
+				conditionalUpsert(milvuspb.WriteCondition_GTE, milvuspb.WriteCondition_SKIP_IF_MISSING, 1)
+			},
+			want: map[string]int64{"upsert_mode=merge": 1, "upsert_fields|2-4": 1, "upsert_write_condition=gte": 1, "upsert_on_missing=skip": 1},
+		},
+		{
+			name: "conditional GT with error policy",
+			run: func() {
+				conditionalUpsert(milvuspb.WriteCondition_GT, milvuspb.WriteCondition_ERROR_IF_MISSING, 2)
+			},
+			want: map[string]int64{"upsert_mode=merge": 1, "upsert_fields|2-4": 1, "upsert_write_condition=gt": 1, "upsert_on_missing=error": 1},
 		},
 	}
 	for _, tc := range cases {

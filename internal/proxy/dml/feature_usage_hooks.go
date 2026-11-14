@@ -41,6 +41,21 @@ func recordUpsertFeatures(req *milvuspb.UpsertRequest) {
 		set.Set(featureusage.FieldOpFeature(op.GetOp()))
 	}
 	set.Set(featureusage.UpsertFieldsFeature(len(req.GetFieldsData())))
+	if condition := req.GetWriteCondition(); condition != nil {
+		if condition.Op == milvuspb.WriteCondition_GT {
+			set.Set(featureusage.FeatureUpsertConditionGT)
+		} else {
+			set.Set(featureusage.FeatureUpsertConditionGTE)
+		}
+		switch condition.OnMissing {
+		case milvuspb.WriteCondition_INSERT_IF_MISSING:
+			set.Set(featureusage.FeatureUpsertMissingInsert)
+		case milvuspb.WriteCondition_SKIP_IF_MISSING:
+			set.Set(featureusage.FeatureUpsertMissingSkip)
+		case milvuspb.WriteCondition_ERROR_IF_MISSING:
+			set.Set(featureusage.FeatureUpsertMissingError)
+		}
+	}
 	set.HitAll()
 }
 

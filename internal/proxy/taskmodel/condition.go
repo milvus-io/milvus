@@ -45,6 +45,12 @@ type TaskCondition struct {
 func (tc *TaskCondition) WaitToFinish() error {
 	select {
 	case <-tc.ctx.Done():
+		// Preserve a completed result when both channels are ready.
+		select {
+		case err := <-tc.done:
+			return err
+		default:
+		}
 		if tc.onContextDone != nil {
 			tc.onContextDone()
 		}
