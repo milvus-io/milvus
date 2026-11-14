@@ -10,6 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/futures/Future.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -2557,4 +2560,162 @@ TEST_F(IndexEntryEncryptedV3Test, PositionedFailureStopsFurtherReads) {
             EXPECT_EQ(writes.load(), mode == 1 ? 1 : 0);
         }
     }
+}
+
+TEST_F(IndexEntryWriterV3Test, AsyncStreamAdmissionLeavesCallerResponsive) {
+    IndexEntryStreamConfigGuard config;
+    const auto data = GeneratePattern(kMinStreamSliceSize);
+    const auto path = kV3FilePath + "_async_admission";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    auto reader =
+        IndexEntryReader::Open(CreateInputStream(path), GetFileSize(path));
+    auto& budget = LoadAdmissionController::GetInstance();
+    budget.SetCapacityBytes(0);
+    budget.SetCapacitySlots(1);
+    const std::string entry_name = "data";
+    folly::CPUThreadPoolExecutor caller(1);
+    for (bool positioned : {false, true}) {
+        SCOPED_TRACE(positioned);
+        folly::CancellationSource cancel;
+        budget.Acquire({0, 1}, LoadAdmissionPriority::High);
+        bool held = true;
+        std::atomic<size_t> callbacks{0};
+        auto task =
+            positioned
+                ? reader->ReadEntryStreamAtAsync(
+                      entry_name,
+                      [&](size_t, const uint8_t*, size_t) { ++callbacks; })
+                : reader->ReadEntryStreamAsync(
+                      entry_name, [&](const uint8_t*, size_t) { ++callbacks; });
+        auto load = std::async(std::launch::async, [&] {
+            folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancel.getToken(),
+                folly::coro::co_withExecutor(&caller, std::move(task))));
+        });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            if (held)
+                budget.Release({0, 1});
+            if (load.valid())
+                load.wait();
+        });
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(50)),
+                  std::future_status::timeout);
+        auto marker =
+            folly::via(&caller, [] {}).via(&folly::InlineExecutor::instance());
+        EXPECT_TRUE(marker.wait(std::chrono::seconds(2)).isReady());
+        cancel.requestCancellation();
+        const auto status = load.wait_for(std::chrono::seconds(2));
+        budget.Release({0, 1});
+        held = false;
+        EXPECT_EQ(status, std::future_status::ready);
+        try {
+            load.get();
+            FAIL() << "expected cancelled admission";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(callbacks.load(), 0);
+    }
+}
+
+TEST_F(IndexEntryWriterV3Test, AsyncStreamReadDrainsOnInheritedCancellation) {
+    const auto data = GeneratePattern(kMinStreamSliceSize);
+    const auto path = kV3FilePath + "_async_drain";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    const std::string entry_name = "data";
+    folly::CPUThreadPoolExecutor caller(1);
+    for (bool positioned : {false, true}) {
+        SCOPED_TRACE(positioned);
+        std::promise<void> entered, release;
+        auto released = release.get_future().share();
+        auto input = std::make_shared<DelayedFailingInputStream>(
+            CreateInputStream(path),
+            std::vector<DelayedFailingInputStream::Rule>{
+                {MILVUS_V3_MAGIC_SIZE,
+                 std::chrono::milliseconds(0),
+                 false,
+                 [&] {
+                     entered.set_value();
+                     released.wait();
+                 }}});
+        auto reader = IndexEntryReader::Open(input, GetFileSize(path));
+        folly::CancellationSource cancel;
+        auto task = positioned
+                        ? reader->ReadEntryStreamAtAsync(
+                              entry_name, [](size_t, const uint8_t*, size_t) {})
+                        : reader->ReadEntryStreamAsync(
+                              entry_name, [](const uint8_t*, size_t) {});
+        auto load = std::async(std::launch::async, [&] {
+            folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancel.getToken(),
+                folly::coro::co_withExecutor(&caller, std::move(task))));
+        });
+        bool resumed = false;
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            if (!resumed)
+                release.set_value();
+            if (load.valid())
+                load.wait();
+        });
+        ASSERT_EQ(entered.get_future().wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        auto marker =
+            folly::via(&caller, [] {}).via(&folly::InlineExecutor::instance());
+        EXPECT_TRUE(marker.wait(std::chrono::seconds(2)).isReady());
+        cancel.requestCancellation();
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(50)),
+                  std::future_status::timeout);
+        release.set_value();
+        resumed = true;
+        try {
+            load.get();
+            FAIL() << "expected cancellation after drained read";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FollyCancel);
+        }
+    }
+}
+
+TEST_F(IndexEntryWriterV3Test, PrecancelledStreamFilePreservesExistingTarget) {
+    const auto data = GeneratePattern(kMinStreamSliceSize);
+    const auto path = kV3FilePath + "_precancelled_stream";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    auto reader =
+        IndexEntryReader::Open(CreateInputStream(path), GetFileSize(path));
+    const std::string target = GetRootPath() + "/existing-stream-file";
+    const std::string original = "keep existing file";
+    {
+        std::ofstream output(target, std::ios::binary);
+        output << original;
+    }
+    folly::CancellationSource cancel;
+    cancel.requestCancellation();
+    try {
+        folly::coro::blockingWait(folly::coro::co_withCancellation(
+            cancel.getToken(),
+            reader->ReadEntryStreamToFileAsync("data", target)));
+        FAIL() << "expected inherited cancellation";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    std::ifstream input(target, std::ios::binary);
+    ASSERT_TRUE(input.is_open());
+    const std::string actual{std::istreambuf_iterator<char>(input),
+                             std::istreambuf_iterator<char>()};
+    EXPECT_EQ(actual, original);
+    ::unlink(target.c_str());
 }

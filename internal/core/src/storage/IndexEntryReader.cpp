@@ -26,6 +26,8 @@
 #include <deque>
 #include <functional>
 #include <folly/futures/Future.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -53,38 +55,22 @@ struct ActiveSliceTask {
     std::shared_ptr<StreamSliceResult> result;
     folly::SemiFuture<folly::Unit> future =
         folly::SemiFuture<folly::Unit>::makeEmpty();
+    LoadAdmissionLease lease;
+    bool manual_release = false;
 };
 
-// Holds the transient bytes and one slot for the lifetime of a slice task.
-class LoadAdmissionGuard {
- public:
-    LoadAdmissionGuard(const size_t slice_transient_bytes,
-                       const LoadAdmissionPriority priority,
-                       const folly::CancellationToken& cancellation_token,
-                       const std::string& operation)
-        : slice_transient_bytes_(slice_transient_bytes) {
-        ThrowIfCancelled(cancellation_token, operation);
-        const bool acquired =
-            LoadAdmissionController::GetInstance().AcquireUntil(
-                {slice_transient_bytes_, 1}, priority, cancellation_token);
-        if (!acquired) {
-            ThrowIfCancelled(cancellation_token, operation);
-            ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
-        }
+// Translate admission cancellation without masking read/validation failures.
+folly::coro::Task<LoadAdmissionLease>
+AcquireEntrySlice(size_t bytes,
+                  LoadAdmissionPriority priority,
+                  const folly::CancellationToken& token) {
+    try {
+        co_return co_await LoadAdmissionController::GetInstance().AcquireAsync(
+            {bytes, 1}, priority, token);
+    } catch (const folly::OperationCancelled&) {
+        ThrowInfo(ErrorCode::FollyCancel, "Index entry admission cancelled");
     }
-
-    ~LoadAdmissionGuard() {
-        LoadAdmissionController::GetInstance().Release(
-            {slice_transient_bytes_, 1});
-    }
-
-    LoadAdmissionGuard(const LoadAdmissionGuard&) = delete;
-    LoadAdmissionGuard&
-    operator=(const LoadAdmissionGuard&) = delete;
-
- private:
-    const size_t slice_transient_bytes_;
-};
+}
 
 bool
 ShouldMergePlainStreamTail(size_t entry_size, size_t slice_size) {
@@ -128,15 +114,16 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
 
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
 
-void
-DrainFutures(std::vector<folly::SemiFuture<folly::Unit>>& futures,
-             std::exception_ptr& first_error) {
+folly::coro::Task<void>
+DrainFuturesAsync(std::vector<folly::SemiFuture<folly::Unit>>& futures,
+                  std::exception_ptr& first_error) {
     for (auto& future : futures) {
         if (!future.valid()) {
             continue;
         }
         try {
-            std::move(future).get();
+            co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{}, std::move(future));
         } catch (...) {
             if (!first_error) {
                 first_error = std::current_exception();
@@ -145,16 +132,20 @@ DrainFutures(std::vector<folly::SemiFuture<folly::Unit>>& futures,
     }
 }
 
-void
+folly::coro::Task<void>
 ReadOrderedEntryStream(
     size_t num_slices,
     uint32_t expected_crc,
     const std::string& crc_error_context,
     ThreadPoolPriority priority,
-    const folly::CancellationToken& cancellation_token,
+    folly::CancellationToken cancellation_token,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
     const SliceTransientBytes& slice_transient_bytes,
     const SliceLoader& load_slice) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    cancellation_token =
+        folly::cancellation_token_merge(cancellation_token, caller_token);
     ThrowIfCancelled(cancellation_token, "ReadEntryStream");
     if (num_slices == 0) {
         auto actual_crc = Crc32cValue(nullptr, 0);
@@ -165,7 +156,7 @@ ReadOrderedEntryStream(
                       Crc32cToHex(expected_crc),
                       Crc32cToHex(actual_crc));
         }
-        return;
+        co_return;
     }
 
     auto& pool = ThreadPools::GetExecutor(priority);
@@ -196,23 +187,7 @@ ReadOrderedEntryStream(
         }
     };
 
-    auto drainActiveTasks = [&]() {
-        while (!active_tasks.empty()) {
-            auto task = std::move(active_tasks.front());
-            active_tasks.pop_front();
-            if (task.future.valid()) {
-                try {
-                    std::move(task.future).get();
-                } catch (...) {
-                    rememberError(std::current_exception());
-                }
-            }
-            std::vector<uint8_t>{}.swap(task.result->data);
-            budget.Release({task.slice_transient_bytes, 1});
-        }
-    };
-
-    auto submitOne = [&](bool block_for_budget) -> bool {
+    auto submitOne = [&](bool block_for_budget) -> folly::coro::Task<bool> {
         size_t seq = next_submit;
         size_t slice_transient_byte_count = 0;
         std::shared_ptr<StreamSliceResult> result;
@@ -222,31 +197,39 @@ ReadOrderedEntryStream(
             result->slice_transient_bytes = slice_transient_byte_count;
         } catch (...) {
             rememberError(std::current_exception());
-            return false;
+            co_return false;
         }
 
+        LoadAdmissionLease admission;
         if (block_for_budget) {
-            const bool acquired =
-                budget.AcquireUntil({slice_transient_byte_count, 1},
-                                    budget_priority,
-                                    cancellation_token);
-            if (!acquired) {
-                rememberCancellation();
-                return false;
+            try {
+                auto lease =
+                    co_await AcquireEntrySlice(slice_transient_byte_count,
+                                               budget_priority,
+                                               cancellation_token);
+                admission = std::move(lease);
+            } catch (...) {
+                rememberError(std::current_exception());
+                co_return false;
             }
         } else if (!budget.TryAcquire({slice_transient_byte_count, 1},
                                       budget_priority)) {
-            return false;
+            co_return false;
         }
 
         if (rememberCancellation()) {
-            budget.Release({slice_transient_byte_count, 1});
-            return false;
+            if (!block_for_budget)
+                budget.Release({slice_transient_byte_count, 1});
+            co_return false;
         }
 
         try {
-            active_tasks.push_back(
-                ActiveSliceTask{slice_transient_byte_count, result});
+            active_tasks.push_back(ActiveSliceTask{
+                block_for_budget ? 0 : slice_transient_byte_count,
+                result,
+                folly::SemiFuture<folly::Unit>::makeEmpty(),
+                std::move(admission),
+                !block_for_budget});
             active_tasks.back().future =
                 folly::via(&pool,
                            [result, load_slice, seq, cancellation_token]() {
@@ -266,20 +249,21 @@ ReadOrderedEntryStream(
                 !active_tasks.back().future.valid()) {
                 active_tasks.pop_back();
             }
-            budget.Release({slice_transient_byte_count, 1});
+            if (!block_for_budget)
+                budget.Release({slice_transient_byte_count, 1});
             rememberError(std::current_exception());
-            return false;
+            co_return false;
         }
 
         next_submit++;
-        return true;
+        co_return true;
     };
 
-    auto refill = [&]() {
+    auto refill = [&]() -> folly::coro::Task<void> {
         while (!first_error && next_submit < num_slices &&
                active_tasks.size() < max_active_tasks) {
             bool block_for_budget = active_tasks.empty();
-            if (!submitOne(block_for_budget)) {
+            if (!(co_await submitOne(block_for_budget))) {
                 break;
             }
         }
@@ -299,14 +283,19 @@ ReadOrderedEntryStream(
         }
     };
 
-    refill();
+    try {
+        co_await refill();
+    } catch (...) {
+        rememberError(std::current_exception());
+    }
 
     while (!active_tasks.empty()) {
         auto task = std::move(active_tasks.front());
         active_tasks.pop_front();
 
         try {
-            std::move(task.future).get();
+            co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{}, std::move(task.future));
         } catch (...) {
             rememberError(std::current_exception());
         }
@@ -320,14 +309,17 @@ ReadOrderedEntryStream(
         }
 
         std::vector<uint8_t>{}.swap(task.result->data);
-        budget.Release({task.slice_transient_bytes, 1});
+        if (task.manual_release)
+            budget.Release({task.slice_transient_bytes, 1});
+        task.lease.Release();
 
-        if (first_error) {
-            drainActiveTasks();
-            break;
+        if (!first_error) {
+            try {
+                co_await refill();
+            } catch (...) {
+                rememberError(std::current_exception());
+            }
         }
-
-        refill();
     }
 
     if (first_error) {
@@ -350,12 +342,16 @@ DefaultEntryStreamSliceSize() {
     return DefaultStreamSliceSize();
 }
 
-std::unique_ptr<IndexEntryReader>
-IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
-                       int64_t file_size,
-                       int64_t collection_id,
-                       ThreadPoolPriority priority,
-                       folly::CancellationToken cancellation_token) {
+folly::coro::Task<std::unique_ptr<IndexEntryReader>>
+IndexEntryReader::OpenAsync(std::shared_ptr<milvus::InputStream> input,
+                            int64_t file_size,
+                            int64_t collection_id,
+                            ThreadPoolPriority priority,
+                            folly::CancellationToken cancellation_token) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    cancellation_token =
+        folly::cancellation_token_merge(cancellation_token, caller_token);
     auto reader = std::unique_ptr<IndexEntryReader>(new IndexEntryReader());
     reader->input_ = std::move(input);
     reader->file_size_ = file_size;
@@ -369,20 +365,26 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                   "Invalid packed V3 input or file size {}",
                   file_size);
     }
-    reader->ValidateMagic();
-    reader->ReadFooterAndDirectory();
-    reader->CheckCancelled("IndexEntryReader::Open");
+    auto preparation =
+        folly::via(&ThreadPools::GetExecutor(priority), [&] {
+            reader->ValidateMagic();
+            reader->ReadFooterAndDirectory();
+            reader->CheckCancelled("IndexEntryReader::Open");
 
-    if (reader->encryption_.has_value()) {
-        reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        if (!(reader->cipher_plugin_ != nullptr)) {
-            ThrowInfo(ErrorCode::ConfigInvalid,
-                      "Cipher plugin required for encrypted V3 index");
-        }
-    }
-
+            if (reader->encryption_.has_value()) {
+                reader->cipher_plugin_ =
+                    PluginLoader::GetInstance().getCipherPlugin();
+                if (!(reader->cipher_plugin_ != nullptr)) {
+                    ThrowInfo(ErrorCode::ConfigInvalid,
+                              "Cipher plugin required for encrypted V3 index");
+                }
+            }
+        }).semi();
+    co_await folly::coro::co_withCancellation(folly::CancellationToken{},
+                                              std::move(preparation));
     // Parse __meta__ entry
-    auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
+    auto meta_entry =
+        co_await reader->ReadEntryAsync(MILVUS_V3_META_ENTRY_NAME);
     if (!meta_entry.data.empty()) {
         try {
             reader->metadata_ = nlohmann::json::parse(meta_entry.data.begin(),
@@ -394,7 +396,38 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         }
     }
 
-    return reader;
+    co_return reader;
+}
+
+std::unique_ptr<IndexEntryReader>
+IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
+                       int64_t file_size,
+                       int64_t collection_id,
+                       ThreadPoolPriority priority,
+                       folly::CancellationToken token) {
+    return folly::coro::blockingWait(
+        OpenAsync(std::move(input), file_size, collection_id, priority, token));
+}
+
+Entry
+IndexEntryReader::ReadEntry(const std::string& name) {
+    return folly::coro::blockingWait(ReadEntryAsync(name));
+}
+
+void
+IndexEntryReader::ReadEntryStreamAt(
+    const std::string& name,
+    std::function<void(size_t, const uint8_t*, size_t)> write) {
+    folly::coro::blockingWait(ReadEntryStreamAtAsync(name, std::move(write)));
+}
+
+void
+IndexEntryReader::ReadEntryStream(
+    const std::string& name,
+    std::function<void(const uint8_t*, size_t)> consume,
+    size_t slice_size) {
+    folly::coro::blockingWait(
+        ReadEntryStreamAsync(name, std::move(consume), slice_size));
 }
 
 void
@@ -462,31 +495,36 @@ IndexEntryReader::StreamDownloadTaskCount(const EntryMeta& meta) {
                                  DefaultEntryStreamSliceSize());
 }
 
-Entry
-IndexEntryReader::ReadEntry(const std::string& name) {
-    CheckCancelled("IndexEntryReader::ReadEntry");
+folly::coro::Task<Entry>
+IndexEntryReader::ReadEntryAsync(const std::string& name) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(cancellation_token_, caller_token);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntry");
     auto cache_it = small_entry_cache_.find(name);
     if (cache_it != small_entry_cache_.end()) {
-        return cache_it->second;
+        co_return cache_it->second;
     }
 
     const auto& meta = directory_.At(name);
 
     Entry result;
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
-        result = ReadEncryptedEntry(meta);
+        result = co_await ReadEncryptedEntry(meta);
     } else {
-        result = ReadPlainEntry(meta);
+        result = co_await ReadPlainEntry(meta);
     }
 
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntry");
     if (result.data.size() <= kSmallEntryCacheThreshold) {
         small_entry_cache_[name] = result;
     }
 
-    return result;
+    co_return result;
 }
 
-Entry
+folly::coro::Task<Entry>
 IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadPlainEntry");
     const auto& pm = std::get<PlainEntrySource>(meta.source);
@@ -494,15 +532,20 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     result.data.resize(meta.plaintext_size);
 
     if (meta.plaintext_size <= kEntryDownloadRangeSize) {
-        size_t n = input_->ReadAt(
-            result.data.data(), pm.remote_offset, meta.plaintext_size);
+        auto read =
+            folly::via(&ThreadPools::GetExecutor(priority_), [&] {
+                return input_->ReadAt(
+                    result.data.data(), pm.remote_offset, meta.plaintext_size);
+            }).semi();
+        const auto n = co_await folly::coro::co_withCancellation(
+            folly::CancellationToken{}, std::move(read));
         CheckCancelled("IndexEntryReader::ReadPlainEntry");
         if (!(n == meta.plaintext_size)) {
             ThrowInfo(ErrorCode::FileReadFailed, "Failed to read entry data");
         }
         VerifyCrc32c(
             meta.expected_crc, result.data.data(), meta.plaintext_size, "");
-        return result;
+        co_return result;
     }
 
     auto& pool = ThreadPools::GetExecutor(priority_);
@@ -545,7 +588,7 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     } catch (...) {
         first_error = std::current_exception();
     }
-    DrainFutures(futures, first_error);
+    co_await DrainFuturesAsync(futures, first_error);
     if (first_error) {
         std::rethrow_exception(first_error);
     }
@@ -555,10 +598,10 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     VerifyCrc32c(
         meta.expected_crc, result.data.data(), meta.plaintext_size, "");
 
-    return result;
+    co_return result;
 }
 
-Entry
+folly::coro::Task<Entry>
 IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadEncryptedEntry");
     const auto& em = std::get<EncryptedEntrySource>(meta.source);
@@ -624,7 +667,7 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     } catch (...) {
         first_error = std::current_exception();
     }
-    DrainFutures(futures, first_error);
+    co_await DrainFuturesAsync(futures, first_error);
     if (first_error) {
         std::rethrow_exception(first_error);
     }
@@ -634,7 +677,7 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     VerifyCrc32c(
         meta.expected_crc, result.data.data(), meta.plaintext_size, "");
 
-    return result;
+    co_return result;
 }
 
 IndexEntryReader::EntryDownloadState
@@ -898,7 +941,7 @@ struct IndexEntryReader::EntryStreamFailure {
     folly::CancellationSource cancellation;
 };
 
-void
+folly::coro::Task<void>
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
     const EntryMeta& meta,
     EntryStreamDownloadState& state,
@@ -906,8 +949,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     EntryStreamFailure& failure) {
     auto& pool = ThreadPools::GetExecutor(priority_);
     auto input = input_;
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
     const auto cancellation_token = folly::cancellation_token_merge(
-        cancellation_token_, failure.cancellation.getToken());
+        cancellation_token_, failure.cancellation.getToken(), caller_token);
     const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority_);
     futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
@@ -922,13 +967,12 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             auto slice = em.slices[i];
             const auto output_offset = slice.plaintext_offset;
             const auto plain_len = slice.plaintext_bytes;
-            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
+            auto budget_guard = co_await AcquireEntrySlice(
                 SaturatingAdd(
                     EncryptedStreamBudgetBytes(slice.remote_bytes, plain_len),
                     2 * FileWriter::ALIGNMENT_MASK),
                 budget_priority,
-                cancellation_token,
-                "IndexEntryReader::ReadEntriesStreamToFiles");
+                cancellation_token);
 
             ThrowIfCancelled(
                 cancellation_token,
@@ -1010,13 +1054,12 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len = PlainStreamSliceBytes(
                 meta.plaintext_size, slice_size, num_slices, seq);
             size_t src_offset = pm.remote_offset + output_offset;
-            auto budget_guard = std::make_unique<LoadAdmissionGuard>(
+            auto budget_guard = co_await AcquireEntrySlice(
                 SaturatingAdd(
                     SaturatingMultiply(len, kFileStreamBufferMultiplier),
                     2 * FileWriter::ALIGNMENT_MASK),
                 budget_priority,
-                cancellation_token,
-                "IndexEntryReader::ReadEntriesStreamToFiles");
+                cancellation_token);
 
             ThrowIfCancelled(
                 cancellation_token,
@@ -1088,11 +1131,15 @@ IndexEntryReader::FinalizeEntryStreamDownload(EntryStreamDownloadState& state) {
     }
 }
 
-void
-IndexEntryReader::ReadEntryStreamAt(
+folly::coro::Task<void>
+IndexEntryReader::ReadEntryStreamAtAsync(
     const std::string& name,
     std::function<void(size_t, const uint8_t*, size_t)> write) {
-    CheckCancelled("IndexEntryReader::ReadEntryStreamAt");
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(cancellation_token_, caller_token);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntryStreamAt");
     const auto slice_size = DefaultEntryStreamSliceSize();
     AssertInfo(slice_size >= kMinStreamSliceSize &&
                    IsStreamSliceSizeAligned(slice_size),
@@ -1109,129 +1156,110 @@ IndexEntryReader::ReadEntryStreamAt(
     std::vector<folly::SemiFuture<folly::Unit>> futures;
     std::exception_ptr first_error;
     try {
-        SubmitEntryStreamDownloadTasks(meta, state, futures, failure);
+        co_await SubmitEntryStreamDownloadTasks(meta, state, futures, failure);
     } catch (...) {
         first_error = std::current_exception();
         failure.RecordAndCancel(first_error);
     }
     // Both submission failures and worker failures must drain before the caller
     // can destroy its destination. Preserve the original exception and code.
-    DrainFutures(futures, first_error);
+    co_await DrainFuturesAsync(futures, first_error);
     if (auto root_error = failure.FirstError()) {
         first_error = root_error;
     }
     if (first_error) {
         std::rethrow_exception(first_error);
     }
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntryStreamAt");
     FinalizeEntryStreamDownload(state);
 }
 
 void
 IndexEntryReader::ReadEntryToFile(const std::string& name,
-                                  const std::string& local_path) {
-    CheckCancelled("IndexEntryReader::ReadEntryToFile");
-    const auto& meta = directory_.At(name);
-
-    auto state = PrepareEntryDownload(name, local_path, meta);
-    std::vector<folly::SemiFuture<folly::Unit>> futures;
-    try {
-        futures.reserve(DownloadTaskCount(meta));
-        SubmitEntryDownloadTasks(meta, state, futures);
-
-        std::exception_ptr first_error = nullptr;
-        DrainFutures(futures, first_error);
-        if (first_error) {
-            std::rethrow_exception(first_error);
-        }
-
-        FinalizeEntryDownload(state);
-    } catch (...) {
-        std::exception_ptr first_error = std::current_exception();
-        DrainFutures(futures, first_error);
-        if (state.fd != -1) {
-            ::close(state.fd);
-            state.fd = -1;
-        }
-        std::rethrow_exception(first_error);
-    }
+                                  const std::string& path) {
+    folly::coro::blockingWait(ReadEntriesToFilesAsync({{name, path}}));
 }
 
 void
 IndexEntryReader::ReadEntriesToFiles(
-    const std::vector<std::pair<std::string, std::string>>& name_path_pairs) {
-    CheckCancelled("IndexEntryReader::ReadEntriesToFiles");
-    if (name_path_pairs.empty()) {
-        return;
-    }
+    const std::vector<std::pair<std::string, std::string>>& paths) {
+    folly::coro::blockingWait(ReadEntriesToFilesAsync(paths));
+}
 
-    // Prepare all download states
+folly::coro::Task<void>
+IndexEntryReader::ReadEntriesToFilesAsync(
+    const std::vector<std::pair<std::string, std::string>>& name_path_pairs) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(cancellation_token_, caller_token);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntriesToFiles");
     std::vector<EntryDownloadState> states;
     states.reserve(name_path_pairs.size());
-
-    // Helper to close all open fds in states
-    auto close_all_fds = [&states]() {
-        for (auto& s : states) {
-            if (s.fd != -1) {
-                ::close(s.fd);
-                s.fd = -1;
-            }
-        }
-    };
-
-    std::vector<folly::SemiFuture<folly::Unit>> all_futures;
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
+    std::exception_ptr error;
     try {
-        size_t total_task_count = 0;
+        size_t count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             const auto& meta = directory_.At(name);
             states.push_back(PrepareEntryDownload(name, path, meta));
-            total_task_count += DownloadTaskCount(meta);
+            count += DownloadTaskCount(meta);
         }
-
-        // Submit ALL tasks for ALL entries at once (avoids thread pool deadlock)
-        all_futures.reserve(total_task_count);
-        for (size_t i = 0; i < name_path_pairs.size(); i++) {
-            const auto& meta = directory_.At(name_path_pairs[i].first);
-            SubmitEntryDownloadTasks(meta, states[i], all_futures);
-        }
-
-        // Wait for ALL tasks to complete
-        std::exception_ptr first_error = nullptr;
-        DrainFutures(all_futures, first_error);
-        if (first_error) {
-            std::rethrow_exception(first_error);
-        }
-
-        // Verify CRCs and close all file descriptors
-        for (auto& state : states) {
-            FinalizeEntryDownload(state);
+        futures.reserve(count);
+        for (size_t i = 0; i < name_path_pairs.size(); ++i) {
+            SubmitEntryDownloadTasks(
+                directory_.At(name_path_pairs[i].first), states[i], futures);
         }
     } catch (...) {
-        std::exception_ptr first_error = std::current_exception();
-        DrainFutures(all_futures, first_error);
-        close_all_fds();
-        std::rethrow_exception(first_error);
+        error = std::current_exception();
     }
+    co_await DrainFuturesAsync(futures, error);
+    if (!error) {
+        try {
+            ThrowIfCancelled(token, "IndexEntryReader::ReadEntriesToFiles");
+            for (auto& state : states) FinalizeEntryDownload(state);
+        } catch (...) {
+            error = std::current_exception();
+        }
+    }
+    for (auto& state : states) {
+        if (state.fd != -1) {
+            ::close(state.fd);
+            state.fd = -1;
+        }
+    }
+    if (error)
+        std::rethrow_exception(error);
 }
 
 void
 IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
-                                        const std::string& local_path,
-                                        io::Priority write_priority) {
-    CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
-    if (!(directory_.HasEntry(name))) {
+                                        const std::string& path,
+                                        io::Priority priority) {
+    folly::coro::blockingWait(ReadEntryStreamToFileAsync(name, path, priority));
+}
+
+folly::coro::Task<void>
+IndexEntryReader::ReadEntryStreamToFileAsync(const std::string& name,
+                                             const std::string& local_path,
+                                             io::Priority write_priority) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(cancellation_token_, caller_token);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntryStreamToFile");
+    if (!directory_.HasEntry(name)) {
         ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
     }
-    // Construct before the cleanup scope: an open failure must not unlink an
-    // existing destination that this writer never acquired.
     PositionedFileWriter writer(local_path, GetEntrySize(name), write_priority);
     try {
-        ReadEntryStreamAt(name,
-                          [&](size_t offset, const uint8_t* data, size_t len) {
-                              writer.WriteAt(offset, data, len);
-                          });
+        co_await ReadEntryStreamAtAsync(
+            name, [&](size_t offset, const uint8_t* data, size_t len) {
+                writer.WriteAt(offset, data, len);
+            });
         writer.Finish();
     } catch (...) {
-        // ReadEntryStreamAt drains workers before returning the original error.
+        // The await drains workers before the destination can be removed.
         ::unlink(local_path.c_str());
         throw;
     }
@@ -1239,58 +1267,52 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
 
 void
 IndexEntryReader::ReadEntriesStreamToFiles(
+    const std::vector<std::pair<std::string, std::string>>& paths,
+    io::Priority priority) {
+    folly::coro::blockingWait(ReadEntriesStreamToFilesAsync(paths, priority));
+}
+
+folly::coro::Task<void>
+IndexEntryReader::ReadEntriesStreamToFilesAsync(
     const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
     io::Priority write_priority) {
-    CheckCancelled("IndexEntryReader::ReadEntriesStreamToFiles");
-    if (name_path_pairs.empty()) {
-        return;
-    }
-
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(cancellation_token_, caller_token);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntriesStreamToFiles");
     std::vector<EntryStreamDownloadState> states;
     states.reserve(name_path_pairs.size());
     EntryStreamFailure failure;
-    std::vector<folly::SemiFuture<folly::Unit>> all_futures;
-
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
+    std::exception_ptr error;
     try {
-        size_t total_task_count = 0;
+        size_t count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             const auto& meta = directory_.At(name);
             states.push_back(
                 PrepareEntryStreamDownload(name, path, meta, write_priority));
-            total_task_count += StreamDownloadTaskCount(meta);
+            count += StreamDownloadTaskCount(meta);
         }
-
-        all_futures.reserve(total_task_count);
-        for (size_t i = 0; i < name_path_pairs.size(); i++) {
-            const auto& meta = directory_.At(name_path_pairs[i].first);
-            SubmitEntryStreamDownloadTasks(
-                meta, states[i], all_futures, failure);
-        }
-
-        std::exception_ptr first_error = nullptr;
-        DrainFutures(all_futures, first_error);
-        if (auto root_error = failure.FirstError()) {
-            first_error = root_error;
-        }
-        if (first_error) {
-            std::rethrow_exception(first_error);
-        }
-
-        for (auto& state : states) {
-            FinalizeEntryStreamDownload(state);
+        futures.reserve(count);
+        for (size_t i = 0; i < name_path_pairs.size(); ++i) {
+            co_await SubmitEntryStreamDownloadTasks(
+                directory_.At(name_path_pairs[i].first),
+                states[i],
+                futures,
+                failure);
         }
     } catch (...) {
-        auto first_error = std::current_exception();
-        failure.RecordAndCancel(first_error);
-        DrainFutures(all_futures, first_error);
-        if (auto root_error = failure.FirstError()) {
-            first_error = root_error;
-        }
-        for (auto& state : states) {
-            state.writer.reset();
-        }
-        std::rethrow_exception(first_error);
+        error = std::current_exception();
+        failure.RecordAndCancel(error);
     }
+    co_await DrainFuturesAsync(futures, error);
+    if (auto root = failure.FirstError())
+        error = root;
+    if (error)
+        std::rethrow_exception(error);
+    ThrowIfCancelled(token, "IndexEntryReader::ReadEntriesStreamToFiles");
+    for (auto& state : states) FinalizeEntryStreamDownload(state);
 }
 
 size_t
@@ -1299,8 +1321,8 @@ IndexEntryReader::GetEntrySize(const std::string& name) const {
     return directory_.At(name).plaintext_size;
 }
 
-void
-IndexEntryReader::ReadEntryStream(
+folly::coro::Task<void>
+IndexEntryReader::ReadEntryStreamAsync(
     const std::string& name,
     std::function<void(const uint8_t* data, size_t len)> slice_consumer,
     size_t slice_size) {
@@ -1308,13 +1330,13 @@ IndexEntryReader::ReadEntryStream(
     const auto& meta = directory_.At(name);
 
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
-        ReadEncryptedEntryStream(meta, slice_consumer);
+        co_await ReadEncryptedEntryStream(meta, slice_consumer);
     } else {
-        ReadPlainEntryStream(meta, slice_consumer, slice_size);
+        co_await ReadPlainEntryStream(meta, slice_consumer, slice_size);
     }
 }
 
-void
+folly::coro::Task<void>
 IndexEntryReader::ReadPlainEntryStream(
     const EntryMeta& meta,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
@@ -1356,17 +1378,17 @@ IndexEntryReader::ReadPlainEntryStream(
         return data;
     };
 
-    ReadOrderedEntryStream(num_slices,
-                           meta.expected_crc,
-                           "CRC-32C mismatch in stream read",
-                           priority_,
-                           cancellation_token_,
-                           slice_consumer,
-                           sliceTransientBytes,
-                           load_slice);
+    co_await ReadOrderedEntryStream(num_slices,
+                                    meta.expected_crc,
+                                    "CRC-32C mismatch in stream read",
+                                    priority_,
+                                    cancellation_token_,
+                                    slice_consumer,
+                                    sliceTransientBytes,
+                                    load_slice);
 }
 
-void
+folly::coro::Task<void>
 IndexEntryReader::ReadEncryptedEntryStream(
     const EntryMeta& meta,
     const std::function<void(const uint8_t* data, size_t len)>&
@@ -1430,14 +1452,14 @@ IndexEntryReader::ReadEncryptedEntryStream(
             reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
     };
 
-    ReadOrderedEntryStream(num_slices,
-                           meta.expected_crc,
-                           "CRC-32C mismatch in encrypted stream read",
-                           priority_,
-                           cancellation_token_,
-                           slice_consumer,
-                           sliceTransientBytes,
-                           load_slice);
+    co_await ReadOrderedEntryStream(num_slices,
+                                    meta.expected_crc,
+                                    "CRC-32C mismatch in encrypted stream read",
+                                    priority_,
+                                    cancellation_token_,
+                                    slice_consumer,
+                                    sliceTransientBytes,
+                                    load_slice);
 }
 
 }  // namespace milvus::storage

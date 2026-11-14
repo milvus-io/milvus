@@ -138,7 +138,8 @@ class V1RemoteSource final : public FileSource {
               LoadOptions options = {},
               ArtifactStorageNamespace storage_namespace =
                   ArtifactStorageNamespace::Index,
-              V1SourceLayout layout = V1SourceLayout::MemoryEntries);
+              V1SourceLayout layout = V1SourceLayout::MemoryEntries,
+              bool use_async = true);
 
     // Set per-load state only between fully drained sequential operations.
     void
