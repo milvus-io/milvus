@@ -40,7 +40,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 namespace milvus::segcore {
 
@@ -66,7 +66,7 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
-            storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
     if (*file_manager_context_.use_async_load) {
         index::IndexLoadContext load_ctx(op_ctx, load_info_.load_priority);
         storage::LoadOptions options;

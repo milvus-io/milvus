@@ -47,7 +47,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
@@ -1467,17 +1467,18 @@ TEST_P(ManifestGroupTranslatorTest,
 }
 
 TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
-    const auto previous_window = StorageV2AsyncLoadReadWindowSizeBytes();
+    const auto previous_window =
+        milvus::storage::LoadFieldDataReadWindowSizeBytes();
     const auto previous_cell_target = GetCellTargetSizeBytes();
     auto restore = folly::makeGuard([&] {
-        SetStorageV2AsyncLoadReadWindowSizeBytes(previous_window);
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous_window);
         SetCellTargetSizeBytes(previous_cell_target);
     });
     SetCellTargetSizeBytes(1);
     const int64_t wide_window = 4 * FieldDataLoadBatchTargetBytes();
     for (const int64_t window :
          {int64_t{1}, wide_window, std::numeric_limits<int64_t>::max()}) {
-        SetStorageV2AsyncLoadReadWindowSizeBytes(window);
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(window);
         // Group 0 contains arrays; group 1 contains only a vector field.
         for (const int64_t group : {int64_t{0}, int64_t{1}}) {
             auto translator = MakeTranslator(group, GetParam(), true);
@@ -1509,9 +1510,10 @@ TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
 }
 
 TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
-    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
-    auto restore = folly::makeGuard(
-        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous = milvus::storage::LoadFieldDataReadWindowSizeBytes();
+    auto restore = folly::makeGuard([previous]() {
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous);
+    });
     auto previous_cell_target = GetCellTargetSizeBytes();
     auto restore_cell_target = folly::makeGuard([previous_cell_target]() {
         SetCellTargetSizeBytes(previous_cell_target);
@@ -1519,7 +1521,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     auto use_mmap = GetParam();
 
     SetCellTargetSizeBytes(1);
-    SetStorageV2AsyncLoadReadWindowSizeBytes(
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(
         std::numeric_limits<int64_t>::max());
     auto wide_window_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
@@ -1533,7 +1535,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     EXPECT_EQ(wide_window_cells.size(), num_cells);
     EXPECT_EQ(wide_window_reader->AsyncCalls(), 1);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(1);
     auto reloaded_cells = wide_window_translator->get_cells(nullptr, cids);
     EXPECT_EQ(reloaded_cells.size(), num_cells);
     EXPECT_EQ(wide_window_reader->AsyncCalls(), 2);
@@ -1545,7 +1547,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     EXPECT_EQ(limited_cells.size(), num_cells);
     EXPECT_EQ(limited_reader->AsyncCalls(), num_cells);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(
         std::numeric_limits<int64_t>::max());
     auto limited_reload = limited_translator->get_cells(nullptr, cids);
     EXPECT_EQ(limited_reload.size(), num_cells);
@@ -1626,12 +1628,12 @@ TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
 }
 
 TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
-    SetStorageV2AsyncLoadEnabled(false);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     auto sync_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
-    auto sync_translator =
-        MakeTranslator(0, GetParam(), StorageV2AsyncLoadEnabled(), sync_reader);
-    SetStorageV2AsyncLoadEnabled(true);
+    auto sync_translator = MakeTranslator(
+        0, GetParam(), milvus::storage::LoadAsyncReadEnabled(), sync_reader);
+    milvus::storage::SetLoadAsyncReadEnabled(true);
     sync_translator->get_cells(nullptr, {0});
     EXPECT_GT(sync_reader->SyncCalls(), 0);
     EXPECT_EQ(sync_reader->AsyncCalls(), 0);
@@ -1639,8 +1641,8 @@ TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
     auto async_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
     auto async_translator = MakeTranslator(
-        0, GetParam(), StorageV2AsyncLoadEnabled(), async_reader);
-    SetStorageV2AsyncLoadEnabled(false);
+        0, GetParam(), milvus::storage::LoadAsyncReadEnabled(), async_reader);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     async_translator->get_cells(nullptr, {0});
     EXPECT_EQ(async_reader->SyncCalls(), 0);
     EXPECT_GT(async_reader->AsyncCalls(), 0);

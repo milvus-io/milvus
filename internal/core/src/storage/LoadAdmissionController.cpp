@@ -23,7 +23,7 @@
 #include "folly/OperationCancelled.h"
 #include "monitor/Monitor.h"
 #include "storage/LoadOverheadController.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 namespace milvus::storage {
 
@@ -31,7 +31,7 @@ namespace {
 
 bool
 UpdateLoadOverheadControllers(const size_t slots) {
-    if (!segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
+    if (!milvus::storage::LoadAsyncReadEnabled()) {
         return true;
     }
     // All current Group bindings provide max_runtime_unit, so both policy
@@ -277,8 +277,7 @@ LoadAdmissionController::SetCapacityBytes(const size_t bytes) {
         const bool expanding =
             old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
         auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
-        const bool async =
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        const bool async = milvus::storage::LoadAsyncReadEnabled();
         if (async && expanding &&
             !overhead_controller.UpdateBudgetBytes(bytes)) {
             return;

@@ -80,7 +80,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/Utils.h"
 #include "segcore/default_fs.h"
 #include "segcore/json_stats/BsonInvertedIndexTranslator.h"
@@ -2425,7 +2425,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
                    OpContext* op_ctx) {
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
     index::IndexLoadContext preparation_ctx(
         op_ctx, GetValueFromConfig<int32_t>(config, LOAD_PRIORITY).value_or(0));
     auto* context = &preparation_ctx.ctx;

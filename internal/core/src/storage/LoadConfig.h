@@ -18,28 +18,27 @@
 
 #include <cstdint>
 
-namespace milvus::segcore::storagev2translator {
+namespace milvus::storage {
 
-inline constexpr int64_t kDefaultStorageV2AsyncLoadReadWindowSizeBytes =
+inline constexpr int64_t kDefaultLoadFieldDataReadWindowSizeBytes =
     16LL * 1024 * 1024;
 
-// Historical StorageV2 names are retained for configuration compatibility;
-// these accessors control the Storage V3 async-load pipeline.
+// Selects asynchronous storage reads for supported field-data and index loaders.
 [[nodiscard]] bool
-StorageV2AsyncLoadEnabled();
+LoadAsyncReadEnabled();
 
 // Selects the load mode and refreshes its overhead policy.
 // Call only while loading and resource-limit updates are quiescent; rebuild
 // readers that captured the previous mode before resuming loading.
 void
-SetStorageV2AsyncLoadEnabled(bool enabled);
+SetLoadAsyncReadEnabled(bool enabled);
 
-// Returns the process-wide Storage V3 read-window size in bytes.
+// Returns the process-wide Storage V3 field-data read-window size in bytes.
 [[nodiscard]] int64_t
-StorageV2AsyncLoadReadWindowSizeBytes();
+LoadFieldDataReadWindowSizeBytes();
 
 // Sets the read-window size; non-positive values restore the default.
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+SetLoadFieldDataReadWindowSizeBytes(int64_t bytes);
 
-}  // namespace milvus::segcore::storagev2translator
+}  // namespace milvus::storage

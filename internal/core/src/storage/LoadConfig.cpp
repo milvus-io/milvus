@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 #include <atomic>
 #include <mutex>
@@ -23,33 +23,33 @@
 #include "storage/ThreadPools.h"
 #include "common/EasyAssert.h"
 
-namespace milvus::segcore::storagev2translator {
+namespace milvus::storage {
 namespace {
 
 std::atomic<bool> g_async_load_enabled{false};
 std::atomic<int64_t> g_async_load_read_window_size_bytes{
-    kDefaultStorageV2AsyncLoadReadWindowSizeBytes};
+    kDefaultLoadFieldDataReadWindowSizeBytes};
 
 }  // namespace
 
 bool
-StorageV2AsyncLoadEnabled() {
+LoadAsyncReadEnabled() {
     return g_async_load_enabled.load(std::memory_order_acquire);
 }
 
 void
-SetStorageV2AsyncLoadEnabled(const bool enabled) {
+SetLoadAsyncReadEnabled(const bool enabled) {
     static std::mutex mode_update_mutex;
     std::lock_guard lock(mode_update_mutex);
-    if (enabled == StorageV2AsyncLoadEnabled()) {
+    if (enabled == LoadAsyncReadEnabled()) {
         return;
     }
     // Mode changes require quiescent loading; live mixed-mode rollout is unsupported.
-    auto& admission = storage::LoadAdmissionController::GetInstance();
+    auto& admission = LoadAdmissionController::GetInstance();
     const auto limit =
         enabled ? admission.CapacitySlots()
                 : static_cast<size_t>(ThreadPools::GetLoadExecutorWorkers());
-    if (!storage::ConfigureLoadOverheadControllers(
+    if (!ConfigureLoadOverheadControllers(
             limit, enabled ? admission.CapacityBytes() : 0)) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Failed to configure loading overhead for load mode");
@@ -58,16 +58,16 @@ SetStorageV2AsyncLoadEnabled(const bool enabled) {
 }
 
 int64_t
-StorageV2AsyncLoadReadWindowSizeBytes() {
+LoadFieldDataReadWindowSizeBytes() {
     return g_async_load_read_window_size_bytes.load(std::memory_order_acquire);
 }
 
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
+SetLoadFieldDataReadWindowSizeBytes(const int64_t bytes) {
     const auto normalized_bytes =
-        bytes > 0 ? bytes : kDefaultStorageV2AsyncLoadReadWindowSizeBytes;
+        bytes > 0 ? bytes : kDefaultLoadFieldDataReadWindowSizeBytes;
     g_async_load_read_window_size_bytes.store(normalized_bytes,
                                               std::memory_order_release);
 }
 
-}  // namespace milvus::segcore::storagev2translator
+}  // namespace milvus::storage

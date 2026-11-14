@@ -150,7 +150,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/StatusToErrorCode.h"
@@ -2827,8 +2827,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             FormatFieldIds(lazy_fields));
     }
 
-    const bool enable_async_load =
-        storagev2translator::StorageV2AsyncLoadEnabled();
+    const bool enable_async_load = milvus::storage::LoadAsyncReadEnabled();
     tasks = PrepareManifestLoadTasks(reader,
                                      schema_snapshot,
                                      segment_load_info,
@@ -9465,8 +9464,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     for (const auto& [cg_index, field_ids] : lazy_cg_field_ids) {
         add_task(cg_index, field_ids, /*eager_load=*/false);
     }
-    const bool enable_async_load =
-        storagev2translator::StorageV2AsyncLoadEnabled();
+    const bool enable_async_load = milvus::storage::LoadAsyncReadEnabled();
     tasks = PrepareManifestLoadTasks(reader,
                                      schema_snapshot,
                                      segment_load_info,

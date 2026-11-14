@@ -23,7 +23,7 @@
 
 #include "folly/coro/BlockingWait.h"
 #include "common/OpContext.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/MemFileManagerImpl.h"
 
@@ -97,7 +97,7 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
                        storage::ArtifactStorageNamespace storage_namespace,
                        milvus::OpContext* op_ctx) {
     const bool use_async = context.use_async_load.value_or(
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+        milvus::storage::LoadAsyncReadEnabled());
     const auto priority =
         op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW

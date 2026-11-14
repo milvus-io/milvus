@@ -480,7 +480,7 @@ func TestResizeThreadPools(t *testing.T) {
 func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
-	node := &QueryNode{}
+	node := &QueryNode{ctx: t.Context()}
 
 	assert.NotPanics(t, func() { node.RegisterSegcoreConfigWatcher() })
 
@@ -504,9 +504,18 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
 	})
 	assert.NotPanics(t, func() {
-		pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "67108864")
+		pt.Save(pt.QueryNodeCfg.LoadTransientBudgetBytes.Key, "67108864")
 	})
-	pt.Reset(pt.CommonCfg.LoadTransientBudgetBytes.Key)
+	pt.Reset(pt.QueryNodeCfg.LoadTransientBudgetBytes.Key)
+
+	var cellTarget int64
+	updateCellTarget := mockey.Mock(initcore.UpdateLoadFieldDataCellTargetSizeBytes).To(func(bytes int64) {
+		cellTarget = bytes
+	}).Build()
+	defer updateCellTarget.UnPatch()
+	defer pt.Reset(pt.QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.Key)
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.Key, "8388608"))
+	assert.EqualValues(t, 8388608, cellTarget)
 }
 
 func TestQueryNode(t *testing.T) {

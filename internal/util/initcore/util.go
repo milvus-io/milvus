@@ -319,25 +319,25 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 		}))
 }
 
-func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
-	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
+func UpdateLoadFieldDataCellTargetSizeBytes(bytes int64) {
+	C.SetLoadFieldDataCellTargetSizeBytes(C.int64_t(bytes))
 }
 
-// updateStorageV2AsyncLoadEnabled publishes the rollout value to C++.
-func updateStorageV2AsyncLoadEnabled(enabled bool) error {
-	status := C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+// updateLoadAsyncReadEnabled publishes the rollout value to C++.
+func updateLoadAsyncReadEnabled(enabled bool) error {
+	status := C.SetLoadAsyncReadEnabled(C.bool(enabled))
 	return HandleCStatus(&status, "configure async load mode failed")
 }
 
-// updateStorageV2AsyncLoadThreadPoolSize publishes the positive worker limit.
-func updateStorageV2AsyncLoadThreadPoolSize(threads int) error {
-	status := C.SetStorageV2AsyncLoadThreadPoolSize(C.int(threads))
+// updateLoadExecutorThreads publishes the positive worker limit.
+func updateLoadExecutorThreads(threads int) error {
+	status := C.SetLoadExecutorThreads(C.int(threads))
 	return HandleCStatus(&status, "configure async load executor failed")
 }
 
-// getStorageV2AsyncLoadThreadPoolSize returns the effective native worker limit.
-func getStorageV2AsyncLoadThreadPoolSize() int {
-	return int(C.GetStorageV2AsyncLoadThreadPoolSize())
+// getLoadExecutorThreads returns the effective native worker limit.
+func getLoadExecutorThreads() int {
+	return int(C.GetLoadExecutorThreads())
 }
 
 // registerQueryNodeAsyncLoadThreadPoolConfig applies startup configuration and
@@ -346,7 +346,7 @@ func registerQueryNodeAsyncLoadThreadPoolConfig(ctx context.Context, pt *paramta
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	item := &pt.QueryNodeCfg.LoadExecutorThreads
 	var mu sync.Mutex
 	syncConfig := func() error {
 		mu.Lock()
@@ -386,14 +386,14 @@ func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) error {
 	// Stop new translators from selecting async before relaxing its defaults;
 	// install the limits before allowing new translators to select async.
 	if !enabled {
-		if err := updateStorageV2AsyncLoadEnabled(false); err != nil {
+		if err := updateLoadAsyncReadEnabled(false); err != nil {
 			return err
 		}
 	}
 	UpdateLoadTransientBudgetBytes(budgetBytes)
 	UpdateLoadAdmissionSlots(slots)
 	if enabled {
-		return updateStorageV2AsyncLoadEnabled(true)
+		return updateLoadAsyncReadEnabled(true)
 	}
 	return nil
 }
@@ -409,8 +409,8 @@ func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentPa
 	syncConfig := func() error {
 		mu.Lock()
 		defer mu.Unlock()
-		enabled := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
-		budgetBytes, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		enabled := pt.QueryNodeCfg.LoadAsyncReadEnabled.GetAsBool()
+		budgetBytes, slots := pt.QueryNodeCfg.ResolveLoadAdmissionLimits(enabled)
 		if err := apply(enabled, budgetBytes, slots); err != nil {
 			return err
 		}
@@ -421,9 +421,9 @@ func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentPa
 		return nil
 	}
 	for _, key := range []string{
-		pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
-		pt.CommonCfg.LoadTransientBudgetBytes.Key,
-		pt.CommonCfg.LoadAdmissionSlots.Key,
+		pt.QueryNodeCfg.LoadAsyncReadEnabled.Key,
+		pt.QueryNodeCfg.LoadTransientBudgetBytes.Key,
+		pt.QueryNodeCfg.LoadAdmissionSlots.Key,
 	} {
 		pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
 			if evt.HasUpdated {
@@ -436,10 +436,10 @@ func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentPa
 	return syncConfig()
 }
 
-// registerStorageV2AsyncLoadReadWindowConfig keeps the native read-window
-// threshold synchronized with the historical storageV2 config key.
-func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+// registerLoadFieldDataReadWindowConfig keeps the native read-window
+// threshold synchronized with the field-data load configuration.
+func registerLoadFieldDataReadWindowConfig(pt *paramtable.ComponentParam) {
+	item := &pt.QueryNodeCfg.LoadFieldDataReadWindowSizeBytes
 	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
 		pt.Watch(item.Key, config.NewHandler(item.Key+".core", func(evt *config.Event) {
 			if !evt.HasUpdated {
@@ -448,18 +448,18 @@ func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
 			syncConfig()
 		}))
 	}, func() {
-		updateStorageV2AsyncLoadReadWindowSizeBytes(item.GetAsInt64())
+		updateLoadFieldDataReadWindowSizeBytes(item.GetAsInt64())
 	})
 }
 
-// updateStorageV2AsyncLoadReadWindowSizeBytes publishes the threshold to C++.
-func updateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
-	C.SetStorageV2AsyncLoadReadWindowSizeBytes(C.int64_t(bytes))
+// updateLoadFieldDataReadWindowSizeBytes publishes the threshold to C++.
+func updateLoadFieldDataReadWindowSizeBytes(bytes int64) {
+	C.SetLoadFieldDataReadWindowSizeBytes(C.int64_t(bytes))
 }
 
-// getStorageV2AsyncLoadReadWindowSizeBytes returns the effective native value.
-func getStorageV2AsyncLoadReadWindowSizeBytes() int64 {
-	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
+// getLoadFieldDataReadWindowSizeBytes returns the effective native value.
+func getLoadFieldDataReadWindowSizeBytes() int64 {
+	return int64(C.GetLoadFieldDataReadWindowSizeBytes())
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

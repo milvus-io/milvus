@@ -36,7 +36,7 @@
 #include "segcore/memory_planner.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/ThreadPools.h"
 
 std::once_flag traceFlag;
@@ -229,15 +229,14 @@ UpdateArrowIOThreadPoolMetrics() {
 }
 
 void
-SetStorageV2CellTargetSizeBytes(int64_t bytes) {
+SetLoadFieldDataCellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
 CStatus
-SetStorageV2AsyncLoadEnabled(const bool enabled) {
+SetLoadAsyncReadEnabled(const bool enabled) {
     try {
-        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
-            enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(enabled);
         return milvus::SuccessCStatus();
     } catch (const std::exception& error) {
         return milvus::FailureCStatus(&error);
@@ -248,7 +247,7 @@ SetStorageV2AsyncLoadEnabled(const bool enabled) {
 }
 
 CStatus
-SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
+SetLoadExecutorThreads(const int threads) {
     try {
         milvus::storage::SetAsyncLoadThreadPoolSize(threads);
         return milvus::SuccessCStatus();
@@ -261,20 +260,18 @@ SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
 }
 
 int
-GetStorageV2AsyncLoadThreadPoolSize() {
+GetLoadExecutorThreads() {
     return milvus::storage::GetAsyncLoadThreadPoolSize();
 }
 
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
-    milvus::segcore::storagev2translator::
-        SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
+SetLoadFieldDataReadWindowSizeBytes(const int64_t bytes) {
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(bytes);
 }
 
 int64_t
-GetStorageV2AsyncLoadReadWindowSizeBytes() {
-    return milvus::segcore::storagev2translator::
-        StorageV2AsyncLoadReadWindowSizeBytes();
+GetLoadFieldDataReadWindowSizeBytes() {
+    return milvus::storage::LoadFieldDataReadWindowSizeBytes();
 }
 
 void

@@ -34,7 +34,7 @@
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/AsyncLoadException.h"
 #include "storage/AsyncLoadExecutor.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/ThreadPools.h"
 #include "storage/LoadAdmissionController.h"
 
@@ -290,8 +290,9 @@ LoadCellsAsyncImpl(
                    cell.file_idx);
     }
 
-    const auto effective_read_window_bytes = read_window_bytes.value_or(
-        static_cast<size_t>(StorageV2AsyncLoadReadWindowSizeBytes()));
+    const auto effective_read_window_bytes =
+        read_window_bytes.value_or(static_cast<size_t>(
+            milvus::storage::LoadFieldDataReadWindowSizeBytes()));
     auto windows = BuildAsyncReadWindows(cells, effective_read_window_bytes);
     auto& admission = storage::LoadAdmissionController::GetInstance();
     const auto* const priority_name =

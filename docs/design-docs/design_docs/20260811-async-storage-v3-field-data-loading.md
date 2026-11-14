@@ -35,11 +35,10 @@ The design has six main properties:
 6. Caller cancellation and the first sibling failure cancel pending windows;
    failures are published before a window releases its budget lease.
 
-The path is guarded by the temporary
-`queryNode.segcore.storageV2.enableAsyncLoad` switch, which defaults to
-`false`. Async loading support for data and indexes is incomplete, and enabling
-the switch is currently unsupported. The legacy `LoadCellBatchAsync` path
-remains the default.
+The path is guarded by the internal
+`queryNode.segcore.load.asyncReadEnabled` switch, which defaults to
+`false`. The legacy `LoadCellBatchAsync` path remains the default. Enabling
+async reads by default requires separate rollout validation.
 
 This PR covers Storage V3 field data and JSON key-stat column groups. It does
 not make scalar-index loading asynchronous.
@@ -431,7 +430,7 @@ state.
 Reader preparation and cell loading share the default process-wide
 `folly::CPUThreadPoolExecutor`, resolved through `ResolveAsyncLoadExecutor`, with:
 
-- a positive worker limit from `queryNode.segcore.storageV2.asyncLoadThreadPoolSize`,
+- a positive worker limit from `queryNode.segcore.load.executorThreads`,
   defaulting to `max(1, min(CPU_NUM, 16))`;
 - two unbounded priority queues;
 - thread name prefix `MILVUS_ASYNC_LOAD_`;
@@ -754,20 +753,20 @@ remote record batches are not considered consumed until the final
 
 | Parameter | Default | Refresh behavior | Purpose |
 |---|---:|---|---|
-| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured during preparation/construction | internal experimental switch; enabling is currently unsupported |
-| `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` | `min(CPUNUM, 16)`, at least 1 | watched dynamically; invalid/non-positive values restore the default | shared async executor worker limit; independent of admission slots |
-| `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
-| `common.loadTransientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
-| `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, index stream slices, and async metadata preparation operations |
+| `queryNode.segcore.load.asyncReadEnabled` | `false` | restart QueryNode; existing readers retain their mode | selects asynchronous storage reads for supported loaders |
+| `queryNode.segcore.load.executorThreads` | `min(CPUNUM, 16)`, at least 1 | watched dynamically; invalid/non-positive values restore the default | shared async executor worker limit; independent of admission slots |
+| `queryNode.segcore.load.fieldData.cellTargetSizeBytes` | `4194304` (4 MiB) | watched dynamically; applies to newly built cells | target average field-data cell size, independent of async reads and cache eviction |
+| `queryNode.segcore.load.fieldData.readWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
+| `queryNode.segcore.load.admission.transientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
+| `queryNode.segcore.load.admission.slots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, index stream slices, and async metadata preparation operations |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
-The async switch, async executor size, and both load admission parameters are intentionally not
-exported in the generated public config surface or listed in `milvus.yaml`.
-The admission parameters remain available for explicit internal configuration
-and dynamic updates. Async loading support for data and indexes is incomplete; this document
-describes the implemented field-data stages, not complete async index support.
-Enabling the switch is currently unsupported. Complete async loading support
-and validate these defaults before supporting enablement.
+All six `queryNode.segcore.load` parameters have `Export: false` and are absent
+from `milvus.yaml`. They remain available for explicit internal configuration.
+The previous `queryNode.segcore.storageV2` loading keys and `common` admission
+keys are removed without aliases; existing overrides must use the keys above.
+Async reads remain disabled by default. This document describes the field-data
+pipeline; index loading is covered by the separate index design documents.
 
 Admission limits must be non-negative integers. Malformed strings, values outside
 int64, and negative values fall back to their declared defaults (2 GiB and
@@ -809,14 +808,14 @@ async switch recomputes both defaults while preserving explicit limits. In
 particular, disabling async removes any implicit admission limits even though
 existing async translators retain their mode; it does not revoke held leases.
 
-Planned validation sequence after these prerequisites are met:
+Planned rollout validation sequence:
 
-1. Configure a positive `common.loadTransientBudgetBytes` appropriate for the
-   QueryNode memory envelope, and a positive `common.loadAdmissionSlots` to
+1. Configure a positive `queryNode.segcore.load.admission.transientBudgetBytes` appropriate for the
+   QueryNode memory envelope, and a positive `queryNode.segcore.load.admission.slots` to
    independently cap unfinished load work.
 2. Optionally configure `common.diskWriteNumThreads` when mmap finalization
    should be isolated from the async load executor.
-3. Enable `queryNode.segcore.storageV2.enableAsyncLoad` on a limited set of
+3. Enable `queryNode.segcore.load.asyncReadEnabled` on a limited set of
    QueryNodes.
 4. Reload or replace test segments so their translators capture the new mode.
 5. Compare load latency, peak memory, object-storage errors, cancellation, and
@@ -941,7 +940,7 @@ sealed-segment tests, and `make verifiers`.
 | shared async executor and priority | `internal/core/src/storage/AsyncLoadExecutor.{h,cpp}` |
 | native exception classification | `internal/core/src/segcore/storagev2translator/AsyncLoadException.h` |
 | manifest translator integration | `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.{h,cpp}` |
-| per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.{h,cpp}` |
+| per-process async configuration | `internal/core/src/storage/LoadConfig.{h,cpp}` |
 | cell metadata and size planning | `internal/core/src/segcore/storagev2translator/GroupCTMeta.h` |
 | bytes-and-slots load admission | `internal/core/src/storage/LoadAdmissionController.{h,cpp}` |
 | mmap finalization executor | `internal/core/src/storage/LocalFileIOPool.{h,cpp}` |

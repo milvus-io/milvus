@@ -20,7 +20,7 @@
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "storage/AsyncLoadExecutor.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
 #include "index/Utils.h"
@@ -72,7 +72,7 @@ MakeRemoteSource(const index::IndexFamily& requested_family,
                             : storage::V1SourceLayout::MemoryEntries;
     // Inspect metadata before the concrete family can be selected.
     if (!context.use_async_load.value_or(
-            storagev2translator::StorageV2AsyncLoadEnabled())) {
+            milvus::storage::LoadAsyncReadEnabled())) {
         return std::make_unique<storage::V1RemoteSource>(
             context,
             remote_paths,
@@ -159,7 +159,7 @@ SealedIndexLoader::SealedIndexLoader(
             : proto::common::LoadPriority::HIGH;
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
     config_[milvus::index::INDEX_FILES] = index_load_info_.index_files;
     config_[DIM_KEY] = index_load_info_.dim;
     config_[INDEX_NUM_ROWS_KEY] = index_load_info_.num_rows;
