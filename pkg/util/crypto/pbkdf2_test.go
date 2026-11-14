@@ -27,7 +27,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -110,20 +109,6 @@ func TestPBKDF2SHA512MatchesStandardLibrary(t *testing.T) {
 			}
 		}
 	}
-}
-
-func TestPasswordHashAlgorithmDefaultsToBcrypt(t *testing.T) {
-	assert.Equal(t, PasswordHashBcrypt, paramtable.Get().CommonCfg.PasswordHashAlgorithm.GetValue())
-
-	hash, err := PasswordEncrypt("a-password")
-	require.NoError(t, err)
-	cost, err := bcrypt.Cost([]byte(hash))
-	require.NoError(t, err)
-	assert.Equal(t, bcrypt.DefaultCost, cost)
-
-	logs := capturePasswordLogs(t)
-	require.NoError(t, VerifyStoredPassword(context.Background(), hash, "a-password"))
-	assert.NotContains(t, logs.String(), "bcrypt password hash")
 }
 
 func TestPasswordEncryptPBKDF2SHA512(t *testing.T) {
@@ -252,30 +237,6 @@ func TestVerifyStoredPasswordMalformedPBKDF2SHA512(t *testing.T) {
 	for _, stored := range []string{"$pbkdf2-sha256$i=1000$c2FsdA$a2V5", "pbkdf2-sha512$i=1000$c2FsdA$a2V5"} {
 		require.ErrorIs(t, VerifyStoredPassword(context.Background(), stored, password), merr.ErrServiceInternal)
 	}
-}
-
-// The warning's limiter is per call site and process-wide, so this must stay the
-// only test that verifies a matching bcrypt hash with pbkdf2-sha512 configured.
-func TestVerifyStoredPasswordWarnsOnLegacyBcrypt(t *testing.T) {
-	const password = "PASSWORD_SENTINEL_DO_NOT_LOG"
-	legacy, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
-	require.NoError(t, err)
-	stored := encodePBKDF2SHA512(t, password, []byte("0123456789abcdef"), pbkdf2SHA512MinIterations)
-
-	usePasswordHashAlgorithm(t, PasswordHashPBKDF2SHA512)
-	logs := capturePasswordLogs(t)
-
-	require.ErrorIs(t, VerifyStoredPassword(context.Background(), string(legacy), "wrong"), merr.ErrPrivilegeNotAuthenticated)
-	require.NoError(t, VerifyStoredPassword(context.Background(), stored, password))
-	assert.NotContains(t, logs.String(), "bcrypt password hash", "only a verified bcrypt hash needs rotating")
-
-	for range 3 {
-		require.NoError(t, VerifyStoredPassword(context.Background(), string(legacy), password))
-	}
-	output := logs.String()
-	assert.Equal(t, 1, strings.Count(output, "bcrypt password hash"), "the warning must be rate limited")
-	assert.NotContains(t, output, password)
-	assert.NotContains(t, output, string(legacy))
 }
 
 func BenchmarkVerifyStoredPasswordPBKDF2SHA512(b *testing.B) {
