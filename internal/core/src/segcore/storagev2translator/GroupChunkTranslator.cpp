@@ -55,7 +55,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/StatusToErrorCode.h"
 #include "storage/LoadOverheadController.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 
@@ -244,7 +244,8 @@ GroupChunkTranslator::GroupChunkTranslator(
 
     // This legacy loader always uses synchronous workers. In async mode its
     // scratch remains request-local rather than borrowing admission limits.
-    if (!StorageV2AsyncLoadEnabled() && !meta_.chunk_memory_size_.empty()) {
+    if (!milvus::storage::LoadAsyncReadEnabled() &&
+        !meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
         auto max_overhead_size = loading_overhead_bytes(max_cell_sz);

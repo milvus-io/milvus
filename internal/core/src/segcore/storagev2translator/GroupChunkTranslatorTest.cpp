@@ -55,7 +55,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
@@ -413,10 +413,10 @@ TEST_P(GroupChunkTranslatorTest, AsyncCancellationDrainsPreparation) {
 }
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
-    const auto previous_enabled = StorageV2AsyncLoadEnabled();
+    const auto previous_enabled = milvus::storage::LoadAsyncReadEnabled();
     auto restore_mode = folly::makeGuard(
-        [&] { SetStorageV2AsyncLoadEnabled(previous_enabled); });
-    SetStorageV2AsyncLoadEnabled(false);
+        [&] { milvus::storage::SetLoadAsyncReadEnabled(previous_enabled); });
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     auto temp_dir =
         std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
     std::filesystem::create_directory(temp_dir);
@@ -443,10 +443,10 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             MmapChunkWritebackMode::Disabled);
     };
     auto translator = make_translator();
-    SetStorageV2AsyncLoadEnabled(true);
+    milvus::storage::SetLoadAsyncReadEnabled(true);
     EXPECT_FALSE(
         make_translator()->meta()->loading_overhead_config.has_value());
-    SetStorageV2AsyncLoadEnabled(false);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
 
     auto memory_group =
         milvus::storage::LoadMemoryOverheadController::GetInstance()

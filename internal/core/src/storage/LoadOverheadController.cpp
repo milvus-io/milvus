@@ -22,7 +22,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "storage/ThreadPools.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 namespace milvus::storage {
 
@@ -93,7 +93,7 @@ template <cachinglayer::LoadingOverheadDimension Dimension>
 cachinglayer::LoadingOverheadGroupHandle
 LoadOverheadController<Dimension>::GetOrCreate() {
     const auto initial_limit =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled()
+        milvus::storage::LoadAsyncReadEnabled()
             ? size_t{0}
             : static_cast<size_t>(ThreadPools::GetLoadExecutorWorkers());
     std::lock_guard<std::mutex> lock(mutex_);

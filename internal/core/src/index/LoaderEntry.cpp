@@ -20,7 +20,7 @@
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/WithCancellation.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/MemFileManagerImpl.h"
@@ -97,7 +97,7 @@ OpenIndexSource(const IndexLoadRequest& request) {
     }
     const auto& files = std::get<IndexFiles>(request.source);
     const bool use_async = files.context.use_async_load.value_or(
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+        milvus::storage::LoadAsyncReadEnabled());
     if (const auto* legacy =
             std::get_if<LegacyIndexStorageConfig>(&files.storage_config)) {
         // The source retains only token/priority, never this temporary context.
@@ -214,7 +214,7 @@ LoaderEntry::Load(IndexLoadRequest request) const {
     bool use_async;
     if (auto* files = std::get_if<IndexFiles>(&request.source)) {
         use_async = files->context.use_async_load.value_or(
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
         // Executor selection and storage opening must use the same snapshot.
         files->context.use_async_load = use_async;
     } else {

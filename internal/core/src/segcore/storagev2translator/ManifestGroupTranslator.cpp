@@ -56,7 +56,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/Util.h"
@@ -156,7 +156,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       writeback_mode_(writeback_mode),
       load_priority_(load_priority),
       enable_async_load_(enable_async_load),
-      async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
+      async_read_window_bytes_(
+          milvus::storage::LoadFieldDataReadWindowSizeBytes()) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());

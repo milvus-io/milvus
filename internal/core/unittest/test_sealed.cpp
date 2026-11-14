@@ -106,7 +106,7 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -374,12 +374,11 @@ constexpr int64_t kWarmupPkFieldId = START_USER_FIELDID;
 constexpr int64_t kWarmupVectorFieldId = START_USER_FIELDID + 1;
 
 auto
-SetStorageV2AsyncLoadForTest(bool enabled) {
-    auto previous = storagev2translator::StorageV2AsyncLoadEnabled();
-    storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
-    return folly::makeGuard([previous] {
-        storagev2translator::SetStorageV2AsyncLoadEnabled(previous);
-    });
+SetLoadAsyncReadForTest(bool enabled) {
+    auto previous = milvus::storage::LoadAsyncReadEnabled();
+    milvus::storage::SetLoadAsyncReadEnabled(enabled);
+    return folly::makeGuard(
+        [previous] { milvus::storage::SetLoadAsyncReadEnabled(previous); });
 }
 
 class LazyColumnGroupConfigGuard {
@@ -5833,7 +5832,7 @@ TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
 
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupUsesVectorIndexWarmupForNoIndexVector) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(false);
+    auto async_load_guard = SetLoadAsyncReadForTest(false);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -5874,7 +5873,7 @@ TEST(SealedSegmentCowState,
 
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupUsesAsyncReaderWhenAsyncEnabled) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto async_load_guard = SetLoadAsyncReadForTest(true);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -5905,7 +5904,7 @@ TEST(SealedSegmentCowState,
 
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupPreparesCacheSlotOnMiddlePool) {
-    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto async_load_guard = SetLoadAsyncReadForTest(true);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -5950,7 +5949,7 @@ TEST(SealedSegmentCowState,
             SCOPED_TRACE(::testing::Message() << "lazy=" << lazy_enabled
                                               << ", async=" << async_enabled);
             LazyColumnGroupConfigGuard lazy_group_guard(lazy_enabled);
-            auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+            auto async_guard = SetLoadAsyncReadForTest(async_enabled);
             // The vector belongs to the staged schema, not the published one.
             auto segment = CreateSealedSegment(
                 CreateWarmupPolicySchema(/*include_vector=*/false),
@@ -6001,7 +6000,7 @@ TEST(SealedSegmentCowState,
             EXPECT_EQ(estimate_calls->load(), lazy_enabled ? 0 : 1);
 
             // An installed factory must keep its mode across config changes.
-            storagev2translator::SetStorageV2AsyncLoadEnabled(!async_enabled);
+            milvus::storage::SetLoadAsyncReadEnabled(!async_enabled);
             SegcoreConfig::default_config().set_lazy_column_group_enabled(
                 !lazy_enabled);
             EXPECT_EQ(column->num_chunks(), 1);
@@ -6037,7 +6036,7 @@ TEST(SealedSegmentCowState, MixedManifestTasksOnlyPreopenRegularReaders) {
     const FieldId pk(kWarmupPkFieldId);
     for (bool async_enabled : {false, true}) {
         SCOPED_TRACE(async_enabled);
-        auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+        auto async_guard = SetLoadAsyncReadForTest(async_enabled);
         auto segment = CreateSealedSegment(schema, nullptr, 1009);
         auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
         ASSERT_NE(sealed, nullptr);
@@ -6195,7 +6194,7 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
 
 TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
     LazyColumnGroupConfigGuard lazy_group_guard(false);
-    auto async_guard = SetStorageV2AsyncLoadForTest(false);
+    auto async_guard = SetLoadAsyncReadForTest(false);
     auto schema = std::make_shared<Schema>();
     auto eager = schema->AddDebugField("eager", DataType::INT64);
     auto lazy = schema->AddDebugField("lazy", DataType::INT64);

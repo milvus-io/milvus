@@ -280,14 +280,14 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
-	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
-		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
+	pt.Watch(pt.QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.Key,
+		config.NewHandler("queryNode.segcore.load.fieldData.cellTargetSizeBytes", func(evt *config.Event) {
 			if !evt.HasUpdated {
 				return
 			}
-			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
-			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
-			mlog.Info(node.ctx, "queryNode.segcore.storageV2.cellTargetSizeBytes updated",
+			newBytes := paramtable.Get().QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.GetAsInt64()
+			initcore.UpdateLoadFieldDataCellTargetSizeBytes(newBytes)
+			mlog.Info(node.ctx, "queryNode.segcore.load.fieldData.cellTargetSizeBytes updated",
 				mlog.Int64("bytes", newBytes))
 		}))
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
