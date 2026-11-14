@@ -24,6 +24,10 @@
 #include "common/SystemProperty.h"
 #include "segcore/Utils.h"
 #include "storage/ThreadPools.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
 #include "mmap/Types.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -160,69 +164,87 @@ std::vector<
 ChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    return folly::coro::blockingWait(get_cells_async(ctx, cids));
+}
+
+folly::coro::Task<std::vector<
+    std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>>
+ChunkTranslator::get_cells_async(
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    milvus::OpContext context(folly::cancellation_token_merge(
+        ctx ? ctx->cancellation_token : folly::CancellationToken{},
+        caller_token));
     const auto priority = ResolveLoadPriority(ctx, load_priority_);
+    CheckCancellation(
+        &context, segment_id_, field_id_, "ChunkTranslator::get_cells()");
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         cells;
     cells.reserve(cids.size());
-
     std::vector<std::string> remote_files;
     remote_files.reserve(cids.size());
-    for (auto cid : cids) {
+    for (const auto cid : cids) {
+        AssertInfo(cid < file_infos_.size(), "cid out of range");
         remote_files.push_back(file_infos_[cid].file_path);
     }
-
-    auto channel = std::make_shared<ArrowReaderChannel>();
-    LOG_INFO("segment {} submits load field {} chunks {} task to thread pool",
-             segment_id_,
-             field_id_,
-             fmt::format("{}", fmt::join(cids, " ")));
-    LoadArrowReaderFromRemote(remote_files, channel, priority);
-
-    for (auto cid : cids) {
-        // Check for cancellation before processing each chunk
-        CheckCancellation(
-            ctx, segment_id_, field_id_, "ChunkTranslator::get_cells()");
-
-        std::unique_ptr<milvus::Chunk> chunk = nullptr;
-        if (!use_mmap_) {
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            // this relies on the fact that channel is blocked when there is no data to pop
-            bool popped = channel->pop(r);
-            AssertInfo(popped, "failed to pop arrow reader from channel");
-            arrow::ArrayVector array_vec =
-                read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_, array_vec);
-        } else {
-            // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
-            auto filepath =
-                std::filesystem::path(mmap_dir_path_) /
-                fmt::format("seg_{}_fid_{}_{}", segment_id_, field_id_, cid);
-            std::filesystem::create_directories(
-                std::filesystem::path(mmap_dir_path_));
-
-            LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
-                     segment_id_,
-                     field_id_,
-                     cid,
-                     filepath.string());
-
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            bool popped = channel->pop(r);
-            AssertInfo(popped, "failed to pop arrow reader from channel");
-            arrow::ArrayVector array_vec =
-                read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 array_vec,
-                                 mmap_populate_,
-                                 filepath.string(),
-                                 priority,
-                                 writeback_mode_);
+    auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
+                   .GetRemoteChunkManager();
+    auto futures = storage::GetObjectData(
+        rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
+    std::exception_ptr first_error;
+    for (size_t i = 0; i < futures.size(); ++i) {
+        try {
+            // Cancellation cannot abandon reads borrowing the chunk manager.
+            auto codec = co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{}, std::move(futures[i]));
+            if (first_error) {
+                continue;
+            }
+            CheckCancellation(&context,
+                              segment_id_,
+                              field_id_,
+                              "ChunkTranslator::get_cells()");
+            const auto cid = cids[i];
+            auto reader = codec->GetReader();
+            auto arrays = read_single_column_batches(reader->reader);
+            std::unique_ptr<milvus::Chunk> chunk;
+            if (!use_mmap_) {
+                chunk = create_chunk(field_meta_, arrays);
+            } else {
+                const auto filepath =
+                    std::filesystem::path(mmap_dir_path_) /
+                    fmt::format(
+                        "seg_{}_fid_{}_{}", segment_id_, field_id_, cid);
+                std::filesystem::create_directories(
+                    std::filesystem::path(mmap_dir_path_));
+                LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
+                         segment_id_,
+                         field_id_,
+                         cid,
+                         filepath.string());
+                chunk = create_chunk(field_meta_,
+                                     arrays,
+                                     mmap_populate_,
+                                     filepath.string(),
+                                     priority,
+                                     writeback_mode_);
+            }
+            cells.emplace_back(cid, std::move(chunk));
+        } catch (...) {
+            if (!first_error) {
+                first_error = std::current_exception();
+            }
         }
-        cells.emplace_back(cid, std::move(chunk));
     }
-
-    return cells;
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
+    CheckCancellation(
+        &context, segment_id_, field_id_, "ChunkTranslator::get_cells()");
+    co_return cells;
 }
 
 }  // namespace milvus::segcore::storagev1translator

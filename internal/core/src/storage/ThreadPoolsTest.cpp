@@ -413,6 +413,11 @@ TEST(ThreadPool, RejectedBatchSubmissionReturnsAdmissionBytesAndSlots) {
             })),
         std::system_error);
     EXPECT_EQ(rejected->rejections, 2);
+    auto downloads = storage::GetObjectData(
+        nullptr, {"rejected-field-data"}, ThreadPoolPriority::HIGH, false);
+    ASSERT_EQ(downloads.size(), 1);
+    EXPECT_THROW(std::move(downloads.front()).get(), std::system_error);
+    EXPECT_EQ(rejected->rejections, 3);
     EXPECT_EQ(reads, 0);
     EXPECT_EQ(finalized, 0);
     const bool async_budget_returned =
