@@ -645,6 +645,13 @@ type SearchReqV2 struct {
 func (req *SearchReqV2) GetDbName() string         { return req.DbName }
 func (req *SearchReqV2) GetCollectionName() string { return req.CollectionName }
 
+// ExplainReqV2 is a search body plus the output format.
+type ExplainReqV2 struct {
+	SearchReqV2
+	// Format is ExplainFormatJSON (default) or ExplainFormatText.
+	Format string `json:"format"`
+}
+
 type SearchAggregationReq struct {
 	Fields         []string                        `json:"fields"`
 	Size           int64                           `json:"size"`

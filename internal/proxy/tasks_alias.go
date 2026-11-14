@@ -140,6 +140,7 @@ const (
 
 var (
 	NewSearchTask                            = dql.NewSearchTask
+	ExplainSearch                            = dql.ExplainSearch
 	NewQueryTask                             = dql.NewQueryTask
 	NewGetStatisticsTask                     = dql.NewGetStatisticsTask
 	NewGetCollectionStatisticsTask           = dql.NewGetCollectionStatisticsTask
