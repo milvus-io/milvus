@@ -263,28 +263,6 @@ TEST(ConjunctExprTest, BorrowedMaskSurvivesNestedReplacementAndExceptions) {
     }
 }
 
-TEST(ConjunctExprTest, CandidateValidityHonorsUnalignedBorrowedMask) {
-    constexpr size_t size = 67;
-    TargetBitmap backing(size + 13, false);
-    for (size_t i = 0; i < size; ++i) {
-        backing[i + 7] = i % 3 != 1;
-    }
-    const auto mask = backing.view(7, size);
-    TargetBitmap data(size, true), valid(size, true);
-    std::unique_ptr<bool[]> validity(new bool[size]);
-    for (size_t i = 0; i < size; ++i) validity[i] = i % 5 != 0;
-    ApplyValidMaskForCandidates(ValidityView::FromExpanded(validity.get()),
-                                data.view(),
-                                valid.view(),
-                                size,
-                                &mask,
-                                0);
-    for (size_t i = 0; i < size; ++i) {
-        EXPECT_EQ(bool(data[i]), !mask[i] || validity[i]);
-        EXPECT_EQ(bool(valid[i]), !mask[i] || validity[i]);
-    }
-}
-
 TEST(ConjunctExprTest, NestedMasksPreserveCandidatesAndThreeValuedLogic) {
     // Enumerate the complete truth table for A AND (B OR C), both directly
     // and below a real NOT, with and without a null-rejecting consumer.

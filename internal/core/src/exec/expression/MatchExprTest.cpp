@@ -832,12 +832,11 @@ class MatchExprCandidateTest : public ::testing::TestWithParam<bool> {
         } else {
             auto growing = CreateGrowingSegment(schema_, empty_index_meta);
             growing->PreInsert(kRows);
-            growing->Insert(
-                0,
-                kRows,
-                generated_.row_ids_.data(),
-                generated_.timestamps_.data(),
-                std::make_shared<InsertRecordProto>(*generated_.raw_));
+            growing->Insert(0,
+                            kRows,
+                            generated_.row_ids_.data(),
+                            generated_.timestamps_.data(),
+                            generated_.raw_);
             segment_ = std::move(growing);
         }
     }
@@ -1585,7 +1584,8 @@ TEST(MatchExprRouting, BothRowAndElementSelectivityGateSparseBatches) {
         arrays.data(), nullptr, row_count, (*schema)[field]);
     insert->mutable_fields_data()->AddAllocated(array_data.release());
     insert->set_num_rows(row_count);
-    GeneratedData generated(std::move(insert));
+    GeneratedData generated;
+    generated.raw_ = insert.release();
     generated.schema_ = schema;
     generated.row_ids_ = ids;
     generated.timestamps_.assign(ids.begin(), ids.end());
@@ -1607,7 +1607,7 @@ TEST(MatchExprRouting, BothRowAndElementSelectivityGateSparseBatches) {
                             row_count,
                             ids.data(),
                             generated.timestamps_.data(),
-                            generated.SharedRaw());
+                            generated.raw_);
             segment = std::move(growing);
         }
         exec::QueryContext query(
