@@ -828,7 +828,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(16), Params.LoadAdmissionSlots.GetAsInt64())
 		params.Save(Params.LoadAdmissionSlots.Key, "0")
 		assert.Equal(t, int64(0), Params.LoadAdmissionSlots.GetAsInt64())
-
 	})
 
 	t.Run("test commonConfig", func(t *testing.T) {

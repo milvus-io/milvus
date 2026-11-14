@@ -111,8 +111,8 @@ TEST_P(ChunkTranslatorAwaitTest, DownloadYieldsAndDrainsBeforeCancellation) {
             ASSERT_EQ(cells.size(), 1);
             EXPECT_EQ(cells.front().first, 0);
             ASSERT_EQ(cells.front().second->RowNums(), 16);
-            const auto* actual =
-                reinterpret_cast<const int64_t*>(cells.front().second->RawData());
+            const auto* actual = reinterpret_cast<const int64_t*>(
+                cells.front().second->RawData());
             const auto expected = dataset.get_col<int64_t>(field);
             for (size_t i = 0; i < expected.size(); ++i) {
                 EXPECT_EQ(actual[i], expected[i]);
