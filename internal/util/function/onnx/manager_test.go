@@ -1,0 +1,802 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+package onnx
+
+import (
+	"context"
+	"encoding/binary"
+	"math"
+	"os"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+type testBackend struct {
+	loads atomic.Int32
+	new   func(string) *testSession
+	load  func(context.Context, string) (Session, error)
+}
+
+func (b *testBackend) Name() string    { return "test-onnxruntime" }
+func (b *testBackend) Version() string { return "test-1" }
+func (b *testBackend) Load(ctx context.Context, path string) (Session, error) {
+	b.loads.Add(1)
+	if b.load != nil {
+		return b.load(ctx, path)
+	}
+	return b.new(path), nil
+}
+
+type testSession struct {
+	run       func(context.Context, []Tensor) ([]Tensor, error)
+	inputs    []TensorSpec
+	outputs   []TensorSpec
+	memory    uint64
+	close     atomic.Int32
+	active    atomic.Int32
+	maxActive atomic.Int32
+	closeFunc func()
+}
+
+func TestInternalDependencyErrorsAreSystemErrors(t *testing.T) {
+	_, err := NewManager(nil, Config{})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = NewRunner(nil)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+
+	_, err = NewManager(FuncBackend{LoadFunc: func(context.Context, string) (Session, error) {
+		return nil, nil
+	}}, Config{})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	_, err = (FuncBackend{}).Load(context.Background(), "model.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	_, err = (FuncBackend{LoadFunc: func(context.Context, string) (Session, error) {
+		return nil, nil
+	}}).Load(context.Background(), "model.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+}
+
+func (s *testSession) Inputs() []TensorSpec {
+	if s.inputs != nil {
+		return s.inputs
+	}
+	return []TensorSpec{{Name: "input", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}}
+}
+
+func (s *testSession) Outputs() []TensorSpec {
+	if s.outputs != nil {
+		return s.outputs
+	}
+	return []TensorSpec{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}}
+}
+
+func (s *testSession) MemoryBytes() uint64 {
+	if s.memory > 0 {
+		return s.memory
+	}
+	return 16
+}
+
+func (s *testSession) Close() error {
+	s.close.Add(1)
+	if s.closeFunc != nil {
+		s.closeFunc()
+	}
+	return nil
+}
+
+func (s *testSession) Run(ctx context.Context, inputs []Tensor) ([]Tensor, error) {
+	active := s.active.Add(1)
+	for {
+		previous := s.maxActive.Load()
+		if active <= previous || s.maxActive.CompareAndSwap(previous, active) {
+			break
+		}
+	}
+	defer s.active.Add(-1)
+	return s.run(ctx, inputs)
+}
+
+func newTestTensor(t *testing.T, name string, values ...float32) Tensor {
+	t.Helper()
+	tensor, err := NewFloat32Tensor(name, []int64{1, 2}, values)
+	require.NoError(t, err)
+	return tensor
+}
+
+func newTestModel(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir() + "/model.onnx"
+	require.NoError(t, os.WriteFile(path, []byte("test model"), 0o600))
+	return path
+}
+
+func TestRunnerReusesSessionAndValidatesTensorSignature(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(_ context.Context, inputs []Tensor) ([]Tensor, error) {
+			output := append([]byte(nil), inputs[0].Data...)
+			for i := 0; i < len(output); i += 4 {
+				value := math.Float32frombits(binary.LittleEndian.Uint32(output[i:]))
+				binary.LittleEndian.PutUint32(output[i:], math.Float32bits(value+1))
+			}
+			return []Tensor{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{1, 2}, Data: output}}, nil
+		}}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	runner, err := NewRunner(manager)
+	require.NoError(t, err)
+	model := newTestModel(t)
+
+	input := newTestTensor(t, "input", 1, 2)
+	outputs, err := runner.Run(context.Background(), model, []Tensor{input})
+	require.NoError(t, err)
+	require.Equal(t, "output", outputs[0].Name)
+	require.Equal(t, float32(2), mathFloat32(outputs[0].Data[0:4]))
+	_, err = runner.Run(context.Background(), model, []Tensor{newTestTensor(t, "wrong", 1, 2)})
+	require.Error(t, err)
+	require.Equal(t, int32(1), backend.loads.Load())
+
+	manager.Close()
+	// Close is deferred for active leases and immediate for this idle session.
+	require.Eventually(t, func() bool { return manager.SessionCount() == 0 }, time.Second, time.Millisecond)
+}
+
+func mathFloat32(data []byte) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(data))
+}
+
+func TestManagerSerializedLoadsAndIdleRelease(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: 10 * time.Millisecond})
+	require.NoError(t, err)
+	model := newTestModel(t)
+	const callers = 16
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lease, acquireErr := manager.Acquire(context.Background(), model)
+			if acquireErr == nil {
+				lease.Release()
+			}
+			require.NoError(t, acquireErr)
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int32(1), backend.loads.Load())
+	require.Eventually(t, func() bool { return manager.SessionCount() == 0 }, time.Second, time.Millisecond)
+	manager.Close()
+}
+
+func TestManagerAcquireHonorsCancellationWhileAnotherLoadIsInFlight(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &testBackend{new: func(string) *testSession {
+		close(started)
+		<-release
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := newTestModel(t)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		lease, acquireErr := manager.Acquire(context.Background(), model)
+		if acquireErr == nil {
+			lease.Release()
+		}
+		firstDone <- acquireErr
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	lease, err := manager.Acquire(ctx, model)
+	require.Error(t, err)
+	require.Nil(t, lease)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	close(release)
+	require.NoError(t, <-firstDone)
+}
+
+func TestManagerIdentityChangesWhenModelContentChanges(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour, MaxSessions: 2})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := newTestModel(t)
+	first, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	firstIdentity := first.Identity()
+	first.Release()
+	require.NoError(t, os.WriteFile(model, []byte("updated model"), 0o600))
+	second, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	require.NotEqual(t, firstIdentity, second.Identity())
+	second.Release()
+	require.Equal(t, int32(2), backend.loads.Load())
+}
+
+func TestManagerBoundsConcurrencyAndMemory(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(ctx context.Context, _ []Tensor) ([]Tensor, error) {
+			started <- struct{}{}
+			select {
+			case <-release:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+	}}
+	manager, err := NewManager(backend, Config{MaxConcurrency: 1, MaxMemoryBytes: 8})
+	require.NoError(t, err)
+	model := newTestModel(t)
+	lease, err := manager.Acquire(context.Background(), model)
+	require.Error(t, err)
+	require.Nil(t, lease)
+	manager.Close()
+
+	// A second manager demonstrates cancellation while waiting for execution.
+	manager, err = NewManager(backend, Config{MaxConcurrency: 1, MaxMemoryBytes: 32})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	defer first.Release()
+	input := newTestTensor(t, "input", 1, 2)
+	go func() { _, _ = first.Run(context.Background(), []Tensor{input}) }()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	_, err = first.Run(ctx, []Tensor{input})
+	require.Error(t, err)
+	close(release)
+}
+
+func TestManagerUsesLoadTimeMemoryCharge(t *testing.T) {
+	var loaded *testSession
+	backend := &testBackend{new: func(string) *testSession {
+		loaded = &testSession{memory: 8, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+		return loaded
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 8, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	model := newTestModel(t)
+	lease, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8), manager.MemoryBytes())
+
+	loaded.memory = 64
+	lease.Release()
+	manager.Close()
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
+func TestRunnerRejectsMalformedRuntimeOutput(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) {
+			return []Tensor{{Name: "unexpected", DataType: DataTypeFloat32, Shape: []int64{1, 2}, Data: make([]byte, 8)}}, nil
+		}}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	runner, err := NewRunner(manager)
+	require.NoError(t, err)
+	_, err = runner.Run(context.Background(), newTestModel(t), []Tensor{newTestTensor(t, "input", 1, 2)})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrFunctionFailed), merr.Code(err))
+}
+
+func TestManagerRejectsUnknownRuntimeDataType(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{
+			inputs:  []TensorSpec{{Name: "input", DataType: DataType(255), Shape: []int64{-1, 2}}},
+			outputs: []TensorSpec{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}},
+			run:     func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+		}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(context.Background(), newTestModel(t))
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrFunctionFailed), merr.Code(err))
+}
+
+func TestManagerAcceptsAllSupportedRuntimeDataTypes(t *testing.T) {
+	types := []DataType{
+		DataTypeFloat32, DataTypeFloat64, DataTypeInt8, DataTypeInt16,
+		DataTypeInt32, DataTypeInt64, DataTypeUint8, DataTypeUint16,
+		DataTypeUint32, DataTypeUint64, DataTypeBool,
+	}
+	backend := &testBackend{new: func(string) *testSession {
+		specs := make([]TensorSpec, len(types))
+		for i, dataType := range types {
+			specs[i] = TensorSpec{Name: dataType.String(), DataType: dataType, Shape: []int64{1}}
+		}
+		return &testSession{
+			inputs:  specs,
+			outputs: specs,
+			run:     func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+		}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	lease, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	lease.Release()
+}
+
+func TestManagerRejectsOversizedModelBeforeLoad(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxModelBytes: 1})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(context.Background(), newTestModel(t))
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestManagerRejectsModelChangedDuringLoad(t *testing.T) {
+	var modelPath string
+	var loaded *testSession
+	backend := &testBackend{new: func(path string) *testSession {
+		modelPath = path
+		require.NoError(t, os.WriteFile(path, []byte("changed model"), 0o600))
+		loaded = &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+		return loaded
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(context.Background(), newTestModel(t))
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Code(err))
+	require.NotEmpty(t, modelPath)
+	require.Equal(t, int32(1), loaded.close.Load())
+}
+
+func TestRunnerPreservesInferenceFailureAndReleasesLease(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) {
+			return nil, merr.WrapErrServiceUnavailableMsg("runtime is temporarily unavailable")
+		}}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: 10 * time.Millisecond})
+	require.NoError(t, err)
+	runner, err := NewRunner(manager)
+	require.NoError(t, err)
+	_, err = runner.Run(context.Background(), newTestModel(t), []Tensor{newTestTensor(t, "input", 1, 2)})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Code(err))
+	require.Eventually(t, func() bool { return manager.SessionCount() == 0 }, time.Second, time.Millisecond)
+	manager.Close()
+}
+
+func TestRunnerPreservesOutputValidationCause(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{
+			outputs: []TensorSpec{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}},
+			run: func(context.Context, []Tensor) ([]Tensor, error) {
+				return []Tensor{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{math.MaxInt64, 2}}}, nil
+			},
+		}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	runner, err := NewRunner(manager)
+	require.NoError(t, err)
+
+	_, err = runner.Run(context.Background(), newTestModel(t), []Tensor{newTestTensor(t, "input", 1, 2)})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrFunctionFailed), merr.Code(err))
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestTensorConstructionRejectsMismatchedValues(t *testing.T) {
+	_, err := NewFloat32Tensor("input", []int64{1, 2}, []float32{1})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, context.Canceled))
+}
+
+func TestManagerRejectsExternalTensorData(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := t.TempDir() + "/external.onnx"
+	// ModelProto.graph.initializer[0].data_location = EXTERNAL.
+	modelBytes := []byte{0x3a, 0x04, 0x2a, 0x02, 0x70, 0x01}
+	require.NoError(t, os.WriteFile(model, modelBytes, 0o600))
+
+	_, err = manager.Acquire(context.Background(), model)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestManagerRejectsExternalTensorDataInLocalFunction(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	model := t.TempDir() + "/function-external.onnx"
+	// ModelProto.functions[0].attribute_proto[0].t.data_location = EXTERNAL.
+	modelBytes := []byte{0xca, 0x01, 0x06, 0x5a, 0x04, 0x2a, 0x02, 0x70, 0x01}
+	require.NoError(t, os.WriteFile(model, modelBytes, 0o600))
+
+	_, err = manager.Acquire(context.Background(), model)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestModelProtoInspectionRejectsUnknownGroups(t *testing.T) {
+	path := t.TempDir() + "/model.onnx"
+	// A valid unknown protobuf group must be skipped so the scanner continues
+	// to inspect later known fields.
+	graph := wrapModelProtoField(5, wrapModelProtoField(13, []byte("external")))
+	require.NoError(t, os.WriteFile(path, append([]byte{0x1b, 0x1c}, wrapModelProtoField(7, graph)...), 0o600))
+	external, err := modelHasExternalData(context.Background(), path)
+	require.NoError(t, err)
+	require.True(t, external)
+}
+
+func TestModelProtoScanBoundsNesting(t *testing.T) {
+	model := []byte{}
+	for i := 0; i < maxModelProtoDepth+2; i++ {
+		model = wrapModelProtoField(6, model)
+		model = wrapModelProtoField(5, model)
+		model = wrapModelProtoField(1, model)
+	}
+	model = wrapModelProtoField(7, model)
+	path := t.TempDir() + "/deep.onnx"
+	require.NoError(t, os.WriteFile(path, model, 0o600))
+	_, err := modelHasExternalData(context.Background(), path)
+	require.ErrorIs(t, err, errModelProtoTooDeep)
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	_, err = manager.Acquire(context.Background(), path)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+	require.Equal(t, int32(0), backend.loads.Load())
+}
+
+func TestManagerLoadsPinnedModelSnapshot(t *testing.T) {
+	model := newTestModel(t)
+	require.NoError(t, os.WriteFile(model, []byte("model A"), 0o600))
+	var loaded []byte
+	backend := &testBackend{new: func(path string) *testSession {
+		require.NoError(t, os.WriteFile(model, []byte("model B"), 0o600))
+		loaded, _ = os.ReadFile(path)
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	lease, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	lease.Release()
+	require.Equal(t, []byte("model A"), loaded)
+}
+
+func TestManagerRejectsNULModelPath(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	_, err = manager.Acquire(context.Background(), "model\x00.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+}
+
+func TestManagerCancelsWhileWaitingForEvictionClose(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{memory: 16, closeFunc: func() {
+			select {
+			case <-closeStarted:
+			default:
+				close(closeStarted)
+			}
+			<-closeRelease
+		}, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 2, MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	first.Release()
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = manager.Acquire(ctx, secondModel)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	<-closeStarted
+	require.Equal(t, uint64(32), manager.MemoryBytes())
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+	second, err := manager.Acquire(context.Background(), secondModel)
+	require.NoError(t, err)
+	second.Release()
+}
+
+func TestManagerDiscardsCanceledPostLoadSessionAsynchronously(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session := &testSession{
+		memory: 16,
+		closeFunc: func() {
+			close(closeStarted)
+			<-closeRelease
+		},
+		run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+	}
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		cancel()
+		return session, nil
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	started := time.Now()
+	_, err = manager.Acquire(ctx, newTestModel(t))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(started), time.Second)
+	<-closeStarted
+	require.Equal(t, uint64(16), manager.MemoryBytes())
+
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
+func TestManagerDiscardsPartialSessionOnCanceledLoadAsynchronously(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	session := &testSession{
+		memory: 16,
+		closeFunc: func() {
+			close(closeStarted)
+			<-closeRelease
+		},
+		run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		cancel()
+		return session, context.Canceled
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(ctx, newTestModel(t))
+	require.ErrorIs(t, err, context.Canceled)
+	<-closeStarted
+	require.Equal(t, uint64(16), manager.MemoryBytes())
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
+func TestManagerEvictsIdleEntryWhenPendingMemoryExceedsLimit(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+
+	entry := &managerEntry{
+		key:       "idle",
+		session:   &testSession{},
+		memory:    8,
+		manager:   manager,
+		closeDone: make(chan struct{}),
+	}
+	manager.mu.Lock()
+	manager.entries[entry.key] = entry
+	manager.memBytes = 17
+	evicted := manager.evictIdleForMemoryLocked(1)
+	manager.mu.Unlock()
+
+	require.Len(t, evicted, 1)
+	startCloseEntries(evicted)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 9 }, time.Second, time.Millisecond)
+	manager.Close()
+}
+
+func TestManagerEvictsIdleEntryWhileAnotherSessionIsClosing(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 2, IdleTTL: time.Hour})
+	require.NoError(t, err)
+
+	idle := &managerEntry{
+		key:       "idle",
+		session:   &testSession{},
+		memory:    8,
+		manager:   manager,
+		closeDone: make(chan struct{}),
+	}
+	manager.mu.Lock()
+	manager.entries[idle.key] = idle
+	manager.pendingSessions = 1 // another entry is already closing
+	manager.mu.Unlock()
+
+	lease, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	lease.Release()
+
+	// The pending close is only represented in this focused admission test.
+	manager.mu.Lock()
+	manager.pendingSessions = 0
+	manager.mu.Unlock()
+	manager.Close()
+}
+
+func TestManagerRejectsOverBudgetSessionBeforeEviction(t *testing.T) {
+	var loads atomic.Int32
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		if loads.Add(1) == 1 {
+			return &testSession{memory: 8, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
+		}
+		return &testSession{memory: 32, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	first.Release()
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	_, err = manager.Acquire(context.Background(), secondModel)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Equal(t, 1, manager.SessionCount())
+}
+
+func wrapModelProtoField(field int, payload []byte) []byte {
+	tag := uint64(field<<3 | 2)
+	encoded := []byte{byte(tag)}
+	for tag >= 0x80 {
+		encoded[len(encoded)-1] = byte(tag&0x7f | 0x80)
+		tag >>= 7
+		encoded = append(encoded, byte(tag))
+	}
+	length := uint64(len(payload))
+	for {
+		b := byte(length & 0x7f)
+		length >>= 7
+		if length != 0 {
+			b |= 0x80
+		}
+		encoded = append(encoded, b)
+		if length == 0 {
+			break
+		}
+	}
+	return append(encoded, payload...)
+}
+
+func TestManagerKeepsPendingCloseWithinLimits(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	var closeOnce sync.Once
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{closeFunc: func() {
+			closeOnce.Do(func() { close(closeStarted) })
+			<-closeRelease
+		}, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 1, MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	firstModel := newTestModel(t)
+	first, err := manager.Acquire(context.Background(), firstModel)
+	require.NoError(t, err)
+	first.Release()
+
+	closeDone := make(chan struct{})
+	go func() {
+		manager.removeAndClose(first.entry)
+		close(closeDone)
+	}()
+	<-closeStarted
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	_, err = manager.Acquire(context.Background(), secondModel)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceResourceInsufficient), merr.Code(err))
+
+	close(closeRelease)
+	<-closeDone
+	second, err := manager.Acquire(context.Background(), secondModel)
+	require.NoError(t, err)
+	second.Release()
+}
+
+func TestManagerIgnoresStaleIdleTimer(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	lease, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	entry := lease.entry
+	lease.Release()
+	manager.mu.Lock()
+	staleTimerID := entry.timerID
+	manager.mu.Unlock()
+
+	lease, err = manager.Acquire(context.Background(), entry.path)
+	require.NoError(t, err)
+	lease.Release()
+	manager.removeAndCloseTimer(entry, staleTimerID)
+
+	require.Equal(t, 1, manager.SessionCount())
+	require.Equal(t, int32(0), entry.session.(*testSession).close.Load())
+}
+
+func TestValidateTensorsRejectsPayloadSizeOverflow(t *testing.T) {
+	err := validateTensors("input", []TensorSpec{{Name: "input", DataType: DataTypeFloat32, Shape: []int64{-1}}}, []Tensor{{
+		Name: "input", DataType: DataTypeFloat32, Shape: []int64{math.MaxInt64},
+	}})
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+}
