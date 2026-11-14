@@ -13,7 +13,6 @@ package onnx
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"math"
 	"os"
 	"sync"
@@ -21,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -55,18 +55,21 @@ func (s *testSession) Inputs() []TensorSpec {
 	}
 	return []TensorSpec{{Name: "input", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}}
 }
+
 func (s *testSession) Outputs() []TensorSpec {
 	if s.outputs != nil {
 		return s.outputs
 	}
 	return []TensorSpec{{Name: "output", DataType: DataTypeFloat32, Shape: []int64{-1, 2}}}
 }
+
 func (s *testSession) MemoryBytes() uint64 {
 	if s.memory > 0 {
 		return s.memory
 	}
 	return 16
 }
+
 func (s *testSession) Close() error {
 	s.close.Add(1)
 	if s.closeFunc != nil {
@@ -74,6 +77,7 @@ func (s *testSession) Close() error {
 	}
 	return nil
 }
+
 func (s *testSession) Run(ctx context.Context, inputs []Tensor) ([]Tensor, error) {
 	active := s.active.Add(1)
 	for {

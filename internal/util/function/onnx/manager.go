@@ -14,7 +14,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -35,8 +35,10 @@ const (
 	maxHashBuffer         = 1 << 20
 )
 
-var errModelTooLarge = errors.New("onnx: model exceeds configured size")
-var errMalformedModelProto = errors.New("onnx: malformed model protobuf")
+var (
+	errModelTooLarge       = errors.New("onnx: model exceeds configured size")
+	errMalformedModelProto = errors.New("onnx: malformed model protobuf")
+)
 
 // Config bounds resident sessions, inference calls, and runtime memory.
 // Zero values select conservative defaults, except MaxMemoryBytes where zero
