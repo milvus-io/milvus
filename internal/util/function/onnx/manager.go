@@ -255,7 +255,11 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 	session, err := m.backend.Load(ctx, snapshotPath)
 	if err != nil {
 		if session != nil {
-			_ = session.Close()
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				discardSessionAsync(m, session, session.MemoryBytes(), sourcePath)
+			} else {
+				_ = session.Close()
+			}
 		}
 		return nil, merr.Wrap(err, "onnx: load model")
 	}
@@ -289,6 +293,11 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 			m.mu.Unlock()
 			_ = session.Close()
 			return nil, merr.WrapErrServiceNotReadyMsg("onnx: manager is closed")
+		}
+		if m.config.MaxMemoryBytes > 0 && memory > m.config.MaxMemoryBytes {
+			m.mu.Unlock()
+			_ = session.Close()
+			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: resident session memory limit exceeded (%d > %d bytes)", memory, m.config.MaxMemoryBytes)
 		}
 		if m.config.MaxMemoryBytes == 0 || (m.memBytes <= m.config.MaxMemoryBytes && memory <= m.config.MaxMemoryBytes-m.memBytes) {
 			break
@@ -555,6 +564,14 @@ func scanModelProto(ctx context.Context, file *os.File, offset, length int64, ki
 				return false, errMalformedModelProto
 			}
 			pos += 4
+		case 3:
+			var err error
+			pos, err = skipModelGroup(file, pos, end, field)
+			if err != nil {
+				return false, err
+			}
+		case 4:
+			return false, errMalformedModelProto
 		default:
 			return false, errMalformedModelProto
 		}
@@ -563,6 +580,55 @@ func scanModelProto(ctx context.Context, file *os.File, offset, length int64, ki
 		return false, errMalformedModelProto
 	}
 	return false, nil
+}
+
+func skipModelGroup(file *os.File, pos, end int64, groupField int) (int64, error) {
+	depth := 1
+	for pos < end {
+		tag, size, err := readModelVarint(file, pos, end)
+		if err != nil {
+			return 0, err
+		}
+		pos += size
+		field := int(tag >> 3)
+		switch tag & 7 {
+		case 0:
+			_, size, err = readModelVarint(file, pos, end)
+			if err != nil {
+				return 0, err
+			}
+			pos += size
+		case 1:
+			if end-pos < 8 {
+				return 0, errMalformedModelProto
+			}
+			pos += 8
+		case 2:
+			length, size, err := readModelVarint(file, pos, end)
+			if err != nil || length > uint64(end-pos-size) {
+				return 0, errMalformedModelProto
+			}
+			pos += size + int64(length)
+		case 3:
+			depth++
+		case 4:
+			if field != groupField {
+				return 0, errMalformedModelProto
+			}
+			depth--
+			if depth == 0 {
+				return pos, nil
+			}
+		case 5:
+			if end-pos < 4 {
+				return 0, errMalformedModelProto
+			}
+			pos += 4
+		default:
+			return 0, errMalformedModelProto
+		}
+	}
+	return 0, errMalformedModelProto
 }
 
 func modelProtoChild(kind modelProtoKind, field int) (modelProtoKind, bool) {

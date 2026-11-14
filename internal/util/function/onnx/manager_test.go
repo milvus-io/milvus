@@ -478,6 +478,17 @@ func TestManagerRejectsExternalTensorDataInLocalFunction(t *testing.T) {
 	require.Equal(t, int32(0), backend.loads.Load())
 }
 
+func TestModelProtoInspectionRejectsUnknownGroups(t *testing.T) {
+	path := t.TempDir() + "/model.onnx"
+	// A valid unknown protobuf group must be skipped so the scanner continues
+	// to inspect later known fields.
+	graph := wrapModelProtoField(5, wrapModelProtoField(13, []byte("external")))
+	require.NoError(t, os.WriteFile(path, append([]byte{0x1b, 0x1c}, wrapModelProtoField(7, graph)...), 0o600))
+	external, err := modelHasExternalData(context.Background(), path)
+	require.NoError(t, err)
+	require.True(t, external)
+}
+
 func TestModelProtoScanBoundsNesting(t *testing.T) {
 	model := []byte{}
 	for i := 0; i < maxModelProtoDepth+2; i++ {
@@ -594,6 +605,34 @@ func TestManagerDiscardsCanceledPostLoadSessionAsynchronously(t *testing.T) {
 	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
 }
 
+func TestManagerDiscardsPartialSessionOnCanceledLoadAsynchronously(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	session := &testSession{
+		memory: 16,
+		closeFunc: func() {
+			close(closeStarted)
+			<-closeRelease
+		},
+		run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		cancel()
+		return session, context.Canceled
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(ctx, newTestModel(t))
+	require.ErrorIs(t, err, context.Canceled)
+	<-closeStarted
+	require.Equal(t, uint64(16), manager.MemoryBytes())
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
 func TestManagerEvictsIdleEntryWhenPendingMemoryExceedsLimit(t *testing.T) {
 	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
 	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
@@ -646,6 +685,28 @@ func TestManagerEvictsIdleEntryWhileAnotherSessionIsClosing(t *testing.T) {
 	manager.pendingSessions = 0
 	manager.mu.Unlock()
 	manager.Close()
+}
+
+func TestManagerRejectsOverBudgetSessionBeforeEviction(t *testing.T) {
+	var loads atomic.Int32
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		if loads.Add(1) == 1 {
+			return &testSession{memory: 8, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
+		}
+		return &testSession{memory: 32, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+	first.Release()
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	_, err = manager.Acquire(context.Background(), secondModel)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Equal(t, 1, manager.SessionCount())
 }
 
 func wrapModelProtoField(field int, payload []byte) []byte {
