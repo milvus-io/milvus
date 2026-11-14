@@ -1199,13 +1199,21 @@ GetObjectData(ChunkManager* remote_chunk_manager,
         };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(folly::via(&pool,
-                                        std::bind(DownloadAndDeserialize,
-                                                  remote_chunk_manager,
-                                                  is_field_data,
-                                                  array_type,
-                                                  file))
-                                 .semi());
+        try {
+            futures.emplace_back(folly::via(&pool,
+                                            std::bind(DownloadAndDeserialize,
+                                                      remote_chunk_manager,
+                                                      is_field_data,
+                                                      array_type,
+                                                      file))
+                                     .semi());
+        } catch (...) {
+            // Return the error with issued reads so callers can drain their owners.
+            futures.emplace_back(
+                folly::makeSemiFuture<std::unique_ptr<DataCodec>>(
+                    folly::exception_wrapper(std::current_exception())));
+            break;
+        }
     }
     return futures;
 }
