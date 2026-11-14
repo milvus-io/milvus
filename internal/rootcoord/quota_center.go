@@ -491,6 +491,7 @@ func (q *QuotaCenter) collectMetrics() error {
 		// Empty and growing-only QueryViews need read quotas too. QN physical
 		// metrics alone do not enumerate them. Keep released-but-resident views
 		// covered until their cleanup completes.
+		collections := q.loadedCollectionIDs()
 		if resources := qvresource.Resource(); resources != nil {
 			collections.Insert(resources.ShardViews.CollectionIDs()...)
 			for collectionID := range resources.LoadConfigs.Snapshot().ConfigsMap() {
@@ -500,7 +501,7 @@ func (q *QuotaCenter) collectMetrics() error {
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
 		var rangeErr error
-		q.loadedCollectionIDs().Range(func(collectionID int64) bool {
+		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
 				// skip limit check if the collection meta has been removed from rootcoord meta
