@@ -156,7 +156,7 @@ class VirtualPKTakeResult final : public TakeResult {
  public:
     VirtualPKTakeResult(std::shared_ptr<VirtualPKValues> owner,
                         int64_t size,
-                        const TargetBitmap* candidate_mask)
+                        const TargetBitmapView* candidate_mask)
         : owner_(std::move(owner)),
           size_(size),
           candidate_mask_(candidate_mask) {
@@ -246,7 +246,7 @@ class VirtualPKTakeResult final : public TakeResult {
  private:
     std::shared_ptr<VirtualPKValues> owner_;
     int64_t size_;
-    const TargetBitmap* candidate_mask_;
+    const TargetBitmapView* candidate_mask_;
 };
 
 }  // namespace

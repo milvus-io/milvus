@@ -128,6 +128,11 @@ class IStructElementOffsets {
                              const TargetBitmapView& valid_row_bitset,
                              int64_t row_start) const = 0;
 
+    // Expand a normalized row selection without allocating a validity bitmap.
+    virtual TargetBitmap
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
+                             int64_t row_start) const;
+
     // Convert row-level bitset to element offsets
     // Returns element IDs for all rows where row_bitset[row_id] is true
     virtual FixedVector<int32_t>
@@ -257,6 +262,10 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
                              const TargetBitmapView& valid_row_bitset,
                              int64_t row_start) const override;
 
+    TargetBitmap
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
+                             int64_t row_start) const override;
+
     FixedVector<int32_t>
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
                               int64_t row_start) const override;
@@ -357,6 +366,10 @@ class StructElementOffsetsGrowing : public IStructElementOffsets {
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
                              const TargetBitmapView& valid_row_bitset,
+                             int64_t row_start) const override;
+
+    TargetBitmap
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
                              int64_t row_start) const override;
 
     FixedVector<int32_t>

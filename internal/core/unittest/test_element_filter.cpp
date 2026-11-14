@@ -42,6 +42,11 @@
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "exec/Task.h"
+#include "common/ElementFilterIterator.h"
+#include "exec/expression/ConjunctExpr.h"
+#include "exec/operator/IterativeElementFilterNode.h"
+#include "exec/operator/ElementFilterBitsNode.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
@@ -6948,3 +6953,519 @@ TEST(ElementNullableVectorSearch, GrowingAddedVectorSubField) {
                   segment.get(), s, mixed_layout, "growing added", "{}", true),
               0);
 }
+
+namespace milvus::exec {
+namespace {
+
+class CandidateRecordingExprSet : public ExprSet {
+ public:
+    CandidateRecordingExprSet(ExecContext* context,
+                              const std::vector<int32_t>& starts)
+        : ExprSet({}, context), starts_(starts) {
+    }
+
+    void
+    Eval(int32_t, int32_t, bool, EvalCtx& ctx, std::vector<VectorPtr>& results)
+        override {
+        EXPECT_EQ(ctx.get_offset_input(), nullptr);
+        const auto end_row = std::min<size_t>(row_ + 2, starts_.size() - 1);
+        const auto count = starts_[end_row] - starts_[row_];
+        // The size must come from this parent-row batch, never from a fixed
+        // element count or the preceding batch's result length.
+        EXPECT_TRUE(ctx.get_bitmap_input().empty() ||
+                    ctx.get_bitmap_input().size() == count);
+        if (!ctx.get_bitmap_input().empty() && expected_backing) {
+            EXPECT_EQ(ctx.get_bitmap_input().data(), expected_backing());
+        }
+        masks.push_back(TargetBitmap(ctx.get_bitmap_input()));
+        TargetBitmap data(count, false);
+        TargetBitmap valid(count, true);
+        for (int64_t i = 0; i < count; ++i) {
+            // Stand in for a candidate-aware leaf and keep its observed work
+            // separate from the operator's final parent intersection.
+            if (ctx.get_bitmap_input().empty() || ctx.get_bitmap_input()[i]) {
+                evaluated.push_back(starts_[row_] + i);
+                data[i] = (starts_[row_] + i) % 3 == 0;
+                valid[i] = (starts_[row_] + i) % 5 != 1;
+            }
+        }
+        results = {
+            std::make_shared<ColumnVector>(std::move(data), std::move(valid))};
+        row_ = end_row;
+    }
+
+    std::function<const void*()> expected_backing;
+    std::vector<TargetBitmap> masks;
+    std::vector<int64_t> evaluated;
+
+ private:
+    const std::vector<int32_t>& starts_;
+    size_t row_ = 0;
+};
+
+}  // namespace
+
+namespace {
+
+class ConstantElementBitmapExpr : public Expr {
+ public:
+    ConstantElementBitmapExpr(bool data, bool valid)
+        : Expr(DataType::BOOL, {}, "constant_element_bitmap", nullptr),
+          data_(data),
+          valid_(valid) {
+    }
+    void
+    Eval(EvalCtx&, VectorPtr& result) override {
+        ++evals;
+        result = std::make_shared<ColumnVector>(TargetBitmap(2, data_),
+                                                TargetBitmap(2, valid_));
+    }
+    void
+    MoveCursor() override {
+        ++moves;
+    }
+    int evals = 0;
+    int moves = 0;
+
+ private:
+    bool data_;
+    bool valid_;
+};
+
+class UnknownOffsetExprSet : public ExprSet {
+ public:
+    UnknownOffsetExprSet(ExecContext* context, std::vector<int32_t> valid_ids)
+        : ExprSet({}, context), valid_ids_(std::move(valid_ids)) {
+    }
+    void
+    Eval(int32_t, int32_t, bool, EvalCtx& ctx, std::vector<VectorPtr>& results)
+        override {
+        auto* input = ctx.get_offset_input();
+        ASSERT_NE(input, nullptr);
+        inputs.push_back(*input);
+        TargetBitmap data(input->size(), true);
+        TargetBitmap valid(input->size(), false);
+        for (size_t i = 0; i < input->size(); ++i) {
+            valid[i] =
+                std::find(valid_ids_.begin(), valid_ids_.end(), (*input)[i]) !=
+                valid_ids_.end();
+        }
+        results = {
+            std::make_shared<ColumnVector>(std::move(data), std::move(valid))};
+    }
+    std::vector<OffsetVector> inputs;
+
+ private:
+    std::vector<int32_t> valid_ids_;
+};
+
+class OrderedElementIterator : public VectorIterator {
+ public:
+    explicit OrderedElementIterator(int64_t count) : count_(count) {
+    }
+    bool
+    HasNext() override {
+        return position_ < count_;
+    }
+    std::optional<std::pair<int64_t, float>>
+    Next() override {
+        if (!HasNext())
+            return std::nullopt;
+        const auto id = position_++;
+        return std::make_pair(id, static_cast<float>(id) / 4);
+    }
+
+ private:
+    int64_t count_;
+    int64_t position_ = 0;
+};
+
+TEST(ElementFilterUnknown, IterativeConsumerRejectsSetDataOnUnknownElements) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    QueryContext query("iterative_unknown", segment.get(), 0, MAX_TIMESTAMP);
+    ExecContext exec(&query);
+    UnknownOffsetExprSet expressions(&exec, {1024, 1026});
+    auto base = std::make_shared<OrderedElementIterator>(1027);
+    ElementFilterIterator iterator(base, &exec, &expressions);
+    EXPECT_TRUE(iterator.HasNext());
+    EXPECT_TRUE(iterator.HasNext());
+    auto first = iterator.Next();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->first, 1024);
+    EXPECT_FLOAT_EQ(first->second, 256.0f);
+    auto second = iterator.Next();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->first, 1026);
+    EXPECT_FLOAT_EQ(second->second, 256.5f);
+    EXPECT_FALSE(iterator.HasNext());
+    EXPECT_FALSE(iterator.Next().has_value());
+    ASSERT_EQ(expressions.inputs.size(), 2);
+    EXPECT_EQ(expressions.inputs[0].size(), 1024);
+    EXPECT_EQ(expressions.inputs[1], (OffsetVector{1024, 1025, 1026}));
+}
+
+}  // namespace
+
+class SelectionExpansionRecorder : public StructElementOffsetsSealed {
+ public:
+    using StructElementOffsetsSealed::StructElementOffsetsSealed;
+    TargetBitmap
+    RowBitsetToElementBitset(const TargetBitmapView& rows,
+                             int64_t start) const override {
+        ++selections;
+        auto result =
+            StructElementOffsetsSealed::RowBitsetToElementBitset(rows, start);
+        selection_data = result.data();
+        return result;
+    }
+    std::pair<TargetBitmap, TargetBitmap>
+    RowBitsetToElementBitset(const TargetBitmapView& rows,
+                             const TargetBitmapView& valid,
+                             int64_t start) const override {
+        ++paired;
+        return StructElementOffsetsSealed::RowBitsetToElementBitset(
+            rows, valid, start);
+    }
+    mutable int selections = 0;
+    mutable int paired = 0;
+    mutable const void* selection_data = nullptr;
+};
+
+class NestedIndexRouteExprSet : public ExprSet {
+ public:
+    using ExprSet::ExprSet;
+    void
+    Eval(int32_t begin,
+         int32_t end,
+         bool initialize,
+         EvalCtx& ctx,
+         std::vector<VectorPtr>& results) override {
+        EXPECT_EQ(ctx.get_offset_input(), nullptr);
+        ++evals;
+        ExprSet::Eval(begin, end, initialize, ctx, results);
+    }
+    int evals = 0;
+};
+
+class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
+ protected:
+    void
+    CheckCompositeNestedIndexRoute(bool is_and, bool negate) {
+        milvus::test::ExprBatchSizeGuard batch_guard(100);
+        constexpr int rows = 1000;
+        auto schema = std::make_shared<Schema>();
+        const auto pk = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        const auto field = schema->AddDebugArrayField(
+            "structA[price]", DataType::INT32, false);
+        auto generated = DataGen(schema, rows, 42, 0, 1, 1);
+        std::vector<int32_t> values;
+        for (auto& data : *generated.raw_->mutable_fields_data()) {
+            if (data.field_id() != field.get())
+                continue;
+            auto arrays = data.mutable_scalars()->mutable_array_data();
+            arrays->clear_data();
+            for (int row = 0; row < rows; ++row) {
+                values.push_back(row % 7);
+                arrays->add_data()->mutable_int_data()->add_data(values.back());
+            }
+        }
+        auto segment = CreateSealedWithFieldDataLoaded(schema, generated);
+        auto built_index =
+            BuildTestScalarIndex<int32_t>(index::families::kInverted,
+                                          values.size(),
+                                          values.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
+        LoadIndexInfo info{};
+        info.field_id = field.get();
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::INT32;
+        info.index_params["index_type"] = index::INVERTED_INDEX_TYPE;
+        SetTestIndexMetadata(info, *built_index, index::families::kInverted);
+        info.index =
+            CreateTestIndex("composite_nested", std::move(built_index));
+        segment->LoadIndex(info);
+        expr::ColumnInfo column(field, DataType::ARRAY);
+        column.element_type_ = DataType::INT32;
+        column.element_level_ = true;
+        proto::plan::GenericValue low, high;
+        low.set_int64_val(1);
+        high.set_int64_val(5);
+        expr::TypedExprPtr root = std::make_shared<expr::LogicalBinaryExpr>(
+            is_and ? expr::LogicalBinaryExpr::OpType::And
+                   : expr::LogicalBinaryExpr::OpType::Or,
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::GreaterThan, low),
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::LessThan, high));
+        if (negate)
+            root = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+        auto query = std::make_shared<QueryContext>(
+            "composite_nested", segment.get(), rows, MAX_TIMESTAMP);
+        query->set_active_element_count(rows);
+        auto logical = std::make_shared<plan::ElementFilterBitsNode>(
+            "composite_nested", root, "structA");
+        auto task = Task::Create(
+            "composite_nested", plan::PlanFragment(logical), 0, query);
+        DriverContext driver(task, 0, 0, 0, 0);
+        PhyElementFilterBitsNode node(0, &driver, logical);
+        ExecContext exec(query.get());
+        auto expressions = std::make_unique<NestedIndexRouteExprSet>(
+            std::vector<expr::TypedExprPtr>{root}, &exec, true);
+        auto* observed = expressions.get();
+        ASSERT_TRUE(observed->expr(0)->CanUseNestedIndex());
+        auto conjunction =
+            negate ? observed->expr(0)->GetInputsRef()[0] : observed->expr(0);
+        auto indexed_leaf = conjunction->GetInputsRef()[1];
+        conjunction->GetInputsRef()[1] =
+            std::make_shared<ConstantElementBitmapExpr>(true, true);
+        EXPECT_FALSE(observed->expr(0)->CanUseNestedIndex());
+        conjunction->GetInputsRef()[1] = indexed_leaf;
+        node.element_exprs_ = std::move(expressions);
+        TargetBitmap parents(rows, false), unused_validity(rows, false);
+        for (int row : {1, 3, 500, 700, 999})
+            parents[row] = true;  // 0.5%: capability decides mode.
+        auto offsets = segment->GetStructElementOffsets(field);
+        auto [filtered, valid] = node.EvaluateElementExpression(
+            parents.view(), unused_validity.view(), offsets.get());
+        EXPECT_EQ(observed->evals,
+                  10);  // Sequential batches; offset mode would evaluate once.
+        for (int row = 0; row < rows; ++row) {
+            const auto value = row % 7;
+            bool hit = is_and ? value > 1 && value < 5 : value > 1 || value < 5;
+            if (negate)
+                hit = !hit;
+            EXPECT_EQ(bool(filtered[row]), !(parents[row] && hit));
+            EXPECT_TRUE(valid[row]);
+        }
+    }
+
+    void
+    CheckOffsetValidity() {
+        constexpr int64_t rows = 1000;
+        std::vector<int32_t> starts = {0};
+        for (int64_t row = 0; row < rows; ++row) {
+            starts.push_back(starts.back() + (row == 1 ? 3 : 1));
+        }
+        StructElementOffsetsSealed offsets(starts);
+        auto schema = std::make_shared<Schema>();
+        const auto pk = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto query = std::make_shared<QueryContext>(
+            "offset_unknown", segment.get(), rows, MAX_TIMESTAMP);
+        query->set_active_element_count(starts.back());
+        auto logical = std::make_shared<plan::ElementFilterBitsNode>(
+            "elements",
+            std::make_shared<expr::AlwaysTrueExpr>(),
+            "struct_array");
+        auto task = Task::Create(
+            "offset_unknown", plan::PlanFragment(logical), 0, query);
+        DriverContext driver(task, 0, 0, 0, 0);
+        PhyElementFilterBitsNode node(0, &driver, logical);
+        ExecContext exec(query.get());
+        auto expressions = std::make_unique<UnknownOffsetExprSet>(
+            &exec, std::vector<int32_t>{2});
+        auto* observed = expressions.get();
+        node.element_exprs_ = std::move(expressions);
+        TargetBitmap parents(rows, false);
+        parents[1] = true;  // 0.1% hit ratio forces the offset path.
+        // MVCC source selections leave their validity channel unused.
+        TargetBitmap parent_valid(rows, false);
+        auto [filtered, valid] =
+            node.EvaluateElementExpression(TargetBitmapView(parents),
+                                           TargetBitmapView(parent_valid),
+                                           &offsets);
+        ASSERT_EQ(observed->inputs.size(), 1);
+        EXPECT_EQ(observed->inputs[0], (OffsetVector{1, 2, 3}));
+        for (int64_t element = 0; element < starts.back(); ++element) {
+            EXPECT_EQ(filtered[element], element != 2);
+            EXPECT_TRUE(valid[element]);
+        }
+    }
+
+    void
+    CheckConsumerNullRejection() {
+        auto schema = std::make_shared<Schema>();
+        const auto pk = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto query = std::make_shared<QueryContext>(
+            "element_null_context", segment.get(), 0, MAX_TIMESTAMP);
+        proto::plan::GenericValue low, high;
+        low.set_int64_val(0);
+        high.set_int64_val(10);
+        expr::ColumnInfo column(pk, DataType::INT64);
+        auto conjunction = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And,
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::GreaterThan, low),
+            std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, proto::plan::LessThan, high));
+        for (bool inner_not : {false, true}) {
+            expr::TypedExprPtr root = conjunction;
+            if (inner_not)
+                root = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+            auto check = [&](ExprSet& expressions) {
+                auto compiled = expressions.expr(0);
+                if (inner_not)
+                    compiled = compiled->GetInputsRef()[0];
+                auto physical_and =
+                    std::dynamic_pointer_cast<PhyConjunctFilterExpr>(compiled);
+                ASSERT_NE(physical_and, nullptr);
+                EXPECT_EQ(physical_and->IsNullRejecting(), !inner_not);
+                auto unknown =
+                    std::make_shared<ConstantElementBitmapExpr>(true, false);
+                auto later =
+                    std::make_shared<ConstantElementBitmapExpr>(false, true);
+                physical_and->RebuildInputs({unknown, later});
+                ExecContext exec(query.get());
+                EvalCtx context(&exec);
+                std::vector<VectorPtr> results;
+                expressions.Eval(context, results);
+                EXPECT_EQ(later->evals, inner_not ? 1 : 0);
+                EXPECT_EQ(later->moves, inner_not ? 0 : 1);
+                ASSERT_EQ(results.size(), 1);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector>(results[0]);
+                ASSERT_NE(output, nullptr);
+                ASSERT_EQ(output->size(), 2);
+                TargetBitmapView data(output->GetRawData(), 2);
+                TargetBitmapView valid(output->GetValidRawData(), 2);
+                for (int i = 0; i < 2; ++i) {
+                    EXPECT_EQ(bool(data[i] && valid[i]), inner_not);
+                }
+            };
+            auto full_logical = std::make_shared<plan::ElementFilterBitsNode>(
+                "full", root, "struct_array");
+            auto full_task = Task::Create(
+                "full", plan::PlanFragment(full_logical), 0, query);
+            DriverContext full_driver(full_task, 0, 0, 0, 0);
+            PhyElementFilterBitsNode full_node(0, &full_driver, full_logical);
+            check(*full_node.element_exprs_);
+
+            auto iterative_logical =
+                std::make_shared<plan::IterativeElementFilterNode>(
+                    "iterative",
+                    root,
+                    "struct_array",
+                    std::vector<plan::PlanNodePtr>{});
+            auto iterative_task = Task::Create(
+                "iterative", plan::PlanFragment(iterative_logical), 0, query);
+            DriverContext iterative_driver(iterative_task, 0, 0, 0, 0);
+            PhyIterativeElementFilterNode iterative_node(
+                0, &iterative_driver, iterative_logical);
+            check(*iterative_node.element_exprs_);
+        }
+    }
+
+    void
+    CheckFullMode(bool select_long_row, bool all_rows = false) {
+        milvus::test::ExprBatchSizeGuard guard(2);
+        const std::vector<int32_t> starts = {
+            0, 0, 0, 1, 66, 66, 66, 68, 69, 70, 70, 72, 72, 75};
+        const auto rows = starts.size() - 1;
+        SelectionExpansionRecorder offsets(starts);
+        auto schema = std::make_shared<Schema>();
+        const auto pk = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto query = std::make_shared<QueryContext>(
+            "element-candidates", segment.get(), rows, MAX_TIMESTAMP);
+        query->set_active_element_count(starts.back());
+        auto logical = std::make_shared<plan::ElementFilterBitsNode>(
+            "elements",
+            std::make_shared<expr::AlwaysTrueExpr>(),
+            "struct_array");
+        auto task = Task::Create(
+            "element-candidates", plan::PlanFragment(logical), 0, query);
+        DriverContext driver(task, 0, 0, 0, 0);
+        PhyElementFilterBitsNode node(0, &driver, logical);
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(3);
+        ExecContext exec_context(query.get());
+        auto recorder =
+            std::make_unique<CandidateRecordingExprSet>(&exec_context, starts);
+        auto* observed = recorder.get();
+        observed->expected_backing = [&] { return offsets.selection_data; };
+        node.element_exprs_ = std::move(recorder);
+        TargetBitmap parents(rows, false);
+        // A row selection from MVCC may have an all-zero validity channel.
+        TargetBitmap parent_valid(rows, false);
+        for (auto row : {6, 7, 9, 12}) {
+            parents[row] = true;
+        }
+        parents[2] = !select_long_row;
+        parents[3] = select_long_row;
+        parents[12] = !select_long_row;
+        if (all_rows) {
+            parents.set();
+        }
+        auto [filtered, valid] =
+            node.EvaluateElementExpression(TargetBitmapView(parents),
+                                           TargetBitmapView(parent_valid),
+                                           &offsets);
+        EXPECT_EQ(offsets.selections, all_rows ? 0 : 1);
+        EXPECT_EQ(offsets.paired, 0);
+        std::vector<int64_t> expected_work;
+        for (size_t row = 0; row < rows; ++row) {
+            for (int64_t element = starts[row]; element < starts[row + 1];
+                 ++element) {
+                const bool candidate = parents[row];
+                if (candidate) {
+                    expected_work.push_back(element);
+                }
+                EXPECT_EQ(filtered[element],
+                          !(candidate && element % 3 == 0 && element % 5 != 1));
+                EXPECT_TRUE(valid[element]);
+            }
+        }
+        EXPECT_EQ(observed->evaluated, expected_work);
+        ASSERT_EQ(observed->masks.size(), 7);
+        EXPECT_TRUE(observed->masks[0].empty());
+        EXPECT_EQ(observed->masks[1].size(), all_rows ? 0 : 66);
+        EXPECT_TRUE(observed->masks[2].empty());
+        EXPECT_EQ(observed->masks.back().size(),
+                  select_long_row && !all_rows ? 3 : 0);
+        if (all_rows) {
+            for (const auto& mask : observed->masks) {
+                EXPECT_TRUE(mask.empty());
+            }
+        }
+    }
+};
+
+TEST_F(ElementFilterBitsNodeCandidateTest,
+       CompositeNestedIndexSelectsFullMode) {
+    for (bool is_and : {false, true}) {
+        for (bool negate : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "and=" << is_and << ", not=" << negate);
+            CheckCompositeNestedIndexRoute(is_and, negate);
+        }
+    }
+}
+
+TEST_F(ElementFilterBitsNodeCandidateTest,
+       FullModePassesAlignedElementCandidates) {
+    CheckFullMode(false);
+    CheckFullMode(true);
+    CheckFullMode(false, true);
+}
+
+TEST_F(ElementFilterBitsNodeCandidateTest,
+       OffsetConsumerRejectsUnknownDataBits) {
+    CheckOffsetValidity();
+}
+TEST_F(ElementFilterBitsNodeCandidateTest, ConsumersMarkAndButStopAtNot) {
+    CheckConsumerNullRejection();
+}
+
+}  // namespace milvus::exec

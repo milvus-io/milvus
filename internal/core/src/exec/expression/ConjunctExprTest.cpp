@@ -213,6 +213,78 @@ ExpectTruth(const ColumnVectorPtr& output, size_t row, Truth expected) {
 
 }  // namespace
 
+TEST(ConjunctExprTest, BorrowedMaskSurvivesNestedReplacementAndExceptions) {
+    constexpr size_t size = 67;
+    TargetBitmap backing(size + 13, false);
+    for (size_t i = 0; i < size; ++i) {
+        backing[i + 7] = i % 3 != 1;
+    }
+    const auto snapshot = backing.clone();
+    QueryContext query("borrowed_mask", nullptr, size, 0);
+    ExecContext exec(&query);
+    for (bool fail : {false, true}) {
+        EvalCtx ctx(&exec);
+        const auto parent = backing.view(7, size);
+        ctx.set_bitmap_input(parent);
+        // Move an owning mask in and out before restoring a borrowed mask.
+        auto saved = ctx.take_bitmap_input();
+        ctx.set_bitmap_input(TargetBitmap(size, true));
+        ctx.set_bitmap_input(std::move(saved));
+        auto first = std::make_shared<MaskAwareExpr>(
+            std::vector<Truth>(size, Truth::True), size);
+        auto last = std::make_shared<MaskAwareExpr>(
+            std::vector<Truth>(size, Truth::True), size);
+        last->throw_on_eval_ = fail;
+        auto inner = std::make_shared<PhyConjunctFilterExpr>(
+            std::vector<ExprPtr>{first, last}, true, nullptr);
+        PhyConjunctFilterExpr outer(
+            {inner,
+             std::make_shared<FixedBitmapExpr>(TargetBitmap(size, false),
+                                               TargetBitmap(size, true))},
+            false,
+            nullptr);
+        VectorPtr result;
+        if (fail) {
+            EXPECT_THROW(outer.Eval(ctx, result), std::runtime_error);
+        } else {
+            outer.Eval(ctx, result);
+        }
+        const auto restored = ctx.get_bitmap_input();
+        EXPECT_EQ(restored.data(), backing.data());
+        EXPECT_EQ(restored.offset(), 7);
+        EXPECT_EQ(restored.size(), size);
+        for (size_t i = 0; i < size; ++i) {
+            EXPECT_EQ(restored[i], parent[i]);
+        }
+        EXPECT_TRUE(backing == snapshot);
+        ctx.clear_bitmap_input();
+        EXPECT_TRUE(ctx.get_bitmap_input().empty());
+        EXPECT_TRUE(backing == snapshot);
+    }
+}
+
+TEST(ConjunctExprTest, CandidateValidityHonorsUnalignedBorrowedMask) {
+    constexpr size_t size = 67;
+    TargetBitmap backing(size + 13, false);
+    for (size_t i = 0; i < size; ++i) {
+        backing[i + 7] = i % 3 != 1;
+    }
+    const auto mask = backing.view(7, size);
+    TargetBitmap data(size, true), valid(size, true);
+    std::unique_ptr<bool[]> validity(new bool[size]);
+    for (size_t i = 0; i < size; ++i) validity[i] = i % 5 != 0;
+    ApplyValidMaskForCandidates(ValidityView::FromExpanded(validity.get()),
+                                data.view(),
+                                valid.view(),
+                                size,
+                                &mask,
+                                0);
+    for (size_t i = 0; i < size; ++i) {
+        EXPECT_EQ(bool(data[i]), !mask[i] || validity[i]);
+        EXPECT_EQ(bool(valid[i]), !mask[i] || validity[i]);
+    }
+}
+
 TEST(ConjunctExprTest, NestedMasksPreserveCandidatesAndThreeValuedLogic) {
     // Enumerate the complete truth table for A AND (B OR C), both directly
     // and below a real NOT, with and without a null-rejecting consumer.
@@ -465,11 +537,28 @@ TEST(ConjunctExprTest, NestedOffsetMasksUseCandidatePositions) {
     ExpectTruth(output, 0, Truth::True);
     ExpectTruth(output, 1, Truth::True);
     EXPECT_EQ(third->eval_count_, 1);
-    EXPECT_EQ(third->move_count_, 1);
+    EXPECT_EQ(third->move_count_, 0);
     EXPECT_EQ(first->cursor_, 0);
     EXPECT_EQ(second->cursor_, 0);
     EXPECT_EQ(third->cursor_, 0);
     ExpectMask(eval_context, next_parent);
+
+    // Direct offset evaluation leaves every sequential cursor at its origin.
+    eval_context.set_offset_input(nullptr);
+    eval_context.clear_bitmap_input();
+    for (const auto& node : std::vector<ExprPtr>{first, second, third, inner}) {
+        node->SetHasOffsetInput(false);
+    }
+    outer.SetHasOffsetInput(false);
+    outer.Eval(eval_context, result);
+    EXPECT_EQ(first->cursor_, 65);
+    EXPECT_EQ(second->cursor_, 65);
+    EXPECT_EQ(third->cursor_, 65);
+    output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_EQ(output->size(), 65);
+    for (size_t i = 0; i < 65; ++i) {
+        ExpectTruth(output, i, Truth::False);
+    }
 }
 
 TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
@@ -727,10 +816,11 @@ TEST(ConjunctExprTest, OffsetInputErasesUnmaterializedReservedLikeSlot) {
     EXPECT_FALSE(data[0]);
     EXPECT_TRUE(valid[0]);
     // The definite-FALSE first input early-exits: the second expression is
-    // skipped via MoveCursor and the erased reserved slot is never touched.
+    // skipped without moving its sequential cursor. The erased reserved slot
+    // is never touched.
     EXPECT_EQ(first->eval_count_, 1);
     EXPECT_EQ(second->eval_count_, 0);
-    EXPECT_EQ(second->move_count_, 1);
+    EXPECT_EQ(second->move_count_, 0);
 }
 
 TEST(ConjunctExprTest, MarkNullRejectingStopsAtNonConjunctNodes) {

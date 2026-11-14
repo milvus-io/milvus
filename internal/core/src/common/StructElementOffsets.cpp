@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -188,6 +189,38 @@ ElementBitsetAnyReduce(const Starts& starts,
     }
 }
 
+// Scan the packed row bitmap by 64-bit words and merge adjacent selected
+// rows. Each run becomes one bulk bit-range fill (packed words plus masked
+// boundary words), so excluded rows never rewrite the zero-initialized output.
+template <typename Starts>
+TargetBitmap
+ExpandRowSelection(const TargetBitmapView& rows,
+                   int64_t row_start,
+                   const Starts& starts) {
+    const auto first_element = starts[row_start];
+    TargetBitmap result(starts[row_start + rows.size()] - first_element, false);
+    // Match ElementBitsetAnyReduce's packed-word traversal. Consume each
+    // input word once, even for heavily interleaved selections.
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr size_t kWordBits = 8 * sizeof(word_t);
+    for (size_t position = 0; position < rows.size(); position += kWordBits) {
+        const auto count = std::min(kWordBits, rows.size() - position);
+        word_t word = rows.read(position, count);
+        while (word != 0) {
+            const size_t first_bit = std::countr_zero(word);
+            const size_t last_bit =
+                first_bit + std::countr_one(word >> first_bit);
+            const auto first =
+                starts[row_start + position + first_bit] - first_element;
+            const auto last =
+                starts[row_start + position + last_bit] - first_element;
+            result.set(first, last - first, true);
+            word = last_bit == kWordBits ? 0 : word & (~word_t(0) << last_bit);
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 std::pair<int32_t, int32_t>
@@ -246,6 +279,14 @@ StructElementOffsetsSealed::CopyRowElementStarts(int64_t row_start,
                 sizeof(int32_t) * (row_count + 1));
 }
 
+TargetBitmap
+IStructElementOffsets::RowBitsetToElementBitset(const TargetBitmapView& rows,
+                                                int64_t row_start) const {
+    FixedVector<int32_t> starts(rows.size() + 1);
+    CopyRowElementStarts(row_start, rows.size(), starts.data());
+    return ExpandRowSelection(rows, 0, starts);
+}
+
 std::pair<TargetBitmap, TargetBitmap>
 StructElementOffsetsSealed::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
@@ -277,6 +318,20 @@ StructElementOffsetsSealed::RowBitsetToElementBitset(
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+TargetBitmap
+StructElementOffsetsSealed::RowBitsetToElementBitset(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    return ExpandRowSelection(row_bitset, row_start, row_to_element_start_);
 }
 
 FixedVector<int32_t>
@@ -715,6 +770,24 @@ StructElementOffsetsGrowing::RowBitsetToElementBitset(
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+TargetBitmap
+StructElementOffsetsGrowing::RowBitsetToElementBitset(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    const int64_t committed =
+        committed_row_count_.load(std::memory_order_acquire);
+
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed);
+
+    ChunkedReader starts(starts_chunks_);
+    return ExpandRowSelection(row_bitset, row_start, starts);
 }
 
 FixedVector<int32_t>

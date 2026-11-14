@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -228,6 +229,8 @@ func TestQueryViewReleaseRuntimeShutdown(t *testing.T) {
 			completion := syncutil.NewFuture[error]()
 			runtime.balancer = &fakeRuntimeBalancer{completion: completion}
 			runtime.syncer = &readinessSyncer{}
+			runtime.viewFeedback = viewfeedback.New(&loadmgr.LoadConfigStore{}, &fakeRuntimeDataViewProvider{})
+			t.Cleanup(runtime.viewFeedback.Close)
 			if phase == "already stopped" {
 				runtime.stop()
 			}
