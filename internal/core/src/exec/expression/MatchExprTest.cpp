@@ -811,6 +811,22 @@ class RecordingMatchElementExpr : public exec::Expr {
     int64_t row_ = 0;
 };
 
+// Models an index-only/sequential predicate: evaluating it or waiting for
+// its prefetch when selected rows have no elements is observable wasted work.
+class IndexLikeMatchElementExpr : public RecordingMatchElementExpr {
+ public:
+    using RecordingMatchElementExpr::RecordingMatchElementExpr;
+    bool
+    CanUseOffsetsForSequentialBatch() override {
+        return false;
+    }
+    void
+    WaitPrefetch() override {
+        ++waits;
+    }
+    int waits = 0;
+};
+
 class MatchExprCandidateTest : public ::testing::TestWithParam<bool> {
  protected:
     void
@@ -1011,6 +1027,49 @@ TEST_P(MatchExprCandidateTest, SequentialSparseEmptySkippedAndDenseBatches) {
             VectorPtr exhausted;
             match->Eval(ctx, exhausted);
             EXPECT_EQ(exhausted, nullptr);
+        }
+    }
+}
+
+TEST_P(MatchExprCandidateTest, EmptyCandidatesSkipIndexEvaluationAndPrefetch) {
+    for (auto type : types_) {
+        for (int threshold : {0, 1, 2, 4}) {
+            auto child = std::make_shared<IndexLikeMatchElementExpr>(
+                starts_, data_, valid_, 6);
+            auto logical = std::make_shared<expr::MatchExpr>(
+                "struct_array", type, threshold, expr::TypedExprPtr{});
+            exec::PhyMatchFilterExpr match({child},
+                                           logical,
+                                           "empty_candidates",
+                                           nullptr,
+                                           segment_.get(),
+                                           kRows,
+                                           6);
+            exec::QueryContext query(
+                "empty_candidates", segment_.get(), kRows, MAX_TIMESTAMP);
+            exec::ExecContext exec(&query);
+            exec::EvalCtx ctx(&exec);
+            for (int64_t start : {0, 6, 12}) {
+                const auto count = std::min<int64_t>(6, kRows - start);
+                TargetBitmap mask(count, false);
+                if (start == 0) {
+                    mask[1] = mask[4] = true;
+                }
+                if (start == 6) {
+                    mask[0] = mask[2] = mask[5] = true;
+                }  // NULL / empty
+                if (start == 12)
+                    mask.set();
+                ctx.set_bitmap_input(mask.view());
+                VectorPtr result;
+                match.Eval(ctx, result);
+                exec::OffsetVector rows;
+                for (int64_t i = 0; i < count; ++i) rows.push_back(start + i);
+                Check(result, rows, mask, type, threshold);
+                EXPECT_EQ(child->calls.size(), start == 12 ? 1 : 0);
+                EXPECT_EQ(child->waits, 0);
+            }
+            EXPECT_EQ(child->moves, 2);
         }
     }
 }
@@ -1510,7 +1569,13 @@ TEST_P(MatchExprCandidateTest, SequentialOnlyChildReceivesElementCandidates) {
         exec::OffsetVector rows;
         for (int64_t i = 0; i < count; ++i) rows.push_back(start + i);
         Check(result, rows, candidates, expr::MatchType::MatchAny, 0);
-        if (starts_[start + count] > starts_[start]) {
+        int64_t selected_elements = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            if (candidates[i])
+                selected_elements +=
+                    starts_[start + i + 1] - starts_[start + i];
+        }
+        if (selected_elements > 0) {
             ASSERT_EQ(child->calls.size(), calls + 1);
             const auto& mask = child->masks.back();
             if (!candidates.all()) {
@@ -1525,9 +1590,11 @@ TEST_P(MatchExprCandidateTest, SequentialOnlyChildReceivesElementCandidates) {
                 }
             } else
                 EXPECT_TRUE(mask.empty());
+        } else {
+            EXPECT_EQ(child->calls.size(), calls);
         }
     }
-    EXPECT_EQ(child->moves, 1);
+    EXPECT_EQ(child->moves, 4);
 }
 
 INSTANTIATE_TEST_SUITE_P(GrowingAndSealed,
@@ -3165,6 +3232,7 @@ class SequentialIndexGuard : public exec::Expr {
     }
     void
     MoveCursor() override {
+        ++moves;
         inputs_[0]->MoveCursor();
     }
     // Delegate the actual path decision: every indexed child must decline.
@@ -3172,7 +3240,14 @@ class SequentialIndexGuard : public exec::Expr {
     CanUseOffsetsForSequentialBatch() override {
         return inputs_[0]->CanUseOffsetsForSequentialBatch();
     }
+    void
+    WaitPrefetch() override {
+        ++waits;
+        inputs_[0]->WaitPrefetch();
+    }
     int calls = 0;
+    int moves = 0;
+    int waits = 0;
 };
 }  // namespace
 
@@ -3227,7 +3302,42 @@ TEST_F(SealedMatchExprTest, ParentCandidatesPreserveNestedIndexExecution) {
             }
         }
     }
-    EXPECT_EQ(guard->calls, N_ / 100);
+    EXPECT_EQ(guard->calls, N_ / 100 - N_ / 400);
+    EXPECT_EQ(guard->moves, N_ / 400);
+}
+
+TEST_F(SealedMatchExprTest, NoCandidatesSkipRealNestedIndexThenResume) {
+    ScopedSchemaHandle handle(*schema_);
+    const auto bytes = handle.Parse(
+        "match_any(struct_array, $[sub_str] == \"aaa\" && $[sub_int] > 100)");
+    auto plan = CreateRetrievePlanByExpr(schema_, bytes.data(), bytes.size());
+    auto filter = std::dynamic_pointer_cast<const plan::FilterBitsNode>(
+        plan->plan_node_->plannodes_->sources().front());
+    exec::QueryContext query("skip_index", seg_.get(), N_, MAX_TIMESTAMP);
+    exec::ExecContext exec(&query);
+    exec::ExprSet exprs({filter->filter()}, &exec);
+    auto match = exprs.expr(0);
+    auto child = match->GetInputsRef()[0];
+    auto guard = std::make_shared<SequentialIndexGuard>(child);
+    match->GetInputsRef()[0] = guard;
+    exec::EvalCtx ctx(&exec);
+    ctx.set_bitmap_input(TargetBitmap(100, false));
+    VectorPtr result;
+    match->Eval(ctx, result);
+    EXPECT_EQ(guard->calls, 0);
+    EXPECT_EQ(guard->waits, 0);
+    EXPECT_EQ(guard->moves, 1);
+    ctx.clear_bitmap_input();
+    match->Eval(ctx, result);
+    auto col = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(col, nullptr);
+    ASSERT_EQ(col->size(), 100);
+    TargetBitmapView bits(col->GetRawData(), 100);
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_EQ(bool(bits[i]),
+                  CountMatchingElements(100 + i, "aaa", 100) > 0);
+    }
+    EXPECT_EQ(guard->calls, 1);
 }
 
 TEST_F(SealedMatchExprTest, MatchAllWithNestedIndex) {

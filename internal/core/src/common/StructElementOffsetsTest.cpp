@@ -1589,25 +1589,55 @@ TEST_F(StructElementOffsetsTest, GrowingConcurrentWriters) {
 }
 
 TEST_F(StructElementOffsetsTest, SelectionOnlyExpansionMatchesPairedAPI) {
-    const std::vector<int32_t> starts = {0, 0, 2, 67, 67, 68, 72};
+    const int rows = StructElementOffsetsGrowing::kEntriesPerChunk + 140;
+    std::vector<int32_t> starts{0}, lengths;
+    for (int i = 0; i < rows; ++i) {
+        lengths.push_back(i % 5 == 0 ? 0 : (i % 3 == 0 ? 129 : i % 7));
+        starts.push_back(starts.back() + lengths.back());
+    }
     StructElementOffsetsSealed sealed(starts);
     StructElementOffsetsGrowing growing;
-    std::vector<int32_t> lengths;
-    for (size_t i = 1; i < starts.size(); ++i) {
-        lengths.push_back(starts[i] - starts[i - 1]);
-    }
     growing.Insert(0, lengths.data(), lengths.size());
     for (IStructElementOffsets* offsets :
          {static_cast<IStructElementOffsets*>(&sealed),
           static_cast<IStructElementOffsets*>(&growing)}) {
-        for (int start : {0, 1, 3, 6}) {
-            TargetBitmap rows(starts.size() - 1 - start, false);
-            for (size_t i = 0; i < rows.size(); ++i) rows[i] = i % 2 == 0;
-            TargetBitmap validity(rows.size(), false);
-            auto [expected, unused] = offsets->RowBitsetToElementBitset(
-                rows.view(), validity.view(), start);
-            auto actual = offsets->RowBitsetToElementBitset(rows.view(), start);
-            EXPECT_TRUE(actual == expected);
+        for (auto [start, count] : std::vector<std::pair<int, int>>{
+                 {0, 0},
+                 {0, rows},
+                 {7, 67},
+                 {63, 130},
+                 {StructElementOffsetsGrowing::kEntriesPerChunk - 2, 71},
+                 {rows, 0}}) {
+            for (int pattern = 0; pattern < 5; ++pattern) {
+                SCOPED_TRACE(::testing::Message()
+                             << "start=" << start << ", count=" << count
+                             << ", pattern=" << pattern);
+                TargetBitmap backing(count + 13, false);
+                auto selection = backing.view(7, count);
+                for (int i = 0; i < count; ++i) {
+                    selection[i] = pattern == 1 ||
+                                   (pattern == 2 && i % 67 == 0) ||
+                                   (pattern == 3 && i % 129 < 68) ||
+                                   (pattern == 4 && i % 2 == 0);
+                }
+                TargetBitmap validity(count, false);
+                auto [expected, unused] = offsets->RowBitsetToElementBitset(
+                    selection, validity.view(), start);
+                auto actual =
+                    offsets->RowBitsetToElementBitset(selection, start);
+                EXPECT_TRUE(actual == expected);
+                // Independent scalar oracle: each element inherits exactly
+                // its parent selection, without using packed range operations.
+                ASSERT_EQ(actual.size(), starts[start + count] - starts[start]);
+                for (int row = 0; row < count; ++row) {
+                    for (int element = starts[start + row];
+                         element < starts[start + row + 1];
+                         ++element) {
+                        EXPECT_EQ(bool(actual[element - starts[start]]),
+                                  bool(selection[row]));
+                    }
+                }
+            }
         }
     }
 }

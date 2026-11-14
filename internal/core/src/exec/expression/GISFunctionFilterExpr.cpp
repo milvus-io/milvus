@@ -59,7 +59,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
@@ -138,7 +138,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
@@ -212,7 +212,7 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         const auto batch_offset = processed_cursor;                              \
         processed_cursor += size;                                                \
-        auto geometry_cache = this -> segment_->GetGeometryCache(field_id_);     \
+        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
             /* Cache-owned geometries share one GEOS context; drive the        \
              * predicate on a per-thread context so concurrent lock-free        \
