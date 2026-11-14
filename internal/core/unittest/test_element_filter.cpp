@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <arrow/api.h>
+#include <boost/container/vector.hpp>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
@@ -51,6 +52,7 @@
 #include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/InvertedIndexTantivy.h"
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
@@ -7109,34 +7111,31 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
         const auto field = schema->AddDebugArrayField(
             "structA[price]", DataType::INT32, false);
         auto generated = DataGen(schema, rows, 42, 0, 1, 1);
-        std::vector<int32_t> values;
+        std::vector<boost::container::vector<int32_t>> values(rows);
         for (auto& data : *generated.raw_->mutable_fields_data()) {
             if (data.field_id() != field.get())
                 continue;
             auto arrays = data.mutable_scalars()->mutable_array_data();
             arrays->clear_data();
             for (int row = 0; row < rows; ++row) {
-                values.push_back(row % 7);
-                arrays->add_data()->mutable_int_data()->add_data(values.back());
+                values[row].push_back(row % 7);
+                arrays->add_data()->mutable_int_data()->add_data(row % 7);
             }
         }
         auto segment = CreateSealedWithFieldDataLoaded(schema, generated);
         auto built_index =
-            BuildTestScalarIndex<int32_t>(index::families::kInverted,
-                                          values.size(),
-                                          values.data(),
-                                          nullptr,
-                                          {{"nested", true},
-                                           {"field_type", DataType::ARRAY},
-                                           {"element_type", DataType::INT32}});
+            std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+        Config config;
+        config["is_array"] = true;
+        config["is_nested_index"] = true;
+        built_index->BuildWithRawDataForUT(rows, values.data(), config);
         LoadIndexInfo info{};
         info.field_id = field.get();
         info.field_type = DataType::ARRAY;
         info.element_type = DataType::INT32;
-        info.index_params["index_type"] = index::INVERTED_INDEX_TYPE;
-        SetTestIndexMetadata(info, *built_index, index::families::kInverted);
-        info.index =
-            CreateTestIndex("composite_nested", std::move(built_index));
+        info.index_params = GenIndexParams(built_index.get());
+        info.cache_index =
+            CreateTestCacheIndex("composite_nested", std::move(built_index));
         segment->LoadIndex(info);
         expr::ColumnInfo column(field, DataType::ARRAY);
         column.element_type_ = DataType::INT32;
