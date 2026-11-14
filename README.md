@@ -296,7 +296,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/Gofastasf"><img src="https://avatars.githubusercontent.com/u/159963288?v=4" width="30px" /></a>
 <a href="https://github.com/Goodnight77"><img src="https://avatars.githubusercontent.com/u/117648012?v=4" width="30px" /></a>
 <a href="https://github.com/Gracieeea"><img src="https://avatars.githubusercontent.com/u/50101579?v=4" width="30px" /></a>
-<a href="https://github.com/GuanyunFeng"><img src="https://avatars.githubusercontent.com/u/40229765?v=4" width="30px" /></a>
 <a href="https://github.com/GuoRentong"><img src="https://avatars.githubusercontent.com/u/57477222?v=4" width="30px" /></a>
 <a href="https://github.com/GuyKh"><img src="https://avatars.githubusercontent.com/u/3136012?v=4" width="30px" /></a>
 <a href="https://github.com/Hard-Coder05"><img src="https://avatars.githubusercontent.com/u/54059881?v=4" width="30px" /></a>
