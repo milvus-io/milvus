@@ -147,6 +147,7 @@ func TestCollectionLoadInfoVersions(t *testing.T) {
 	store, err := RecoverLoadConfigStore(t.Context(), deps)
 	require.NoError(t, err)
 	cfg := versionedTestConfig()
+	cfg.AutoLoad = true
 	require.NoError(t, store.Put(t.Context(), cfg))
 	first := store.GetConfigVersion(1)
 	release, err := store.AcquireLoadInfo(t.Context(), 1, first)
@@ -158,6 +159,7 @@ func TestCollectionLoadInfoVersions(t *testing.T) {
 	require.NoError(t, store.Put(t.Context(), cfg))
 	second := store.GetConfigVersion(1)
 	require.Greater(t, second, first)
+	require.True(t, store.GetConfig(1).AutoLoad, "index revisions preserve loading source")
 	current, err := store.GetLoadInfo(t.Context(), 1, second)
 	require.NoError(t, err)
 	require.Equal(t, []int64{300, 301}, current.RequiredFields[0].IndexIds)

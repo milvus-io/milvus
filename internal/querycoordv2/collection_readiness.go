@@ -75,7 +75,7 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 			if err != nil {
 				return nil, err
 			}
-			status, err := s.LoadCollection(loadCtx, loadReq)
+			status, err := s.loadCollection(loadCtx, loadReq, true)
 			if err := merr.CheckRPCCall(status, err); err != nil {
 				return nil, err
 			}

@@ -107,7 +107,17 @@ func (sm *snQueryViewStateMachine) UpdateView(view *viewpb.QueryViewOfShard) {
 		return
 	}
 	if view.GetMeta() != nil {
+		priority := sm.meta.GetControl().GetPreparationPriority()
 		sm.meta = proto.Clone(view.GetMeta()).(*viewpb.QueryViewMeta)
+		// Priority belongs to the identity captured at first admission/recovery.
+		// A duplicate command (including an older sender omitting Control) may
+		// strengthen lifecycle control, but cannot rescore this view.
+		if sm.meta.Control != nil || priority != 0 {
+			if sm.meta.Control == nil {
+				sm.meta.Control = &viewpb.QueryViewControl{}
+			}
+			sm.meta.Control.PreparationPriority = priority
+		}
 	}
 	if view.GetStreamingNode() != nil {
 		sm.snView = cloneStreamingNodeView(view.GetStreamingNode())

@@ -87,6 +87,7 @@ func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
 }
 
 type ExpectedLoadConfig struct {
+	ExpectedAutoLoad                 bool
 	ExpectedPartitionIDs             []int64
 	ExpectedReplicaNumber            map[string]int // map resource group name to replica number in resource group
 	ExpectedFieldIndexID             map[int64]int64
@@ -97,6 +98,7 @@ type ExpectedLoadConfig struct {
 }
 
 type CurrentLoadConfig struct {
+	AutoLoad   bool
 	Collection *meta.Collection
 	Partitions map[int64]*meta.Partition
 	Replicas   map[int64]*meta.Replica
@@ -169,6 +171,7 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		RequiredFields:           c.Collection.GetRequiredFields(),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
+		AutoLoad:                 c.AutoLoad,
 	}
 }
 
@@ -195,6 +198,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		RequiredFields:           req.Expected.ExpectedRequiredFields,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
+		AutoLoad:                 req.Expected.ExpectedAutoLoad,
 	}
 	// check if the load configuration is changed; nothing to broadcast if not.
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {

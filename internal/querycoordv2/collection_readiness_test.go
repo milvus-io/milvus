@@ -305,6 +305,9 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("waiter was not released")
 			}
+			if scenario == "cancel" {
+				s.qviewsRuntime.readyChanges.Close()
+			}
 		})
 	}
 }
@@ -473,6 +476,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	require.Eventually(t, func() bool { return s.qviewsRuntime.loadConfigStore.Contains(100) }, 3*time.Second, time.Millisecond)
 	assertReadinessBlocked(t, done)
 	config := s.qviewsRuntime.loadConfigStore.GetConfig(100)
+	require.True(t, config.AutoLoad, "query-triggered load persists its source through the WAL callback")
 	require.Len(t, config.LoadFields, 2)
 	require.Equal(t, []int64{1000}, config.LoadFields[1].GetIndexIds())
 	shardID := qviews.ShardID{ReplicaID: config.Replicas[0].ReplicaID, VChannel: channel}
@@ -495,6 +499,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 			t.Fatal("ready collection did not release all callers")
 		}
 	}
+	require.True(t, s.qviewsRuntime.loadConfigStore.GetConfig(100).AutoLoad, "readiness completion does not clear the persisted source")
 	// An already-ready collection submits no additional load.
 	status, err := second.EnsureCollectionReady(ctx, request())
 	require.NoError(t, merr.CheckRPCCall(status, err))

@@ -30,6 +30,68 @@ func cacheStats(segment, node, rows int64, state coordview.SegmentState, known b
 	return &coordview.ShardStats{Segments: map[int64]*coordview.SegmentStats{segment: {SegmentID: segment, PartitionID: 1, LogicalSize: rows, LostStats: !known, Nodes: map[int64]coordview.SegmentState{node: state}}}}
 }
 
+func TestRetiringShardProgressDoesNotRequestAnotherBalance(t *testing.T) {
+	for _, source := range []string{"up", "preparing"} {
+		for _, intent := range []string{"released", "replica_removed", "loaded"} {
+			t.Run(source+"/"+intent, func(t *testing.T) {
+				c := New(nil)
+				shard := cacheShard(1, 10)
+				c.PublishLoadConfig(1, cacheConfig(1, 10), 1)
+				version := &qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}, QueryVersion: 1}
+				before := cacheStats(1000, 1, 100, coordview.SegmentStateUp, true)
+				if source == "up" {
+					before.UpVersion = version
+				} else {
+					before.PreparingVersion = version
+				}
+				c.PublishShard(shard, before)
+				var scopes []api.TriggerScope
+				c.SetNotifier(func(scope api.TriggerScope) { scopes = append(scopes, scope) })
+				switch intent {
+				case "released":
+					c.PublishLoadConfig(1, nil, 2)
+				case "replica_removed":
+					c.PublishLoadConfig(1, cacheConfig(1, 20), 2)
+				default:
+					c.PublishLoadConfig(1, cacheConfig(1, 10), 2)
+				}
+				require.Len(t, scopes, 1, "intent changes still request collection reconciliation")
+				require.Equal(t, []int64{1}, scopes[0].DirtyCollections)
+				scopes = nil
+
+				down := cacheStats(1000, 1, 100, coordview.SegmentStateReady, true)
+				c.PublishShard(shard, down)
+				require.Same(t, down, c.GetCollection(1).GetShard(shard).Stats())
+				require.Zero(t, c.GetNode(1).Info().UpLogicalSize, "accounting must advance even without notification")
+				if intent == "loaded" {
+					require.Len(t, scopes, 1, "desired shards must still request replacement on view loss")
+				} else {
+					require.Empty(t, scopes, "the manager and syncer already own teardown")
+				}
+				scopes = nil
+
+				// A late serving/preparing publication must still trigger cleanup.
+				c.PublishShard(shard, before)
+				require.Len(t, scopes, 1)
+				require.Equal(t, []qviews.ShardID{shard}, scopes[0].DirtyShards)
+				scopes = nil
+				c.PublishShard(shard, nil)
+				require.Len(t, scopes, 1, "final removal retains its notification")
+			})
+		}
+	}
+}
+
+func TestRecoveredResidualShardStillRequestsRelease(t *testing.T) {
+	c := New(nil)
+	shard := cacheShard(1, 10)
+	var scopes []api.TriggerScope
+	c.SetNotifier(func(scope api.TriggerScope) { scopes = append(scopes, scope) })
+	c.PublishShard(shard, cacheStats(1000, 1, 100, coordview.SegmentStateReady, true))
+	require.Len(t, scopes, 1, "initial recovery publication must not be mistaken for teardown progress")
+	require.Equal(t, []qviews.ShardID{shard}, scopes[0].DirtyShards)
+}
+
 func TestCacheImmutablePublicationAndFallback(t *testing.T) {
 	c := New(nil)
 	shard := cacheShard(1, 10)

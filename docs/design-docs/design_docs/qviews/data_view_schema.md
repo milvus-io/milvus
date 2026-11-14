@@ -37,16 +37,39 @@ after a newer QueryView has been registered, even if the newer view fails.
 Once a certified newer DataView is planned, its preparation supersedes any
 older-schema Preparing/Ready view; every schema shares one preparation slot.
 
-This extraction includes DataView publication, the native/proto contract,
-Balancer consumption and the `PrepareDataViewSchema` dependency interface.
-Production integration must supply initial/projection schema identities, order
-target load intent before certification, use the consuming-side ALTER flush
-fence, and keep destructive compaction cleanup behind direct schema publication.
-RootCoord publication, Broadcaster wiring and the DataCoord implementation of
-that dependency remain in the integration PR. W/A frontier production is also
-separate; this change does not fabricate Transform coverage.
+The production schema handoff is wired through the original ALTER callback:
 
-The parent still defers Import/AlterSchema lifecycle exclusion. In particular,
+```text
+PrepareSchema
+  → LoadConfigs.ApplySchema
+  → DataCoord.PrepareDataViewSchema → DataViewManager.AdvanceSchema
+  → WaitAtSchema (for loaded collections)
+→ MetaTable.AlterCollection
+→ ShardViewRegistry.PublishCollectionSchema
+```
+
+These operations distinguish four milestones:
+
+| Milestone | Meaning and boundary |
+| --- | --- |
+| Target visible | After the Broadcast task is persisted, `GetPendingSchemaTarget()` exposes its immutable target, even before append or ACK completion. Known business-channel ACK TimeTicks may be incomplete or absent. This does not prove any channel has applied the schema. |
+| Write schema effective | Each VChannel switches its write schema at its own WAL ALTER boundary. Consuming-side `AckSyncUp` also waits for pre-ALTER L1 final publication before the ordered callback can run. Neither event publishes the read schema. |
+| Data preparation complete | In that callback, `PrepareSchema` applies target load intent and calls DataCoord's implemented `PrepareDataViewSchema`. `AdvanceSchema` certifies and publishes the supported DataView schema, directly or after materialization. Loaded collections must additionally reach exact-schema Up coverage through `WaitAtSchema`. |
+| Read schema public | Only after preparation and any serving obligation complete does `MetaTable.AlterCollection` durably publish the read schema. `PublishCollectionSchema` then notifies View managers so superseded schema coverage can retire. |
+
+Unloaded collections still require DataView certification, but have no serving
+handoff to wait for. Bound index metadata is installed before `PrepareSchema`;
+destructive compaction cleanup remains gated by direct schema publication.
+W/A Transform coverage follows its own frontier contract and cannot be inferred
+from schema readiness. See [schema handoff](schema_evolution.md) for callback
+replay, public cache invalidation and retained read generations.
+
+Implementation: `internal/views/coord/resource/schema.go`,
+`internal/datacoord/dataview_schema.go`, `internal/dataview/schema.go`,
+`internal/rootcoord/ddl_callbacks_alter_collection_properties.go`, and
+`internal/streamingcoord/server/broadcaster/schema.go`.
+
+Import/AlterSchema lifecycle exclusion remains deferred. In particular,
 an import frozen under an older schema must not later publish data missing a
 new Function output. These component tests do not establish that production
 concurrency guarantee.

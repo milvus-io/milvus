@@ -166,7 +166,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 			return deps.schemaVersion(ctx, id)
 		}
 	}
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil, schemaVersion))
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback)), schemaVersion))
 	if deps.balancerFactory != nil {
 		balancerController = deps.balancerFactory(balanceCache)
 	}

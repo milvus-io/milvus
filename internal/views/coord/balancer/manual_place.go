@@ -72,6 +72,7 @@ func (b *DefaultBalancer) ManualPlace(ctx context.Context, scope PlacementScope,
 				return merr.WrapErrServiceInternalMsg("manual placement has no source snapshot for shard %s", id.String())
 			}
 		}
+		priorities := b.preparationPriorities()
 		changed := make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder)
 		for _, id := range ids {
 			builder := builders[id]
@@ -87,7 +88,7 @@ func (b *DefaultBalancer) ManualPlace(ctx context.Context, scope PlacementScope,
 				return err
 			}
 			// Detach all callback-owned memory before publishing to managers.
-			changed[id] = qviews.NewQueryViewAtCoordBuilderFromView(after)
+			changed[id] = qviews.NewQueryViewAtCoordBuilderFromView(after).SetPreparationPriority(priorities.preparationPriority(id))
 		}
 		for _, id := range ids {
 			builder := changed[id]

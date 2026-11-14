@@ -92,6 +92,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				ExpectedRequiredFields:           currentLoadConfig.Collection.GetRequiredFields(),
 				ExpectedPriority:                 commonpb.LoadPriority_HIGH,
 				ExpectedUserSpecifiedReplicaMode: currentLoadConfig.GetUserSpecifiedReplicaMode(),
+				ExpectedAutoLoad:                 currentLoadConfig.AutoLoad,
 			},
 		}
 		if msg, err = job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq); err != nil {

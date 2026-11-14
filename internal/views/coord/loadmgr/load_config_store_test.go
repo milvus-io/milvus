@@ -140,3 +140,44 @@ func TestFromAlterLoadConfigMessage(t *testing.T) {
 	require.EqualValues(t, 300, header.LoadFields[0].IndexId, "conversion must not retain message-owned storage")
 	require.Equal(t, commonpb.LoadPriority_LOW, cfg.Replicas[0].Priority)
 }
+
+func TestAutoLoadIntentPersistsAcrossPublicationAndRecovery(t *testing.T) {
+	deps := versionedTestDependencies(t)
+	store, err := RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	manager := NewCollectionLoadManager(store, nil, nil)
+	header := &messagespb.AlterLoadConfigMessageHeader{
+		CollectionId: 100, AutoLoad: true, PartitionIds: []int64{10},
+		Replicas: []*messagespb.LoadReplicaConfig{{ReplicaId: 1000, ResourceGroupName: "rg1"}},
+	}
+	require.NoError(t, manager.ApplyLoadConfig(t.Context(), header))
+	initial := store.GetConfig(100)
+	require.True(t, initial.AutoLoad)
+	require.True(t, initial.Clone().AutoLoad)
+	require.True(t, initial.toCollectionLoadConfigProto().GetAutoLoad())
+	require.NoError(t, manager.AddPartition(t.Context(), 100, 20))
+	require.True(t, store.GetConfig(100).AutoLoad, "derived load revisions preserve their source")
+
+	recovered, err := RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	require.True(t, recovered.GetConfig(100).AutoLoad)
+	require.Equal(t, []int64{10, 20}, recovered.GetConfig(100).PartitionIDs)
+
+	// A manual load replaces the intent, without mutating a published snapshot.
+	header.AutoLoad = false
+	require.NoError(t, manager.ApplyLoadConfig(t.Context(), header))
+	require.False(t, store.GetConfig(100).AutoLoad)
+	require.True(t, initial.AutoLoad)
+	version := store.GetConfigVersion(100)
+	require.NoError(t, manager.ApplyLoadConfig(t.Context(), header))
+	require.Equal(t, version, store.GetConfigVersion(100), "broadcast replay is idempotent")
+	recovered, err = RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	require.False(t, recovered.GetConfig(100).AutoLoad)
+
+	store.StopPlanning(100)
+	require.NoError(t, store.Remove(t.Context(), 100))
+	recovered, err = RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	require.Nil(t, recovered.GetConfig(100), "release removes the marker with the load intent")
+}

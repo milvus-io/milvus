@@ -12,15 +12,20 @@ import (
 // DefaultBalancePolicy retains target layouts across batches. Actual facts and
 // row predictions remain in the cache and call-local planning context respectively.
 type DefaultBalancePolicy struct {
-	mu      sync.Mutex
-	layouts layoutManager
-	fanouts map[qviews.ShardID]int
-	search  map[qviews.ShardID]*searchCursor
+	feedback ViewFeedbackReader
+	mu       sync.Mutex
+	layouts  layoutManager
+	fanouts  map[qviews.ShardID]int
+	search   map[qviews.ShardID]*searchCursor
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
-func NewDefaultBalancePolicy() *DefaultBalancePolicy {
-	return &DefaultBalancePolicy{}
+func NewDefaultBalancePolicy(options ...PolicyOption) *DefaultBalancePolicy {
+	p := &DefaultBalancePolicy{}
+	for _, option := range options {
+		option(p)
+	}
+	return p
 }
 
 type balanceCandidate struct {
@@ -41,6 +46,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		return plan
 	}
 	snap := newPlanningContext(reader)
+	snap.feedback = p.feedback
 	dirty = p.layouts.prepare(snap, dirty)
 	if p.fanouts == nil {
 		p.fanouts = make(map[qviews.ShardID]int)

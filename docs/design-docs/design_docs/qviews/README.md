@@ -570,3 +570,5 @@ Feedback does not drive QueryView state machines or preparation priority.
 statistics references, SN resource readiness and shared ownership, and per-worker
 Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
 QN applies the recorded selection before acquiring execution handles.
+
+- [QueryView 准备优先级](query_view_preparation_priority.md)：基于 ViewFeedback 创建固定分值并传给 QN/SN 待执行任务。

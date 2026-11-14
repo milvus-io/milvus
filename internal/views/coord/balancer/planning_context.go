@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"time"
+
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
@@ -26,7 +28,10 @@ type balanceInput interface {
 }
 
 type planningContext struct {
-	recovery *publishedRecoveryBase
+	feedback            ViewFeedbackReader
+	preparationFeedback *preparationSnapshot
+	priorityNow         time.Time
+	recovery            *publishedRecoveryBase
 	balancercache.Reader
 	schemaVersions map[int64]int32
 	collections    map[int64]*balancercache.CollectionEntry
@@ -45,7 +50,7 @@ func newPlanningContext(reader balancercache.Reader) *planningContext {
 	if current, ok := reader.(*planningContext); ok {
 		return current
 	}
-	p := &planningContext{Reader: reader, collections: make(map[int64]*balancercache.CollectionEntry), nodeEntries: make(map[int64]*balancercache.NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
+	p := &planningContext{Reader: reader, priorityNow: time.Now(), collections: make(map[int64]*balancercache.CollectionEntry), nodeEntries: make(map[int64]*balancercache.NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
 	p.targets = make(map[int64][]int64)
 	p.groupEntries = make(map[string]*balancercache.ResourceGroupEntry)
 	p.replicaDelta = make(map[int64]map[int64]int64)
