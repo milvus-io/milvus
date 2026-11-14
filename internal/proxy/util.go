@@ -870,9 +870,15 @@ func ValidateUserDescription(description string) error {
 }
 
 func ValidatePassword(password string) error {
-	if len(password) < Params.ProxyCfg.MinPasswordLength.GetAsInt() || len(password) > Params.ProxyCfg.MaxPasswordLength.GetAsInt() {
+	maxLength := Params.ProxyCfg.MaxPasswordLength.GetAsInt()
+	if bound := crypto.MaxPasswordBytes(); maxLength > bound {
+		// proxy.maxPasswordLength may allow more than the configured algorithm
+		// can hash, for instance after switching back to bcrypt.
+		maxLength = bound
+	}
+	if len(password) < Params.ProxyCfg.MinPasswordLength.GetAsInt() || len(password) > maxLength {
 		return merr.WrapErrParameterInvalidRange(Params.ProxyCfg.MinPasswordLength.GetAsInt(),
-			Params.ProxyCfg.MaxPasswordLength.GetAsInt(),
+			maxLength,
 			len(password), "invalid password length")
 	}
 	return nil
