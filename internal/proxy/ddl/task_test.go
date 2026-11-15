@@ -1745,6 +1745,52 @@ func TestCreateCollectionTask(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionTaskMilvusTableStruct(t *testing.T) {
+	ctx := context.Background()
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_ArrayOfVector} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/element_nullable=%t", dataType, elementNullable), func(t *testing.T) {
+				elementType := schemapb.DataType_Int64
+				params := []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+				if dataType == schemapb.DataType_ArrayOfVector {
+					elementType = schemapb.DataType_FloatVector
+					params = append(params, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
+				}
+				schema := &schemapb.CollectionSchema{
+					Name: "milvus_table_struct", ExternalSource: "s3://bucket/snapshot.json",
+					ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+					Fields: []*schemapb.FieldSchema{
+						{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+						{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+					},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						Name: "items", Nullable: true,
+						Fields: []*schemapb.FieldSchema{{
+							Name: "value", DataType: dataType, ElementType: elementType,
+							ElementNullable: elementNullable, TypeParams: params,
+						}},
+					}},
+				}
+				encoded, err := proto.Marshal(schema)
+				require.NoError(t, err)
+				task := &CreateCollectionTask{
+					ctx: ctx, Condition: NewTaskCondition(ctx),
+					CreateCollectionRequest: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name, Schema: encoded, ShardsNum: 1},
+				}
+				require.NoError(t, task.OnEnqueue())
+				require.NoError(t, task.PreExecute(ctx))
+				resolved := &schemapb.CollectionSchema{}
+				require.NoError(t, proto.Unmarshal(task.Schema, resolved))
+				child := resolved.StructArrayFields[0].Fields[0]
+				require.Equal(t, "items[value]", child.Name)
+				require.Equal(t, "items[value]", child.ExternalField)
+				require.Equal(t, elementNullable, child.ElementNullable)
+				require.True(t, child.Nullable)
+			})
+		}
+	}
+}
+
 func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()

@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -951,7 +952,8 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		return merr.Status(err), nil
 	}
 
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+	if typeutil.IsExternalCollection(dresp.GetSchema()) &&
+		!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
 		return merr.Status(merr.WrapErrParameterInvalidMsg(
 			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
@@ -1011,12 +1013,17 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Check for external collection - alter collection schema is not supported
+	// Milvus-table can add a mapped Struct child, but cannot backfill functions
+	// or apply other native schema mutations to the source snapshot.
 	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
-		}, nil
+		plan, err := schemautil.ParseAlterSchemaAddRequest(request.GetAction().GetAddRequest())
+		if err != nil || plan.Kind != schemautil.AlterSchemaAddStructSubField ||
+			!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
+			return &milvuspb.AlterCollectionSchemaResponse{
+				AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
+			}, nil
+		}
 	}
 
 	task := NewAlterCollectionSchemaTask(ctx, node, request, dresp.GetSchema(), dresp.GetProperties(), CheckVecIndexWithDataTypeExist)

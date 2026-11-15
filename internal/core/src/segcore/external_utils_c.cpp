@@ -223,7 +223,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
             bool uses_external_primary_key = false;
-            for (const auto& field_schema : schema.fields()) {
+            auto append_sample_field = [&](const auto& field_schema) {
                 bool is_milvus_table_data_field =
                     is_milvus_table &&
                     field_schema.fieldid() >= START_USER_FIELDID &&
@@ -234,7 +234,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 }
                 if (field_schema.external_field().empty() &&
                     !is_milvus_table_data_field) {
-                    continue;
+                    return;
                 }
                 auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
                 auto column_name = is_milvus_table_data_field
@@ -242,6 +242,21 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                        : field_meta.get_external_field();
                 external_fields.push_back(
                     {std::move(field_meta), std::move(column_name)});
+            };
+            for (const auto& field_schema : schema.fields()) {
+                append_sample_field(field_schema);
+            }
+            if (is_milvus_table) {
+                // Struct leaves are physical columns, just like top-level fields.
+                // Match Schema::ParseFrom when inheriting parent nullability.
+                for (const auto& parent : schema.struct_array_fields()) {
+                    for (const auto& child : parent.fields()) {
+                        auto field_schema = child;
+                        field_schema.set_nullable(child.nullable() ||
+                                                  parent.nullable());
+                        append_sample_field(field_schema);
+                    }
+                }
             }
             if (is_milvus_table && uses_external_primary_key) {
                 // Real-PK milvus-table loading also keeps source insert

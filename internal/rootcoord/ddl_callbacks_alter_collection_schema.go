@@ -134,6 +134,13 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err != nil {
 		return err
 	}
+	if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+		if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+			return err
+		}
+		properties = updateMaxFieldIDProperty(properties, maxAssignedFieldIDFromSchema(schema))
+		schema.Properties = properties
+	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}

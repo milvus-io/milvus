@@ -18,9 +18,11 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -28,11 +30,78 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestAlignMilvusTableAddedStructFields(t *testing.T) {
+	for _, addChild := range []bool{false, true} {
+		t.Run(fmt.Sprintf("add_child=%t", addChild), func(t *testing.T) {
+			old := &schemapb.CollectionSchema{
+				Name: "target", ExternalSource: "s3://bucket/snapshot",
+				ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+				Fields:       []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", ExternalField: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+			}
+			parent := &schemapb.StructArrayFieldSchema{FieldID: 110, Name: "clips", Nullable: true,
+				Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "clips[base]", ExternalField: "clips[base]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true}}}
+			if addChild {
+				old.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(parent).(*schemapb.StructArrayFieldSchema)}
+			}
+			candidate := proto.Clone(old).(*schemapb.CollectionSchema)
+			if addChild {
+				candidate.StructArrayFields[0].Fields = append(candidate.StructArrayFields[0].Fields,
+					&schemapb.FieldSchema{FieldID: 112, Name: "clips[note]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true})
+			} else {
+				parent.FieldID, parent.Fields[0].FieldID, parent.Fields[0].ExternalField = 101, 102, ""
+				candidate.StructArrayFields = []*schemapb.StructArrayFieldSchema{parent}
+			}
+			source := proto.Clone(candidate).(*schemapb.CollectionSchema)
+			source.ExternalSource, source.ExternalSpec, source.Fields[0].ExternalField = "", "", ""
+			for _, child := range source.StructArrayFields[0].Fields {
+				child.ExternalField = ""
+			}
+			if !addChild {
+				source.StructArrayFields[0].FieldID = 120
+			}
+			added := source.StructArrayFields[0].Fields[len(source.StructArrayFields[0].Fields)-1]
+			added.FieldID = 121
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(
+				&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+			defer read.UnPatch()
+			coll := model.UnmarshalCollectionModel(&etcdpb.CollectionInfo{Schema: old})
+			before := proto.Clone(old)
+			require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), coll, candidate))
+			bound := candidate.StructArrayFields[0].Fields[len(candidate.StructArrayFields[0].Fields)-1]
+			require.Equal(t, int64(121), bound.FieldID)
+			require.Equal(t, bound.Name, bound.ExternalField)
+			require.Equal(t, source.StructArrayFields[0].FieldID, candidate.StructArrayFields[0].FieldID)
+			require.Equal(t, int64(100), candidate.Fields[0].FieldID)
+			if addChild {
+				require.Equal(t, int64(111), candidate.StructArrayFields[0].Fields[0].FieldID)
+			}
+			require.True(t, proto.Equal(before, old))
+
+			// Alignment cannot silently remap an already published parent or leaf.
+			wrongID := proto.Clone(candidate).(*schemapb.CollectionSchema)
+			wrongID.Fields[0].FieldID++
+			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), coll, wrongID), merr.ErrParameterInvalid)
+			wrongType := proto.Clone(candidate).(*schemapb.CollectionSchema)
+			wrongType.StructArrayFields[0].Fields[len(wrongType.StructArrayFields[0].Fields)-1].ElementType = schemapb.DataType_Double
+			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), coll, wrongType), merr.ErrParameterInvalid)
+			missingChild := proto.Clone(candidate).(*schemapb.CollectionSchema)
+			missingChild.StructArrayFields[0].Fields[len(missingChild.StructArrayFields[0].Fields)-1].Name = "clips[missing]"
+			require.ErrorContains(t, alignMilvusTableAddedStructFields(context.Background(), coll, missingChild), "absent from the selected source snapshot")
+			missingParent := proto.Clone(candidate).(*schemapb.CollectionSchema)
+			missingParent.StructArrayFields[0].Name = "missing"
+			require.ErrorContains(t, alignMilvusTableAddedStructFields(context.Background(), coll, missingParent), "absent from the selected source snapshot")
+		})
+	}
+}
 
 func TestValidateAddedStructFieldNameErrorClassification(t *testing.T) {
 	for _, name := range []string{"", strings.Repeat("a", Params.ProxyCfg.MaxNameLength.GetAsInt()+1), "1field", "bad name", "AND"} {
@@ -205,5 +274,37 @@ func newRootAddStructFieldSchema(name string) *schemapb.StructArrayFieldSchema {
 				},
 			},
 		},
+	}
+}
+
+func TestAlignMilvusTableAddedStructFieldsFailures(t *testing.T) {
+	storageErr := merr.WrapErrServiceUnavailableMsg("snapshot unavailable")
+	for _, tc := range []struct {
+		name     string
+		metadata *datapb.SnapshotMetadata
+		readErr  error
+		want     error
+	}{
+		{name: "storage unavailable", readErr: storageErr, want: storageErr},
+		{name: "missing collection", metadata: &datapb.SnapshotMetadata{}, want: merr.ErrDataIntegrity},
+		{name: "missing schema", metadata: &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{}}, want: merr.ErrDataIntegrity},
+		{name: "external source", metadata: &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "id", ExternalField: "id"}}}}}, want: merr.ErrParameterInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(tc.metadata, tc.readErr).Build()
+			defer read.UnPatch()
+			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema), tc.want)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			require.ErrorIs(t, alignMilvusTableAddedStructFields(ctx, &model.Collection{}, schema), context.Canceled)
+			require.Equal(t, 1, read.Times(), "cancellation must not issue source I/O")
+			schema.ExternalSource = ""
+			require.Error(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema))
+			require.Equal(t, 1, read.Times(), "invalid source must fail before I/O")
+			schema.ExternalSpec = `{"format":"parquet"}`
+			require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema))
+			require.Equal(t, 1, read.Times(), "other external formats must not read Milvus snapshots")
+		})
 	}
 }

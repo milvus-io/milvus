@@ -994,7 +994,8 @@ BuildInternalSchemaWithTextAndDynamicFields() {
 
 std::shared_ptr<arrow::Table>
 BuildInternalTakeArrowTableWithTextAndDynamicFields(
-    const InternalSchemaWithTextAndDynamicFields& info) {
+    const InternalSchemaWithTextAndDynamicFields& info,
+    bool null_dynamic_row = false) {
     arrow::Int64Builder int64_b;
     arrow::BinaryBuilder text_b;
     arrow::BinaryBuilder dynamic_b;
@@ -1006,6 +1007,10 @@ BuildInternalTakeArrowTableWithTextAndDynamicFields(
                         .Append(encoded_text.data(),
                                 static_cast<int32_t>(encoded_text.size()))
                         .ok());
+        if (null_dynamic_row && i == 1) {
+            EXPECT_TRUE(dynamic_b.AppendNull().ok());
+            continue;
+        }
         auto dynamic = R"({"foo":)" + std::to_string(i) + R"(,"bar":true})";
         EXPECT_TRUE(
             dynamic_b
@@ -2144,6 +2149,67 @@ TEST(InternalTakeTest, TryTakeForSearch_ProjectsDynamicField) {
     ASSERT_EQ(dynamic_data->scalars().json_data().data_size(), 2);
     EXPECT_EQ(dynamic_data->scalars().json_data().data(0), R"({"foo":4})");
     EXPECT_EQ(dynamic_data->scalars().json_data().data(1), R"({"foo":0})");
+}
+
+TEST(InternalTakeTest, NullableDynamicProjectionPreservesRows) {
+    for (bool external : {false, true}) {
+        auto info = BuildInternalSchemaWithTextAndDynamicFields();
+        if (external) {
+            info.base.schema->set_external_source("s3://bucket/snapshot");
+            info.base.schema->set_external_spec(R"({"format":"milvus-table"})");
+        }
+        auto table =
+            BuildInternalTakeArrowTableWithTextAndDynamicFields(info, true);
+        SegmentSealedUPtr holder;
+        auto* segment = CreateExternalSegment(holder, info.base.schema);
+        segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+        segment->SetUseTakeForOutputForTesting(true);
+        // Include repeated and reordered null rows to exercise result_mapping.
+        std::vector<int64_t> offsets = {1, 3, 1, 0};
+        for (bool project : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "external=" << external << " project=" << project);
+            auto check = [&](const DataArray& data) {
+                ASSERT_EQ(data.scalars().json_data().data_size(), 4);
+                const auto& validity = GetFieldDataRowValidData(data);
+                ASSERT_EQ(validity.size(), 4);
+                EXPECT_FALSE(validity[0]);
+                EXPECT_TRUE(validity[1]);
+                EXPECT_FALSE(validity[2]);
+                EXPECT_TRUE(validity[3]);
+                EXPECT_TRUE(data.scalars().json_data().data(0).empty());
+                EXPECT_TRUE(data.scalars().json_data().data(2).empty());
+                EXPECT_EQ(data.scalars().json_data().data(1),
+                          project ? R"({"foo":3})" : R"({"foo":3,"bar":true})");
+                EXPECT_EQ(data.scalars().json_data().data(3),
+                          project ? R"({"foo":0})" : R"({"foo":0,"bar":true})");
+            };
+            auto retrieve =
+                std::make_unique<query::RetrievePlan>(info.base.schema);
+            retrieve->field_ids_ = {info.dynamic_id};
+            if (project) {
+                retrieve->target_dynamic_fields_ = {"foo"};
+            }
+            auto result = std::make_unique<proto::segcore::RetrieveResults>();
+            ASSERT_TRUE(segment->TryTakeForRetrieve(retrieve.get(),
+                                                    result,
+                                                    offsets.data(),
+                                                    offsets.size(),
+                                                    false,
+                                                    false));
+            ASSERT_EQ(result->fields_data_size(), 1);
+            check(result->fields_data(0));
+            auto search = std::make_unique<query::Plan>(info.base.schema);
+            search->target_entries_ = {info.dynamic_id};
+            if (project) {
+                search->target_dynamic_fields_ = {"foo"};
+            }
+            SearchResult search_result;
+            ASSERT_TRUE(segment->TestTryTakeForSearch(
+                search.get(), offsets.data(), offsets.size(), search_result));
+            check(*search_result.output_fields_data_.at(info.dynamic_id));
+        }
+    }
 }
 
 // ---------- TryTakeForRetrieve: error & edge-case paths ----------

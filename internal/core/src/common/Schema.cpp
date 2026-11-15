@@ -131,6 +131,7 @@ Schema::Schema(const Schema& other)
       mmap_enabled_(other.mmap_enabled_),
       mmap_fields_(other.mmap_fields_),
       struct_array_field_cache_(other.struct_array_field_cache_),
+      struct_field_ids_(other.struct_field_ids_),
       warmup_vector_index_(other.warmup_vector_index_),
       warmup_scalar_index_(other.warmup_scalar_index_),
       warmup_scalar_field_(other.warmup_scalar_field_),
@@ -166,6 +167,7 @@ Schema::operator=(const Schema& other) {
     std::swap(mmap_enabled_, copied.mmap_enabled_);
     std::swap(mmap_fields_, copied.mmap_fields_);
     std::swap(struct_array_field_cache_, copied.struct_array_field_cache_);
+    std::swap(struct_field_ids_, copied.struct_field_ids_);
     std::swap(warmup_vector_index_, copied.warmup_vector_index_);
     std::swap(warmup_scalar_index_, copied.warmup_scalar_index_);
     std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);

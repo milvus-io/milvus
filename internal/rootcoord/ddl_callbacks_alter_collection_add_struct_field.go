@@ -28,12 +28,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -84,6 +87,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 
 	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
+	if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+		return err
+	}
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties
 	if err := validateSchemaEvolution(coll, schema); err != nil {
@@ -152,6 +158,69 @@ func normalizeAndCheckAddedStructField(structArrayField *schemapb.StructArrayFie
 		}
 	}
 	return nil
+}
+
+// alignMilvusTableAddedStructFields binds only newly added Struct fields to the
+// currently selected source snapshot. Existing mappings and IDs are immutable.
+// A caller selecting a newer explicit snapshot must refresh it before adding
+// fields from that snapshot. Replay uses the bound schema in the WAL message.
+func alignMilvusTableAddedStructFields(ctx context.Context, coll *model.Collection, schema *schemapb.CollectionSchema) error {
+	if !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+		return err
+	}
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(schema.GetExternalSource(), schema.GetExternalSpec(),
+		createMilvusTableSnapshotStorageConfig(), packed.ExternalSpecContext{Source: schema.GetExternalSource(), Spec: schema.GetExternalSpec()})
+	if err != nil {
+		return merr.Wrap(err, "read milvus-table snapshot for Struct addition")
+	}
+	source := metadata.GetCollection().GetSchema()
+	if source == nil {
+		return merr.WrapErrDataIntegrityMsg("milvus-table snapshot has no collection schema")
+	}
+	if typeutil.IsExternalCollection(source) {
+		return merr.WrapErrParameterInvalidMsg("milvus-table cannot use an external collection snapshot as source")
+	}
+	oldParents := make(map[string]*model.StructArrayField, len(coll.StructArrayFields))
+	oldChildren := make(map[string]struct{})
+	for _, parent := range coll.StructArrayFields {
+		oldParents[parent.Name] = parent
+		for _, child := range parent.Fields {
+			oldChildren[storedRootStructSubFieldName(parent.Name, child.Name)] = struct{}{}
+		}
+	}
+	sourceParents := make(map[string]*schemapb.StructArrayFieldSchema)
+	for _, parent := range source.GetStructArrayFields() {
+		sourceParents[parent.GetName()] = parent
+	}
+	sourceFields := milvusTableSourceFieldsByName(source)
+	for _, parent := range schema.GetStructArrayFields() {
+		original := sourceParents[parent.GetName()]
+		if original == nil {
+			return merr.WrapErrParameterInvalidMsg("Struct field %q is absent from the selected source snapshot; refresh a snapshot containing this field before adding it", parent.GetName())
+		}
+		if oldParents[parent.GetName()] == nil {
+			parent.FieldID = original.GetFieldID()
+		}
+		for _, child := range parent.GetFields() {
+			name := storedRootStructSubFieldName(parent.GetName(), child.GetName())
+			if _, exists := oldChildren[name]; exists {
+				continue
+			}
+			originalChild := sourceFields[name]
+			if originalChild == nil {
+				return merr.WrapErrParameterInvalidMsg("Struct sub-field %q is absent from the selected source snapshot; refresh a snapshot containing this field before adding it", name)
+			}
+			child.FieldID = originalChild.GetFieldID()
+			child.ExternalField = name
+		}
+	}
+	return typeutil.ValidateMilvusTableSchemaIdentity(schema, source, true)
 }
 
 func validateAddedStructSubFieldProperties(originalName string, field *schemapb.FieldSchema) error {

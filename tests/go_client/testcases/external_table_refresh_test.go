@@ -24,10 +24,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -4459,4 +4461,246 @@ func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
 	require.Equal(t, expected, got[0],
 		"row count must equal sum of parquet shards (%d); strays must be filtered, no shard may be dropped",
 		expected)
+}
+
+func TestMilvusTableStructSchemaEvolutionSnapshot(t *testing.T) {
+	for _, scenario := range []string{"source_adds_struct", "both_add_struct", "both_add_child"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := hp.CreateContext(t, 10*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+			source := common.GenRandomString("struct_evolution_src", 6)
+			target := common.GenRandomString("struct_evolution_ext", 6)
+			baseChild := entity.NewField().WithName("base").WithDataType(entity.FieldTypeInt64)
+			baseChildren := entity.NewStructSchema().WithField(baseChild)
+			structField := func(name string, children *entity.StructSchema) *entity.Field {
+				return entity.NewField().WithName(name).WithDataType(entity.FieldTypeArray).
+					WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children)
+			}
+			sourceSchema := entity.NewSchema().WithName(source).
+				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+				WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2)).
+				WithField(structField("clips", baseChildren))
+			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(source, sourceSchema).
+				WithConsistencyLevel(entity.ClStrong).WithProperty("collection.autocompaction.enabled", false)))
+			t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(source)) })
+
+			snapshot := func() string {
+				name := common.GenRandomString("struct_evolution_snapshot", 6)
+				require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(name, source)))
+				t.Cleanup(func() { _ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(name, source)) })
+				info, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(name, source))
+				require.NoError(t, err)
+				require.NotEmpty(t, info.GetS3Location())
+				return info.GetS3Location()
+			}
+			spec := extTestSpec(getMinIOConfig(), "milvus-table")
+			refresh := func(location string) {
+				job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(target).
+					WithExternalSource(location).WithExternalSpec(spec))
+				require.NoError(t, err)
+				waitForRefreshComplete(ctx, t, mc, job.JobID, 2*time.Minute)
+			}
+			_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(source).
+				WithInt64Column("id", []int64{100, 300, 400}).WithFloatVectorColumn("vector", 2, [][]float32{{1, 0}, {0, 1}, {1, 1}}).
+				WithStructArrayColumn("clips", baseChildren, []map[string]any{{"base": []int64{1, 2}}, nil, {"base": []int64{}}}))
+			require.NoError(t, err)
+			require.NoError(t, flushWithRetry(ctx, mc, source))
+			indexAndLoadCollection(ctx, t, mc, source, "vector")
+			first := snapshot()
+			desc, err := mc.GetService().DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: source})
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(desc.GetStatus()))
+			targetSchema := proto.Clone(desc.GetSchema()).(*schemapb.CollectionSchema)
+			targetSchema.Name, targetSchema.ExternalSource, targetSchema.ExternalSpec = target, first, spec
+			for _, field := range targetSchema.Fields {
+				field.ExternalField = field.Name
+			}
+			encoded, err := proto.Marshal(targetSchema)
+			require.NoError(t, err)
+			status, err := mc.GetService().CreateCollection(ctx, &milvuspb.CreateCollectionRequest{CollectionName: target, Schema: encoded, ShardsNum: 1})
+			require.NoError(t, merr.CheckRPCCall(status, err))
+			t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(target)) })
+			refresh(first)
+			indexAndLoadCollection(ctx, t, mc, target, "vector")
+
+			addedChild := func(name string) *entity.Field {
+				return entity.NewField().WithName(name).WithDataType(entity.FieldTypeInt64).WithNullable(true)
+			}
+			addTo := func(name string) error {
+				if scenario == "both_add_child" {
+					return mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(name, addedChild("clips[note]")))
+				}
+				children := entity.NewStructSchema().WithField(addedChild("note"))
+				return mc.AddCollectionStructField(ctx, client.NewAddCollectionStructFieldOption(name, structField("refresh_meta", children)))
+			}
+			require.NoError(t, addTo(source))
+			d, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(source))
+			require.NoError(t, err)
+			v := int64(7)
+			newRow := client.NewColumnBasedInsertOption(source).
+				WithInt64Column("id", []int64{200}).WithFloatVectorColumn("vector", 2, [][]float32{{1, 0}})
+			if scenario == "both_add_child" {
+				newRow.WithStructArrayColumn("clips", elemNullFindStruct(t, d.Schema, "clips"),
+					[]map[string]any{{"base": []int64{3, 4}, "note": []*int64{&v, nil}}})
+			} else {
+				newRow.WithStructArrayColumn("clips", baseChildren, []map[string]any{{"base": []int64{3, 4}}}).
+					WithStructArrayColumn("refresh_meta", elemNullFindStruct(t, d.Schema, "refresh_meta"),
+						[]map[string]any{{"note": []*int64{&v}}})
+			}
+			_, err = mc.Insert(ctx, newRow)
+			require.NoError(t, err)
+			require.NoError(t, flushWithRetry(ctx, mc, source))
+			second := snapshot()
+			if scenario != "source_adds_struct" {
+				// Make the source schema containing the new field available to target DDL.
+				refresh(second)
+				visible, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(target))
+				require.NoError(t, err)
+				require.NoError(t, visible.Await(ctx))
+				require.NoError(t, addTo(target))
+				// Nullable schema does not replace missing source physical columns.
+				for attempt := 0; attempt < 2; attempt++ {
+					job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(target).
+						WithExternalSource(second).WithExternalSpec(spec))
+					require.NoError(t, err)
+					require.Eventually(t, func() bool {
+						progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+							client.NewGetRefreshExternalCollectionProgressOption(job.JobID))
+						require.NoError(t, err)
+						require.NotEqual(t, entity.RefreshStateCompleted, progress.State)
+						if progress.State != entity.RefreshStateFailed {
+							return false
+						}
+						require.Contains(t, progress.Reason, "missing required column")
+						return true
+					}, 2*time.Minute, time.Second)
+					unchanged, err := mc.Query(ctx, client.NewQueryOption(target).
+						WithFilter("id in [100, 200, 300, 400]").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+					require.NoError(t, err)
+					require.Equal(t, 4, unchanged.ResultCount)
+					ids := make([]int64, unchanged.ResultCount)
+					for i := range ids {
+						ids[i], err = unchanged.GetColumn("id").GetAsInt64(i)
+						require.NoError(t, err)
+					}
+					require.ElementsMatch(t, []int64{100, 200, 300, 400}, ids)
+				}
+				t.Log("Missing source columns rejected on initial and repeated refresh")
+
+				// Rewrite all logical rows with the expanded source schema, then
+				// compact away the old physical segments before exporting a snapshot.
+				clips := []map[string]any{{"base": []int64{1, 2}}, {"base": []int64{3, 4}}, nil, {"base": []int64{}}}
+				if scenario == "both_add_child" {
+					clips[0]["note"] = []*int64{nil, nil}
+					clips[1]["note"] = []*int64{&v, nil}
+					clips[3]["note"] = []*int64{}
+				}
+				backfill := client.NewColumnBasedInsertOption(source).
+					WithInt64Column("id", []int64{100, 200, 300, 400}).
+					WithFloatVectorColumn("vector", 2, [][]float32{{1, 0}, {1, 0}, {0, 1}, {1, 1}}).
+					WithStructArrayColumn("clips", elemNullFindStruct(t, d.Schema, "clips"), clips)
+				if scenario == "both_add_struct" {
+					backfill.WithStructArrayColumn("refresh_meta", elemNullFindStruct(t, d.Schema, "refresh_meta"),
+						[]map[string]any{nil, {"note": []*int64{&v}}, nil, nil})
+				}
+				_, err = mc.Upsert(ctx, backfill)
+				require.NoError(t, err)
+				require.NoError(t, flushWithRetry(ctx, mc, source))
+				compactID, err := mc.Compact(ctx, client.NewCompactOption(source))
+				require.NoError(t, err)
+				require.Eventually(t, func() bool {
+					state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(compactID))
+					require.NoError(t, err)
+					return state == entity.CompactionStateCompleted
+				}, 3*time.Minute, time.Second)
+				second = snapshot()
+				t.Log("Source backfill and compaction completed; validating the new snapshot")
+			}
+			refresh(second)
+			load, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(target))
+			require.NoError(t, err)
+			require.NoError(t, load.Await(ctx))
+
+			output := []string{"id", "clips"}
+			if scenario == "both_add_struct" {
+				output = append(output, "refresh_meta")
+			}
+			for _, phase := range []string{"refresh", "repeat_refresh", "release_reload"} {
+				t.Logf("verify %s", phase)
+				if phase == "repeat_refresh" {
+					refresh(second)
+					load, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(target))
+					require.NoError(t, err)
+					require.NoError(t, load.Await(ctx))
+				} else if phase == "release_reload" {
+					require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(target)))
+					load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(target))
+					require.NoError(t, err)
+					require.NoError(t, load.Await(ctx))
+				}
+				got, err := mc.Query(ctx, client.NewQueryOption(target).
+					WithFilter("id in [100, 200, 300, 400]").WithOutputFields(output...).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Equal(t, 4, got.ResultCount)
+				seen := make(map[int64]bool)
+				for i := 0; i < got.ResultCount; i++ {
+					id, err := got.GetColumn("id").GetAsInt64(i)
+					require.NoError(t, err)
+					require.Contains(t, []int64{100, 200, 300, 400}, id)
+					require.False(t, seen[id])
+					seen[id] = true
+					base := []int64{1, 2}
+					if id == 200 {
+						base = []int64{3, 4}
+					}
+					expected := map[string]any{"base": base}
+					switch scenario {
+					case "both_add_child":
+						notes := []*int64{nil, nil}
+						if id == 200 {
+							notes[0] = &v
+						}
+						expected["note"] = notes
+					case "both_add_struct":
+						meta, err := got.GetColumn("refresh_meta").Get(i)
+						require.NoError(t, err)
+						if id != 200 {
+							require.Nil(t, meta)
+						} else {
+							require.Equal(t, map[string]any{"note": []*int64{&v}}, meta)
+						}
+					}
+					clips, err := got.GetColumn("clips").Get(i)
+					require.NoError(t, err)
+					if id == 300 {
+						require.Nil(t, clips, "a null parent must not become an empty Struct")
+					} else if id == 400 {
+						require.NotNil(t, clips)
+						empty, ok := clips.(map[string]any)
+						require.True(t, ok)
+						require.Empty(t, empty["base"])
+						if scenario == "both_add_child" {
+							require.Contains(t, empty, "note")
+							require.Empty(t, empty["note"])
+						}
+					} else {
+						require.Equal(t, expected, clips)
+					}
+				}
+				filter := `MATCH_ANY(clips, $[base] == 3)`
+				if scenario == "both_add_child" {
+					filter = fmt.Sprintf(`MATCH_ANY(clips, $[note] == %d)`, v)
+				} else if scenario == "both_add_struct" {
+					filter = fmt.Sprintf(`MATCH_ANY(refresh_meta, $[note] == %d)`, v)
+				}
+				filtered, err := mc.Query(ctx, client.NewQueryOption(target).
+					WithFilter(filter).WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Equal(t, 1, filtered.ResultCount)
+				matched, err := filtered.GetColumn("id").GetAsInt64(0)
+				require.NoError(t, err)
+				require.Equal(t, int64(200), matched)
+			}
+		})
+	}
 }

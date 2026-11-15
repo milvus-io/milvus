@@ -3429,6 +3429,77 @@ TEST_F(SegmentLoadInfoTest, HasManifestColumnUsesManifestColumnNames) {
     EXPECT_FALSE(info.HasManifestColumn("101"));
 }
 
+TEST_F(SegmentLoadInfoTest, MilvusTableMissingStructColumnsDoNotFillDefaults) {
+    proto::schema::CollectionSchema pb;
+    pb.set_external_source("s3://bucket/snapshot");
+    pb.set_external_spec(R"({"format":"milvus-table"})");
+    auto* pk = pb.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("id");
+    pk->set_data_type(proto::schema::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("id");
+    auto* parent = pb.add_struct_array_fields();
+    parent->set_fieldid(101);
+    parent->set_name("clips");
+    parent->set_nullable(true);
+    auto* capacity = parent->add_type_params();
+    capacity->set_key("max_capacity");
+    capacity->set_value("4");
+    for (int64_t id : {102, 103}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 102 ? "clips[base]" : "clips[note]");
+        child->set_external_field(child->name());
+        child->set_data_type(proto::schema::Array);
+        child->set_element_type(proto::schema::Int64);
+        child->set_nullable(true);
+        child->set_element_nullable(id == 103);
+        *child->add_type_params() = *capacity;
+    }
+    auto schema = Schema::ParseFrom(pb);
+    for (const bool has_sibling : {false, true}) {
+        SCOPED_TRACE(has_sibling);
+        auto groups =
+            MakeExternalColumnGroups({{{"100"}, {"/external/id.parquet"}}});
+        if (has_sibling) {
+            auto sibling = MakeExternalColumnGroups(
+                {{{"102"}, {"/external/base.parquet"}}});
+            groups->push_back(sibling->at(0));
+        }
+        auto load_proto = MakeManifestProto("/manifest/v1");
+        auto* fake = load_proto.add_binlog_paths();
+        fake->set_fieldid(100);
+        for (auto id : {100, 102, 103}) {
+            fake->add_child_fields(id);
+        }
+        SegmentLoadInfo info(load_proto, schema);
+        info.SetColumnGroupsForTesting(groups);
+        const auto diff = info.GetLoadDiff();
+        const std::set<FieldId> filled(diff.fields_to_fill_default.begin(),
+                                       diff.fields_to_fill_default.end());
+        const std::set<FieldId> expected;
+        EXPECT_TRUE(filled.empty());
+        EXPECT_TRUE(diff.load_external_manifest);
+        SegmentLoadInfo copied(info);
+        EXPECT_EQ(copied.GetDefaultFilledFieldsForNewInfo(info), expected);
+        auto repeated = copied.ComputeDiff(info);
+        EXPECT_TRUE(repeated.fields_to_fill_default.empty());
+        auto schema_copy = std::make_shared<Schema>(*schema);
+        Schema assigned;
+        assigned = *schema;
+        EXPECT_EQ(schema_copy->GetStructFieldId("clips"), FieldId(101));
+        EXPECT_EQ(assigned.GetStructFieldId("clips"), FieldId(101));
+        // A later physical column does not change the strict external policy.
+        auto newer =
+            MakeExternalColumnGroups({{{"104"}, {"/external/newer.parquet"}}});
+        groups->push_back(newer->at(0));
+        SegmentLoadInfo corrupt(load_proto, schema);
+        corrupt.SetColumnGroupsForTesting(groups);
+        EXPECT_TRUE(corrupt.GetLoadDiff().fields_to_fill_default.empty());
+    }
+}
+
 TEST_F(SegmentLoadInfoTest, CachedManifestColumnsCanBeInherited) {
     schema_->set_external_source("s3://external-bucket/table");
 

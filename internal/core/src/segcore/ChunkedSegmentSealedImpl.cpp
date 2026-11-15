@@ -2481,8 +2481,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                      schema_snapshot->get_external_spec());
     }
 
-    auto needed_columns = schema_snapshot->GetExternalColumnNames();
-    auto reader = std::shared_ptr<milvus_storage::api::Reader>(
+    const auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
@@ -9397,7 +9397,9 @@ ShouldProjectInternalTakeDynamicField(
     const Schema& schema,
     FieldId field_id,
     const std::vector<std::string>& target_dynamic_fields) {
-    if (schema.is_external_collection() || target_dynamic_fields.empty()) {
+    if ((schema.is_external_collection() &&
+         !schema.is_milvus_table_external_collection()) ||
+        target_dynamic_fields.empty()) {
         return false;
     }
     auto dynamic_field_id = schema.get_dynamic_field_id();
@@ -9602,6 +9604,11 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto obj = data_array->mutable_scalars()->mutable_json_data();
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
+                // Preserve the row placeholder; null JSON must not be parsed.
+                if (typed->IsNull(result_mapping[i])) {
+                    obj->add_data();
+                    continue;
+                }
                 auto val = typed->Value(result_mapping[i]);
                 if (dynamic_field_names != nullptr &&
                     !dynamic_field_names->empty()) {
@@ -10009,6 +10016,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
         auto column_name = schema_snapshot->get_storage_column_name(field_id);
+        if (snapshot->load_info && snapshot->load_info->HasManifestPath() &&
+            !snapshot->load_info->HasManifestColumn(column_name)) {
+            // Default-filled historical columns have no remote projection.
+            // Use the regular output path for the entire request so no field
+            // disappears from the positional result schema.
+            return false;
+        }
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
@@ -10295,6 +10309,13 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
         auto column_name = schema_snapshot->get_storage_column_name(field_id);
+        if (snapshot->load_info && snapshot->load_info->HasManifestPath() &&
+            !snapshot->load_info->HasManifestColumn(column_name)) {
+            // Default-filled historical columns have no remote projection.
+            // Use the regular output path for the entire request so no field
+            // disappears from the positional result schema.
+            return false;
+        }
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
