@@ -1543,7 +1543,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableRep
 					})
 					expectedFields = append(expectedFields, 105)
 				}
-				seg := &datapb.SegmentInfo{ID: 1, CollectionID: s.collectionID, PartitionID: 2000,
+				seg := &datapb.SegmentInfo{
+					ID: 1, CollectionID: s.collectionID, PartitionID: 2000,
 					NumOfRows: 2, ManifestPath: targetManifest, StorageVersion: storage.StorageV3,
 					Binlogs: []*datapb.FieldBinlog{{ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{EntriesNum: 2, MemorySize: 16}}}},
 				}

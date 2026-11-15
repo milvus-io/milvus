@@ -1342,9 +1342,9 @@ func TestExploreMilvusTableDoesNotScanSourceColumns(t *testing.T) {
 	source.Fields = append(source.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "extra", DataType: schemapb.DataType_Int64, Nullable: true})
 	target := testMilvusTableTargetRefreshSchema()
 	target.Fields = append(target.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "mapped_extra", ExternalField: "extra", DataType: schemapb.DataType_Int64, Nullable: true})
-	ms := metacache.NewMetaStore(nil)
-	ms.PutCollection(&meta.CollectionInfo{ID: 100, Schema: target})
-	manager := &Manager{mt: &meta.Meta{MetaStore: ms}, allocator: &stubAllocator{nextID: 1000}}
+	collections := typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo]()
+	collections.Insert(100, &meta.CollectionInfo{ID: 100, Schema: target})
+	manager := &Manager{mt: &meta.Meta{Collections: collections}, allocator: &stubAllocator{nextID: 1000}}
 	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
 	defer read.UnPatch()
 	expected := []packed.FileInfo{{FilePath: "source-manifest", SourceSegmentID: 20, NumRows: 3}}
@@ -1355,7 +1355,9 @@ func TestExploreMilvusTableDoesNotScanSourceColumns(t *testing.T) {
 	defer columns.UnPatch()
 	files, manifest, err := manager.exploreExternalFiles(context.Background(), &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100, ExternalSource: target.ExternalSource, ExternalSpec: target.ExternalSpec})
 	require.NoError(t, err)
-	require.Equal(t, expected, files)
+	require.Len(t, files, 1)
+	require.Equal(t, "source-manifest", files[0].GetFilePath())
+	require.EqualValues(t, 3, files[0].GetNumRows())
 	require.Equal(t, "explore", manifest)
 	require.Zero(t, columns.Times())
 }

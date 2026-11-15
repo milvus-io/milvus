@@ -3542,19 +3542,25 @@ func TestMilvusTableStructArraySnapshot(t *testing.T) {
 				case 1:
 					return map[string]any{"ignored": []int64{}, "lang": []*string{}, "tags": [][]*string{}, "nums": [][]int64{}}
 				case 2:
-					return map[string]any{"ignored": []int64{1, 2, 3}, "lang": []*string{&value, nil, &value},
-						"tags": [][]*string{nil, {}, {&value, nil, elemNullStr("tail")}}, "nums": [][]int64{nil, {}, {int64(id), 2}}}
+					return map[string]any{
+						"ignored": []int64{1, 2, 3}, "lang": []*string{&value, nil, &value},
+						"tags": [][]*string{nil, {}, {&value, nil, elemNullStr("tail")}}, "nums": [][]int64{nil, {}, {int64(id), 2}},
+					}
 				case 3:
 					if omit {
 						return map[string]any{"ignored": []int64{1, 2}}
 					}
 					return map[string]any{"ignored": []int64{1, 2}, "lang": []*string{nil, nil}, "tags": [][]*string{nil, nil}, "nums": [][]int64{nil, nil}}
 				case 4:
-					return map[string]any{"ignored": []int64{1, 2, 3}, "lang": []*string{&value, &value, &value},
-						"tags": [][]*string{{nil, nil}, {elemNullStr("")}, {&value}}, "nums": [][]int64{{int64(id)}, {}, nil}}
+					return map[string]any{
+						"ignored": []int64{1, 2, 3}, "lang": []*string{&value, &value, &value},
+						"tags": [][]*string{{nil, nil}, {elemNullStr("")}, {&value}}, "nums": [][]int64{{int64(id)}, {}, nil},
+					}
 				default:
-					return map[string]any{"ignored": []int64{1}, "lang": []*string{&value},
-						"tags": [][]*string{{&value, elemNullStr("a"), elemNullStr("b"), elemNullStr("c")}}, "nums": [][]int64{{-1, 0, int64(id), 100}}}
+					return map[string]any{
+						"ignored": []int64{1}, "lang": []*string{&value},
+						"tags": [][]*string{{&value, elemNullStr("a"), elemNullStr("b"), elemNullStr("c")}}, "nums": [][]int64{{-1, 0, int64(id), 100}},
+					}
 				}
 			}
 			assertClips := func(value any, id int64, projected bool) {
@@ -3774,9 +3780,12 @@ func TestMilvusTableAddedStructFieldSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			for round := 0; round < 2; round++ {
 				value := int64(10 + round)
-				rows := []map[string]any{nil, {"base": []int64{}, "added": []*int64{}},
+				rows := []map[string]any{
+					nil,
+					{"base": []int64{}, "added": []*int64{}},
 					{"base": []int64{1, 2}, "added": []*int64{&value, nil}},
-					{"base": []int64{3, 4}, "added": []*int64{nil, nil}}}
+					{"base": []int64{3, 4}, "added": []*int64{nil, nil}},
+				}
 				start := int64(round * 4)
 				_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(source).
 					WithInt64Column("id", []int64{start, start + 1, start + 2, start + 3}).
@@ -3876,7 +3885,7 @@ func TestMilvusTableAddedStructFieldSnapshot(t *testing.T) {
 					require.Len(t, actual, 1, "unselected sibling must not leak")
 					expected := []*int64{}
 					if id%4 == 2 {
-						v := int64(10 + id/4)
+						v := 10 + id/4
 						expected = []*int64{&v, nil}
 					} else if id%4 == 3 {
 						expected = []*int64{nil, nil}
@@ -4051,7 +4060,7 @@ func testMilvusTableVectorArraySnapshot[V entity.Vector](t *testing.T, vector fu
 			}
 			assertSearch := func(name, child string, id int) {
 				t.Helper()
-				query := entity.Vector(vectorArray([]V{vector(2 * id), vector(2*id + 1)}))
+				query := vectorArray([]V{vector(2 * id), vector(2*id + 1)})
 				wantScore := float64(2)
 				if elementNullable {
 					query = vector(2*id + 1)

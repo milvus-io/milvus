@@ -7707,7 +7707,6 @@ func TestMilvusTableStructAutomaticMapping(t *testing.T) {
 		require.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 		require.True(t, proto.Equal(original, schema))
 	})
-
 }
 
 func TestMilvusTableNativeListFieldValidation(t *testing.T) {

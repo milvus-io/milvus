@@ -670,10 +670,14 @@ func TestEstimateSegmentLoadingResourceExternalTextMatchReads(t *testing.T) {
 					Properties: []*commonpb.KeyValuePair{{Key: common.WarmupVectorIndexKey, Value: common.WarmupDisable}},
 					Fields: []*schemapb.FieldSchema{
 						{FieldID: 200, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-						{FieldID: 101, Name: "vector", ExternalField: "vector", DataType: schemapb.DataType_FloatVector,
-							TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}, {Key: common.WarmupKey, Value: common.WarmupSync}}},
-						{FieldID: 102, Name: "text", ExternalField: "text", DataType: tc.dataType,
-							TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}, {Key: "enable_match", Value: strconv.FormatBool(tc.enableMatch)}, {Key: "enable_analyzer", Value: "true"}}},
+						{
+							FieldID: 101, Name: "vector", ExternalField: "vector", DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}, {Key: common.WarmupKey, Value: common.WarmupSync}},
+						},
+						{
+							FieldID: 102, Name: "text", ExternalField: "text", DataType: tc.dataType,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}, {Key: "enable_match", Value: strconv.FormatBool(tc.enableMatch)}, {Key: "enable_analyzer", Value: "true"}},
+						},
 					},
 				}
 				loadInfo := &querypb.SegmentLoadInfo{
