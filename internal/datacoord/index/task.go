@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -791,7 +790,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
 	params := indexParams
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
 		var err error
-		params, err = Params.KnowhereConfig.UpdateIndexParams(meta.GetIndexType(params), paramtable.BuildStage, params)
+		params, err = updateBuildIndexParams(meta.GetIndexType(params), params)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err, "failed to update index build params")
 		}

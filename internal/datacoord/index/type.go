@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -111,6 +112,14 @@ func CheckFMIndexEngineVersion(indexParams []*commonpb.KeyValuePair, resolvedSca
 			common.MinScalarIndexVersionForFMINDEX, resolvedScalarVersion)
 	}
 	return nil
+}
+
+// updateBuildIndexParams applies the knowhere build-stage params for
+// indexType to params. KnowhereConfig.UpdateIndexParams writes the elements
+// of its input in place, and params usually are IndexMeta's shared,
+// read-only list, so it gets a copy.
+func updateBuildIndexParams(indexType string, params []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	return Params.KnowhereConfig.UpdateIndexParams(indexType, paramtable.BuildStage, common.CloneKeyValuePairs(params))
 }
 
 func DeleteParams(from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
