@@ -3785,8 +3785,15 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 }
 
 func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
-	ctx := hp.CreateContext(t, 5*time.Minute)
+	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	// Keep the negative snapshot deterministic; backfill is enabled below.
+	previousBackfill, err := hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "false")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", previousBackfill)
+		require.NoError(t, err)
+	})
 
 	const rowCount = 5000
 	const deletedCount = 500
@@ -3800,9 +3807,12 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 		WithField(entity.NewField().
 			WithName("embedding").
 			WithDataType(entity.FieldTypeFloatVector).
-			WithDim(testVecDim))
+			WithDim(testVecDim)).
+		WithField(entity.NewField().WithName("title").WithDataType(entity.FieldTypeInt64))
 
-	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema)))
+	// Keep segment identities stable; schema-bump compaction is controlled separately by server config.
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).
+		WithProperty("collection.autocompaction.enabled", false)))
 	t.Cleanup(func() {
 		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName))
 	})
@@ -3813,8 +3823,9 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 		ids[i] = int64(i)
 		vectors[i] = []float32{float32(i), float32(i) + 1, float32(i) + 2, float32(i) + 3}
 	}
-	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
 		column.NewColumnInt64("id", ids),
+		column.NewColumnInt64("title", ids),
 		column.NewColumnFloatVector("embedding", testVecDim, vectors)))
 	require.NoError(t, err)
 
@@ -3870,7 +3881,8 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 			WithName("embedding").
 			WithDataType(entity.FieldTypeFloatVector).
 			WithDim(testVecDim).
-			WithExternalField("embedding"))
+			WithExternalField("embedding")).
+		WithField(entity.NewField().WithName("title").WithDataType(entity.FieldTypeInt64).WithExternalField("title"))
 
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
 	t.Cleanup(func() {
@@ -3916,8 +3928,278 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(deletedCount), nearestID)
 
+	oldSegments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, oldSegments)
+
+	const newID, deletedNewID = rowCount, rowCount + 1
+	const newTitle = 12345
+	extra := entity.NewField().WithName("extra").WithDataType(entity.FieldTypeInt64).WithNullable(true)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(sourceName, extra)))
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", []int64{newID, deletedNewID}),
+		column.NewColumnInt64("title", []int64{newTitle, newTitle + 1}),
+		column.NewColumnInt64("extra", []int64{1, 2}),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors[:2])))
+	require.NoError(t, err)
+	time.Sleep(10 * time.Second)
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	delRes, err = mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", []int64{deletedNewID}))
+	require.NoError(t, err)
+	require.Equal(t, int64(1), delRes.DeleteCount)
+	time.Sleep(10 * time.Second)
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	currentSegments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(sourceName))
+	require.NoError(t, err)
+	for _, old := range oldSegments {
+		if old.NumRows == 0 {
+			continue
+		}
+		require.Contains(t, currentSegments, old, "pre-add-field segment must remain unchanged")
+		t.Logf("Preserved pre-add-field segment: id=%d rows=%d", old.ID, old.NumRows)
+	}
+
+	nextSnapshot := common.GenRandomString("mt_extra_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(nextSnapshot, sourceName)))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(nextSnapshot, sourceName))
+	})
+	nextSnapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(nextSnapshot, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, nextSnapshotInfo.GetS3Location())
+	// Keep the collection loaded while switching snapshots, then refresh the query view.
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName).
+		WithExternalSource(nextSnapshotInfo.GetS3Location()).WithExternalSpec(externalSpec))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+
+	rows, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithFilter(fmt.Sprintf("id in [%d, %d]", newID, deletedNewID)).
+		WithOutputFields("id", "title").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 1, rows.ResultCount)
+	id, err := rows.GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(newID), id)
+	title, err := rows.GetColumn("title").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(newTitle), title)
+	searchRes, err = mc.Search(ctx,
+		client.NewSearchOption(externalName, 2, []entity.Vector{entity.FloatVector(vectors[0])}).
+			WithFilter(fmt.Sprintf("id in [%d, %d]", newID, deletedNewID)).
+			WithOutputFields("id", "title").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Len(t, searchRes, 1)
+	require.Equal(t, 1, searchRes[0].ResultCount)
+	id, err = searchRes[0].GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(newID), id)
+	title, err = searchRes[0].GetColumn("title").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(newTitle), title)
+
 	t.Logf("milvus-table snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
 		sourceDesc.ID, snapshotName, externalSource)
+
+	// A mapped historical column must be physically backfilled before refresh.
+	t.Run("MappedAddedNullableField", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+		defer cancel()
+		mappedName := common.GenRandomString("mt_mapped_extra", 6)
+		mappedSchema := entity.NewSchema().ReadProto(externalSchema.ProtoMessage()).
+			WithName(mappedName).
+			WithExternalSource(nextSnapshotInfo.GetS3Location()).
+			WithField(entity.NewField().WithName("extra").WithDataType(entity.FieldTypeInt64).
+				WithNullable(true).WithExternalField("extra"))
+		require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(mappedName, mappedSchema)))
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(mappedName))
+		})
+		refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(mappedName))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateFailed)
+		progress, err := mc.GetRefreshExternalCollectionProgress(ctx, client.NewGetRefreshExternalCollectionProgressOption(refresh.JobID))
+		require.NoError(t, err)
+		mappedCreated, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(mappedName))
+		require.NoError(t, err)
+		var extraFieldID int64
+		for _, field := range mappedCreated.Schema.Fields {
+			if field.Name == "extra" {
+				extraFieldID = field.ID
+			}
+		}
+		require.Positive(t, extraFieldID)
+		require.Contains(t, progress.Reason, fmt.Sprintf("field_id=%d", extraFieldID))
+		require.Contains(t, progress.Reason, "new snapshot")
+
+		_, err = hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
+		require.NoError(t, err)
+		// These API statistics report physical segment schema convergence, not
+		// the logical NULL values that an internal-table query can synthesize.
+		require.Eventually(t, func() bool {
+			stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(sourceName))
+			if err != nil {
+				t.Logf("waiting for backfill: %v", err)
+				return false
+			}
+			total, totalErr := strconv.Atoi(stats["schema_version_total_segments"])
+			consistent, consistentErr := strconv.Atoi(stats["schema_version_consistent_segments"])
+			return totalErr == nil && consistentErr == nil && total > 0 && total == consistent
+		}, 3*time.Minute, 2*time.Second, "source physical backfill did not finish")
+		backfilledSnapshot := common.GenRandomString("mt_backfilled", 6)
+		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(backfilledSnapshot, sourceName)))
+		t.Cleanup(func() {
+			_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(backfilledSnapshot, sourceName))
+		})
+		backfilledInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(backfilledSnapshot, sourceName))
+		require.NoError(t, err)
+		refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(mappedName).
+			WithExternalSource(backfilledInfo.GetS3Location()).WithExternalSpec(externalSpec))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+		idxTask, err := mc.CreateIndex(ctx,
+			client.NewCreateIndexOption(mappedName, "embedding", index.NewFlatIndex(entity.L2)))
+		require.NoError(t, err)
+		require.NoError(t, idxTask.Await(ctx))
+		// Backfilled physical NULL values must also work with a scalar index.
+		scalarTask, err := mc.CreateIndex(ctx,
+			client.NewCreateIndexOption(mappedName, "extra", index.NewSortedIndex()))
+		require.NoError(t, err)
+		require.NoError(t, scalarTask.Await(ctx))
+		loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(mappedName))
+		require.NoError(t, err)
+		require.NoError(t, loadTask.Await(ctx), "load external collection after source backfill")
+
+		checkRow := func(t *testing.T, id int64, wantNull bool, wantExtra int64) {
+			filter := fmt.Sprintf("id == %d and extra == %d", id, wantExtra)
+			if wantNull {
+				filter = fmt.Sprintf("id == %d and extra is null", id)
+			}
+			checkColumns := func(idCol, extraCol column.Column) {
+				require.NotNil(t, idCol)
+				require.NotNil(t, extraCol)
+				gotID, err := idCol.GetAsInt64(0)
+				require.NoError(t, err)
+				require.Equal(t, id, gotID)
+				isNull, err := extraCol.IsNull(0)
+				require.NoError(t, err)
+				require.Equal(t, wantNull, isNull)
+				if !wantNull {
+					value, err := extraCol.GetAsInt64(0)
+					require.NoError(t, err)
+					require.Equal(t, wantExtra, value)
+				}
+			}
+			rows, err := mc.Query(ctx, client.NewQueryOption(mappedName).
+				WithFilter(filter).WithOutputFields("id", "extra").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Equal(t, 1, rows.ResultCount)
+			checkColumns(rows.GetColumn("id"), rows.GetColumn("extra"))
+			results, err := mc.Search(ctx, client.NewSearchOption(mappedName, 1,
+				[]entity.Vector{entity.FloatVector(vectors[deletedCount])}).
+				WithFilter(filter).WithOutputFields("id", "extra").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			require.Equal(t, 1, results[0].ResultCount)
+			checkColumns(results[0].GetColumn("id"), results[0].GetColumn("extra"))
+		}
+		t.Run("NewRow", func(t *testing.T) { checkRow(t, newID, false, 1) })
+		t.Run("OldRow", func(t *testing.T) { checkRow(t, deletedCount, true, 0) })
+
+		// A failed refresh must leave the loaded collection on its last good snapshot.
+		refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(mappedName).
+			WithExternalSource(nextSnapshotInfo.GetS3Location()).WithExternalSpec(externalSpec))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateFailed)
+		checkRow(t, deletedCount, true, 0)
+		checkRow(t, newID, false, 1)
+		mappedDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(mappedName))
+		require.NoError(t, err)
+		require.Equal(t, backfilledInfo.GetS3Location(), mappedDesc.Schema.ExternalSource)
+		const deletedOldID = deletedCount + 2
+		t.Run("OldRowToDelete", func(t *testing.T) { checkRow(t, deletedOldID, true, 0) })
+		if t.Failed() {
+			return
+		}
+
+		// Refreshing the same snapshot while loaded must preserve backfilled NULLs.
+		for attempt := 0; attempt < 2; attempt++ {
+			refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(mappedName))
+			require.NoError(t, err)
+			waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+			loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(mappedName).WithRefresh(true))
+			require.NoError(t, err)
+			require.NoError(t, loadTask.Await(ctx))
+			checkRow(t, deletedCount, true, 0)
+			checkRow(t, newID, false, 1)
+		}
+
+		// A later snapshot replaces one old row with a real value while other old rows remain NULL.
+		_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(sourceName,
+			column.NewColumnInt64("id", []int64{deletedCount}),
+			column.NewColumnInt64("title", []int64{deletedCount}),
+			column.NewColumnInt64("extra", []int64{7}),
+			column.NewColumnFloatVector("embedding", testVecDim, vectors[deletedCount:deletedCount+1])))
+		require.NoError(t, err)
+		// Delete an already-loaded old row without reinserting it, so stale deltas cannot be hidden by a value filter.
+		deleteResult, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", []int64{deletedOldID}))
+		require.NoError(t, err)
+		require.Equal(t, int64(1), deleteResult.DeleteCount)
+		time.Sleep(10 * time.Second)
+		flushTask, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+		require.NoError(t, err)
+		require.NoError(t, flushTask.Await(ctx))
+		latestSnapshot := common.GenRandomString("mt_value_snap", 6)
+		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(latestSnapshot, sourceName)))
+		t.Cleanup(func() {
+			_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(latestSnapshot, sourceName))
+		})
+		latestInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(latestSnapshot, sourceName))
+		require.NoError(t, err)
+		// Preserve loaded segments so refresh exercises their existing NULL columns and deletes.
+		refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(mappedName).
+			WithExternalSource(latestInfo.GetS3Location()).WithExternalSpec(externalSpec))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+		loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(mappedName).WithRefresh(true))
+		require.NoError(t, err)
+		require.NoError(t, loadTask.Await(ctx))
+		t.Run("RefreshedValue", func(t *testing.T) { checkRow(t, deletedCount, false, 7) })
+		t.Run("RefreshedNull", func(t *testing.T) { checkRow(t, deletedCount+1, true, 0) })
+		t.Run("RefreshedNewRow", func(t *testing.T) { checkRow(t, newID, false, 1) })
+		t.Run("RefreshedDeletedOldRow", func(t *testing.T) {
+			rows, err := mc.Query(ctx, client.NewQueryOption(mappedName).
+				WithFilter(fmt.Sprintf("id == %d", deletedOldID)).
+				WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			if rows.ResultCount != 0 {
+				t.Errorf("query returned %d rows for deleted PK %d after refresh", rows.ResultCount, deletedOldID)
+			}
+			results, err := mc.Search(ctx, client.NewSearchOption(mappedName, 1,
+				[]entity.Vector{entity.FloatVector(vectors[deletedOldID])}).
+				WithFilter(fmt.Sprintf("id == %d", deletedOldID)).
+				WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			if results[0].ResultCount != 0 {
+				t.Errorf("search returned %d rows for deleted PK %d after refresh", results[0].ResultCount, deletedOldID)
+			}
+		})
+		deleted, err := mc.Query(ctx, client.NewQueryOption(mappedName).
+			WithFilter(fmt.Sprintf("id == %d", deletedNewID)).WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Zero(t, deleted.ResultCount)
+	})
 }
 
 func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {

@@ -86,6 +86,11 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err != nil {
 		return err
 	}
+	if plan.Kind == schemautil.AlterSchemaAddField {
+		if err := validateMilvusTableFieldAddition(coll); err != nil {
+			return err
+		}
+	}
 	if plan.HasField() {
 		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
 			if err := prepareAlterSchemaAddStructSubField(coll, plan); err != nil {

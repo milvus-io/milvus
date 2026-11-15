@@ -157,7 +157,7 @@ type milvusTableSourceDeltalogDeletes struct {
 
 // getMilvusTableSourceManifestDeltalogs reads source segment deltas from the
 // StorageV3 manifest and caches a deep copy by manifest path for the refresh
-// task lifetime.
+// task lifetime. Only manifests whose mapped columns exist enter the cache.
 func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	manifestPath string,
 ) ([]*datapb.FieldBinlog, error) {
@@ -173,7 +173,8 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	t.milvusTableSourceDeltalogsMu.Unlock()
 
 	extfs := t.milvusTableExternalSpecContext()
-	deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(manifestPath, t.req.GetStorageConfig(), extfs)
+	resolver := typeutil.NewStorageColumnResolver(t.req.GetSchema(), typeutil.WithStorageColumnExternalSpec(extfs.Spec))
+	deltalogs, err := packed.GetMilvusTableSourceDeltalogs(manifestPath, t.req.GetStorageConfig(), extfs, resolver.SourceDataColumnNames())
 	if err != nil {
 		return nil, merr.Wrapf(err, "read milvus-table source manifest deltalogs %s", manifestPath)
 	}

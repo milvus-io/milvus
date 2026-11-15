@@ -2652,3 +2652,143 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+// Import validates columns from the source manifest before committing a target.
+func TestMilvusTableImportRejectsMissingColumn(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		sourceColumns []string
+		required      []string
+		missing       string
+	}{
+		{name: "partial overlap", sourceColumns: []string{"100", "102"}, required: []string{"100", "103"}, missing: "103"},
+		{name: "no overlap", sourceColumns: []string{"102"}, required: []string{"103"}, missing: "103"},
+		{name: "missing timestamp", sourceColumns: []string{"100"}, required: []string{"100", "1"}, missing: "1"},
+		{name: "mixed group subset", sourceColumns: []string{"100", "102", "103"}, required: []string{"100", "103"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
+				&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+					Columns: tc.sourceColumns, Format: "parquet",
+					Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
+				}}})
+			require.NoError(t, err)
+			result, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), tc.required,
+				[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ExternalSpecContext{})
+			if tc.missing == "" {
+				require.NoError(t, err)
+				missing, err := ManifestMissingColumns(result, cfg, tc.required)
+				require.NoError(t, err)
+				require.Empty(t, missing)
+			} else {
+				require.Error(t, err)
+				require.Empty(t, result)
+				require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+				require.ErrorIs(t, err, ErrLoonPermanent)
+				require.Equal(t, merr.Code(merr.ErrOperationNotSupported), merr.Code(err))
+				require.Contains(t, err.Error(), "field_id="+tc.missing)
+				require.Contains(t, err.Error(), "new snapshot")
+				// No target manifest may be published when only part of the projection exists.
+				manifests, err := filepath.Glob(filepath.Join(dir, "target", "_metadata", "manifest-*.avro"))
+				require.NoError(t, err)
+				require.Empty(t, manifests)
+			}
+		})
+	}
+}
+
+func TestGetMilvusTableSourceDeltalogs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
+		&ManifestUpdates{
+			ColumnGroups: []ColumnGroupEntry{{
+				Columns: []string{"100", "102"}, Format: "parquet",
+				Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
+			}},
+			DeltaLogs: []DeltaLogEntry{{Path: filepath.Join(dir, "_delta", "88"), NumEntries: 2}, {Path: filepath.Join(dir, "_delta", "89"), NumEntries: 0}},
+		})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		missing string
+	}{
+		{name: "subset", columns: []string{"100"}},
+		{name: "complete", columns: []string{"100", "102"}},
+		{name: "missing field", columns: []string{"100", "103"}, missing: "103"},
+		{name: "missing timestamp", columns: []string{"100", "1"}, missing: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs, err := GetMilvusTableSourceDeltalogs(source, cfg, ExternalSpecContext{}, tc.columns)
+			if tc.missing != "" {
+				require.Error(t, err)
+				require.Nil(t, logs)
+				require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+				require.Equal(t, merr.Code(merr.ErrOperationNotSupported), merr.Code(err))
+				require.Contains(t, err.Error(), "field_id="+tc.missing)
+				require.Contains(t, err.Error(), "new snapshot")
+			} else {
+				require.NoError(t, err)
+				require.Len(t, logs, 1)
+				require.Len(t, logs[0].GetBinlogs(), 2)
+				require.Equal(t, int64(2), logs[0].GetBinlogs()[0].GetEntriesNum())
+				require.Equal(t, int64(0), logs[0].GetBinlogs()[1].GetEntriesNum())
+				require.Equal(t, filepath.Join(dir, "_delta", "89"), logs[0].GetBinlogs()[1].GetLogPath())
+			}
+		})
+	}
+	// Other callers can still read deletes without imposing a column contract.
+	logs, err := GetDeltaLogsFromManifestWithExtfs(source, cfg, ExternalSpecContext{})
+	require.NoError(t, err)
+	require.Len(t, logs[0].GetBinlogs(), 2)
+}
+
+func TestGetMilvusTableSourceDeltalogs_ReadFailure(t *testing.T) {
+	readErr := merr.WrapErrServiceUnavailableMsg("source storage unavailable")
+	read := mockey.Mock(MakePropertiesFromStorageConfig).Return(nil, readErr).Build()
+	defer read.UnPatch()
+	logs, err := GetMilvusTableSourceDeltalogs(MarshalManifestPath("source", 1), &indexpb.StorageConfig{}, ExternalSpecContext{}, []string{"103"})
+	require.ErrorIs(t, err, readErr)
+	require.Nil(t, logs)
+	require.NotContains(t, err.Error(), "backfill")
+}
+
+func TestMilvusTableRefreshRejectsMissingSourceColumn(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	makeManifest := func(name string, columns []string) string {
+		manifest, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, name), ManifestEarliest), cfg,
+			&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+				Columns: columns, Format: "parquet",
+				Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, name+".parquet"), EndIndex: 3}},
+			}}})
+		require.NoError(t, err)
+		return manifest
+	}
+	source := makeManifest("source", []string{"100"})
+	target := makeManifest("target", []string{"100", "103"})
+	result, err := RefreshMilvusTableManifest(context.Background(), target, []string{"100", "103"},
+		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ExternalSpecContext{}, nil, nil)
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.Contains(t, err.Error(), "field_id=103")
+	require.Empty(t, result.ManifestPath)
+	missing, err := ManifestMissingColumns(target, cfg, []string{"100", "103"})
+	require.NoError(t, err)
+	require.Empty(t, missing, "the last committed manifest remains intact")
+}
+
+func TestMilvusTableImportSourceReadFailurePreservesClassification(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	source := MarshalManifestPath(filepath.Join(dir, "missing-source"), 1)
+	result, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"100"},
+		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ExternalSpecContext{})
+	require.Error(t, err)
+	require.Empty(t, result)
+	require.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.NotContains(t, err.Error(), "backfill")
+}

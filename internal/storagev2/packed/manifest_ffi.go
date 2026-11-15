@@ -19,6 +19,7 @@ package packed
 #include <stdint.h>
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_exttable_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
@@ -352,7 +353,13 @@ func createMilvusTableManifest(
 		cProperties,
 		hasExternalPrimaryKey,
 	)
+	unsupported := result.err_code == C.LOON_NOT_SUPPORT
 	if err := HandleLoonFFIResult(result); err != nil {
+		if unsupported {
+			// Translate this import capability error at the milvus-table boundary,
+			// retaining the FFI sentinel for existing retry guards.
+			return "", merr.WrapErrOperationNotSupported(err, "import milvus-table source columns")
+		}
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -678,7 +685,7 @@ func readManifestColumnGroupEntries(
 	return selected, nil
 }
 
-// MilvusTableRefreshResult contains the only manifest committed by a delete-only
+// MilvusTableRefreshResult contains the manifest committed by a column or delete
 // refresh and its scheduling metadata. An error always returns an empty result.
 type MilvusTableRefreshResult struct {
 	ManifestPath  string

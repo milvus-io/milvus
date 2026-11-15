@@ -800,10 +800,29 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
                                         source_row_counts[i],
                                         external_source,
                                         properties);
-            if (target_groups_data.empty()) {
-                RETURN_ERROR(LOON_ARROW_ERROR,
-                             "milvus-table source manifest does not contain "
-                             "any target external columns");
+            // Validate the complete projection from the manifest already read
+            // for import. A partial match must not produce an incomplete target.
+            std::unordered_set<std::string> imported_columns;
+            for (const auto& group : target_groups_data) {
+                imported_columns.insert(group.columns.begin(),
+                                        group.columns.end());
+            }
+            for (size_t j = 0; j < num_target_columns; ++j) {
+                if (imported_columns.find(target_columns[j]) ==
+                    imported_columns.end()) {
+                    RETURN_ERROR(
+                        LOON_NOT_SUPPORT,
+                        "cannot refresh milvus-table: source manifest " +
+                            source_manifest_path +
+                            " is missing required column field_id=" +
+                            target_columns[j] +
+                            "; historical missing columns are not supported, "
+                            "including nullable fields and fields with "
+                            "defaults. "
+                            "Complete physical backfill on the source "
+                            "collection, create a new snapshot, and refresh "
+                            "using that snapshot");
+                }
             }
 
             auto target_groups = MaterializeColumnGroups(target_groups_data);

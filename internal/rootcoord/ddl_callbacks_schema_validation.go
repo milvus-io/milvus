@@ -20,6 +20,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
@@ -28,4 +30,21 @@ func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.Coll
 		oldSchema = oldColl.ToCollectionSchemaPB()
 	}
 	return schemautil.ValidateSchemaEvolution(oldSchema, newSchema)
+}
+
+// Mapped field IDs are resolved from the snapshot only when the collection is
+// created. Reject online data-field additions before allocating an unrelated ID
+// or publishing a schema that subsequent refreshes cannot validate.
+func validateMilvusTableFieldAddition(coll *model.Collection) error {
+	if coll.ExternalSource == "" {
+		return nil
+	}
+	spec, err := specutil.ParseExternalSpec(coll.ExternalSpec)
+	if err != nil {
+		return merr.Wrap(err, "parse external collection spec for field addition")
+	}
+	if spec.Format == specutil.FormatMilvusTable {
+		return merr.WrapErrOperationNotSupportedMsg("online field addition is not supported for milvus-table collections; create a new external collection with the desired source field mappings")
+	}
+	return nil
 }

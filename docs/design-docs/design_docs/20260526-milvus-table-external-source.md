@@ -66,7 +66,8 @@ live in the target PK space.
 - Supporting snapshots from non-StorageV3 source collections.
 - Reconstructing a snapshot path from `source_collection_id` and `snapshot_id`.
 - Making external tables writable.
-- Supporting schema evolution between refreshes.
+- Changing the definitions or field IDs of mapped source fields between refreshes.
+- Reading mapped columns that are physically absent from historical source segments.
 - Reusing source primary-key bloom filters for virtual primary key targets.
 - Supporting dynamic fields, struct fields, partition keys, clustering keys,
   text match, or auto ID for external collections.
@@ -117,6 +118,18 @@ At create time, RootCoord reads the source snapshot metadata and copies the
 source field ID into the target field. The persisted target schema keeps
 `external_field` as the source field name, not as a numeric field ID string.
 
+The target may omit ordinary non-key source fields. Every target data field
+must have a unique, compatible source mapping; source primary, partition, and
+clustering keys must remain mapped. Adding an unmapped ordinary source field
+does not prevent refresh.
+
+Online addition of mapped data fields to an existing `milvus-table` collection
+is not supported. RootCoord rejects both `AddCollectionField` and the field-add
+operation of `AlterCollectionSchema` before broadcasting a schema change. Create
+a new external collection to include additional source columns; this keeps every
+mapped field ID aligned with the source snapshot. Other external formats retain
+their existing add-field behavior.
+
 ## Schema Alignment
 
 Milvus StorageV3 segment manifests store physical columns by field ID string.
@@ -158,6 +171,25 @@ For `milvus-table`, DataCoord exploration reads the snapshot metadata JSON and
 requires `storagev2_manifest_list` to be present. If it is missing, refresh
 fails fast with an explicit error because the source snapshot was not created
 from a StorageV3 collection.
+
+DataNode validates required physical columns while reading each source data
+manifest. Manifest import checks the complete target projection before committing;
+the retained-segment path checks columns during its existing source-deltalog read,
+including no-op refreshes. Successful checks share the task's source-deltalog
+cache. DataCoord does not perform a separate scan of source data manifests.
+Target-local function outputs are excluded from the required source columns.
+
+A missing mapped column fails the refresh even when it is nullable or has a
+default value. The error identifies the source manifest and field ID and asks
+the user to complete physical backfill on the source, create a new snapshot,
+and refresh from that snapshot. Backfill does not repair an already-created
+snapshot. A manifest read failure is reported as a read failure, not as evidence
+of a missing column.
+
+Tasks may already have written candidate manifests when a sibling task fails.
+Segment results are applied only after all tasks succeed, so a missing-column
+failure leaves the published target segments and collection source/spec unchanged.
+An already-loaded external collection continues serving its last successful snapshot.
 
 Each source StorageV3 segment manifest becomes one or more external fragments
 identified by:
@@ -354,8 +386,11 @@ separate schema mutation path for indexes.
   of writing an unstable target path.
 - If target schema does not match the source snapshot schema, create or refresh
   fails instead of reading data with mismatched field IDs.
-- If a later refresh points to a snapshot with a different schema, refresh
-  fails schema identity validation.
+- If a later snapshot changes a mapped field's definition or field ID, refresh
+  fails schema identity validation. Additional unmapped ordinary fields are allowed.
+- If any source data segment lacks a mapped column, its DataNode task fails
+  before the job publishes segment results; nullable and default-value
+  declarations do not bypass this check.
 - Existing Parquet, Lance, Vortex, and Iceberg external tables keep their
   existing `external_field` physical-column behavior.
 

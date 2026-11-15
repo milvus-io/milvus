@@ -36,6 +36,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err = proto.Unmarshal(req.Schema, fieldSchema); err != nil {
 		return merr.Wrap(err, "failed to unmarshal field schema")
 	}
+	if err := validateMilvusTableFieldAddition(coll); err != nil {
+		return err
+	}
 	if fieldSchema.GetDataType() == schemapb.DataType_Text && fieldSchema.GetDefaultValue() != nil {
 		return merr.WrapErrParameterInvalidMsg("default value is not supported when adding TEXT field, field name = %s", fieldSchema.GetName())
 	}
