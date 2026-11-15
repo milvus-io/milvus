@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -166,11 +165,12 @@ func (i *RestfulInfo) ErrorCode() string {
 }
 
 func (i *RestfulInfo) ErrorMsg() string {
+	// CR/LF escaping is done once in Formatter.Format for every field.
 	message, ok := i.ctx.Get(ContextReturnMessage)
 	if !ok {
 		return ""
 	}
-	return strings.ReplaceAll(message.(string), "\n", "\\n")
+	return message.(string)
 }
 
 func (i *RestfulInfo) ErrorType() string {

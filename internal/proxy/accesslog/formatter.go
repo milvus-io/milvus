@@ -31,6 +31,13 @@ const (
 
 var BaseFormatterKey = "base"
 
+// lineBreakEscaper keeps one access log record on one line. Field values reach
+// the log as is, and a CR or LF in any of them (a multi-line filter in
+// $method_expr, a user name, a collection name, an error message) would split
+// the record across lines. That breaks line-based tooling and lets a caller
+// append a forged record that is attributed to someone else.
+var lineBreakEscaper = strings.NewReplacer("\r", "\\r", "\n", "\\n")
+
 // Formaater manager not concurrent safe
 // make sure init with Add and SetMethod before use Get
 type FormatterManger struct {
@@ -121,6 +128,13 @@ func (f *Formatter) build() {
 
 func (f *Formatter) Format(i info.AccessInfo) string {
 	fieldValues := info.Get(i, f.fields...)
+	// Every record is built here, so escaping in one place covers all fields and
+	// both the gRPC and RESTful protocols. Values without CR/LF are unchanged.
+	for idx, v := range fieldValues {
+		if s, ok := v.(string); ok {
+			fieldValues[idx] = lineBreakEscaper.Replace(s)
+		}
+	}
 	return fmt.Sprintf(f.fmt, fieldValues...)
 }
 

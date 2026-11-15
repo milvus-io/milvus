@@ -109,10 +109,10 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	result = Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
-	// replace line breaks
+	// Line breaks are returned as is; Formatter.Format escapes them for the log.
 	s.info.resp = merr.Status(errors.New("test error. stack: 1:\n 2:\n 3:\n"))
 	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
+	s.Equal("test error. stack: 1:\n 2:\n 3:\n", result[0])
 
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
 	result = Get(s.info, "$error_msg")
