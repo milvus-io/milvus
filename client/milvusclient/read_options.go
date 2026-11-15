@@ -913,9 +913,7 @@ func pks2Expr(ids column.Column) string {
 		expr = fmt.Sprintf("%s in %s", pkName, strings.Join(strings.Fields(fmt.Sprint(ids.FieldData().GetScalars().GetLongData().GetData())), ","))
 	case entity.FieldTypeVarChar:
 		data := ids.FieldData().GetScalars().GetData().(*schemapb.ScalarField_StringData).StringData.GetData()
-		for i := range data {
-			data[i] = fmt.Sprintf("\"%s\"", data[i])
-		}
+		data = lo.Map(data, func(id string, _ int) string { return fmt.Sprintf("%q", id) })
 		expr = fmt.Sprintf("%s in [%s]", pkName, strings.Join(data, ","))
 	}
 	return expr
