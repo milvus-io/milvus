@@ -35,8 +35,8 @@ The runtime adapter implements `Backend.Load` and returns a `Session` with the
 model's input and output signatures. The caller creates one manager and runner
 for the component, then runs each request through `Runner.Run`. `Lease` keeps a
 loaded session alive for the duration of one inference. `FuncBackend` is a
-small bridge for adapters that already expose a loader function; the package's
-example shows the lifecycle without requiring a native runtime in unit tests.
+small bridge for adapters that already expose a loader function; focused tests
+exercise the lifecycle without requiring a native runtime.
 
 ## Lifecycle and invariants
 

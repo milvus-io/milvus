@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -106,6 +107,7 @@ type Manager struct {
 	mu              sync.Mutex
 	entries         map[string]*managerEntry
 	memBytes        uint64
+	pendingMemory   uint64
 	pendingSessions int
 	closed          bool
 	loadMu          chan struct{}
@@ -209,6 +211,10 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 	if m.sessionCountLocked() >= m.config.MaxSessions {
 		m.mu.Unlock()
 		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "onnx: maximum resident sessions (%d) reached", m.config.MaxSessions)
+	}
+	if m.config.MaxMemoryBytes > 0 && m.pendingMemory >= m.config.MaxMemoryBytes {
+		m.mu.Unlock()
+		return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: pending session teardown consumes the resident memory limit (%d bytes)", m.config.MaxMemoryBytes)
 	}
 	m.mu.Unlock()
 
@@ -347,6 +353,9 @@ func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, strin
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: stat model %q failed", abs)
+		}
+		if errors.Is(err, syscall.ENAMETOOLONG) {
+			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: model path %q is too long", abs)
 		}
 		return "", "", "", merr.WrapErrIoFailedErr(err, "onnx: stat model %q failed", abs)
 	}
@@ -566,7 +575,7 @@ func scanModelProto(ctx context.Context, file *os.File, offset, length int64, ki
 			pos += 4
 		case 3:
 			var err error
-			pos, err = skipModelGroup(file, pos, end, field)
+			pos, err = skipModelGroup(ctx, file, pos, end, field)
 			if err != nil {
 				return false, err
 			}
@@ -576,15 +585,21 @@ func scanModelProto(ctx context.Context, file *os.File, offset, length int64, ki
 			return false, errMalformedModelProto
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if pos != end {
 		return false, errMalformedModelProto
 	}
 	return false, nil
 }
 
-func skipModelGroup(file *os.File, pos, end int64, groupField int) (int64, error) {
+func skipModelGroup(ctx context.Context, file *os.File, pos, end int64, groupField int) (int64, error) {
 	depth := 1
 	for pos < end {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		tag, size, err := readModelVarint(file, pos, end)
 		if err != nil {
 			return 0, err
@@ -865,6 +880,7 @@ func discardSessionAsync(m *Manager, session Session, memory uint64, path string
 	}
 	m.mu.Lock()
 	m.pendingSessions++
+	m.pendingMemory += memory
 	m.memBytes += memory
 	m.mu.Unlock()
 	startCloseEntries([]*managerEntry{entry})
@@ -888,6 +904,7 @@ func (m *Manager) sessionCountLocked() int {
 func (m *Manager) markClosingLocked(entry *managerEntry) {
 	if entry.closing.CompareAndSwap(false, true) {
 		m.pendingSessions++
+		m.pendingMemory += entry.memory
 	}
 }
 
@@ -895,6 +912,11 @@ func (m *Manager) finishClose(entry *managerEntry) {
 	m.mu.Lock()
 	if m.pendingSessions > 0 {
 		m.pendingSessions--
+	}
+	if m.pendingMemory >= entry.memory {
+		m.pendingMemory -= entry.memory
+	} else {
+		m.pendingMemory = 0
 	}
 	if m.memBytes >= entry.memory {
 		m.memBytes -= entry.memory

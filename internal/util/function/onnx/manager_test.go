@@ -15,12 +15,12 @@ import (
 	"encoding/binary"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -176,6 +176,7 @@ func TestManagerSerializedLoadsAndIdleRelease(t *testing.T) {
 	model := newTestModel(t)
 	const callers = 16
 	var wg sync.WaitGroup
+	errs := make(chan error, callers)
 	for i := 0; i < callers; i++ {
 		wg.Add(1)
 		go func() {
@@ -184,10 +185,14 @@ func TestManagerSerializedLoadsAndIdleRelease(t *testing.T) {
 			if acquireErr == nil {
 				lease.Release()
 			}
-			require.NoError(t, acquireErr)
+			errs <- acquireErr
 		}()
 	}
 	wg.Wait()
+	close(errs)
+	for acquireErr := range errs {
+		require.NoError(t, acquireErr)
+	}
 	require.Equal(t, int32(1), backend.loads.Load())
 	require.Eventually(t, func() bool { return manager.SessionCount() == 0 }, time.Second, time.Millisecond)
 	manager.Close()
@@ -247,8 +252,8 @@ func TestManagerIdentityChangesWhenModelContentChanges(t *testing.T) {
 	require.Equal(t, int32(2), backend.loads.Load())
 }
 
-func TestManagerBoundsConcurrencyAndMemory(t *testing.T) {
-	started := make(chan struct{}, 2)
+func TestManagerBoundsInferenceConcurrency(t *testing.T) {
+	started := make(chan struct{})
 	release := make(chan struct{})
 	backend := &testBackend{new: func(string) *testSession {
 		return &testSession{run: func(ctx context.Context, _ []Tensor) ([]Tensor, error) {
@@ -261,29 +266,27 @@ func TestManagerBoundsConcurrencyAndMemory(t *testing.T) {
 			}
 		}}
 	}}
-	manager, err := NewManager(backend, Config{MaxConcurrency: 1, MaxMemoryBytes: 8})
-	require.NoError(t, err)
-	model := newTestModel(t)
-	lease, err := manager.Acquire(context.Background(), model)
-	require.Error(t, err)
-	require.Nil(t, lease)
-	manager.Close()
-
-	// A second manager demonstrates cancellation while waiting for execution.
-	manager, err = NewManager(backend, Config{MaxConcurrency: 1, MaxMemoryBytes: 32})
+	manager, err := NewManager(backend, Config{MaxConcurrency: 1, MaxMemoryBytes: 32})
 	require.NoError(t, err)
 	defer manager.Close()
+	model := newTestModel(t)
 	first, err := manager.Acquire(context.Background(), model)
 	require.NoError(t, err)
 	defer first.Release()
 	input := newTestTensor(t, "input", 1, 2)
-	go func() { _, _ = first.Run(context.Background(), []Tensor{input}) }()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		_, _ = first.Run(context.Background(), []Tensor{input})
+	}()
 	<-started
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
 	_, err = first.Run(ctx, []Tensor{input})
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	close(release)
+	<-firstDone
+	require.Equal(t, int32(1), first.entry.session.(*testSession).maxActive.Load())
 }
 
 func TestManagerUsesLoadTimeMemoryCharge(t *testing.T) {
@@ -439,7 +442,6 @@ func TestRunnerPreservesOutputValidationCause(t *testing.T) {
 func TestTensorConstructionRejectsMismatchedValues(t *testing.T) {
 	_, err := NewFloat32Tensor("input", []int64{1, 2}, []float32{1})
 	require.Error(t, err)
-	require.False(t, errors.Is(err, context.Canceled))
 }
 
 func TestManagerRejectsExternalTensorData(t *testing.T) {
@@ -539,6 +541,18 @@ func TestManagerRejectsNULModelPath(t *testing.T) {
 	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 }
 
+func TestManagerRejectsOverlongModelPath(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	modelPath := t.TempDir() + "/" + strings.Repeat("a", 256)
+	_, err = manager.Acquire(context.Background(), modelPath)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+}
+
 func TestManagerCancelsWhileWaitingForEvictionClose(t *testing.T) {
 	closeStarted := make(chan struct{})
 	closeRelease := make(chan struct{})
@@ -633,58 +647,45 @@ func TestManagerDiscardsPartialSessionOnCanceledLoadAsynchronously(t *testing.T)
 	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
 }
 
-func TestManagerEvictsIdleEntryWhenPendingMemoryExceedsLimit(t *testing.T) {
-	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
-	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
-	require.NoError(t, err)
+func TestManagerRejectsLoadWhenPendingMemoryConsumesBudget(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseClose := func() { releaseOnce.Do(func() { close(closeRelease) }) }
+	defer releaseClose()
 
-	entry := &managerEntry{
-		key:       "idle",
-		session:   &testSession{},
-		memory:    8,
-		manager:   manager,
-		closeDone: make(chan struct{}),
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var loads atomic.Int32
+	session := &testSession{
+		memory: 16,
+		closeFunc: func() {
+			close(closeStarted)
+			<-closeRelease
+		},
+		run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
 	}
-	manager.mu.Lock()
-	manager.entries[entry.key] = entry
-	manager.memBytes = 17
-	evicted := manager.evictIdleForMemoryLocked(1)
-	manager.mu.Unlock()
-
-	require.Len(t, evicted, 1)
-	startCloseEntries(evicted)
-	require.Eventually(t, func() bool { return manager.MemoryBytes() == 9 }, time.Second, time.Millisecond)
-	manager.Close()
-}
-
-func TestManagerEvictsIdleEntryWhileAnotherSessionIsClosing(t *testing.T) {
-	backend := &testBackend{new: func(string) *testSession {
-		return &testSession{run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		if loads.Add(1) == 1 {
+			cancel()
+			return session, nil
+		}
+		return &testSession{memory: 16, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
 	}}
-	manager, err := NewManager(backend, Config{MaxSessions: 2, IdleTTL: time.Hour})
+	manager, err := NewManager(backend, Config{MaxSessions: 4, MaxMemoryBytes: 16, IdleTTL: time.Hour})
 	require.NoError(t, err)
+	defer manager.Close()
 
-	idle := &managerEntry{
-		key:       "idle",
-		session:   &testSession{},
-		memory:    8,
-		manager:   manager,
-		closeDone: make(chan struct{}),
-	}
-	manager.mu.Lock()
-	manager.entries[idle.key] = idle
-	manager.pendingSessions = 1 // another entry is already closing
-	manager.mu.Unlock()
+	_, err = manager.Acquire(ctx, newTestModel(t))
+	require.ErrorIs(t, err, context.Canceled)
+	<-closeStarted
 
-	lease, err := manager.Acquire(context.Background(), newTestModel(t))
-	require.NoError(t, err)
-	lease.Release()
-
-	// The pending close is only represented in this focused admission test.
-	manager.mu.Lock()
-	manager.pendingSessions = 0
-	manager.mu.Unlock()
-	manager.Close()
+	_, err = manager.Acquire(context.Background(), newTestModel(t))
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Equal(t, int32(1), loads.Load())
+	releaseClose()
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
 }
 
 func TestManagerRejectsOverBudgetSessionBeforeEviction(t *testing.T) {
@@ -742,17 +743,16 @@ func TestManagerKeepsPendingCloseWithinLimits(t *testing.T) {
 			<-closeRelease
 		}, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
 	}}
-	manager, err := NewManager(backend, Config{MaxSessions: 1, MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	manager, err := NewManager(backend, Config{MaxSessions: 1, MaxMemoryBytes: 16, IdleTTL: time.Nanosecond})
 	require.NoError(t, err)
 	defer manager.Close()
 	firstModel := newTestModel(t)
 	first, err := manager.Acquire(context.Background(), firstModel)
 	require.NoError(t, err)
-	first.Release()
 
 	closeDone := make(chan struct{})
 	go func() {
-		manager.removeAndClose(first.entry)
+		first.Release()
 		close(closeDone)
 	}()
 	<-closeStarted
@@ -791,6 +791,19 @@ func TestManagerIgnoresStaleIdleTimer(t *testing.T) {
 
 	require.Equal(t, 1, manager.SessionCount())
 	require.Equal(t, int32(0), entry.session.(*testSession).close.Load())
+}
+
+func TestSkipModelGroupHonorsCancellation(t *testing.T) {
+	path := t.TempDir() + "/group.onnx"
+	require.NoError(t, os.WriteFile(path, []byte{0x08, 0x00, 0x1c}, 0o600))
+	file, err := os.Open(path)
+	require.NoError(t, err)
+	defer file.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = skipModelGroup(ctx, file, 0, 3, 3)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestValidateTensorsRejectsPayloadSizeOverflow(t *testing.T) {
