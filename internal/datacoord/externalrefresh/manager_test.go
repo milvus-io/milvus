@@ -2902,3 +2902,38 @@ func TestCleanup_DoubleHandleJobFailedDoesNotDouble(t *testing.T) {
 	}
 	assert.Equal(t, fmt.Sprintf("__explore_temp__/coord_%d/", 111), prefixes[0])
 }
+
+func TestHandleJobFinished_DroppedCollection(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		finished  bool
+		lookupErr error
+		wantCalls int
+	}{
+		{"finished_missing", true, merr.WrapErrCollectionNotFound(200), 1},
+		{"active_missing", false, merr.WrapErrCollectionNotFound(200), 2},
+		{"finished_unavailable", true, merr.WrapErrServiceUnavailable("rootcoord unavailable"), 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newManagerForPublish(t, "", func(context.Context, int64, string, string) error {
+				t.Fatal("must not publish without a collection")
+				return nil
+			})
+			calls := 0
+			mgr.collectionGetter = func(context.Context, int64) (*meta.CollectionInfo, error) {
+				calls++
+				return nil, merr.Wrap(tc.lookupErr, "collection lookup")
+			}
+			job := publishJob()
+			if tc.finished {
+				job.State = indexpb.JobState_JobStateFinished
+			}
+			mgr.handleJobFinished(context.Background(), job)
+			mgr.handleJobFinished(context.Background(), job)
+			assert.Equal(t, tc.wantCalls, calls)
+			_, notified := mgr.notifiedJobs[job.GetJobId()]
+			assert.Equal(t, tc.wantCalls == 1, notified)
+			assert.Equal(t, tc.finished, job.GetState() == indexpb.JobState_JobStateFinished)
+		})
+	}
+}
