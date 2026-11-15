@@ -1446,6 +1446,10 @@ Valid values: [auto, enable, disable]`,
 }
 
 // /////////////////////////////////////////////////////////////////////////////
+// PulsarProducerAccessModeExclusiveWithFencing is the value of pulsar.producerAccessMode with which
+// a new producer fences out the producers that are already connected to the topic.
+const PulsarProducerAccessModeExclusiveWithFencing = "exclusiveWithFencing"
+
 // --- pulsar ---
 type PulsarConfig struct {
 	Address            ParamItem `refreshable:"false"`
@@ -1728,10 +1732,12 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Key:          "pulsar.producerAccessMode",
 		Version:      "3.0.2",
 		DefaultValue: "exclusive",
-		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared, exclusive or exclusiveWithFencing.
 exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+exclusiveWithFencing: the producer creation fences out the producers that are connected to the topic, so a new wal owner does not wait for the previous one to disconnect.
 shared: multiple producers can write to the topic at the same time.
-exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+exclusive access is enforced by pulsar broker 2.8.0 or later, exclusiveWithFencing requires pulsar broker 2.11.0 or later.
+With exclusiveWithFencing the streaming coord does not wait streaming.walBalancer.nodeLostGracePeriod before it reassigns the wal of a lost streaming node.`,
 		Export: true,
 	}
 	p.ProducerAccessMode.Init(base.mgr)

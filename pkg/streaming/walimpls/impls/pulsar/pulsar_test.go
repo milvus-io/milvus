@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -84,4 +85,50 @@ func TestPulsarExclusiveProducer(t *testing.T) {
 	defer second.Close()
 	_, err = second.Append(ctx, message.CreateTestEmptyInsertMesage(1, map[string]string{}))
 	require.NoError(t, err)
+}
+
+func TestPulsarExclusiveWithFencingProducer(t *testing.T) {
+	accessMode := &paramtable.Get().PulsarCfg.ProducerAccessMode
+	defer accessMode.SwapTempValue(accessMode.SwapTempValue(producerAccessModeExclusiveWithFencing))
+
+	opener, err := (&builderImpl{}).Build()
+	require.NoError(t, err)
+	defer opener.Close()
+
+	pchannel := types.PChannelInfo{
+		Name:       fmt.Sprintf("test-exclusive-with-fencing-producer-%d", time.Now().UnixNano()),
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}
+	first, err := opener.Open(context.Background(), &walimpls.OpenOption{Channel: pchannel})
+	require.NoError(t, err)
+	defer first.Close()
+	_, err = first.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, map[string]string{}))
+	require.NoError(t, err)
+
+	// The second open takes the topic over while the first producer is still connected.
+	pchannel.Term = 2
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	second, err := opener.Open(ctx, &walimpls.OpenOption{Channel: pchannel})
+	require.NoError(t, err)
+	defer second.Close()
+
+	// The first wal is fenced and can never append again.
+	require.Eventually(t, func() bool {
+		appendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := first.Append(appendCtx, message.CreateTestEmptyInsertMesage(2, map[string]string{}))
+		return errors.Is(err, walimpls.ErrFenced)
+	}, 30*time.Second, 100*time.Millisecond)
+
+	// The second wal keeps the topic after the first one tried to reconnect.
+	for i := 0; i < 20; i++ {
+		_, err = second.Append(ctx, message.CreateTestEmptyInsertMesage(int64(3+i), map[string]string{}))
+		require.NoError(t, err)
+		time.Sleep(50 * time.Millisecond)
+	}
+	_, err = first.Append(ctx, message.CreateTestEmptyInsertMesage(100, map[string]string{}))
+	// The error is marked with github.com/cockroachdb/errors, which the standard errors.Is cannot see.
+	require.True(t, errors.Is(err, walimpls.ErrFenced), "unexpected error: %v", err)
 }

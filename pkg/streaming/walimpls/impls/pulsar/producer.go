@@ -51,8 +51,9 @@ func newWALProducer(ctx context.Context, newClient clientFactory, topic string, 
 	for {
 		producer, err := client.CreateProducer(pulsar.ProducerOptions{
 			Topic: topic,
-			// The go pulsar client does not support ProducerAccessModeExclusiveWithFencing.
 			// In ProducerAccessModeExclusive, the creation fails while another producer is connected to the topic.
+			// In ProducerAccessModeExclusiveWithFencing, the broker closes the connected producers instead,
+			// and they fail with pulsar.ErrProducerFenced when they reconnect.
 			ProducerAccessMode: accessMode,
 		})
 		if err == nil {

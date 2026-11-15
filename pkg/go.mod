@@ -9,11 +9,11 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
 	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/aliyun/credentials-go v1.2.7
-	github.com/apache/pulsar-client-go v0.19.0
+	github.com/apache/pulsar-client-go v0.21.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/blang/semver/v4 v4.0.0
 	github.com/bytedance/mockey v1.4.6
-	github.com/cenkalti/backoff/v4 v4.2.1
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/confluentinc/confluent-kafka-go v1.9.1
 	github.com/containerd/cgroups/v3 v3.0.3
@@ -68,7 +68,7 @@ require (
 )
 
 require (
-	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0 // indirect
@@ -201,18 +201,18 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
-	github.com/shirou/gopsutil/v4 v4.25.10
+	github.com/shirou/gopsutil/v4 v4.26.3
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.8.1 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/tiancaiamao/gp v0.0.0-20221230034425-4025bc8a4d4a // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tikv/pd/client v0.0.0-20260609141937-b01426f6b08b // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
-	github.com/tklauser/go-sysconf v0.3.15 // indirect
-	github.com/tklauser/numcpus v0.10.0 // indirect
+	github.com/tklauser/go-sysconf v0.3.16 // indirect
+	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20220101234140-673ab2c3ae75 // indirect
 	github.com/twmb/murmur3 v1.1.6
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
@@ -259,3 +259,5 @@ replace (
 replace github.com/hamba/avro/v2 => github.com/iskorotkov/avro/v2 v2.33.0
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 // v0.61.0 removed the UnaryServerInterceptor used by etcd v3.5.x and woodpecker
+
+replace github.com/apache/pulsar-client-go => github.com/xiaofan-luan/pulsar-client-go v0.21.1-0.20261110013408-df16f292a96d

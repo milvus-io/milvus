@@ -358,10 +358,12 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
-  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared, exclusive or exclusiveWithFencing.
   # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # exclusiveWithFencing: the producer creation fences out the producers that are connected to the topic, so a new wal owner does not wait for the previous one to disconnect.
   # shared: multiple producers can write to the topic at the same time.
-  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later, exclusiveWithFencing requires pulsar broker 2.11.0 or later.
+  # With exclusiveWithFencing the streaming coord does not wait streaming.walBalancer.nodeLostGracePeriod before it reassigns the wal of a lost streaming node.
   producerAccessMode: exclusive
   # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
   # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
