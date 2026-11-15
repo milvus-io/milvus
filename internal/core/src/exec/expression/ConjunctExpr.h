@@ -74,15 +74,6 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
     bool
-    CanUseNestedIndex() const override {
-        return !inputs_.empty() &&
-               std::all_of(
-                   inputs_.begin(), inputs_.end(), [](const auto& input) {
-                       return input->CanUseNestedIndex();
-                   });
-    }
-
-    bool
     CanUseOffsetsForSequentialBatch() override {
         return std::all_of(
             inputs_.begin(), inputs_.end(), [](const auto& input) {

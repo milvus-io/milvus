@@ -7143,17 +7143,24 @@ class NestedIndexRouteExprSet : public ExprSet {
          bool initialize,
          EvalCtx& ctx,
          std::vector<VectorPtr>& results) override {
-        EXPECT_EQ(ctx.get_offset_input(), nullptr);
+        EXPECT_EQ(ctx.get_offset_input() != nullptr, expect_offsets);
+        if (const auto* offsets = ctx.get_offset_input()) {
+            EXPECT_EQ(offsets->size(), expected_candidates);
+        }
         ++evals;
         ExprSet::Eval(begin, end, initialize, ctx, results);
     }
     int evals = 0;
+    bool expect_offsets = false;
+    size_t expected_candidates = 0;
 };
 
 class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
  protected:
     void
-    CheckCompositeNestedIndexRoute(bool is_and, bool negate) {
+    CheckCompositeNestedIndexRoute(bool is_and,
+                                   bool negate,
+                                   int selected_rows) {
         milvus::test::ExprBatchSizeGuard batch_guard(100);
         constexpr int rows = 1000;
         auto schema = std::make_shared<Schema>();
@@ -7220,23 +7227,25 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
         auto expressions = std::make_unique<NestedIndexRouteExprSet>(
             std::vector<expr::TypedExprPtr>{root}, &exec, true);
         auto* observed = expressions.get();
-        ASSERT_TRUE(observed->expr(0)->CanUseNestedIndex());
         auto conjunction =
             negate ? observed->expr(0)->GetInputsRef()[0] : observed->expr(0);
-        auto indexed_leaf = conjunction->GetInputsRef()[1];
-        conjunction->GetInputsRef()[1] =
-            std::make_shared<ConstantElementBitmapExpr>(true, true);
-        EXPECT_FALSE(observed->expr(0)->CanUseNestedIndex());
-        conjunction->GetInputsRef()[1] = indexed_leaf;
+        for (const auto& leaf : conjunction->GetInputsRef()) {
+            ASSERT_TRUE(leaf->CanUseNestedIndex());
+        }
+        // Preserve master's routing for composite predicates even when every
+        // leaf has a nested index. The 0.2%-1% band still uses offsets.
+        ASSERT_FALSE(observed->expr(0)->CanUseNestedIndex());
+        observed->expect_offsets = selected_rows < rows / 100;
+        observed->expected_candidates = selected_rows;
         node.element_exprs_ = std::move(expressions);
         TargetBitmap parents(rows, false), unused_validity(rows, false);
-        for (int row : {1, 3, 500, 700, 999})
-            parents[row] = true;  // 0.5%: capability decides mode.
+        for (int i = 0; i < selected_rows; ++i) {
+            parents[(i * 137 + 1) % rows] = true;
+        }
         auto offsets = segment->GetStructElementOffsets(field);
         auto [filtered, valid] = node.EvaluateElementExpression(
             parents.view(), unused_validity.view(), offsets.get());
-        EXPECT_EQ(observed->evals,
-                  10);  // Sequential batches; offset mode would evaluate once.
+        EXPECT_EQ(observed->evals, observed->expect_offsets ? 1 : 10);
         for (int row = 0; row < rows; ++row) {
             const auto value = row % 7;
             bool hit = is_and ? value > 1 && value < 5 : value > 1 || value < 5;
@@ -7443,12 +7452,15 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
 };
 
 TEST_F(ElementFilterBitsNodeCandidateTest,
-       CompositeNestedIndexSelectsFullMode) {
+       CompositeNestedIndexesPreserveExistingRouting) {
     for (bool is_and : {false, true}) {
         for (bool negate : {false, true}) {
-            SCOPED_TRACE(::testing::Message()
-                         << "and=" << is_and << ", not=" << negate);
-            CheckCompositeNestedIndexRoute(is_and, negate);
+            for (int selected_rows : {1, 2, 5, 10}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "and=" << is_and << ", not=" << negate
+                             << ", selected_rows=" << selected_rows);
+                CheckCompositeNestedIndexRoute(is_and, negate, selected_rows);
+            }
         }
     }
 }
