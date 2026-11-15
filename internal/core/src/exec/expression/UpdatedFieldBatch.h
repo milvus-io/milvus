@@ -64,4 +64,49 @@ class UpdatedFieldBatch {
     FixedVector<bool> valid_;
 };
 
+// Materialize only batches containing visible updates. Base views remain
+// immutable; owning patch references keep updated string views alive.
+template <typename T>
+class UpdatedFieldOverlay {
+ public:
+    UpdatedFieldOverlay(
+        const T* base,
+        ValidityView validity,
+        size_t count,
+        std::vector<segcore::experimental::UpdatesRecord::RangeUpdate> patches)
+        : patches_(std::move(patches)), values_(count), valid_(count) {
+        for (size_t i = 0; i < count; ++i) {
+            valid_[i] = !validity || validity[i];
+            if (valid_[i])
+                values_[i] = base[i];
+        }
+        for (const auto& patch : patches_) {
+            const auto& value = *patch.value;
+            valid_[patch.position] =
+                !std::holds_alternative<std::monostate>(value);
+            if (valid_[patch.position]) {
+                if constexpr (std::is_same_v<T, int64_t>)
+                    values_[patch.position] = std::get<int64_t>(value);
+                else
+                    values_[patch.position] = std::get<std::string>(value);
+            } else {
+                values_[patch.position] = T{};
+            }
+        }
+    }
+    const T*
+    Data() const {
+        return values_.data();
+    }
+    ValidityView
+    Validity() const {
+        return ValidityView::FromExpanded(valid_.data());
+    }
+
+ private:
+    std::vector<segcore::experimental::UpdatesRecord::RangeUpdate> patches_;
+    std::vector<T> values_;
+    FixedVector<bool> valid_;
+};
+
 }  // namespace milvus::exec

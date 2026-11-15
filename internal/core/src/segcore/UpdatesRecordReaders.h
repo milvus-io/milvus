@@ -96,6 +96,11 @@ class ValueReader : public index::IIndexReaderBase {
     }
     std::unique_ptr<index::IIndexReaderBase>
     CorrectOriginalIndex(const index::IIndexReaderBase* original) const;
+    std::vector<UpdatesRecord::RangeUpdate>
+    ReadRangeUpdates(int64_t begin_offset,
+                     size_t count,
+                     const TargetBitmap* candidates,
+                     size_t candidate_offset) const;
     // Mask positions are kept aligned but excluded rows are never looked up.
     std::vector<std::shared_ptr<const UpdateValue>>
     ReadCandidates(const std::vector<int64_t>& offsets,

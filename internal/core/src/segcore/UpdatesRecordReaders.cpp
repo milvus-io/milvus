@@ -539,6 +539,20 @@ ValueReader::CorrectOriginalIndex(
                                                                     original);
 }
 
+std::vector<UpdatesRecord::RangeUpdate>
+ValueReader::ReadRangeUpdates(int64_t begin_offset,
+                              size_t count,
+                              const TargetBitmap* candidates,
+                              size_t candidate_offset) const {
+    binding_->records->RecordRead(false);
+    return binding_->records->ReadRangeUpdates(binding_->field_id,
+                                               binding_->query_ts,
+                                               begin_offset,
+                                               count,
+                                               candidates,
+                                               candidate_offset);
+}
+
 UpdatesRecord::Values
 ValueReader::ReadCandidates(const std::vector<int64_t>& offsets,
                             const TargetBitmap* candidates) const {

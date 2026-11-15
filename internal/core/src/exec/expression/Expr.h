@@ -3062,6 +3062,19 @@ class SegmentExpr : public Expr {
                       std::is_same_v<T, std::string_view> ||
                       std::is_same_v<T, std::string>) {
             if (HasUpdates()) {
+                if constexpr (milvus::HasTargetType<T>) {
+                    const auto processed =
+                        ProcessDataChunksByScanWithTarget<T,
+                                                          NeedSegmentOffsets>(
+                            func,
+                            skip_func,
+                            res,
+                            valid_res,
+                            candidate_mask,
+                            values...);
+                    if (processed >= 0)
+                        return processed;
+                }
                 const auto count = GetNextBatchSize();
                 std::vector<int64_t> candidate_rows(count);
                 std::iota(candidate_rows.begin(),
@@ -3121,7 +3134,9 @@ class SegmentExpr : public Expr {
         if (real_batch_size == 0) {
             return 0;
         }
-        auto* cursor = EnsureDataScanCursor<T>(skip_func);
+        // Base statistics cannot reject rows whose updated values may match.
+        auto* cursor =
+            EnsureDataScanCursor<T>(HasUpdates() ? SkipChunkFn{} : skip_func);
         if (cursor == nullptr) {
             return -1;
         }
@@ -3208,10 +3223,33 @@ class SegmentExpr : public Expr {
                            "data scan batch [{}, {}) has no values",
                            batch.row_id_start,
                            batch.row_id_start + batch.size);
-                evaluate_batch(batch.values.data_as<T>(),
-                               batch.validity,
-                               batch.row_id_start,
-                               batch.size);
+                const auto* data = batch.values.data_as<T>();
+                bool overlaid = false;
+                if constexpr (std::is_same_v<T, int64_t> ||
+                              std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, std::string>) {
+                    if (HasUpdates()) {
+                        auto patches = update_readers_.values->ReadRangeUpdates(
+                            batch.row_id_start,
+                            batch.size,
+                            candidate_mask,
+                            batch.row_id_start - window_start);
+                        if (!patches.empty()) {
+                            UpdatedFieldOverlay<T> overlay(data,
+                                                           batch.validity,
+                                                           batch.size,
+                                                           std::move(patches));
+                            evaluate_batch(overlay.Data(),
+                                           overlay.Validity(),
+                                           batch.row_id_start,
+                                           batch.size);
+                            overlaid = true;
+                        }
+                    }
+                }
+                if (!overlaid)
+                    evaluate_batch(
+                        data, batch.validity, batch.row_id_start, batch.size);
             }
             offset += batch.size;
         }

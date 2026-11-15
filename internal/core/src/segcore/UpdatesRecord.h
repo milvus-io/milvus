@@ -97,10 +97,26 @@ class UpdatesRecord {
                     bool equal,
                     TargetBitmap& result,
                     TargetBitmap* validity) const;
+    struct RangeUpdate {
+        size_t position;
+        std::shared_ptr<const UpdateValue> value;
+    };
+    // Sparse patches for a contiguous raw batch. Positions are batch-relative;
+    // only updated, selected cells undergo MVCC lookup. Never reads base data.
+    std::vector<RangeUpdate>
+    ReadRangeUpdates(int64_t field_id,
+                     uint64_t query_ts,
+                     int64_t begin_offset,
+                     size_t count,
+                     const TargetBitmap* candidates = nullptr,
+                     size_t candidate_offset = 0) const;
     struct Stats {
         uint64_t updated_cells = 0, update_versions = 0, base_index_rows = 0;
         uint64_t value_rows = 0, base_rows = 0, correction_rows = 0;
         uint64_t old_index_reads = 0, index_postings = 0;
+        uint64_t overlay_batches = 0, overlay_history_rows = 0,
+                 overlay_rows = 0;
+        uint64_t updated_offset_bitmap_bytes = 0;
         uint64_t all_valid_reads = 0, latest_validity_reads = 0;
         uint64_t history_validity_reads = 0, latest_validity_bytes = 0;
         uint64_t latest_posting_reads = 0, latest_posting_bitmap_bytes = 0;

@@ -230,6 +230,8 @@ struct Field {
     // enter the per-value lookup map lazily when their row is first updated.
     std::vector<PostingPosition> current_postings;
     OffsetHistories offsets;
+    // Membership only: avoids history lookups for unchanged raw-scan rows.
+    TargetBitmap updated_offsets;
     UpdatesRecord::BaseReader base_reader;
     uint64_t base_index_rows = 0, updated_cells = 0;
     std::unique_ptr<AllDataVersionedIndex> index;
@@ -388,6 +390,8 @@ class UpdatesRecord::Impl {
     std::optional<uint64_t> last_mutation_ts;
     std::atomic<uint64_t> index_reads{0}, value_reads{0};
     std::atomic<uint64_t> value_rows{0}, base_rows{0}, correction_rows{0};
+    std::atomic<uint64_t> overlay_batches{0}, overlay_history_rows{0},
+        overlay_rows{0};
     std::atomic<uint64_t> old_index_reads{0};
     mutable std::atomic<uint64_t> index_postings{0}, latest_posting_reads{0};
     std::atomic<uint64_t> all_valid_reads{0}, latest_validity_reads{0},
@@ -450,6 +454,7 @@ UpdatesRecord::RegisterField(int64_t field_id,
     field->type = type;
     field->nullable = nullable;
     field->base_reader = std::move(base_reader);
+    field->updated_offsets = TargetBitmap(impl_->row_count, false);
     if (impl_->enable_temp_index) {
         field->index = std::make_unique<AllDataVersionedIndex>();
         field->current_postings.reserve(impl_->row_count);
@@ -541,12 +546,17 @@ UpdatesRecord::GetStats() const {
         stats.update_versions += field->versions.size();
         stats.base_index_rows += field->base_index_rows;
         stats.latest_validity_bytes += field->latest_validity.size_in_bytes();
+        stats.updated_offset_bitmap_bytes +=
+            field->updated_offsets.size_in_bytes();
         stats.latest_posting_bitmap_bytes += field->latest_posting_bytes;
         stats.latest_posting_bitmap_count += field->latest_posting_count;
     }
     stats.value_rows = impl_->value_rows.load();
     stats.base_rows = impl_->base_rows.load();
     stats.correction_rows = impl_->correction_rows.load();
+    stats.overlay_batches = impl_->overlay_batches.load();
+    stats.overlay_history_rows = impl_->overlay_history_rows.load();
+    stats.overlay_rows = impl_->overlay_rows.load();
     stats.old_index_reads = impl_->old_index_reads.load();
     stats.index_postings = impl_->index_postings.load();
     stats.latest_posting_reads = impl_->latest_posting_reads.load();
@@ -704,6 +714,7 @@ UpdatesRecord::Apply(const std::vector<UpdateValue>& primary_keys,
         if (item.base_history)
             item.base_history->push_back(item.base_interval);
         item.history->push_back(item.version);
+        item.field->updated_offsets.set(item.offset);
         if (item.index_history) {
             item.index_history->push_back(item.version);
             item.block->last_begin[item.slot] = mutation_ts;
@@ -740,6 +751,45 @@ UpdatesRecord::Lookup(int64_t field_id,
                       int64_t offset,
                       uint64_t query_ts) const {
     return Gather(field_id, {offset}, query_ts).front();
+}
+
+std::vector<UpdatesRecord::RangeUpdate>
+UpdatesRecord::ReadRangeUpdates(int64_t field_id,
+                                uint64_t query_ts,
+                                int64_t begin_offset,
+                                size_t count,
+                                const TargetBitmap* candidates,
+                                size_t candidate_offset) const {
+    Require(begin_offset >= 0 &&
+                static_cast<size_t>(begin_offset) <= impl_->row_count &&
+                count <= impl_->row_count - begin_offset,
+            "Invalid POC overlay range");
+    const bool masked = candidates && !candidates->empty();
+    Require(!masked || (candidate_offset <= candidates->size() &&
+                        count <= candidates->size() - candidate_offset),
+            "Invalid POC overlay candidate range");
+    std::vector<RangeUpdate> patches;
+    uint64_t visited = 0;
+    {
+        std::shared_lock lock(impl_->mutex);
+        const auto& field = impl_->GetField(field_id);
+        auto updated = field.updated_offsets.view(begin_offset, count);
+        for (auto pos = updated.find_first(); pos;
+             pos = updated.find_next(*pos)) {
+            if (masked && !(*candidates)[candidate_offset + *pos])
+                continue;
+            ++visited;
+            const auto* history = field.offsets.Find(begin_offset + *pos);
+            const auto* version =
+                history ? Visible(*history, query_ts) : nullptr;
+            if (version)
+                patches.push_back({*pos, version->value});
+        }
+    }
+    impl_->overlay_batches.fetch_add(1, std::memory_order_relaxed);
+    impl_->overlay_history_rows.fetch_add(visited, std::memory_order_relaxed);
+    impl_->overlay_rows.fetch_add(patches.size(), std::memory_order_relaxed);
+    return patches;
 }
 
 UpdatesRecord::Values
