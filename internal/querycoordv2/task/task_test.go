@@ -1601,6 +1601,89 @@ func (suite *TaskSuite) TestRemoveByNodeWaitsForSchedule() {
 	suite.AssertTaskNum(0, 0, 0, 0)
 }
 
+func (suite *TaskSuite) TestRemoveSourceDuringMoveGrowKeepsEligibleGrow() {
+	ctx := context.Background()
+	sourceNode := int64(2)
+	targetNode := int64(3)
+	segmentID := int64(999)
+	channelName := "ch-0"
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  channelName,
+	}
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	suite.dist.SegmentDistManager.Update(sourceNode, utils.CreateTestSegment(suite.collection, 1, segmentID, sourceNode, 1, channelName))
+
+	move, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channelName, segmentID),
+		NewSegmentAction(sourceNode, ActionTypeReduce, channelName, segmentID),
+	)
+	suite.NoError(err)
+	move.SetPriority(TaskPriorityLow)
+	suite.NoError(suite.scheduler.Add(move))
+	suite.scheduler.waitQueue.Remove(move)
+	suite.scheduler.processQueue.Add(move)
+
+	// Model a Grow already admitted by the destination executor. The RPC is
+	// still pending, so its distribution report has not arrived yet.
+	move.Actions()[0].(*SegmentAction).rpcStarted.Store(true)
+
+	targetMgr := meta.NewMockTargetManager(suite.T())
+	targetMgr.EXPECT().CanSegmentBeMoved(mock.Anything, suite.collection, segmentID).Return(true).Maybe()
+	suite.scheduler.targetMgr = targetMgr
+
+	suite.nodeMgr.Remove(sourceNode)
+	suite.dist.SegmentDistManager.Update(sourceNode)
+	suite.scheduler.RemoveByNode(sourceNode)
+
+	suite.Equal(TaskStatusStarted, move.Status())
+	suite.NoError(move.Context().Err())
+	suite.True(suite.scheduler.tasks.Contain(move.ID()))
+
+	// The segment checker can create a normal priority Grow when the source
+	// distribution is cleared. It must not replace this in-flight Grow.
+	duplicateGrow, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channelName, segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(duplicateGrow))
+	suite.True(suite.scheduler.tasks.Contain(move.ID()))
+	suite.False(suite.scheduler.tasks.Contain(duplicateGrow.ID()))
+
+	// Complete the destination Grow and verify that the absent source Reduce is
+	// skipped and the Move terminates successfully.
+	move.Actions()[0].(*SegmentAction).rpcReturned.Store(true)
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, 1, segmentID, targetNode, 1, channelName))
+	suite.False(suite.scheduler.preProcess(move))
+	suite.Equal(TaskStatusSucceeded, move.Status())
+	suite.NoError(move.Err())
+	suite.scheduler.remove(move)
+	suite.False(suite.scheduler.tasks.Contain(move.ID()))
+}
+
 func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 	scheduler := suite.scheduler
 

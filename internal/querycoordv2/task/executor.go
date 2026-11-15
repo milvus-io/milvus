@@ -180,6 +180,9 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	// later step in a multi-action task gets its own full budget rather than
 	// sharing whatever was left of an earlier step's.
 	task.ActivateDeadline(step)
+	if action, ok := task.Actions()[step].(*SegmentAction); ok {
+		action.rpcStarted.Store(true)
+	}
 
 	go func() {
 		mlog.Info(context.TODO(), "execute the action of task")

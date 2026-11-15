@@ -446,8 +446,9 @@ func (task *baseTask) Name() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID    typeutil.UniqueID
-	loadPriority commonpb.LoadPriority
+	segmentID     typeutil.UniqueID
+	loadPriority  commonpb.LoadPriority
+	reduceSkipped atomic.Bool
 	// for balance segment task, expected load and release execution on the same shard leader
 	shardLeaderID int64
 }
@@ -522,6 +523,14 @@ func (task *SegmentTask) ShardLeaderID() int64 {
 
 func (task *SegmentTask) SetShardLeaderID(id int64) {
 	task.shardLeaderID = id
+}
+
+func (task *SegmentTask) SkipReduce() {
+	task.reduceSkipped.Store(true)
+}
+
+func (task *SegmentTask) IsReduceSkipped() bool {
+	return task.reduceSkipped.Load()
 }
 
 type ChannelTask struct {
