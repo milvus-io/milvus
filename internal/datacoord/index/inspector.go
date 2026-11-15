@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -387,7 +386,7 @@ func (i *IndexInspector) createIndexForSegment(ctx context.Context, collection *
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
 		var err error
-		indexParams, err = Params.KnowhereConfig.UpdateIndexParams(indexType, paramtable.BuildStage, indexParams)
+		indexParams, err = updateBuildIndexParams(indexType, indexParams)
 		if err != nil {
 			return err
 		}

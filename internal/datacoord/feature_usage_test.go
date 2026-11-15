@@ -59,12 +59,10 @@ func TestIndexMeta_ListAllIndexes(t *testing.T) {
 	got := m.ListAllIndexes()
 	require.Len(t, got, 2, "deleted indexes are skipped")
 
-	// Clones: mutating the result does not touch the meta.
+	// The results are the stored, shared indexes.
 	for _, idx := range got {
-		idx.IndexName = "mutated"
+		assert.Same(t, m.Indexes[idx.CollectionID][idx.IndexID], idx)
 	}
-	assert.Equal(t, "a", m.Indexes[1][1].IndexName)
-	assert.Equal(t, "b", m.Indexes[2][3].IndexName)
 
 	assert.Empty(t, index.NewSegmentIndexMeta(nil).ListAllIndexes())
 }
