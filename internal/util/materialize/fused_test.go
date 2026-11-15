@@ -2,6 +2,7 @@ package materialize
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -453,6 +454,23 @@ func TestEncodeFused_ReaderRoundTrip(t *testing.T) {
 	}
 }
 
+// minAllocsPerCall returns the fewest allocations one call of f makes across
+// several measurements. testing.AllocsPerRun counts the process's mallocs, so
+// it also counts other goroutines: once a test in this package has called
+// paramtable.Init, the config refresher re-reads and parses milvus.yaml on
+// every tick, about 18,000 allocations each time. Measuring one call at a
+// time keeps each window short, so such a burst lands in only some of them,
+// while an allocation made by f itself shows up in every one: the minimum is
+// f's own count.
+func minAllocsPerCall(f func()) float64 {
+	const attempts = 50
+	minAllocs := math.Inf(1)
+	for i := 0; i < attempts; i++ {
+		minAllocs = min(minAllocs, testing.AllocsPerRun(1, f))
+	}
+	return minAllocs
+}
+
 // Allocations per call do not grow with the row count: the message buffer,
 // and nothing per row.
 func TestEncodeFused_AllocsIndependentOfRows(t *testing.T) {
@@ -465,7 +483,7 @@ func TestEncodeFused_AllocsIndependentOfRows(t *testing.T) {
 			_, ok, err := encodeFused(header, sel) // warm the layout cache
 			require.NoError(t, err)
 			require.True(t, ok)
-			a := testing.AllocsPerRun(50, func() {
+			a := minAllocsPerCall(func() {
 				_, _, _ = encodeFused(header, sel)
 			})
 			release()
