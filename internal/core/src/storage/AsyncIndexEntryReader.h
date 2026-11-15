@@ -25,6 +25,7 @@
 #include "folly/coro/Task.h"
 #include "pb/common.pb.h"
 #include "storage/IndexEntryFormat.h"
+#include "storage/IndexEntryFile.h"
 #include "storage/IndexEntryTarget.h"
 #include "storage/plugin/PluginInterface.h"
 
@@ -45,17 +46,26 @@ class AsyncIndexEntryReader {
          proto::common::LoadPriority priority,
          folly::CancellationToken token = {});
 
+    // Bind fresh per-reader state to a previously validated immutable file; no I/O.
+    static std::unique_ptr<AsyncIndexEntryReader>
+    FromFile(std::shared_ptr<const IndexEntryFile> file);
+
+    std::shared_ptr<const IndexEntryFile>
+    File() const noexcept {
+        return file_;
+    }
+
     // Immutable entry layout, used for destination planning
     // and resource estimates. No I/O; the reference lives as long as this reader.
     const IndexEntryDirectory&
     Directory() const noexcept {
-        return directory_;
+        return file_->directory;
     }
 
     // Index properties decoded from the metadata entry (not entry locations).
     const nlohmann::json&
     IndexMeta() const noexcept {
-        return metadata_;
+        return file_->metadata;
     }
 
     // Fill the entry targets on the shared async executor. Publish the first
@@ -94,12 +104,8 @@ class AsyncIndexEntryReader {
                      size_t bytes,
                      folly::CancellationToken token) const;
 
-    std::shared_ptr<milvus::InputStream> input_;
-    int64_t collection_id_{0};
-    std::optional<IndexFileEncryption> encryption_;
-    std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
-    IndexEntryDirectory directory_;
-    nlohmann::json metadata_;
+    std::shared_ptr<const IndexEntryFile> file_;
+    IndexEntryTail opening_tail_;
 };
 
 }  // namespace milvus::storage

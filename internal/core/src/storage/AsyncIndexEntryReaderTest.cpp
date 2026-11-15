@@ -391,6 +391,115 @@ ReadEntriesForTest(AsyncIndexEntryReader& reader,
     co_return std::move(plan);
 }
 
+TEST_F(AsyncIndexEntryReaderTest, CachedMetadataPreservesCrcAndEncryption) {
+    auto cipher = std::make_shared<MockCipherPlugin>();
+    PluginLoader::GetInstance().registerPluginForTest(cipher);
+    auto unload = folly::makeGuard([] {
+        PluginLoader::GetInstance().unregisterPluginForTest("CipherPlugin");
+    });
+    for (const bool encrypted : {false, true}) {
+        const auto path = kV3FilePath + "_cached_crc";
+        const auto data = GeneratePattern(128 * 1024);
+        if (encrypted) {
+            IndexEntryEncryptedLocalWriter writer(
+                path, fs_, cipher, 1, 0, GetRootPath(), kStreamSliceAlignment);
+            writer.WriteEntry("data", data.data(), data.size());
+            writer.PutMeta("value", "unchanged");
+            writer.Finish();
+        } else {
+            IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+            writer.WriteEntry("data", data.data(), data.size());
+            writer.PutMeta("value", "unchanged");
+            writer.Finish();
+        }
+        auto bytes = ReadLocalFileBytes(GetRootPath() + "/" + path);
+        auto direct =
+            std::make_shared<milvus::test::ControlledDirectReadFile>(bytes);
+        auto reader =
+            OpenAsyncReader(std::make_shared<RemoteInputStream>(direct));
+        ASSERT_EQ(direct->DirectReadCalls().size(), 2);
+        EXPECT_EQ(reader->IndexMeta().at("value"), "unchanged");
+        auto rebound = IndexEntryReader::FromFile(reader->File());
+        EXPECT_EQ(rebound->ReadEntry("data").data, data);
+        const auto& meta = reader->Directory().At(MILVUS_V3_META_ENTRY_NAME);
+        const auto offset =
+            encrypted ? std::get<EncryptedEntrySource>(meta.source)
+                            .slices.front()
+                            .remote_offset
+                      : std::get<PlainEntrySource>(meta.source).remote_offset;
+        bytes[offset + 1] ^= 1;
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << encrypted << async);
+            auto corrupt =
+                std::make_shared<milvus::test::ControlledDirectReadFile>(bytes);
+            auto input = std::make_shared<RemoteInputStream>(corrupt);
+            EXPECT_THROW(
+                {
+                    if (async)
+                        (void)OpenAsyncReader(input);
+                    else
+                        (void)IndexEntryReader::Open(input, input->Size());
+                },
+                milvus::SegcoreError);
+        }
+    }
+}
+
+TEST_F(AsyncIndexEntryReaderTest, MetadataReadsOnlyMissingTailPrefix) {
+    for (const auto [data_size, meta_size] :
+         {std::pair<size_t, size_t>{1024, 16},
+          {128 * 1024, 16},
+          {128 * 1024, 70 * 1024}}) {
+        SCOPED_TRACE(meta_size);
+        const auto path = kV3FilePath + "_metadata_reuse";
+        const auto data = GeneratePattern(data_size);
+        {
+            IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+            writer.WriteEntry("data", data.data(), data.size());
+            writer.PutMeta("value", std::string(meta_size, 'x'));
+            writer.Finish();
+        }
+        auto direct = std::make_shared<milvus::test::ControlledDirectReadFile>(
+            ReadLocalFileBytes(GetRootPath() + "/" + path));
+        auto input = std::make_shared<RemoteInputStream>(direct);
+        auto reader = OpenAsyncReader(input);
+        EXPECT_EQ(reader->IndexMeta().at("value"), std::string(meta_size, 'x'));
+        auto reads = direct->DirectReadCalls();
+        ASSERT_EQ(reads.size(), meta_size < 64 * 1024 ? 2 : 3);
+        EXPECT_EQ(reads[0].nbytes, MILVUS_V3_MAGIC_SIZE);
+        EXPECT_EQ(reads[1].nbytes,
+                  std::min(input->Size(), kIndexEntryTailReadBytes));
+        if (reads.size() == 3) {
+            EXPECT_EQ(reads[2].position + reads[2].nbytes, reads[1].position);
+        }
+        auto file = reader->File();
+        reader.reset();
+        direct->ResetCounters();
+        std::vector<uint8_t> target(data.size());
+        auto retry = AsyncIndexEntryReader::FromFile(file);
+        folly::CancellationSource cancelled;
+        cancelled.requestCancellation();
+        EXPECT_THROW(
+            folly::coro::blockingWait(ReadEntriesForTest(
+                *retry,
+                {{"data",
+                  MemoryEntryTarget{nullptr, target.data(), target.size()}}},
+                milvus::proto::common::LoadPriority::HIGH,
+                cancelled.getToken())),
+            milvus::SegcoreError);
+        EXPECT_TRUE(direct->DirectReadCalls().empty());
+        folly::coro::blockingWait(ReadEntriesForTest(
+            *retry,
+            {{"data",
+              MemoryEntryTarget{nullptr, target.data(), target.size()}}},
+            milvus::proto::common::LoadPriority::HIGH));
+        EXPECT_EQ(target, data);
+        reads = direct->DirectReadCalls();
+        ASSERT_EQ(reads.size(), 1);
+        EXPECT_EQ(reads[0].nbytes, data.size());
+    }
+}
+
 TEST_F(AsyncIndexEntryReaderTest, InvalidFileSizeDoesNotRemoveExistingFile) {
     const auto path = GetRootPath() + "/existing_file";
     std::filesystem::create_directories(GetRootPath());
@@ -499,8 +608,8 @@ TEST_F(AsyncIndexEntryReaderTest,
             return error.get_error_code();
         }
     });
-    // Magic and the combined footer/directory read only need a slot;
-    // __meta__ is the third read and must wait for the held byte budget.
+    // Magic and tail reads only need a slot. Metadata decoding still waits
+    // for the held slice byte budget even when its bytes are already cached.
     EXPECT_TRUE(direct_file->WaitForCallCount(2));
     EXPECT_FALSE(
         direct_file->WaitForCallCount(3, std::chrono::milliseconds(50)));
@@ -589,8 +698,8 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto reader = OpenAsyncReader(recording);
     auto reads_after_open = recording->ReadRanges().size();
-    // One magic read, one combined directory/footer tail read, one meta read.
-    EXPECT_EQ(reads_after_open, 3);
+    // One magic read and one tail read covering directory, footer and metadata.
+    EXPECT_EQ(reads_after_open, 2);
 
     static_assert(std::is_same_v<decltype(reader->Directory()),
                                  const IndexEntryDirectory&>);

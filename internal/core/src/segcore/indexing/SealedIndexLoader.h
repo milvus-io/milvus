@@ -111,6 +111,7 @@ class SealedIndexLoader {
     cachinglayer::ResourceUsage shared_overhead_;
     // Consumed by the first index creation attempt.
     std::shared_ptr<storage::V1RemoteSource> prepared_legacy_source_;
+    std::shared_ptr<const storage::IndexEntryFile> prepared_packed_file_;
     bool lazy_load_{false};
     milvus::cachinglayer::Meta meta_;
 };

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include "folly/ScopeGuard.h"
 
 #include <barrier>
 #include <filesystem>
@@ -230,6 +231,18 @@ TEST_F(SealedIndexLoaderTest, MarisaCreatesIndexBeforeLoadingRequestStorage) {
         auto translator = std::make_unique<SealedIndexLoader>(
             &info, tracer::TraceContext{}, context_, Config(info.index_params));
         ASSERT_EQ(translator->Family(), index::families::kMarisa);
+        // Remove the path after inspection: creation and first pin must reuse
+        // the exact opened file, including after a cancelled creation attempt.
+        const auto moved = info.index_files.front() + ".moved";
+        ASSERT_TRUE(context_.fs->Move(info.index_files.front(), moved).ok());
+        auto restore = folly::makeGuard([&] {
+            EXPECT_TRUE(
+                context_.fs->Move(moved, info.index_files.front()).ok());
+        });
+        folly::CancellationSource cancelled;
+        cancelled.requestCancellation();
+        OpContext rejected(cancelled.getToken());
+        EXPECT_THROW(translator->CreateIndex(&rejected), SegcoreError);
         auto index = translator->CreateIndex(nullptr);
         translator.reset();
         EXPECT_EQ(index->Metadata().count, 4);
