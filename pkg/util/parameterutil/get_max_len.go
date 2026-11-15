@@ -13,8 +13,9 @@ import (
 
 // GetMaxLength get max length of field. Maybe also helpful outside.
 func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
-	if !typeutil.IsStringType(field.GetDataType()) && !typeutil.IsStringType(field.GetElementType()) {
-		msg := fmt.Sprintf("%s is not of string type", field.GetDataType())
+	if !typeutil.IsStringType(field.GetDataType()) && !typeutil.IsStringType(field.GetElementType()) &&
+		!typeutil.IsBlobType(field.GetDataType()) {
+		msg := fmt.Sprintf("%s is not of string or blob type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_VarChar, field.GetDataType(), msg)
 	}
 	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))

@@ -55,6 +55,21 @@ func TestGetMaxLength(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(100), maxLength)
 	})
+
+	t.Run("blob type", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Blob,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "64",
+				},
+			},
+		}
+		maxLength, err := GetMaxLength(f)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(64), maxLength)
+	})
 }
 
 func TestGetMaxCapacity(t *testing.T) {

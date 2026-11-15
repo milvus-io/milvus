@@ -773,6 +773,22 @@ func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
 }
 
+func IsBlobType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Blob
+}
+
+// RejectBlobWrite rejects writes to a collection with a BLOB field, because
+// storage does not support BLOB yet.
+func RejectBlobWrite(schema *schemapb.CollectionSchema) error {
+	for _, field := range schema.GetFields() {
+		if IsBlobType(field.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("collection %s has BLOB field %s; writing BLOB data is not supported yet",
+				schema.GetName(), field.GetName())
+		}
+	}
+	return nil
+}
+
 func IsArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Array
 }

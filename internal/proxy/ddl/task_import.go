@@ -135,6 +135,9 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
+	if err := typeutil.RejectBlobWrite(schema.CollectionSchema); err != nil {
+		return err
+	}
 	it.schema = schema
 
 	channels, err := node.ChMgr().GetVChannels(collectionID)

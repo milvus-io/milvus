@@ -7815,7 +7815,7 @@ func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
 // Rejected request preparation must not reach the new Strong read or publish DML.
 func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 	metacache.MockWriteSchemaForTest(t)
-	for _, stage := range []string{"valid_data", "collection_info", "text_storage", "field_ops", "namespace", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "insert", "delete", "implicit_partial_namespace"} {
+	for _, stage := range []string{"valid_data", "collection_info", "text_storage", "blob_write", "field_ops", "namespace", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "insert", "delete", "implicit_partial_namespace"} {
 		t.Run(stage, func(t *testing.T) {
 			task := createTestUpdateTask()
 			task.req.PartialUpdate = true
@@ -7837,6 +7837,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
 			patch((*metacache.MetaCache).GetCollectionSchema, task.schema, failure("schema"))
 			patch(dql.ValidateTextStorageV3Enabled, failure("text_storage"))
+			patch(typeutil.RejectBlobWrite, failure("blob_write"))
 			implicit := stage == "implicit_partial_namespace"
 			if implicit {
 				task.req.PartialUpdate = false

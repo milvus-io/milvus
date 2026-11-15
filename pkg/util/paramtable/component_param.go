@@ -2899,6 +2899,8 @@ type proxyConfig struct {
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
 	MaxTextLength                     ParamItem `refreshable:"false"`
+	EnableBlobType                    ParamItem `refreshable:"false"`
+	MaxBlobLength                     ParamItem `refreshable:"false"`
 	MaxArrayCapacity                  ParamItem `refreshable:"true"`
 	MaxIndexParamsSize                ParamItem `refreshable:"true"`
 	MaxResultEntries                  ParamItem `refreshable:"true"`
@@ -3524,6 +3526,24 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.EnableBlobType = ParamItem{
+		Key:          "proxy.enableBlobType",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc:          "Experimental: allow BLOB fields in collection schemas",
+		Export:       false,
+	}
+	p.EnableBlobType.Init(base.mgr)
+
+	p.MaxBlobLength = ParamItem{
+		Key:          "proxy.maxBlobLength",
+		Version:      "3.1.0",
+		DefaultValue: strconv.Itoa(65535), // 64K
+		Doc:          "Experimental: upper bound in bytes for the max_length of a BLOB field",
+		Export:       false,
+	}
+	p.MaxBlobLength.Init(base.mgr)
 
 	p.MaxArrayCapacity = ParamItem{
 		Key:          "proxy.maxArrayCapacity",

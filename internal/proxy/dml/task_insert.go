@@ -240,6 +240,9 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {
 		return err
 	}
+	if err := typeutil.RejectBlobWrite(it.schema); err != nil {
+		return err
+	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
 	if err != nil {

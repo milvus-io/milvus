@@ -2250,6 +2250,17 @@ func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
 	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
 }
 
+func TestProxyBlobTypeDefault(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	require.False(t, params.ProxyCfg.EnableBlobType.GetAsBool())
+	require.False(t, params.ProxyCfg.EnableBlobType.Export)
+	require.Equal(t, int64(65535), params.ProxyCfg.MaxBlobLength.GetAsInt64())
+	require.False(t, params.ProxyCfg.MaxBlobLength.Export)
+	require.NoError(t, params.Save(params.ProxyCfg.EnableBlobType.Key, "true"))
+	require.True(t, params.ProxyCfg.EnableBlobType.GetAsBool())
+}
+
 func TestCredentialBrokerStartupPolicy(t *testing.T) {
 	const key = "common.security.credentialBrokerAllowedEndpoints"
 	const endpoint = "https://broker.example.com/v1/credentials/assume-role"

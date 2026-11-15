@@ -59,6 +59,7 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 		loaded       bool
 		failAt       string
 		fileCount    int
+		blob         bool
 	}{
 		{name: "snapshot_default", snapshot: true, backup: true, wantName: "_default", wantIDs: []int64{10}},
 		{name: "snapshot_mapping", snapshot: true, backup: true, mapping: `{"A":"custom","B":"_default"}`, wantIDs: []int64{10, 20}},
@@ -83,6 +84,7 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 		{name: "l0_already_loaded", l0: true, loaded: true, wantErr: "collection cannot be loaded"},
 		{name: "partition_metadata_error", snapshot: true, backup: true, partitionKey: true, failAt: "partitions", wantErr: "dependency failed"},
 		{name: "text_storage_disabled", failAt: "text", wantErr: "dependency failed"},
+		{name: "blob_field", blob: true, wantErr: "writing BLOB data is not supported yet"},
 		{name: "partition_mapping_read_error", failAt: "mapping", wantErr: "dependency failed"},
 		{name: "multiple_snapshot_sources", snapshot: true, backup: true, fileCount: 2, wantErr: "exactly one snapshot metadata path"},
 		{name: "too_many_files", fileCount: 2, wantErr: "max number of import files"},
@@ -110,6 +112,9 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: tc.partitionKey},
 			}}}
+			if tc.blob {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 102, Name: "blob", DataType: schemapb.DataType_Blob})
+			}
 			cache := &MetaCache{}
 			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 			defer idPatch.UnPatch()
