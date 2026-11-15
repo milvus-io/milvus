@@ -1,0 +1,3 @@
+# Match the SDK pinned in tests/python_client/requirements.txt.
+--find-links https://test.pypi.org/simple/pymilvus/
+pymilvus==3.1.0rc106

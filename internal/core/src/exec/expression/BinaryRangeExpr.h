@@ -302,6 +302,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     }
 
     void
+    DetermineUpdateExecPath() override {
+        SelectUpdateIndexReader();
+    }
+
+    void
     DetermineExecPath() override;
 
     bool

@@ -144,6 +144,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     ~ChunkedSegmentSealedImpl() override;
 
+    // Attach only after initializing the static POC store, before serving
+    // experimental queries. Reopen/production update publication is out of scope.
+    void
+    AttachExperimentalUpdates(
+        std::shared_ptr<const experimental::UpdatesRecord> records);
+
+    std::shared_ptr<const experimental::UpdatesRecord>
+    GetExperimentalUpdates() const override {
+        return std::atomic_load(&experimental_updates_);
+    }
+
     // A read-only segment facade retaining the current column/index state.
     // The caller must retain the source segment until this facade is released:
     // deletes still use its shared record and PK lookup callback.
@@ -2327,6 +2338,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ChunkedSegmentSealedImpl(
         const ChunkedSegmentSealedImpl& source,
         std::shared_ptr<const PublishedSegmentState> state);
+
+    std::shared_ptr<const experimental::UpdatesRecord> experimental_updates_;
 
     // Private read-state forks can prepare an exact schema independently of
     // the source segment's monotonic WAL/schema progression.
