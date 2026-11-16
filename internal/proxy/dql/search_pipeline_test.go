@@ -7718,6 +7718,274 @@ func (s *SearchPipelineSuite) TestCompareOrderByFieldNullableJSON() {
 	s.Equal(1, cmp) // 150 > 100
 }
 
+// reorderFieldData must permute every scalar type a search can return, not only
+// the sortable ones: order_by reorders all output columns (issue #54921).
+func (s *SearchPipelineSuite) TestReorderFieldDataTimestamptzGeometryText() {
+	indices := []int{2, 0, 1}
+
+	tests := []struct {
+		name   string
+		field  *schemapb.FieldData
+		assert func(*schemapb.FieldData)
+	}{
+		{
+			name: "timestamptz",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Timestamptz,
+				FieldName: "created_at_tz",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{100, 200, 300}},
+					},
+				}},
+			},
+			assert: func(f *schemapb.FieldData) {
+				s.Equal([]int64{300, 100, 200}, f.GetScalars().GetTimestamptzData().GetData())
+				s.Empty(typeutil.GetFieldDataValidData(f))
+			},
+		},
+		{
+			name: "nullable_timestamptz",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Timestamptz,
+				FieldName: "updated_at_tz",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true}, // index 1 is null
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{100, 0, 300}},
+					},
+				}},
+			},
+			assert: func(f *schemapb.FieldData) {
+				s.Equal([]int64{300, 100, 0}, f.GetScalars().GetTimestamptzData().GetData())
+				s.Equal([]bool{true, true, false}, typeutil.GetFieldDataValidData(f))
+			},
+		},
+		{
+			name: "text",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Text,
+				FieldName: "doc",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+					},
+				}},
+			},
+			assert: func(f *schemapb.FieldData) {
+				s.Equal([]string{"c", "a", "b"}, f.GetScalars().GetStringData().GetData())
+			},
+		},
+		{
+			name: "geometry_wkb",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "location",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{Data: [][]byte{{0x01}, {0x02}, {0x03}}},
+					},
+				}},
+			},
+			assert: func(f *schemapb.FieldData) {
+				s.Equal([][]byte{{0x03}, {0x01}, {0x02}}, f.GetScalars().GetGeometryData().GetData())
+			},
+		},
+		{
+			name: "geometry_wkt",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Geometry,
+				FieldName: "location",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{Data: []string{"POINT (1 1)", "POINT (2 2)", "POINT (3 3)"}},
+					},
+				}},
+			},
+			assert: func(f *schemapb.FieldData) {
+				s.Equal([]string{"POINT (3 3)", "POINT (1 1)", "POINT (2 2)"}, f.GetScalars().GetGeometryWktData().GetData())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.NoError(reorderFieldData(tt.field, indices))
+			tt.assert(tt.field)
+		})
+	}
+}
+
+// reorderFieldData: an index past the scalar payload is reported, not a panic.
+func (s *SearchPipelineSuite) TestReorderFieldDataTimestamptzGeometryTextOutOfBounds() {
+	oob := []int{0, 5}
+
+	fields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Timestamptz,
+			FieldName: "ts",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{100, 200}},
+				},
+			}},
+		},
+		{
+			Type:      schemapb.DataType_Text,
+			FieldName: "doc",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"a", "b"}},
+				},
+			}},
+		},
+		{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "wkb",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{Data: [][]byte{{0x01}, {0x02}}},
+				},
+			}},
+		},
+		{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "wkt",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryWktData{
+					GeometryWktData: &schemapb.GeometryWktArray{Data: []string{"POINT (1 1)", "POINT (2 2)"}},
+				},
+			}},
+		},
+	}
+
+	for _, field := range fields {
+		err := reorderFieldData(field, oob)
+		s.Error(err, field.GetFieldName())
+		s.Contains(err.Error(), "out of bounds", field.GetFieldName())
+	}
+}
+
+// Issue #54921: ordering by a sortable field while a nullable TIMESTAMPTZ
+// column is among the output fields must reorder that column with the rows.
+func (s *SearchPipelineSuite) TestOrderByOperatorReturnsTimestamptzField() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6},
+			Topks:  []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "id",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_Timestamptz,
+					FieldName: "created_at_tz",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							ValidData: []bool{true, false, true, true}, // id 2 is null
+							Data: &schemapb.ScalarField_TimestamptzData{
+								TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{1000, 0, 3000, 4000}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields: []OrderByField{
+			{FieldName: "id", Ascending: false},
+		},
+		groupByFieldId: -1,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+	s.Equal([]int64{4, 3, 2, 1}, sortedResult.Results.Ids.GetIntId().Data)
+	s.Equal([]float32{0.6, 0.7, 0.8, 0.9}, sortedResult.Results.Scores)
+
+	tsField := sortedResult.Results.FieldsData[1]
+	s.Equal([]int64{4000, 3000, 0, 1000}, tsField.GetScalars().GetTimestamptzData().Data)
+	s.Equal([]bool{true, true, false, true}, typeutil.GetFieldDataValidData(tsField))
+}
+
+// Group-by on a TIMESTAMPTZ field is allowed (checkGroupByFieldType), so the
+// order_by operator must both detect its groups and reorder the group-by column.
+func (s *SearchPipelineSuite) TestOrderByOperatorWithGroupByTimestamptz() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+				},
+			},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7},
+			Topks:  []int64{5},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 25, 10, 20, 15}},
+							},
+						},
+					},
+				},
+			},
+			// Group 1000: ids [1,2], prices [30,25]
+			// Group 2000: ids [3], price [10]
+			// Group 3000: ids [4,5], prices [20,15]
+			GroupByFieldValues: []*schemapb.FieldData{{
+				Type: schemapb.DataType_Timestamptz,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_TimestamptzData{
+							TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{1000, 1000, 2000, 3000, 3000}},
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields: []OrderByField{
+			{FieldName: "price", Ascending: true},
+		},
+		groupByFieldId: 100,
+		groupSize:      2,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+	// Groups sorted by their first row's price: 2000 (10) -> 3000 (20) -> 1000 (30).
+	// Rows of one group stay together; treating every row as its own group
+	// would give [3, 5, 4, 2, 1] instead.
+	s.Equal([]int64{3, 4, 5, 1, 2}, sortedResult.Results.Ids.GetIntId().Data)
+	s.Equal([]int64{2000, 3000, 3000, 1000, 1000},
+		sortedResult.Results.GroupByFieldValues[0].GetScalars().GetTimestamptzData().Data)
+}
+
 // Test reorderFieldData returns error for unhandled data type
 func (s *SearchPipelineSuite) TestReorderFieldDataUnhandledType() {
 	// Create a field with an unhandled type (None type is not handled)
