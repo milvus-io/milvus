@@ -37,19 +37,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type analyzeTaskMeta interface {
+	GetCollection(UniqueID) *meta.CollectionInfo
+	SelectSegments(context.Context, ...meta.SegmentFilter) []*meta.SegmentInfo
+}
+
 type analyzeTask struct {
 	*indexpb.AnalyzeTask
 
 	times *taskcommon.Times
 
 	schema      *schemapb.CollectionSchema
-	meta        *meta.Meta
+	meta        analyzeTaskMeta
 	analyzeMeta *AnalyzeMeta
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
 
-func NewAnalyzeTask(t *indexpb.AnalyzeTask, mt *meta.Meta, analyzeMeta *AnalyzeMeta) *analyzeTask {
+func NewAnalyzeTask(t *indexpb.AnalyzeTask, mt analyzeTaskMeta, analyzeMeta *AnalyzeMeta) *analyzeTask {
 	task := &analyzeTask{
 		AnalyzeTask: t,
 		times:       taskcommon.NewTimes(),

@@ -102,7 +102,7 @@ func TestCopyResultReplayAfterRollbackAndRestart(t *testing.T) {
 	ctx := context.Background()
 	m, catalog, copies, task, result, _ := copyPublicationFixture(t)
 	catalog.failCompletion = true
-	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
+	require.ErrorContains(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, copies.GetTask(ctx, task.GetTaskId()).GetState())
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, meta.RestartSegID).GetState())
 	index.WithManifestIndexRollback(t, true)
@@ -119,7 +119,7 @@ func TestCopyResultReplayAfterRollbackAndRestart(t *testing.T) {
 	recoveredTask := recoveredCopies.GetTask(ctx, task.GetTaskId())
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, recoveredTask.GetState())
 	catalog.failCompletion = false
-	require.NoError(t, copysegment.SyncCopySegmentTask(recoveredTask, result, recoveredCopies, restarted, restarted.IndexCatalog.(*index.IndexMeta)))
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, recoveredTask, result, recoveredCopies, restarted, restarted.IndexCatalog.(*index.IndexMeta)))
 	require.Equal(t, final, restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 	require.False(t, restarted.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())
 	record, ok := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
@@ -142,7 +142,7 @@ func TestCopyResultRestoreReplayKeepsImportProtection(t *testing.T) {
 	job.IdMappings = task.GetIdMappings()
 	require.NoError(t, copies.AddJob(ctx, job))
 	catalog.failCompletion = true
-	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
+	require.ErrorContains(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
 	segment := m.GetSegment(ctx, meta.RestartSegID)
 	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
 	require.True(t, segment.GetIsImporting())
@@ -152,7 +152,7 @@ func TestCopyResultRestoreReplayKeepsImportProtection(t *testing.T) {
 	require.NoError(t, err)
 	catalog.failCompletion = false
 	store.FailReadsFrom()
-	require.NoError(t, copysegment.SyncCopySegmentTask(recovered.GetTask(ctx, task.GetTaskId()), result, recovered, restarted, restarted.IndexCatalog.(*index.IndexMeta)))
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, recovered.GetTask(ctx, task.GetTaskId()), result, recovered, restarted, restarted.IndexCatalog.(*index.IndexMeta)))
 	require.True(t, restarted.GetSegment(ctx, meta.RestartSegID).GetIsImporting())
 	require.Equal(t, segment.GetManifestPath(), restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, recovered.GetTask(ctx, task.GetTaskId()).GetState())
@@ -179,7 +179,7 @@ func TestCopyResultKeepsImportProtectionThroughIndexInstall(t *testing.T) {
 		return nil
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	require.NoError(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
 	require.False(t, m.GetSegment(ctx, meta.RestartSegID).GetIsImporting())
 	require.True(t, index.IndexManifestPublished(t, m.IndexCatalog.(*index.IndexMeta), meta.RestartBuildID))
 }
@@ -195,7 +195,7 @@ func TestCopyResultGCFinalizationReadOrdering(t *testing.T) {
 			finalized = true
 			// Force completion just before GC reads the segment state. A prior
 			// missing-build observation must not be used with this finalized state.
-			require.NoError(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
+			require.NoError(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
 		}
 		return original(receiver, ctx, segmentID)
 	}).Build()
@@ -227,7 +227,7 @@ func TestCopyResultEtcdFinalizationWakesBackfill(t *testing.T) {
 		return nil
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	require.NoError(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
 	select {
 	case <-m.IndexCatalog.(*index.IndexMeta).ManifestIndexBackfillNotifyForTest():
 	default:
@@ -255,7 +255,7 @@ func TestCopyResultRevalidatesTargetBeforeFinalization(t *testing.T) {
 				return m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, changedPath))
 			}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
-			require.Error(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
+			require.Error(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
 			segment := m.GetSegment(ctx, meta.RestartSegID)
 			require.True(t, segment.GetIsImporting())
 			if dropped {

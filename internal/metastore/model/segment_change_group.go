@@ -19,7 +19,10 @@ package model
 import (
 	"fmt"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -123,8 +126,28 @@ type SegmentChangeGroup struct {
 	PartitionID  int64               `json:"partitionID"` // 0 = cross-partition (import usually)
 	SourceJobID  int64               `json:"sourceJobID"` // import jobID / compaction planID / copy taskID
 	State        SegmentChangeState  `json:"state"`
-	// NewSegmentIDs are the staged members published by this group.
+	// NewSegmentIDs are the current staged outputs. Finalized zero-row
+	// outputs are retired instead of published. Empty is valid for a change
+	// with no outputs, including a parent-retirement-only compaction.
 	NewSegmentIDs []int64 `json:"newSegmentIds"`
+	// InitialSegmentIDs preserve the producer result identity when a STAGED
+	// member is materialized by sort compaction. Only the coordinator's sort
+	// completion path may replace NewSegmentIDs, recording the durable lineage.
+	InitialSegmentIDs []int64                        `json:"initialSegmentIds,omitempty"`
+	SortJobs          map[int64]SegmentChangeSortJob `json:"sortJobs,omitempty"`
+	// Publication side effects belong to the group, so restart can finish them
+	// without reconstructing a producer task or exposing the segments first.
+	PartitionStats *datapb.PartitionStatsInfo `json:"partitionStats,omitempty"`
+	VChannel       string                     `json:"vchannel,omitempty"`
+	// File-copy workers preserve the source row/delete timeline. Visibility is
+	// committed through the group/DataView; retimestamping those rows would
+	// suppress copied historical deletes. Sort normalization still sets zero.
+	PreserveMemberTimestamps bool `json:"preserveMemberTimestamps,omitempty"`
+	// Import groups may be prepared before WAL commit. They cannot publish
+	// until CommitTS is assigned by that channel's commit fence.
+	AwaitCommitFence bool  `json:"awaitCommitFence,omitempty"`
+	SubgroupOrdinal  int64 `json:"subgroupOrdinal,omitempty"`
+	PreviousGroupID  int64 `json:"previousGroupID,omitempty"`
 	// SupersededSegmentIDs are the parents retired (marked Dropped) at publish.
 	SupersededSegmentIDs []int64 `json:"supersededSegmentIds"`
 	// SupersededL0SegmentIDs are the superseded parents that were exempted from
@@ -154,9 +177,42 @@ func (g *SegmentChangeGroup) Clone() *SegmentChangeGroup {
 	}
 	clone := *g
 	clone.NewSegmentIDs = append([]int64(nil), g.NewSegmentIDs...)
+	clone.InitialSegmentIDs = append([]int64(nil), g.InitialSegmentIDs...)
+	if g.SortJobs != nil {
+		clone.SortJobs = make(map[int64]SegmentChangeSortJob, len(g.SortJobs))
+		for id, job := range g.SortJobs {
+			clone.SortJobs[id] = job
+		}
+	}
+	if g.PartitionStats != nil {
+		clone.PartitionStats = proto.Clone(g.PartitionStats).(*datapb.PartitionStatsInfo)
+	}
 	clone.SupersededSegmentIDs = append([]int64(nil), g.SupersededSegmentIDs...)
 	clone.SupersededL0SegmentIDs = append([]int64(nil), g.SupersededL0SegmentIDs...)
 	return &clone
+}
+
+type SegmentChangeSortJob struct {
+	InputSegmentID  int64 `json:"inputSegmentID"`
+	OutputSegmentID int64 `json:"outputSegmentID"`
+}
+
+// UnpublishedSegmentIDs includes private sort inputs. A registration chunk may
+// have committed the replacement record before retiring an intermediate input.
+// Failure recovery must reclaim that input as well, never the visible parents.
+func (g *SegmentChangeGroup) UnpublishedSegmentIDs() []int64 {
+	ids := append([]int64(nil), g.NewSegmentIDs...)
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for _, job := range g.SortJobs {
+		if !seen[job.InputSegmentID] {
+			ids = append(ids, job.InputSegmentID)
+			seen[job.InputSegmentID] = true
+		}
+	}
+	return ids
 }
 
 // String returns a compact single-line description of the group for logs.
@@ -253,8 +309,60 @@ func (g *SegmentChangeGroup) Validate() error {
 	if g.CollectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("segment change group %d requires a positive collection ID", g.GroupID)
 	}
-	if len(g.NewSegmentIDs) == 0 {
-		return merr.WrapErrServiceInternalMsg("segment change group %d has no new segments", g.GroupID)
+	if g.AwaitCommitFence && g.Source != SegmentChangeSourceImportJob && g.Source != SegmentChangeSourceCDCReplicated {
+		return merr.WrapErrDataIntegrityMsg("unexpected WAL fence policy in group %d", g.GroupID)
+	}
+	if g.SubgroupOrdinal < 0 || g.PreviousGroupID < 0 || g.PreviousGroupID == g.GroupID || (g.SubgroupOrdinal > 0) != (g.PreviousGroupID != 0) {
+		return merr.WrapErrDataIntegrityMsg("invalid subgroup ordering in group %d", g.GroupID)
+	}
+	if len(g.SortJobs) > 0 {
+		members := make(map[int64]bool)
+		for _, id := range g.InitialSegmentIDs {
+			if id <= 0 || members[id] {
+				return merr.WrapErrDataIntegrityMsg("invalid initial member in group %d", g.GroupID)
+			}
+			members[id] = true
+		}
+		pending := make(map[int64]SegmentChangeSortJob, len(g.SortJobs))
+		allocated := make(map[int64]bool, len(members)+len(g.SortJobs))
+		for id := range members {
+			allocated[id] = true
+		}
+		for id, job := range g.SortJobs {
+			if id <= 0 || job.InputSegmentID <= 0 || job.OutputSegmentID <= 0 || allocated[job.OutputSegmentID] {
+				return merr.WrapErrDataIntegrityMsg("invalid sort lineage in group %d", g.GroupID)
+			}
+			allocated[job.OutputSegmentID] = true
+			pending[id] = job
+		}
+		for len(pending) > 0 {
+			progress := false
+			for id, job := range pending {
+				if members[job.InputSegmentID] && !members[job.OutputSegmentID] {
+					delete(members, job.InputSegmentID)
+					members[job.OutputSegmentID] = true
+					delete(pending, id)
+					progress = true
+				}
+			}
+			if !progress {
+				return merr.WrapErrDataIntegrityMsg("unresolved sort lineage in group %d", g.GroupID)
+			}
+		}
+		if len(members) != len(g.NewSegmentIDs) {
+			return merr.WrapErrDataIntegrityMsg("sort lineage disagrees with members of group %d", g.GroupID)
+		}
+		for _, id := range g.NewSegmentIDs {
+			if !members[id] {
+				return merr.WrapErrDataIntegrityMsg("sort lineage disagrees with member %d of group %d", id, g.GroupID)
+			}
+		}
+	}
+	if g.PreserveMemberTimestamps && g.Source != SegmentChangeSourceCopySegment {
+		return merr.WrapErrDataIntegrityMsg("unexpected timestamp preservation policy in group %d", g.GroupID)
+	}
+	if g.PartitionStats != nil && (g.Source != SegmentChangeSourceClustering || g.PartitionStats.GetCollectionID() != g.CollectionID || g.PartitionStats.GetPartitionID() != g.PartitionID || g.PartitionStats.GetVersion() != g.SourceJobID || g.PartitionStats.GetVChannel() != g.VChannel) {
+		return merr.WrapErrDataIntegrityMsg("invalid partition stats identity in group %d", g.GroupID)
 	}
 	for _, id := range g.NewSegmentIDs {
 		if id <= 0 {

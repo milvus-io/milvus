@@ -110,6 +110,9 @@ func (policy *SingleCompactionPolicy) TriggerSegmentSortCompaction(
 		log.Warn(ctx, "fail to apply triggerSegmentSortCompaction, segment not healthy")
 		return nil
 	}
+	if policy.Meta.SegmentChangeCompactionExclusions(segment.GetCollectionID()).Contain(segmentID) && !policy.Meta.GroupSortCandidates(segment.GetCollectionID())[segmentID] {
+		return nil
+	}
 
 	collection, err := policy.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil {
@@ -197,9 +200,11 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 		log.Info(ctx, "skip triggerSegmentSortCompaction for external collection", mlog.FieldCollectionID(collection.ID))
 		return nil, nil, nil
 	}
+	excluded := policy.Meta.SegmentChangeCompactionExclusions(collectionID)
+	groupSort := policy.Meta.GroupSortCandidates(collectionID)
 	triggerableSegments := policy.Meta.SelectSegments(ctx, meta.WithCollection(collectionID),
 		meta.SegmentFilterFunc(func(seg *meta.SegmentInfo) bool {
-			return canTriggerSortCompaction(seg) &&
+			return (!excluded.Contain(seg.GetID()) || groupSort[seg.GetID()]) && canTriggerSortCompaction(seg) &&
 				!policy.Meta.IsSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
