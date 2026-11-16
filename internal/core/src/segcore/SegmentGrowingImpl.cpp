@@ -26,6 +26,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -245,7 +246,7 @@ WithLoadedVectorValues(const FieldDataPtr& data,
 
 int64_t
 GetLoadedFieldRows(
-    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+    std::span<const std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
         column_group_results,
     FieldId field_id) {
     int64_t rows = 0;
@@ -265,7 +266,7 @@ GetLoadedFieldRows(
 
 void
 AssertLoadedFieldRows(
-    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+    std::span<const std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
         column_group_results,
     FieldId field_id,
     int64_t expected_rows,
@@ -276,8 +277,8 @@ AssertLoadedFieldRows(
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
     if (!(rows == expected_rows)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
-                  "growing segment StorageV3 manifest loads {} rows for {} "
-                  "field {}, but SegmentLoadInfo expects {} rows",
+                  "growing segment loads {} rows for {} field {}, "
+                  "but load info expects {} rows",
                   rows,
                   field_name,
                   field_id.get(),
@@ -626,6 +627,29 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
             field_ids.size(),
             representative_field.get());
     }
+}
+
+void
+SegmentGrowingImpl::InitializeFunctionOutputIndexes(
+    const Schema& schema,
+    const std::function<bool(FieldId)>& has_field_in_input) {
+    // Select function-output owners from the first nonempty input.
+    // Schema changes flush and fence existing growing segments via
+    // AlterCollection -> flushAndFenceSegmentAllocUntil, preventing
+    // pre- and post-schema-change rows from mixing in one segment.
+    std::call_once(function_output_indexes_once_, [&] {
+        growing_indexes_.Initialize(
+            schema,
+            index_meta_,
+            segcore_config_,
+            id_,
+            insert_record_,
+            [&](FieldId id) {
+                return schema.is_function_output(id) &&
+                       insert_record_.is_data_exist(id) &&
+                       has_field_in_input(id);
+            });
+    });
 }
 
 int64_t
@@ -1680,6 +1704,12 @@ SegmentGrowingImpl::Insert(
             num_rows);
     }
 
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return field_id_to_offset.contains(id);
+        });
+    }
+
     // Retain the typed input before any growing owner can observe this range.
     // Once an interim reader owns raw data, the column may stay reclaimed and
     // retries must still replay the exact immutable payload.
@@ -1855,6 +1885,11 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                "primary field data should be included");
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return infos.field_infos.contains(id.get());
+        });
+    }
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
@@ -2137,6 +2172,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
 
+    std::unordered_set<FieldId> loaded_function_outputs;
     for (auto& [id, info] : infos.field_infos) {
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
@@ -2282,6 +2318,13 @@ SegmentGrowingImpl::load_column_group_data_internal(
         drain_on_unwind.dismiss();
 
         for (auto& [field_id, field_data] : field_data_map) {
+            if (schema->is_function_output(field_id)) {
+                AssertLoadedFieldRows(std::span(&field_data_map, 1),
+                                      field_id,
+                                      num_rows,
+                                      "function output");
+                loaded_function_outputs.insert(field_id);
+            }
             load_field_data_common(field_id,
                                    reserved_offset,
                                    field_data,
@@ -2298,6 +2341,13 @@ SegmentGrowingImpl::load_column_group_data_internal(
         }
     }
 
+    if (num_rows > 0) {
+        // Packed groups expose their field IDs in the decoded Arrow schema.
+        // Owners added here consume the complete raw columns on first publish.
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return loaded_function_outputs.contains(id);
+        });
+    }
     FillAbsentFieldsThrough(reserved_offset + num_rows);
     CompleteGrowingRawRange(reserved_offset,
                             reserved_offset + num_rows,
@@ -4252,6 +4302,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     AssertLoadedFieldRows(
         column_group_results, primary_field_id, num_rows, "primary");
     AssertAllLoadedFieldRows(column_group_results, num_rows);
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return GetLoadedFieldRows(column_group_results, id) >= 0;
+        });
+    }
     auto timestamp_rows =
         GetLoadedFieldRows(column_group_results, TimestampFieldID);
     auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
