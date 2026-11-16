@@ -1863,9 +1863,9 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
         }
         if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
             const auto& planner = column_->Planner();
-            all_cell_pins_.resize(planner.NumCells());
-            for (int64_t file_id = 0; file_id < planner.NumCells(); ++file_id) {
-                const auto rows = planner.CellRows(file_id);
+            all_cell_pins_.resize(planner.NumFiles());
+            for (int64_t file_id = 0; file_id < planner.NumFiles(); ++file_id) {
+                const auto rows = planner.FileRows(file_id);
                 if (rows == 0) {
                     continue;
                 }
