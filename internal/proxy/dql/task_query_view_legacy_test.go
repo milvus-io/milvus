@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -865,11 +866,137 @@ func TestQueryTaskUnlimitedStreamEnforcesMaxOutputSize(t *testing.T) {
 	old := params.QuotaConfig.MaxOutputSize.GetValue()
 	t.Cleanup(func() { params.Save(key, old) })
 	params.Save(key, "1")
-	stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}
-	task := newQueryViewQueryTask(t, &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, typeutil.Unlimited)
-	require.ErrorContains(t, task.Execute(t.Context()), "maxOutputSize")
-	require.Equal(t, 1, stream.closeCalls)
-	require.Empty(t, task.resultBuf.Collect())
+	for _, failClose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("close_fails=%t", failClose), func(t *testing.T) {
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
+			stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}
+			if failClose {
+				stream.closeErr = fmt.Errorf("query cleanup failed")
+			}
+			task := newQueryViewQueryTask(t, &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, typeutil.Unlimited)
+			err := task.Execute(t.Context())
+			require.ErrorContains(t, err, "maxOutputSize")
+			require.Equal(t, int32(1100), merr.Status(err).GetCode())
+			if failClose {
+				require.NotErrorIs(t, err, stream.closeErr)
+				require.Contains(t, logs.String(), "query cleanup failed")
+			}
+			require.Equal(t, 1, stream.closeCalls)
+			require.Empty(t, task.resultBuf.Collect())
+		})
+	}
+}
+
+func TestSearchTaskStreamPreservesPrimaryError(t *testing.T) {
+	for _, failClose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("close_fails=%t", failClose), func(t *testing.T) {
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
+			primaryErr := merr.WrapErrParameterInvalidMsg("search reduction failed")
+			stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{err: primaryErr}}}
+			if failClose {
+				stream.closeErr = fmt.Errorf("search cleanup failed")
+			}
+			task := newQueryViewSearchTask(t, &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{Stream: stream}}, 1)
+			err := task.Execute(t.Context())
+			require.ErrorIs(t, err, primaryErr)
+			require.Equal(t, int32(1100), merr.Status(err).GetCode())
+			if failClose {
+				require.NotErrorIs(t, err, stream.closeErr)
+				require.Contains(t, logs.String(), "search cleanup failed")
+			}
+			require.Equal(t, 1, stream.closeCalls)
+		})
+	}
+}
+
+func TestQueryAndSearchNestedStreamPreservePrimaryError(t *testing.T) {
+	for _, failClose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("close_fails=%t", failClose), func(t *testing.T) {
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
+			primaryErr := merr.WrapErrParameterInvalidMsg("nested reduction failed")
+			var closeErr error
+			if failClose {
+				closeErr = fmt.Errorf("nested cleanup failed")
+			}
+			queryChild := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{err: primaryErr}}, closeErr: closeErr}
+			queryStream, err := queryreducestream.NewReduceStream(&internalpb.RetrieveRequest{Limit: 1}, nil, []queryreducestream.ReduceStream{queryChild}, 128)
+			require.NoError(t, err)
+			queryTask := newQueryViewQueryTask(t, &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: queryStream}}, 1)
+			err = queryTask.Execute(t.Context())
+			require.ErrorIs(t, err, primaryErr)
+			require.Equal(t, int32(1100), merr.Status(err).GetCode())
+			if failClose {
+				require.NotErrorIs(t, err, closeErr)
+			}
+
+			searchChild := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{err: primaryErr}}, closeErr: closeErr}
+			searchStream, err := searchreducestream.NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, MetricType: "IP"}, []searchreducestream.ReduceStream{searchChild}, 128)
+			require.NoError(t, err)
+			searchTask := newQueryViewSearchTask(t, &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{Stream: searchStream}}, 1)
+			err = searchTask.Execute(t.Context())
+			require.ErrorIs(t, err, primaryErr)
+			require.Equal(t, int32(1100), merr.Status(err).GetCode())
+			if failClose {
+				require.NotErrorIs(t, err, closeErr)
+				require.Contains(t, logs.String(), "nested cleanup failed")
+			}
+			require.Equal(t, 1, queryChild.closeCalls)
+			require.Equal(t, 1, searchChild.closeCalls)
+		})
+	}
+}
+
+func TestHybridStreamPreservesPrimaryError(t *testing.T) {
+	for _, primaryFailure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("primary_failure=%t", primaryFailure), func(t *testing.T) {
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
+			closeErr := fmt.Errorf("hybrid cleanup failed")
+			if !primaryFailure {
+				closeErr = merr.WrapErrParameterInvalidMsg("hybrid cleanup failed")
+			}
+			stream := &fakeLegacySearchStream{closeErr: closeErr}
+			primaryErr := merr.WrapErrParameterInvalidMsg("hybrid reduction failed")
+			if primaryFailure {
+				stream.recv = []fakeLegacySearchRecv{{err: primaryErr}}
+			}
+			task := newQueryViewSearchTask(t, nil, 1)
+			task.IsAdvanced = true
+			task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 1}}
+			_, _, err := task.consumeHybridResultStreams([]searchreducestream.ReduceStream{stream}, func(*internalpb.SearchResults) {})
+			if primaryFailure {
+				require.ErrorIs(t, err, primaryErr)
+				require.NotErrorIs(t, err, closeErr)
+				require.Contains(t, logs.String(), "hybrid cleanup failed")
+			} else {
+				require.ErrorIs(t, err, closeErr)
+			}
+			err = QueryViewLoadError(t.Context(), nil, 1, nil, err)
+			require.Equal(t, int32(1100), merr.Status(err).GetCode())
+			require.Equal(t, 1, stream.closeCalls)
+		})
+	}
+}
+
+func TestQueryAndSearchStreamCloseOnlyError(t *testing.T) {
+	closeErr := merr.WrapErrParameterInvalidMsg("cleanup failed")
+	t.Run("query", func(t *testing.T) {
+		child := &fakeLegacyQueryStream{closeErr: closeErr}
+		stream, err := queryreducestream.NewReduceStream(&internalpb.RetrieveRequest{Limit: 1}, nil, []queryreducestream.ReduceStream{child}, 128)
+		require.NoError(t, err)
+		task := newQueryViewQueryTask(t, &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, 1)
+		err = task.Execute(t.Context())
+		require.ErrorIs(t, err, closeErr)
+		require.Equal(t, int32(1100), merr.Status(err).GetCode())
+	})
+	t.Run("search", func(t *testing.T) {
+		child := &fakeLegacySearchStream{closeErr: closeErr}
+		stream, err := searchreducestream.NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, MetricType: "IP"}, []searchreducestream.ReduceStream{child}, 128)
+		require.NoError(t, err)
+		task := newQueryViewSearchTask(t, &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{Stream: stream}}, 1)
+		err = task.Execute(t.Context())
+		require.ErrorIs(t, err, closeErr)
+		require.Equal(t, int32(1100), merr.Status(err).GetCode())
+	})
 }
 
 func TestQueryTaskGlobalAggregationBatchParity(t *testing.T) {

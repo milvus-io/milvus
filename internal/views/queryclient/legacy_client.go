@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -245,7 +245,9 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 	if err := g.Wait(); err != nil {
 		for _, streams := range vchannelStreams {
 			for _, stream := range streams {
-				err = errors.Join(err, stream.Close())
+				if closeErr := stream.Close(); closeErr != nil {
+					mlog.Warn(ctx, "failed to close Search vchannel stream after setup failure", mlog.Err(closeErr))
+				}
 			}
 		}
 		return nil, err
@@ -265,7 +267,9 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 		if err != nil {
 			for _, streams := range vchannelStreams {
 				for _, stream := range streams {
-					err = errors.Join(err, stream.Close())
+					if closeErr := stream.Close(); closeErr != nil {
+						mlog.Warn(ctx, "failed to close Search vchannel stream after reducer setup failure", mlog.Err(closeErr))
+					}
 				}
 			}
 			return nil, err
@@ -357,7 +361,9 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 	if err := group.Wait(); err != nil {
 		for _, stream := range vchannelStreams {
 			if stream != nil {
-				err = errors.Join(err, stream.Close())
+				if closeErr := stream.Close(); closeErr != nil {
+					mlog.Warn(ctx, "failed to close Query vchannel stream after setup failure", mlog.Err(closeErr))
+				}
 			}
 		}
 		return nil, err
@@ -366,7 +372,9 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 	finalStream, err := queryreducestream.NewReduceStream(req.Req, req.Schema, vchannelStreams, chunkBytes)
 	if err != nil {
 		for _, stream := range vchannelStreams {
-			err = errors.Join(err, stream.Close())
+			if closeErr := stream.Close(); closeErr != nil {
+				mlog.Warn(ctx, "failed to close Query vchannel stream after reducer setup failure", mlog.Err(closeErr))
+			}
 		}
 		return nil, err
 	}

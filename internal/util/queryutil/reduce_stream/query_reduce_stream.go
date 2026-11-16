@@ -21,7 +21,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -749,7 +749,10 @@ func (s *UnOrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults
 }
 
 func (s *UnOrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.closeChildren())
+	if closeErr := s.closeChildren(); closeErr != nil {
+		mlog.Warn(context.Background(), "failed to close Query child streams", mlog.Err(closeErr))
+	}
+	return err
 }
 
 func (s *UnOrderedReduceStream) Close() error {
@@ -872,7 +875,10 @@ func mergeQueryCost(current, incoming *internalpb.CostAggregation) *internalpb.C
 }
 
 func (s *OrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.closeChildren())
+	if closeErr := s.closeChildren(); closeErr != nil {
+		mlog.Warn(context.Background(), "failed to close Query child streams", mlog.Err(closeErr))
+	}
+	return err
 }
 
 func (s *OrderedReduceStream) Close() error {

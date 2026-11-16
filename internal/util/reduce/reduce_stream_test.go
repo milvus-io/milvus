@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type cancelableChildStream struct {
@@ -30,6 +32,7 @@ type cancelableChildStream struct {
 	canceled  chan struct{}
 	release   <-chan struct{}
 	closeOnce sync.Once
+	closeErr  error
 }
 
 func (s *cancelableChildStream) Recv() (int, error) {
@@ -41,7 +44,7 @@ func (s *cancelableChildStream) Recv() (int, error) {
 
 func (s *cancelableChildStream) Close() error {
 	s.closeOnce.Do(func() { close(s.canceled) })
-	return nil
+	return s.closeErr
 }
 
 func (*cancelableChildStream) Interrupt() (int, error) {
@@ -114,4 +117,26 @@ func TestChildStreamsCancelAndClose(t *testing.T) {
 			require.ErrorIs(t, receive(func(int) bool { return true }, nil), context.Canceled)
 		})
 	}
+}
+
+func TestChildStreamsClosePreservesSingleErrorCode(t *testing.T) {
+	closeErr := merr.WrapErrParameterInvalidMsg("child cleanup failed")
+	child := &cancelableChildStream{canceled: make(chan struct{}), closeErr: closeErr}
+	streams := NewChildStreams[int]([]ReduceStream[int]{child})
+	err := streams.Close()
+	require.ErrorIs(t, err, closeErr)
+	require.Equal(t, int32(1100), merr.Status(err).GetCode())
+	require.ErrorIs(t, streams.Close(), closeErr)
+}
+
+func TestChildStreamsClosePreservesMultipleErrors(t *testing.T) {
+	first := merr.WrapErrParameterInvalidMsg("first cleanup failed")
+	second := merr.WrapErrServiceInternalMsg("second cleanup failed")
+	streams := NewChildStreams[int]([]ReduceStream[int]{
+		&cancelableChildStream{canceled: make(chan struct{}), closeErr: first},
+		&cancelableChildStream{canceled: make(chan struct{}), closeErr: second},
+	})
+	err := streams.Close()
+	require.ErrorIs(t, err, first)
+	require.ErrorIs(t, err, second)
 }

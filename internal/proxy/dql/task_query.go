@@ -1269,18 +1269,19 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			retryable := recvErr != nil && (viewerror.AsViewError(recvErr).IsRetryable() || status.Code(recvErr) == codes.Unavailable)
 			closeErr := result.Stream.Close()
 			if recvErr != nil {
-				// Keep the receive error discoverable if cleanup also fails.
-				attemptErr := errors.Join(recvErr, closeErr)
+				if closeErr != nil {
+					mlog.Warn(ctx, "failed to close Query result stream", mlog.Err(closeErr))
+				}
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
 				if retryable {
 					// Shard-local recovery is exhausted or has emitted output; discard the whole attempt.
 					request.RetryErrors = append(request.RetryErrors, recvErr)
-					lastErr = attemptErr
+					lastErr = recvErr
 					continue
 				}
-				return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), attemptErr)
+				return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), recvErr)
 			}
 			if closeErr != nil {
 				return closeErr

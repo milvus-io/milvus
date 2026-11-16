@@ -17,16 +17,17 @@
 package reducestream
 
 import (
+	"context"
 	"io"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -932,7 +933,10 @@ func buildSearchChunk(
 }
 
 func (s *OrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.closeChildren())
+	if closeErr := s.closeChildren(); closeErr != nil {
+		mlog.Warn(context.Background(), "failed to close Search child streams", mlog.Err(closeErr))
+	}
+	return err
 }
 
 // Close idempotently closes every child stream and releases retained Chunks.

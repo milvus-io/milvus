@@ -225,6 +225,10 @@ func (s *ChildStreams[T]) Close() error {
 		<-s.completions
 	}
 	clear(s.receiving)
-	s.closeErr = errors.Join(closeErrors...)
+	if len(closeErrors) == 1 {
+		s.closeErr = closeErrors[0]
+	} else {
+		s.closeErr = errors.Join(closeErrors...)
+	}
 	return s.closeErr
 }

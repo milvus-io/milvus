@@ -1653,18 +1653,19 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		}
 		retryable := recvErr != nil && (viewerror.AsViewError(recvErr).IsRetryable() || status.Code(recvErr) == codes.Unavailable)
 		if recvErr != nil {
-			// Keep the receive error discoverable if cleanup also fails.
-			attemptErr := errors.Join(recvErr, closeErr)
+			if closeErr != nil {
+				mlog.Warn(ctx, "failed to close Search result stream", mlog.Err(closeErr))
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if retryable {
 				// Emitted output, exhausted shard retries, or shared Hybrid plans require a whole-attempt retry.
 				retryErrors = append(retryErrors, recvErr)
-				lastErr = attemptErr
+				lastErr = recvErr
 				continue
 			}
-			return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), attemptErr)
+			return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), recvErr)
 		}
 		if closeErr != nil {
 			return closeErr
@@ -2091,8 +2092,11 @@ func (t *SearchTask) consumeHybridResultStreams(
 	}
 	defer func() {
 		closeStreams()
-		// The caller must still classify the receive error before normalization.
-		err = errors.Join(err, closeErr)
+		if err == nil {
+			err = closeErr
+		} else if closeErr != nil {
+			mlog.Warn(context.Background(), "failed to close Hybrid Search result streams", mlog.Err(closeErr))
+		}
 	}()
 	requests, err := viewquery.BuildSubSearchRequests(t.SearchRequest)
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -15,6 +17,7 @@ import (
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -321,6 +324,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 }
 
 func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
+	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
 	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	leftNode := qviews.NewQueryNode(11)
@@ -333,21 +337,41 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
 	}
 
-	openedStream := &fakeSearchStream{}
+	closeErr := errors.New("setup cleanup failed")
+	primaryErr := merr.WrapErrParameterInvalidMsg("open failed")
+	openedStream := &fakeSearchStream{closeErr: closeErr}
 	queryService := &fakeViewQueryServiceClient{
 		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 			if node.Key() == leftNode.Key() {
 				return openedStream, nil
 			}
-			return nil, errors.New("open failed")
+			return nil, primaryErr
 		},
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
 	_, _, err := client.SearchStreams(context.Background(), &ShardSearchRequest{VChannel: shardID.VChannel, Req: request}, 32)
 
-	require.ErrorContains(t, err, "open failed")
+	require.ErrorIs(t, err, primaryErr)
+	require.NotErrorIs(t, err, closeErr)
+	require.Equal(t, int32(1100), merr.Status(err).GetCode())
+	require.Contains(t, logs.String(), "setup cleanup failed")
 	require.Equal(t, 1, openedStream.closeCount())
+}
+
+func TestShardStreamCloseFailureStopsRetryWithPrimaryError(t *testing.T) {
+	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
+	primaryErr := status.Error(codes.Unavailable, "worker unavailable")
+	closeErr := errors.New("retry cleanup failed")
+	child := &fakeQueryStream{recv: []fakeQueryStreamRecv{{err: primaryErr}}, closeErr: closeErr}
+	ctx, cancel := context.WithCancel(t.Context())
+	stream := &shardReduceStream[*internalpb.RetrieveResults]{stream: child, ctx: ctx, cancel: cancel}
+	_, err := stream.Recv()
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	require.NotErrorIs(t, err, closeErr)
+	require.Contains(t, logs.String(), "retry cleanup failed")
+	require.Equal(t, 1, child.closeCount())
+	require.ErrorIs(t, stream.Close(), closeErr)
 }
 
 func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
@@ -493,6 +517,7 @@ type fakeSearchStream struct {
 	ctx        context.Context
 	recv       []fakeSearchStreamRecv
 	closeCalls int
+	closeErr   error
 }
 
 func (s *fakeSearchStream) Recv() (*internalpb.SearchResults, error) {
@@ -517,7 +542,7 @@ func (s *fakeSearchStream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeCalls++
-	return nil
+	return s.closeErr
 }
 
 func (*fakeSearchStream) Interrupt() (*internalpb.SearchResults, error) {
@@ -540,6 +565,7 @@ type fakeQueryStream struct {
 	ctx        context.Context
 	recv       []fakeQueryStreamRecv
 	closeCalls int
+	closeErr   error
 }
 
 func (s *fakeQueryStream) Recv() (*internalpb.RetrieveResults, error) {
@@ -564,7 +590,7 @@ func (s *fakeQueryStream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeCalls++
-	return nil
+	return s.closeErr
 }
 
 func (*fakeQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {

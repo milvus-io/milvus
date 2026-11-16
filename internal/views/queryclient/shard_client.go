@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -97,7 +98,8 @@ func (s *shardReduceStream[T]) Recv() (T, error) {
 			break
 		}
 		if closeErr := s.stream.Close(); closeErr != nil {
-			s.terminal = errors.Join(err, closeErr)
+			mlog.Warn(s.ctx, "failed to close shard stream before retry", mlog.Err(closeErr))
+			s.terminal = err
 			break
 		}
 		next, plan, restartErr := s.restart(err)
@@ -314,11 +316,15 @@ func (s *shardViewQueryClient) SearchStreams(
 			if err != nil {
 				for _, childStreams := range children {
 					for _, childStream := range childStreams {
-						err = errors.Join(err, childStream.Close())
+						if closeErr := childStream.Close(); closeErr != nil {
+							mlog.Warn(ctx, "failed to close Search child stream after setup failure", mlog.Err(closeErr))
+						}
 					}
 				}
 				for _, stream := range streams {
-					err = errors.Join(err, stream.Close())
+					if closeErr := stream.Close(); closeErr != nil {
+						mlog.Warn(ctx, "failed to close Search shard stream after setup failure", mlog.Err(closeErr))
+					}
 				}
 				return nil, nil, err
 			}
@@ -454,7 +460,9 @@ func (s *shardViewQueryClient) QueryStream(
 		}
 		if err != nil {
 			for _, childStream := range children {
-				err = errors.Join(err, childStream.Close())
+				if closeErr := childStream.Close(); closeErr != nil {
+					mlog.Warn(ctx, "failed to close Query child stream after setup failure", mlog.Err(closeErr))
+				}
 			}
 			return nil, nil, err
 		}

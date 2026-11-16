@@ -153,7 +153,7 @@ func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
 						} else {
 							require.ErrorIs(t, err, context.Canceled)
 						}
-						require.ErrorIs(t, err, closeErr)
+						require.NotErrorIs(t, err, closeErr)
 					case <-time.After(5 * time.Second):
 						t.Fatal("Recv did not exit after cancellation")
 					}
