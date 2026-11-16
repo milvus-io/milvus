@@ -97,7 +97,7 @@ CStatus
 CommitPOCUpdates(void* session) {
     try {
         AssertInfo(session, "Missing POC session");
-        static_cast<SealedUpdatesRecord*>(session)->EnableExprEvaluation();
+        static_cast<SealedUpdatesRecord*>(session)->PublishUpdates();
         return SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

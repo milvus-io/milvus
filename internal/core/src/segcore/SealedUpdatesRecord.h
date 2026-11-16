@@ -31,7 +31,7 @@ namespace milvus::segcore::experimental {
 // Preparation adapter for the static, sealed-segment POC. Pins the original
 // physical base/index state, registers sparse histories and optionally builds
 // the all-data index. OFF does not copy base column values.
-// Expression routing is activated explicitly after preparation.
+// The prepared store is published explicitly for filtering and output lookup.
 class SealedUpdatesRecord {
  public:
     static std::unique_ptr<SealedUpdatesRecord>
@@ -50,9 +50,10 @@ class SealedUpdatesRecord {
           const std::vector<UpdateAssignment>& assignments,
           OpContext* op_ctx = nullptr);
 
-    // Call before starting queries to enable versioned filtering and output fill.
+    // Attach the prepared store to the source segment before starting queries.
+    // Both filtering and output lookup then read from this shared store.
     void
-    EnableExprEvaluation();
+    PublishUpdates();
 
     uint64_t
     LatestInsertionTimestamp() const;

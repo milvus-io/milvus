@@ -55,7 +55,7 @@ SealedUpdatesRecord::LatestInsertionTimestamp() const {
 }
 
 void
-SealedUpdatesRecord::EnableExprEvaluation() {
+SealedUpdatesRecord::PublishUpdates() {
     source_->AttachExperimentalUpdates(records_);
 }
 
