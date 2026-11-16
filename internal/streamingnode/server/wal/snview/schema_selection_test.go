@@ -12,6 +12,7 @@ import (
 )
 
 func TestAcquireUpViewAtExactSchema(t *testing.T) {
+	useImmediateHandoff(t)
 	cat, resources, reports := newMockCatalog(), newMockResourceManager(), &reportCollector{}
 	h := recoverSNQueryViewHandler(t.Context(), testPChannel, cat, resources, nil)
 	for _, pair := range []struct {

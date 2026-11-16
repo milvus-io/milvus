@@ -131,6 +131,11 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	s.mu.RLock()
 	previous := s.configs[cfg.CollectionID]
 	s.mu.RUnlock()
+	// WAL load intent describes fields, partitions and replicas. It must not
+	// erase a data visibility requirement published by an earlier operation.
+	if previous != nil && previous.MinimumDataVersion.GT(cfg.MinimumDataVersion) {
+		cfg.MinimumDataVersion = previous.MinimumDataVersion
+	}
 	if sameLoadRequirements(previous, cfg) {
 		if previous.AutoLoad == cfg.AutoLoad {
 			return nil

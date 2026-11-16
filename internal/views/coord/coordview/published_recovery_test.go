@@ -116,7 +116,7 @@ func TestPublishedRecoveryRechecksAfterReferenceAcquisition(t *testing.T) {
 	unblockOnce := sync.OnceFunc(func() { close(unblock) })
 	defer unblockOnce()
 	var refs atomic.Int32
-	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(_ context.Context, _ int64, version uint64) (func(), error) {
+	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(_ context.Context, _ int64, version uint64, _ qviews.DataVersion) (func(), error) {
 		if version != 99 {
 			return func() {}, nil
 		}

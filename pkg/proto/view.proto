@@ -39,6 +39,9 @@ message CollectionLoadConfig {
     bool user_specified_replica_mode = 8;
     // Loading intent created by AutoLoad. Boost preparation only while the shard lacks a healthy Up view.
     bool auto_load = 9;
+    // Every QueryView referencing this immutable configuration must cover this
+    // data publication. Absent means no additional lower bound (legacy records).
+    DataVersion minimum_data_version = 10;
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.

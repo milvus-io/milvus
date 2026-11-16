@@ -16,8 +16,19 @@
 
 package paramtable
 
+// HandoffPolicy selects how new query plans move to a replacement QueryView.
+type HandoffPolicy string
+
+const (
+	HandoffPolicyImmediate HandoffPolicy = "immediate"
+	HandoffPolicyLinear    HandoffPolicy = "linear"
+)
+
 // queryViewConfig owns QueryView execution and placement configuration.
 type queryViewConfig struct {
+	HandoffPolicy                           ParamItem `refreshable:"true"`
+	LinearHandoffDuration                   ParamItem `refreshable:"true"`
+	LinearHandoffInitialRatio               ParamItem `refreshable:"true"`
 	IDFLazyLoadSealedStats                  ParamItem `refreshable:"true"`
 	IDFSealedStatsLoadConcurrencyRatio      ParamItem `refreshable:"true"`
 	LeaseDuration                           ParamItem `refreshable:"false"`
@@ -42,6 +53,22 @@ type queryViewConfig struct {
 }
 
 func (p *queryViewConfig) init(base *BaseTable) {
+	p.HandoffPolicy = ParamItem{
+		Key: "queryView.handoffPolicy.type", Version: "3.1.0", DefaultValue: string(HandoffPolicyLinear), Export: true,
+		Doc: "New query plan handoff policy: linear or immediate. Unknown values use immediate. Linear shifts traffic between same-schema Up Views at the greatest LoadInfoVersion; old Views may retire before the window ends. Use immediate during upgrades until all coordinators support MinimumDataVersion.",
+	}
+	p.HandoffPolicy.Init(base.mgr)
+	p.LinearHandoffDuration = ParamItem{
+		Key: "queryView.handoffPolicy.linear.duration", Version: "3.1.0", DefaultValue: "30s", Export: true,
+		Doc: "Linear handoff window from local Ready-to-Up. Sampled at transition; non-positive durations use immediate handoff for that transition.",
+	}
+	p.LinearHandoffDuration.Init(base.mgr)
+	p.LinearHandoffInitialRatio = ParamItem{
+		Key: "queryView.handoffPolicy.linear.initialRatio", Version: "3.1.0", DefaultValue: "0.1", Export: true,
+		Doc: "Initial fraction of new plans routed to the target View, in [0,1). Sampled at transition; out-of-range values use immediate handoff for that transition.",
+	}
+	p.LinearHandoffInitialRatio.Init(base.mgr)
+
 	p.IDFLazyLoadSealedStats = ParamItem{
 		Key:          "queryView.idfOracle.lazyLoadSealedStats",
 		Version:      "3.1.0",
@@ -236,4 +263,16 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Doc:          "Additional cost multiplier on logical size units needing a compatible destination load. Increase to favor protected ready-resource reuse; decrease to favor balance despite additional loading.",
 	}
 	p.BalancerLoadCostPerUnit.Init(base.mgr)
+}
+
+// GetHandoffPolicy resolves the current policy on every read so live updates
+// affect both new transitions and active handoff windows. Unknown values retain
+// the immediate fallback instead of admitting an unsupported strategy.
+func (p *queryViewConfig) GetHandoffPolicy() HandoffPolicy {
+	switch policy := HandoffPolicy(p.HandoffPolicy.GetValue()); policy {
+	case HandoffPolicyImmediate, HandoffPolicyLinear:
+		return policy
+	default:
+		return HandoffPolicyImmediate
+	}
 }

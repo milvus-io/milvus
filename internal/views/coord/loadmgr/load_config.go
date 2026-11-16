@@ -4,6 +4,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -19,6 +20,7 @@ type LoadConfig struct {
 	// Version identifies immutable resource requirements, not every metadata
 	// publication. Use snapshot identity to detect an AutoLoad-only change.
 	Version                  uint64
+	MinimumDataVersion       qviews.DataVersion
 	DbID                     int64
 	CollectionID             int64
 	PartitionIDs             []int64
@@ -43,6 +45,7 @@ func (c *LoadConfig) Clone() *LoadConfig {
 	}
 	out := &LoadConfig{
 		Version:                  c.Version,
+		MinimumDataVersion:       c.MinimumDataVersion,
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
@@ -105,6 +108,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 	cfg := &LoadConfig{
 		Version: info.GetVersion(), DbID: info.GetDbID(), CollectionID: info.GetCollectionID(),
+		MinimumDataVersion:       qviews.FromProtoDataVersion(info.GetMinimumDataVersion()),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
 		AutoLoad:                 info.GetAutoLoad(),
 		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
@@ -129,6 +133,9 @@ func (c *LoadConfig) toCollectionLoadConfigProto() *viewpb.CollectionLoadConfig 
 		AutoLoad:                 c.AutoLoad,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 		PartitionIds:             append([]int64(nil), c.PartitionIDs...),
+	}
+	if c.MinimumDataVersion != (qviews.DataVersion{}) {
+		info.MinimumDataVersion = c.MinimumDataVersion.IntoProto()
 	}
 	info.PreloadFields = cloneFieldConfigs(c.LoadFields)
 	for _, replica := range c.Replicas {

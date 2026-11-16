@@ -113,6 +113,15 @@ func (c *qvViewStateMaxAgeCollector) SetProvider(provider func() []QVViewStateMa
 }
 
 var (
+	QVHandoffPlans = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: qvSubsystem, Name: "handoff_plans_total",
+		Help: "New plans sampled during an SN handoff window, by selected role (source or target).",
+	}, []string{"role"})
+	QVHandoffWindows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: qvSubsystem, Name: "handoff_windows_total",
+		Help: "SN handoff starts and observed exits, by reason. No-traffic exits are observed on next planning or replacement.",
+	}, []string{"reason"})
+
 	QVViewStates = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,

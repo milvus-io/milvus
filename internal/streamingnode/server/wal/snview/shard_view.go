@@ -40,6 +40,8 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
+	handoff       *linearHandoff
+	recovered     bool // Reconstructed from a persisted Up, even if recovery fails.
 	leaseDisabled bool // Explicit Down control permanently closes this View's lease.
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
@@ -74,6 +76,7 @@ func recoverSnShardView(
 		entries[version] = &snViewEntry{
 			ApplyView: handler.ApplyView{View: view},
 			sm:        sm,
+			recovered: true,
 		}
 	}
 	s := &snShardView{
@@ -239,6 +242,9 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 		},
 	})
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
+	if before == qviews.QueryViewStateReady && entry.sm.State() == qviews.QueryViewStateUp && entry.advertisedUp {
+		s.startHandoffLocked(key.QueryViewVersion, entry)
+	}
 }
 
 func (s *snShardView) setCollectionIDLocked(collectionID int64) {
@@ -459,12 +465,28 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var generation *snViewEntry
+	for version, entry := range s.views {
+		s.advancePendingDownLocked(version, entry)
+		if schema != nil && entry.sm.meta.GetSchemaVersion() != *schema {
+			continue
+		}
+		// Recovering (or failed recovery of) a persisted Up must not admit
+		// new plans at an older LoadInfoVersion while its resources catch up.
+		state := entry.sm.State()
+		wasUp := state == qviews.QueryViewStateUp || (entry.recovered && (entry.sm.IsRecovering() || state == qviews.QueryViewStateUnrecoverable))
+		if !wasUp {
+			continue
+		}
+		if generation == nil || newerPlanningCandidate(entry, generation) {
+			generation = entry
+		}
+	}
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
 	recovering := false
 	for version, entry := range s.views {
-		s.advancePendingDownLocked(version, entry)
-		if schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema {
+		if generation == nil || entry.sm.meta.GetSchemaVersion() != generation.sm.meta.GetSchemaVersion() || entry.sm.meta.GetLoadInfoVersion() != generation.sm.meta.GetLoadInfoVersion() {
 			continue
 		}
 		if entry.sm.IsRecovering() {
@@ -473,12 +495,13 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 		if entry.leaseDisabled || entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
-		if selected == nil || version.GT(selectedVersion) {
+		if selected == nil || newerPlanningCandidate(entry, selected) {
 			selected = entry
 			selectedVersion = version
 		}
 	}
 	if selected != nil {
+		selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected)
 		// Filter the normally selected version before granting/renewing a
 		// serving lease. Never bypass the constraints by choosing an older
 		// data/load generation or by removing workers from the plan.

@@ -103,7 +103,7 @@ func TestQueryViewDataHandoffAndRefreshProgress(t *testing.T) {
 			response, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{CollectionIDs: []int64{1}})
 			require.NoError(t, err)
 			require.NoError(t, merr.Error(response.Status))
-			require.Equal(t, []int64{100}, response.InMemoryPercentages)
+			require.Equal(t, []int64{50}, response.InMemoryPercentages, "refresh publishes a new load version with a data visibility minimum")
 			require.Equal(t, []int64{50}, response.RefreshProgress)
 		}
 	}

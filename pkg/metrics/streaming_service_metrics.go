@@ -680,6 +680,8 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 
 // RegisterStreamingNode registers streaming node metrics
 func RegisterStreamingNode(registry *prometheus.Registry) {
+	registry.MustRegister(QVHandoffPlans)
+	registry.MustRegister(QVHandoffWindows)
 	registry.MustRegister(StreamingNodeProducerTotal)
 	registry.MustRegister(StreamingNodeProduceInflightTotal)
 	registry.MustRegister(StreamingNodeConsumerTotal)

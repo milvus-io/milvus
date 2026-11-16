@@ -608,3 +608,22 @@ func isMetricVecConstructor(expr ast.Expr) bool {
 		return false
 	}
 }
+
+func TestRegisterStreamingNodeHandoffMetrics(t *testing.T) {
+	QVHandoffPlans.WithLabelValues("source").Add(0)
+	QVHandoffWindows.WithLabelValues("started").Add(0)
+	t.Cleanup(func() {
+		QVHandoffPlans.DeleteLabelValues("source")
+		QVHandoffWindows.DeleteLabelValues("started")
+	})
+	registry := prometheus.NewRegistry()
+	RegisterStreamingNode(registry)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	names := make([]string, 0, len(families))
+	for _, family := range families {
+		names = append(names, family.GetName())
+	}
+	require.Contains(t, names, "milvus_qv_handoff_plans_total")
+	require.Contains(t, names, "milvus_qv_handoff_windows_total")
+}

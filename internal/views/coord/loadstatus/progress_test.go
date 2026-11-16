@@ -150,3 +150,17 @@ func TestProgress(t *testing.T) {
 	channels = []string{"v0"}
 	check(t, 0)
 }
+
+func TestProgressIncludesMinimumDataVersion(t *testing.T) {
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	minimum := qviews.DataVersion{StreamingVersion: 2, CompactVersion: 3}
+	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 1, MinimumDataVersion: minimum, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}))
+	shard := qviews.ShardID{ReplicaID: 10, VChannel: "v0"}
+	stats := &coordview.ShardStats{UpLoadInfoVersion: store.GetConfigVersion(1), UpVersion: &qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 2, CompactVersion: 2}}}
+	patch := mockey.Mock((*coordview.ShardViewRegistry).SnapshotForShards).Return(coordview.NewShardViewSnapshot(1, map[qviews.ShardID]*coordview.ShardStats{shard: stats})).Build()
+	defer patch.UnPatch()
+	require.False(t, Get(store, &coordview.ShardViewRegistry{}, 1, []string{"v0"}).Ready())
+	stats.UpVersion.DataVersion = minimum
+	require.True(t, Get(store, &coordview.ShardViewRegistry{}, 1, []string{"v0"}).Ready())
+}

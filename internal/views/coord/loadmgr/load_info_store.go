@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -70,7 +71,7 @@ func (s *LoadConfigStore) GetLoadInfo(ctx context.Context, collectionID int64, v
 
 // AcquireLoadInfo pins requirements through final durable View removal. It is
 // serialized with deletion, including creation before the View is persisted.
-func (s *LoadConfigStore) AcquireLoadInfo(ctx context.Context, collectionID int64, version uint64) (func(), error) {
+func (s *LoadConfigStore) AcquireLoadInfo(ctx context.Context, collectionID int64, version uint64, dataVersion qviews.DataVersion) (func(), error) {
 	s.referenceLocks.Lock(collectionID)
 	defer s.referenceLocks.Unlock(collectionID)
 	if err := ctx.Err(); err != nil {
@@ -81,6 +82,10 @@ func (s *LoadConfigStore) AcquireLoadInfo(ctx context.Context, collectionID int6
 	if version == 0 || s.history[collectionID][version] == nil {
 		s.mu.Unlock()
 		return nil, merr.WrapErrServiceNotReadyMsg("load requirements %d for collection %d are unavailable", version, collectionID)
+	}
+	if minimum := s.history[collectionID][version].MinimumDataVersion; !dataVersion.GTE(minimum) {
+		s.mu.Unlock()
+		return nil, merr.WrapErrServiceNotReadyMsg("query view data version %s is below load requirements %d minimum %s", dataVersion.String(), version, minimum.String())
 	}
 	s.references[key]++
 	s.mu.Unlock()
