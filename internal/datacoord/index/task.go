@@ -766,7 +766,11 @@ func (it *indexBuildTask) jsonFlatTarget(ctx context.Context) (bool, error) {
 		}
 		schema = collection.Schema
 	}
-	return indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)).GetDataType(), params), nil
+	kind := classifyIndex(schema, &model.Index{FieldID: it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID), IndexParams: params})
+	if kind == indexUnknown {
+		return false, merr.WrapErrServiceNotReadyMsg("index field schema is not visible yet")
+	}
+	return kind == indexLogicalOnlyJSONFlat, nil
 }
 
 const (

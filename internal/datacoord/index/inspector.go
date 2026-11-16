@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -157,11 +156,22 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 		return nil
 	}
 
-	indexes := i.indexMeta.GetPhysicalIndexesForCollection(segment.CollectionID)
-	indexIDToSegIndexes := i.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	classify := i.indexMeta.indexClassifier(segment.CollectionID)
+	indexes := i.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	// Deduplicate against current records, not the physical projection: an
+	// unknown record must remain present if schema visibility changes at admission.
+	indexIDsWithBuild := typeutil.NewUniqueSet()
+	for _, record := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {
+		if !record.IsDeleted {
+			indexIDsWithBuild.Insert(record.IndexID)
+		}
+	}
 
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+		if classify(index) == indexLogicalOnlyJSONFlat {
+			continue
+		}
+		if indexIDsWithBuild.Contain(index.IndexID) {
 			continue
 		}
 		collection, ok := i.CanCreateIndexForSegment(ctx, segment, index)
@@ -190,7 +200,7 @@ func (i *IndexInspector) CanCreateIndexForSegment(ctx context.Context, segment *
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return nil, false
 	}
-	if indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(collection.Schema, index.FieldID).GetDataType(), index.IndexParams) {
+	if index.IsDeleted || classifyIndex(collection.Schema, index) != indexPhysical {
 		return nil, false
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
