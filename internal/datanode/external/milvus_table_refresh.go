@@ -67,7 +67,7 @@ func (t *RefreshExternalCollectionTask) initializeMilvusTableFieldMapping() erro
 		return err
 	}
 	target := t.req.GetSchema()
-	if err := typeutil.ValidateMilvusTableRefreshSchema(target, source); err != nil {
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(target, source); err != nil {
 		return merr.Wrap(err, "resolve milvus-table source fields")
 	}
 	sourceFields := make(map[string]*schemapb.FieldSchema)

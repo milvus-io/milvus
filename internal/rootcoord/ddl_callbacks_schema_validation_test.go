@@ -223,11 +223,10 @@ func TestDDLCallbacksPropertyOnlyAlterSkipsSchemaEvolutionValidation(t *testing.
 func TestMappedFieldAdditionAdmission(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
-		name     string
-		source   string
-		spec     string
-		mapping  string
-		rejected bool
+		name    string
+		source  string
+		spec    string
+		mapping string
 	}{
 		{name: "milvus table", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, mapping: "extra"},
 		{name: "parquet", source: "s3://bucket/data", spec: `{"format":"parquet"}`, mapping: "extra"},
@@ -279,23 +278,10 @@ func TestMappedFieldAdditionAdmission(t *testing.T) {
 					require.NoError(t, marshalErr)
 					err = core.broadcastAlterCollectionForAddField(context.Background(), &milvuspb.AddCollectionFieldRequest{DbName: "db", CollectionName: coll.Name, Schema: encoded})
 				}
-				if tc.rejected {
-					require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-					require.Contains(t, err.Error(), "milvus-table")
-					require.Contains(t, err.Error(), "new external collection")
-					require.Zero(t, cacheCalls)
-				} else {
-					require.ErrorIs(t, err, boundary)
-					require.Equal(t, 1, cacheCalls)
-				}
+				require.ErrorIs(t, err, boundary)
+				require.Equal(t, 1, cacheCalls)
 				require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()), "DDL admission must not mutate committed schema")
 			})
 		}
 	}
-}
-
-func TestMilvusTableFieldAdditionInvalidSpec(t *testing.T) {
-	err := validateMilvusTableFieldAddition(&model.Collection{ExternalSource: "s3://bucket/snapshot", ExternalSpec: "{"})
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.NotErrorIs(t, err, merr.ErrOperationNotSupported)
 }

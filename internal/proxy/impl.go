@@ -1013,16 +1013,11 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Milvus-table can add mapped fields or Struct children, but cannot backfill functions
-	// or apply other native schema mutations to the source snapshot.
 	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		plan, err := schemautil.ParseAlterSchemaAddRequest(request.GetAction().GetAddRequest())
-		if err != nil || (plan.Kind != schemautil.AlterSchemaAddStructSubField && plan.Kind != schemautil.AlterSchemaAddField) ||
-			!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
-			return &milvuspb.AlterCollectionSchemaResponse{
-				AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-					"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
-			}, nil
+		plan, parseErr := schemautil.ParseAlterSchemaAddRequest(request.GetAction().GetAddRequest())
+		if !typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() || parseErr != nil ||
+			(plan.Kind != schemautil.AlterSchemaAddField && plan.Kind != schemautil.AlterSchemaAddStructSubField) {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table field additions"))}, nil
 		}
 	}
 

@@ -446,7 +446,7 @@ func TestPackedFFIReaderMilvusTableFieldMapping(t *testing.T) {
 	files, err := writer.Close()
 	require.NoError(t, err)
 	defer files.Destroy()
-	source, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), config, &ManifestUpdates{NewFiles: files})
+	source, err := CommitManifestUpdates(base, ManifestEarliest, config, &ManifestUpdates{NewFiles: files})
 	require.NoError(t, err)
 	groups, err := readManifestColumnGroupEntries(source, config, []string{"101", "103"})
 	require.NoError(t, err)
@@ -457,7 +457,7 @@ func TestPackedFFIReaderMilvusTableFieldMapping(t *testing.T) {
 			}
 		}
 	}
-	target, err := CommitManifestUpdates(MarshalManifestPath(path.Join(dir, "target"), ManifestEarliest), config,
+	target, err := CommitManifestUpdates(path.Join(dir, "target"), ManifestEarliest, config,
 		&ManifestUpdates{ColumnGroups: groups})
 	require.NoError(t, err)
 	reader, err := NewFFIPackedReader(target, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})
@@ -474,7 +474,7 @@ func TestPackedFFIReaderMilvusTableFieldMapping(t *testing.T) {
 			groups[i].Files[j].Properties["milvus_table.field_id_mapping"] = `{"101":"103","101":"101"}`
 		}
 	}
-	corrupt, err := CommitManifestUpdates(MarshalManifestPath(path.Join(dir, "corrupt"), ManifestEarliest), config,
+	corrupt, err := CommitManifestUpdates(path.Join(dir, "corrupt"), ManifestEarliest, config,
 		&ManifestUpdates{ColumnGroups: groups})
 	require.NoError(t, err)
 	_, err = NewFFIPackedReader(corrupt, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})

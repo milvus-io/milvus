@@ -147,44 +147,92 @@ TEST_F(StorageV2IndexRawDataTest,
         },
         kStreamingInflightBytes);
     EXPECT_EQ(values, (std::vector<int64_t>{31, 32}));
-    auto pending = gen_field_meta(collection_id,
-                                  partition_id,
-                                  segment_id,
-                                  105,
-                                  DataType::INT64,
-                                  DataType::NONE,
-                                  true);
-    pending.field_schema.set_external_field("future");
-    EXPECT_THROW(
-        GetFieldDatasFromManifest(target_manifest,
-                                  properties,
-                                  pending,
-                                  DataType::INT64,
-                                  1,
-                                  DataType::NONE,
-                                  StorageColumnMapping{"105", "105", true}),
-        SegcoreError);
-    auto legacy_manifest =
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
+
+TEST_F(StorageV2IndexRawDataTest, MissingMappedFieldCannotBuildDefaultIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("existing"),
+                     FieldId(101),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({11, 12}).ok());
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {builder.Finish().ValueOrDie()});
+    auto source_path = path_ + "/missing_index_source";
+    auto target_path = path_ + "/missing_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    const auto legacy_manifest =
         nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump();
-    EXPECT_THROW(
-        GetFieldDatasFromManifest(legacy_manifest,
-                                  properties,
-                                  pending,
-                                  DataType::INT64,
-                                  1,
-                                  DataType::NONE,
-                                  StorageColumnMapping{"105", "105", true}),
-        SegcoreError);
-    pending.field_schema.clear_external_field();
-    EXPECT_TRUE(
-        GetFieldDatasFromManifest(legacy_manifest,
-                                  properties,
-                                  pending,
-                                  DataType::INT64,
-                                  1,
-                                  DataType::NONE,
-                                  StorageColumnMapping{"105", "105", false})
-            .empty());
+    auto groups = GetLoonManifest(legacy_manifest, properties)->columnGroups();
+    for (auto& group : groups) {
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    const auto target_version = transaction->Commit().ValueOrDie();
+    const auto mapped_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+
+    for (const auto& manifest : {legacy_manifest, mapped_manifest}) {
+        for (bool has_default : {false, true}) {
+            SCOPED_TRACE(manifest);
+            SCOPED_TRACE(has_default);
+            auto meta = gen_field_meta(collection_id,
+                                       partition_id,
+                                       segment_id,
+                                       105,
+                                       DataType::INT64,
+                                       DataType::NONE,
+                                       true);
+            meta.field_schema.set_external_field("extra");
+            if (has_default) {
+                meta.field_schema.mutable_default_value()->set_long_data(7);
+            }
+            try {
+                GetFieldDatasFromManifest(
+                    manifest,
+                    properties,
+                    meta,
+                    DataType::INT64,
+                    1,
+                    DataType::NONE,
+                    StorageColumnMapping{"105", "105", true});
+                ADD_FAILURE() << "an unrefreshed mapped field must not build a "
+                                 "NULL/default index";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::FieldNotLoaded);
+                EXPECT_NE(
+                    std::string(error.what()).find("RefreshExternalCollection"),
+                    std::string::npos);
+            }
+            // The same absent field remains eligible for normal internal
+            // schema-evolution defaults, including target-local outputs.
+            meta.field_schema.clear_external_field();
+            EXPECT_TRUE(GetFieldDatasFromManifest(
+                            manifest,
+                            properties,
+                            meta,
+                            DataType::INT64,
+                            1,
+                            DataType::NONE,
+                            StorageColumnMapping{"105", "105", false})
+                            .empty());
+        }
+    }
     std::filesystem::remove_all(source_path);
     std::filesystem::remove_all(target_path);
 }

@@ -3952,7 +3952,7 @@ TEST(LazyManifest, MilvusTableMappedRefreshUsesManifestLocalBindings) {
                                   second_builder.Finish().ValueOrDie()});
     auto source_path = root + "/source";
     auto version = milvus::test::WriteRecordBatchesToV3(
-        source, source_path, {batch}, "101|103");
+        source, source_path, {batch}, "101,103");
     auto properties =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
     auto make_manifest = [&](bool expanded) {
@@ -3965,13 +3965,15 @@ TEST(LazyManifest, MilvusTableMappedRefreshUsesManifestLocalBindings) {
             if (!expanded && group->columns.front() != "103") {
                 continue;
             }
+            EXPECT_EQ(group->columns.size(), 1);
             for (auto& file : group->files) {
                 file.properties["milvus_table.field_id_mapping"] =
-                    expanded ? R"({"101":"103","103":"101"})"
-                             : R"({"101":"103"})";
+                    group->columns.front() == "103" ? R"({"101":"103"})"
+                                                    : R"({"103":"101"})";
             }
             groups.push_back(group);
         }
+        EXPECT_EQ(groups.size(), expanded ? 2 : 1);
         auto path = root + (expanded ? "/new" : "/old");
         auto transaction =
             milvus_storage::api::transaction::Transaction::Open(fs, path)

@@ -44,6 +44,7 @@
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 
 namespace {
 
@@ -173,7 +174,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         // 2. Read manifest → ColumnGroups
         auto cgs = ReadManifestColumnGroupsWithFFI(manifest_path, c_properties);
-        auto field_id_mapping = ReadMilvusTableFieldIdMapping(*cgs);
+        auto mapping = ReadMilvusTableFieldIdMapping(*cgs);
 
         // 3. Determine total rows from column group files
         int64_t total_rows = 0;
@@ -240,25 +241,25 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                     return;
                 }
                 auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
-                auto mapping = milvus::ResolvePhysicalColumnMapping(
+                auto physical_mapping = milvus::ResolvePhysicalColumnMapping(
                     is_milvus_table, field_schema);
                 auto sample_name = is_milvus_table_data_field
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
-                if (is_milvus_table_data_field && field_id_mapping) {
-                    auto it = field_id_mapping->physical_columns.find(
-                        field_schema.fieldid());
-                    if (it == field_id_mapping->physical_columns.end()) {
+                auto column_name = physical_mapping.storage_column_name;
+                if (is_milvus_table_data_field && mapping) {
+                    auto it =
+                        mapping->physical_columns.find(field_schema.fieldid());
+                    if (it == mapping->physical_columns.end()) {
                         ThrowInfo(milvus::FieldNotLoaded,
                                   "external field {} has no manifest binding",
                                   field_schema.fieldid());
                     }
-                    mapping.storage_column_name = it->second;
+                    column_name = it->second;
                 }
-                external_fields.push_back(
-                    {std::move(field_meta),
-                     std::move(mapping.storage_column_name),
-                     std::move(sample_name)});
+                external_fields.push_back({std::move(field_meta),
+                                           std::move(column_name),
+                                           std::move(sample_name)});
             };
             for (const auto& field_schema : schema.fields()) {
                 append_sample_field(field_schema);

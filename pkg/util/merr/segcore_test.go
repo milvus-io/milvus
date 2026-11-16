@@ -150,17 +150,6 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.Equal(t, ErrSegcore.code(), Status(err).GetCode())
 	})
 
-	t.Run("field_not_loaded_identity", func(t *testing.T) {
-		err := SegcoreError(2027, "external field has no manifest binding")
-		assert.True(t, IsSegcoreFieldNotLoaded(err))
-		assert.True(t, IsSegcoreFieldNotLoaded(Wrap(err, "create index")))
-		assert.False(t, IsSegcoreFieldNotLoaded(nil))
-		assert.False(t, IsSegcoreFieldNotLoaded(ErrSegcore))
-		assert.False(t, IsSegcoreFieldNotLoaded(SegcoreError(2045, "I/O failure")))
-		assert.Equal(t, SystemError, GetErrorType(err))
-		assert.True(t, IsRetryableErr(err))
-	})
-
 	t.Run("empty_message", func(t *testing.T) {
 		err := SegcoreError(2000, "")
 		assert.ErrorIs(t, err, ErrSegcore)

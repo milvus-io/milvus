@@ -3949,6 +3949,53 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 	s.Equal(datapb.SegmentLevel_L1, result[0].GetLevel())
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PreservesSchemaVersion() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Version: 8,
+			Fields: []*schemapb.FieldSchema{
+				// Sampling is independent of the schema version carried by the segment.
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := s.newTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 64}, nil).Build()
+	defer m2.UnPatch()
+
+	// Newly imported segments must satisfy the schema materialization barrier.
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 100},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal(int32(8), result[0].GetSchemaVersion())
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ContextCanceledInLoops() {
 	paramtable.Init()
 
@@ -4336,10 +4383,12 @@ func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizesOrdinaryStructProjection() {
-	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 100, Fields: []*schemapb.FieldSchema{
 			{Name: "items[a]", FieldID: 101, ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 			{Name: "items[b]", FieldID: 102, ExternalField: "items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
-		}}}}
+		}}},
+	}
 	s.Equal(int64(48), sumFieldSizes(map[string]int64{"items[a]": 16, "items[b]": 32, "items[ignored]": 100}, schema))
 }

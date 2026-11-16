@@ -38,12 +38,6 @@ import (
 )
 
 func TestGetStateFromError(t *testing.T) {
-	t.Run("unbound external field is terminal for this manifest", func(t *testing.T) {
-		err := merr.Wrap(merr.SegcoreError(2027, "external field has no manifest binding"), "create index")
-		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
-		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
-		assert.True(t, merr.IsRetryableErr(err), "queries may retry a different replica")
-	})
 	t.Run("sparse conversion limit is terminal but allocation failures retry", func(t *testing.T) {
 		for _, tc := range []struct {
 			name  string
@@ -53,6 +47,7 @@ func TestGetStateFromError(t *testing.T) {
 			{"conversion budget exceeded", 2003, indexpb.JobState_JobStateFailed},
 			{"allocation failed", 2034, indexpb.JobState_JobStateRetry},
 			{"other configuration error", 2006, indexpb.JobState_JobStateRetry},
+			{"mapped field awaiting external refresh", 2027, indexpb.JobState_JobStateRetry},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				// Preserve the code through the same wrapper used by index builds.

@@ -2992,25 +2992,14 @@ func isExternalSystemOrVirtualField(name string) bool {
 
 // ValidateMilvusTableSchemaIdentity checks that every target milvus-table data
 // field maps to exactly one source snapshot data field through ExternalField.
-// Struct children may be projected by name; selected children must retain their
-// definitions and source IDs. Ordinary unmapped source fields are optional.
+// Struct children may be projected by name; selected children retain their
+// definitions and parent membership. Ordinary unmapped source fields are optional.
 // Source function outputs are optional source columns: a target ordinary field
 // may map to them, but a target function output remains target-local and is
-// regenerated during refresh. Create-time validation may ignore field IDs so
-// RootCoord can copy them from the snapshot. Mapping-aware refresh uses
-// ValidateMilvusTableRefreshSchema and persists physical bindings in manifests.
-func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
-	return validateMilvusTableSchemaIdentity(target, source, requireFieldID, requireFieldID)
-}
-
-// ValidateMilvusTableRefreshSchema validates a projection against the selected
-// snapshot. Physical IDs are bound by the imported manifest, independently of
-// target IDs, and newly added unselected source Structs do not change it.
-func ValidateMilvusTableRefreshSchema(target, source *schemapb.CollectionSchema) error {
-	return validateMilvusTableSchemaIdentity(target, source, false, true)
-}
-
-func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID, allowExtraSourceStructs bool) error {
+// regenerated during refresh. Target and source field IDs are independent.
+// Refresh checks source field ID stability against persisted manifest bindings
+// separately from this logical schema validation.
+func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema) error {
 	if target == nil {
 		return merr.WrapErrParameterInvalidMsg("target schema is nil")
 	}
@@ -3022,7 +3011,8 @@ func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 			target.GetEnableDynamicField(), source.GetEnableDynamicField())
 	}
 
-	// Structs retain parent and child names; physical leaves retain source IDs.
+	// Struct shape is defined by the parent; selected children must belong to
+	// that same source parent even when their target IDs are allocated separately.
 	sourceStructs := make(map[string]*schemapb.StructArrayFieldSchema)
 	sourceParents := make(map[string]string)
 	for _, parent := range source.GetStructArrayFields() {
@@ -3030,10 +3020,6 @@ func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 		for _, field := range parent.GetFields() {
 			sourceParents[field.GetName()] = parent.GetName()
 		}
-	}
-	// Refresh validates the existing projection and can ignore new source Structs.
-	if !allowExtraSourceStructs && len(target.GetStructArrayFields()) != len(sourceStructs) {
-		return merr.WrapErrParameterInvalidMsg("struct field count mismatch")
 	}
 	targetParents := make(map[string]string)
 	seenParents := make(map[string]bool)
@@ -3055,9 +3041,7 @@ func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 		left.Description, right.Description = "", ""
 		left.TypeParams = normalizeMilvusTableKVPairs(left.TypeParams)
 		right.TypeParams = normalizeMilvusTableKVPairs(right.TypeParams)
-		if !requireFieldID {
-			left.FieldID, right.FieldID = 0, 0
-		}
+		left.FieldID, right.FieldID = 0, 0
 		if !proto.Equal(left, right) {
 			return merr.WrapErrParameterInvalidMsg("struct definition mismatch for %q", parent.GetName())
 		}
@@ -3097,7 +3081,7 @@ func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 				sourceName, owner, targetName)
 		}
 		mappedSourceFields[sourceName] = targetName
-		if err := validateMilvusTableFieldIdentity(targetField, sourceField, requireFieldID, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
+		if err := validateMilvusTableFieldIdentity(targetField, sourceField, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
 			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
@@ -3339,24 +3323,19 @@ func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
-func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, requireFieldID bool, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
-	if requireFieldID && target.GetFieldID() != source.GetFieldID() {
-		return merr.WrapErrParameterInvalidMsg("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
-	}
+func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
 	sourcePKAsDataField := targetUsesVirtualPK && source.GetIsPrimaryKey() && !target.GetIsPrimaryKey()
-	targetComparable := comparableMilvusTableField(target, requireFieldID, sourcePKAsDataField, false)
-	sourceComparable := comparableMilvusTableField(source, requireFieldID, sourcePKAsDataField, sourceFunctionOutputAsDataField)
+	targetComparable := comparableMilvusTableField(target, sourcePKAsDataField, false)
+	sourceComparable := comparableMilvusTableField(source, sourcePKAsDataField, sourceFunctionOutputAsDataField)
 	if !proto.Equal(targetComparable, sourceComparable) {
 		return merr.WrapErrParameterInvalidMsg("definition mismatch between target and source snapshot schema")
 	}
 	return nil
 }
 
-func comparableMilvusTableField(field *schemapb.FieldSchema, keepFieldID bool, sourcePKAsDataField bool, sourceFunctionOutputAsDataField bool) *schemapb.FieldSchema {
+func comparableMilvusTableField(field *schemapb.FieldSchema, sourcePKAsDataField bool, sourceFunctionOutputAsDataField bool) *schemapb.FieldSchema {
 	clone := proto.Clone(field).(*schemapb.FieldSchema)
-	if !keepFieldID {
-		clone.FieldID = 0
-	}
+	clone.FieldID = 0
 	if sourcePKAsDataField {
 		clone.IsPrimaryKey = false
 		clone.AutoID = false

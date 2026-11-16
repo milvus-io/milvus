@@ -2454,7 +2454,8 @@ func TestDDLCallbacksOrdinaryExternalRejectsAddStructSubField(t *testing.T) {
 	name := "externalStruct" + funcutil.RandomString(10)
 	status, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	schema := &schemapb.CollectionSchema{Name: name,
+	schema := &schemapb.CollectionSchema{
+		Name:           name,
 		ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{newRootAddStructFieldSchema("profile")},
 	}
@@ -2468,8 +2469,10 @@ func TestDDLCallbacksOrdinaryExternalRejectsAddStructSubField(t *testing.T) {
 	before, err := core.meta.GetCollectionByName(ctx, dbName, name, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	beforeSchema := before.ToCollectionSchemaPB()
-	field := &schemapb.FieldSchema{Name: "profile[new_scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
-		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}
+	field := &schemapb.FieldSchema{
+		Name: "profile[new_scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
 	response, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, name, field, false))
 	require.ErrorIs(t, merr.CheckRPCCall(response.GetAlterStatus(), err), merr.ErrParameterInvalid)
 	after, err := core.meta.GetCollectionByName(ctx, dbName, name, typeutil.MaxTimestamp, false)

@@ -96,7 +96,6 @@ func TestAlignMilvusTableAddedStructFields(t *testing.T) {
 				require.Equal(t, int64(111), candidate.StructArrayFields[0].Fields[0].FieldID)
 			}
 			require.True(t, proto.Equal(before, old))
-
 		})
 	}
 }

@@ -86,11 +86,6 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err != nil {
 		return err
 	}
-	if plan.Kind == schemautil.AlterSchemaAddField {
-		if err := validateMilvusTableFieldAddition(coll); err != nil {
-			return err
-		}
-	}
 	if plan.HasField() {
 		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
 			schema := coll.ToCollectionSchemaPB()
@@ -365,7 +360,15 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if err := schemautil.FillAddedStructSubFieldMaxCapacity(model.MarshalStructArrayFieldModel(parent), field); err != nil {
 		return err
 	}
-	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
+	validationField := field
+	if typeutil.NewStorageColumnResolver(coll.ToCollectionSchemaPB()).IsMilvusTable() {
+		if field.GetExternalField() == "" {
+			field.ExternalField = storedRootStructSubFieldName(parent.Name, originalName)
+		}
+		validationField = typeutil.Clone(field)
+		validationField.ExternalField = ""
+	}
+	if err := validateAddedStructSubFieldProperties(originalName, validationField); err != nil {
 		return err
 	}
 	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {

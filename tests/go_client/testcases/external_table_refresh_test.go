@@ -4239,6 +4239,616 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	})
 }
 
+func TestRefreshExternalCollectionMilvusTableAddFieldBeforeFirstRefresh(t *testing.T) {
+	ctx := hp.CreateContext(t, 12*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	sourceName := common.GenRandomString("mt_add_first_src", 6)
+	targetName := common.GenRandomString("mt_add_first_ext", 6)
+	dropWithTimeout := func(collectionName string) {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName))
+	}
+	t.Cleanup(func() { dropWithTimeout(targetName) })
+	t.Cleanup(func() { dropWithTimeout(sourceName) })
+
+	sourceSchema := entity.NewSchema().WithName(sourceName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("unused").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64).WithNullable(true))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).
+		WithProperty("collection.autocompaction.enabled", false)))
+
+	ids := []int64{31, 32}
+	vectors := [][]float32{{31, 32, 33, 34}, {32, 33, 34, 35}}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnInt64("unused", []int64{131, 132}),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors),
+		column.NewColumnInt64("score", []int64{931, 932})))
+	require.NoError(t, err)
+	flush, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+
+	snapshotName := common.GenRandomString("mt_add_first_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = mc.DropSnapshot(cleanupCtx, client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+	snapshot, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshot.GetS3Location())
+
+	targetSchema := entity.NewSchema().WithName(targetName).
+		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(targetName, targetSchema)))
+
+	// Add Field changes only the logical schema, even before the first refresh.
+	addCtx, cancelAdd := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelAdd()
+	fieldSchema, err := proto.Marshal(entity.NewField().WithName("score").
+		WithDataType(entity.FieldTypeInt64).WithNullable(true).WithExternalField("score").ProtoMessage())
+	require.NoError(t, err)
+	status, err := mc.GetService().AddCollectionField(addCtx, &milvuspb.AddCollectionFieldRequest{
+		CollectionName: targetName,
+		Schema:         fieldSchema,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode(), status.GetReason())
+	require.Zero(t, status.GetCode(), status.GetReason())
+
+	// ALTER must not submit an implicit refresh job.
+	jobs, err := mc.ListRefreshExternalCollectionJobs(ctx, client.NewListRefreshExternalCollectionJobsOption(targetName))
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(targetName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	checkRows := func() {
+		t.Helper()
+		rows, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").
+			WithOutputFields("id", "score").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, len(ids), rows.ResultCount)
+		got := make(map[int64]int64, rows.ResultCount)
+		for i := 0; i < rows.ResultCount; i++ {
+			id, err := rows.GetColumn("id").GetAsInt64(i)
+			require.NoError(t, err)
+			score, err := rows.GetColumn("score").GetAsInt64(i)
+			require.NoError(t, err)
+			got[id] = score
+		}
+		require.Equal(t, map[int64]int64{31: 931, 32: 932}, got)
+		search, err := mc.Search(ctx, client.NewSearchOption(targetName, 1,
+			[]entity.Vector{entity.FloatVector(vectors[0])}).WithOutputFields("id", "score"))
+		require.NoError(t, err)
+		require.Len(t, search, 1)
+		require.Equal(t, 1, search[0].ResultCount)
+		id, err := search[0].GetColumn("id").GetAsInt64(0)
+		require.NoError(t, err)
+		require.Equal(t, int64(31), id)
+		score, err := search[0].GetColumn("score").GetAsInt64(0)
+		require.NoError(t, err)
+		require.Equal(t, int64(931), score)
+	}
+	checkRows()
+
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	checkRows()
+}
+
+func TestRefreshExternalCollectionMilvusTableFunctionOutputFieldIDCollision(t *testing.T) {
+	ctx := hp.CreateContext(t, 12*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	sourceName := common.GenRandomString("mt_fn_id_src", 6)
+	targetName := common.GenRandomString("mt_fn_id_ext", 6)
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(targetName)) })
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName)) })
+
+	textField := func(name, externalName string) *entity.Field {
+		return entity.NewField().WithName(name).WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(256).WithExternalField(externalName).
+			WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})
+	}
+	sourceSchema := entity.NewSchema().WithName(sourceName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("unused").WithDataType(entity.FieldTypeInt64)).
+		WithField(textField("text", "")).
+		WithField(entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).
+		WithProperty("collection.autocompaction.enabled", false)))
+
+	ids := []int64{41, 42}
+	docs := []string{"milvus vector database", "parquet external table"}
+	vectors := [][]float32{{41, 42, 43, 44}, {42, 43, 44, 45}}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnInt64("unused", []int64{141, 142}),
+		column.NewColumnVarChar("text", docs),
+		column.NewColumnFloatVector("vec", testVecDim, vectors)))
+	require.NoError(t, err)
+	flush, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+	snapshotName := common.GenRandomString("mt_fn_id_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+	snapshot, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshot.GetS3Location())
+
+	targetSchema := entity.NewSchema().WithName(targetName).
+		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).WithExternalField("id")).
+		WithField(textField("doc", "text")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("vec")).
+		WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector)).
+		WithFunction(entity.NewFunction().WithName("bm25_fn").WithInputFields("doc").
+			WithOutputFields("sparse").WithType(entity.FunctionTypeBM25))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(targetName, targetSchema)))
+
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+	targetDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(targetName))
+	require.NoError(t, err)
+	fieldID := func(schema *entity.Schema, name string) int64 {
+		t.Helper()
+		for _, field := range schema.Fields {
+			if field.Name == name {
+				return field.ID
+			}
+		}
+		require.FailNow(t, "field %q not found", name)
+		return 0
+	}
+	sourceIDs := map[int64]bool{}
+	for name, expectedID := range map[string]int64{"id": 100, "unused": 101, "text": 102, "vec": 103} {
+		actualID := fieldID(sourceDesc.Schema, name)
+		require.Equal(t, expectedID, actualID, "source field IDs must preserve the collision precondition")
+		sourceIDs[actualID] = true
+	}
+	outputID := fieldID(targetDesc.Schema, "sparse")
+	require.NotZero(t, outputID)
+	require.NotContains(t, sourceIDs, outputID, "BM25 output field ID must not alias any source field")
+	require.NotEqual(t, fieldID(sourceDesc.Schema, "vec"), fieldID(targetDesc.Schema, "embedding"),
+		"mapped vector field must use its target logical ID")
+
+	vectorIdx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(targetName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, vectorIdx.Await(ctx))
+	sparseIdx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(targetName, "sparse", index.NewSparseInvertedIndex(entity.BM25, 0.1)))
+	require.NoError(t, err)
+	require.NoError(t, sparseIdx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	checkResults := func() {
+		t.Helper()
+		rows, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").
+			WithOutputFields("id", "doc").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, len(ids), rows.ResultCount)
+		gotDocs := map[int64]string{}
+		for i := 0; i < rows.ResultCount; i++ {
+			id, err := rows.GetColumn("id").GetAsInt64(i)
+			require.NoError(t, err)
+			doc, err := rows.GetColumn("doc").GetAsString(i)
+			require.NoError(t, err)
+			gotDocs[id] = doc
+		}
+		require.Equal(t, map[int64]string{41: docs[0], 42: docs[1]}, gotDocs)
+		vectorSearch, err := mc.Search(ctx, client.NewSearchOption(targetName, 1,
+			[]entity.Vector{entity.FloatVector(vectors[0])}).WithANNSField("embedding").WithOutputFields("id", "doc"))
+		require.NoError(t, err)
+		require.Len(t, vectorSearch, 1)
+		vectorID, err := vectorSearch[0].GetColumn("id").GetAsInt64(0)
+		require.NoError(t, err)
+		require.Equal(t, int64(41), vectorID)
+		bm25Search, err := mc.Search(ctx, client.NewSearchOption(targetName, 2,
+			[]entity.Vector{entity.Text("milvus vector")}).WithANNSField("sparse").WithOutputFields("id"))
+		require.NoError(t, err)
+		require.Len(t, bm25Search, 1)
+		require.Greater(t, bm25Search[0].ResultCount, 0)
+		bm25IDs := bm25Search[0].GetColumn("id")
+		found := false
+		for i := 0; i < bm25IDs.Len(); i++ {
+			id, err := bm25IDs.GetAsInt64(i)
+			require.NoError(t, err)
+			found = found || id == 41
+		}
+		require.True(t, found, "BM25 search should return the document matching the query")
+	}
+	checkResults()
+
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName).
+		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	checkResults()
+}
+
+func TestRefreshExternalCollectionMilvusTableMappedFieldIDsAndAddField(t *testing.T) {
+	ctx := hp.CreateContext(t, 12*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	sourceName := common.GenRandomString("mt_map_src", 6)
+	sourceSchema := entity.NewSchema().WithName(sourceName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("omitted").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim)).
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64).WithNullable(true))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).
+		WithProperty("collection.autocompaction.enabled", false)))
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName)) })
+
+	ids := []int64{10, 11}
+	vectors := [][]float32{{10, 11, 12, 13}, {11, 12, 13, 14}}
+	omitted := []int64{100, 101}
+	scores := []int64{700, 701}
+	// Exceed the small-segment threshold so CreateIndex runs a real builder.
+	for i := 0; len(ids) < 2048; i++ {
+		ids = append(ids, int64(1000+i))
+		vectors = append(vectors, []float32{1000 + float32(i), 1, 2, 3})
+		omitted = append(omitted, int64(20000+i))
+		scores = append(scores, int64(10000+i))
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors),
+		column.NewColumnInt64("omitted", omitted),
+		column.NewColumnInt64("score", scores)))
+	require.NoError(t, err)
+	flush, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+
+	makeSnapshot := func(prefix string) *milvuspb.DescribeSnapshotResponse {
+		t.Helper()
+		name := common.GenRandomString(prefix, 6)
+		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(name, sourceName)))
+		t.Cleanup(func() { _ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(name, sourceName)) })
+		info, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(name, sourceName))
+		require.NoError(t, err)
+		require.NotEmpty(t, info.GetS3Location())
+		return info
+	}
+	firstSnapshot := makeSnapshot("mt_map_first")
+
+	minioCfg := getMinIOConfig()
+	spec := extTestSpec(minioCfg, "milvus-table")
+	externalName := common.GenRandomString("mt_map_ext", 6)
+	externalSchema := entity.NewSchema().WithName(externalName).
+		WithExternalSource(firstSnapshot.GetS3Location()).WithExternalSpec(spec).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(externalName)) })
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(externalName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	deleteResult, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", []int64{11}))
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleteResult.DeleteCount)
+	time.Sleep(10 * time.Second)
+	flush, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+	// Switch to a newly-created snapshot while the target remains loaded. Its
+	// source score column has already been written to every source segment.
+	secondSnapshot := makeSnapshot("mt_map_second")
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName).
+		WithExternalSource(secondSnapshot.GetS3Location()).WithExternalSpec(spec))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	addedScore := entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64).
+		WithNullable(true).WithExternalField("score")
+	jobsBeforeAdd, err := mc.ListRefreshExternalCollectionJobs(ctx, client.NewListRefreshExternalCollectionJobsOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(externalName, addedScore)))
+	jobsAfterAdd, err := mc.ListRefreshExternalCollectionJobs(ctx, client.NewListRefreshExternalCollectionJobsOption(externalName))
+	require.NoError(t, err)
+	require.Len(t, jobsAfterAdd, len(jobsBeforeAdd), "Add Field must not submit a refresh job")
+	oldRows, err := mc.Query(ctx, client.NewQueryOption(externalName).WithFilter("id >= 0").WithOutputFields("id"))
+	require.NoError(t, err)
+	require.Positive(t, oldRows.ResultCount)
+	_, err = mc.Query(ctx, client.NewQueryOption(externalName).WithFilter("id >= 0").WithOutputFields("score"))
+	require.ErrorContains(t, err, "current loaded external collection manifest")
+	// Building before refresh must wait for the mapped column rather than
+	// successfully indexing synthesized NULLs. Reuse this task after refresh.
+	scoreIndex, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(externalName, "score", index.NewSortedIndex()))
+	require.NoError(t, err)
+	beforeRefreshCtx, cancelBeforeRefresh := context.WithTimeout(ctx, 30*time.Second)
+	indexErr := scoreIndex.Await(beforeRefreshCtx)
+	require.Error(t, indexErr)
+	require.ErrorIs(t, beforeRefreshCtx.Err(), context.DeadlineExceeded)
+	cancelBeforeRefresh()
+	// Keep the collection loaded and explicitly import the expanded projection.
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	require.NoError(t, scoreIndex.Await(ctx), "the original index task must recover after explicit refresh")
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	// The omitted source field shifts both the vector and scalar source IDs.
+	// Index building and retrieval must use the same manifest-bound projection.
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+	targetDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(externalName))
+	require.NoError(t, err)
+	fieldID := func(schema *entity.Schema, name string) int64 {
+		for _, field := range schema.Fields {
+			if field.Name == name {
+				return field.ID
+			}
+		}
+		require.FailNow(t, "field %q not found in schema", name)
+		return 0
+	}
+	sourceScoreID := fieldID(sourceDesc.Schema, "score")
+	targetScoreID := fieldID(targetDesc.Schema, "score")
+	require.Positive(t, sourceScoreID)
+	require.Positive(t, targetScoreID)
+	require.NotEqual(t, sourceScoreID, targetScoreID)
+	sourceVectorID := fieldID(sourceDesc.Schema, "embedding")
+	targetVectorID := fieldID(targetDesc.Schema, "embedding")
+	require.Positive(t, sourceVectorID)
+	require.Positive(t, targetVectorID)
+	require.NotEqual(t, sourceVectorID, targetVectorID)
+	checkScore := func(wantIDs []int64, wantScores []int64) {
+		t.Helper()
+		rows, err := mc.Query(ctx, client.NewQueryOption(externalName).WithFilter("id < 100").
+			WithOutputFields("id", "score").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, len(wantIDs), rows.ResultCount)
+		got := make(map[int64]int64, rows.ResultCount)
+		for i := 0; i < rows.ResultCount; i++ {
+			id, err := rows.GetColumn("id").GetAsInt64(i)
+			require.NoError(t, err)
+			score, err := rows.GetColumn("score").GetAsInt64(i)
+			require.NoError(t, err)
+			got[id] = score
+		}
+		for i, id := range wantIDs {
+			require.Equal(t, wantScores[i], got[id], "score for id=%d", id)
+		}
+	}
+	checkScore([]int64{10}, []int64{700})
+	filtered, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithFilter("score == 700").WithOutputFields("id", "score").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 1, filtered.ResultCount, "the scalar index must contain actual source values")
+	filteredID, err := filtered.GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(10), filteredID)
+	search, err := mc.Search(ctx, client.NewSearchOption(externalName, 1,
+		[]entity.Vector{entity.FloatVector(vectors[0])}).WithFilter("score == 700").WithOutputFields("id", "score"))
+	require.NoError(t, err)
+	require.Len(t, search, 1)
+	searchScore, err := search[0].GetColumn("score").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(700), searchScore)
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", []int64{12}),
+		column.NewColumnFloatVector("embedding", testVecDim, [][]float32{{12, 13, 14, 15}}),
+		column.NewColumnInt64("omitted", []int64{102}),
+		column.NewColumnInt64("score", []int64{702})))
+	require.NoError(t, err)
+	flush, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+	thirdSnapshot := makeSnapshot("mt_map_third")
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName).
+		WithExternalSource(thirdSnapshot.GetS3Location()).WithExternalSpec(spec))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	checkScore([]int64{10, 12}, []int64{700, 702})
+	search, err = mc.Search(ctx, client.NewSearchOption(externalName, 1,
+		[]entity.Vector{entity.FloatVector{12, 13, 14, 15}}).WithOutputFields("id", "score"))
+	require.NoError(t, err)
+	require.Len(t, search, 1)
+	require.Equal(t, 1, search[0].ResultCount)
+	searchScore, err = search[0].GetColumn("score").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(702), searchScore)
+}
+
+func TestRefreshExternalCollectionMilvusTableMappedStructSubField(t *testing.T) {
+	ctx := hp.CreateContext(t, 12*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	const dim = testVecDim
+	sourceName := common.GenRandomString("mt_struct_src", 6)
+	sourceStruct := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(32).WithNullable(true))
+	sourceSchema := entity.NewSchema().WithName(sourceName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("omitted").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(8).WithStructSchema(sourceStruct))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).
+		WithProperty("collection.autocompaction.enabled", false)))
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName)) })
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName).
+		WithInt64Column("id", []int64{21, 22}).
+		WithFloatVectorColumn("embedding", dim, [][]float32{{21, 22, 23, 24}, {22, 23, 24, 25}}).
+		WithInt64Column("omitted", []int64{121, 122}).
+		WithStructArrayColumn("metadata", sourceStruct, []map[string]any{
+			{"score": []int64{801}, "tag": []*string{elemNullStr("first")}},
+			{"score": []int64{802}, "tag": []*string{elemNullStr("second")}},
+		}))
+	require.NoError(t, err)
+	flush, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+	snapshotName := common.GenRandomString("mt_struct_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+	snapshot, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+
+	targetName := common.GenRandomString("mt_struct_ext", 6)
+	targetStruct := entity.NewStructSchema().WithField(entity.NewField().
+		WithName("score").WithDataType(entity.FieldTypeInt64).WithExternalField("metadata[score]"))
+	targetSchema := entity.NewSchema().WithName(targetName).
+		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(dim).WithExternalField("embedding")).
+		WithField(entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(8).WithStructSchema(targetStruct))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(targetName, targetSchema)))
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(targetName)) })
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(targetName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	addedTag := entity.NewField().WithName("metadata[tag]").WithDataType(entity.FieldTypeVarChar).
+		WithMaxLength(32).WithNullable(true).WithExternalField("metadata[tag]")
+	jobsBeforeAdd, err := mc.ListRefreshExternalCollectionJobs(ctx, client.NewListRefreshExternalCollectionJobsOption(targetName))
+	require.NoError(t, err)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(targetName, addedTag)))
+	jobsAfterAdd, err := mc.ListRefreshExternalCollectionJobs(ctx, client.NewListRefreshExternalCollectionJobsOption(targetName))
+	require.NoError(t, err)
+	require.Len(t, jobsAfterAdd, len(jobsBeforeAdd), "Add Field must not submit a refresh job")
+	oldRows, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").WithOutputFields("id"))
+	require.NoError(t, err)
+	require.Positive(t, oldRows.ResultCount)
+	_, err = mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").WithOutputFields("metadata"))
+	require.ErrorContains(t, err, "current loaded external collection manifest")
+	// Keep the collection loaded and explicitly import the expanded projection.
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+	targetDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(targetName))
+	require.NoError(t, err)
+	findStructSubFieldID := func(schema *entity.Schema, parentName, childName string) int64 {
+		for _, field := range schema.Fields {
+			if field.Name == parentName && field.StructSchema != nil {
+				for _, subField := range field.StructSchema.Fields {
+					if subField.Name == childName {
+						return subField.ID
+					}
+				}
+			}
+		}
+		require.FailNow(t, "Struct sub-field %q[%q] not found in schema", parentName, childName)
+		return 0
+	}
+	sourceTagID := findStructSubFieldID(sourceDesc.Schema, "metadata", "tag")
+	targetTagID := findStructSubFieldID(targetDesc.Schema, "metadata", "tag")
+	require.Positive(t, sourceTagID)
+	require.Positive(t, targetTagID)
+	require.NotEqual(t, sourceTagID, targetTagID)
+	checkStructValues := func() {
+		t.Helper()
+		rows, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").
+			WithOutputFields("id", "metadata").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, 2, rows.ResultCount)
+		want := map[int64]map[string]any{
+			21: {"score": []int64{801}, "tag": []*string{elemNullStr("first")}},
+			22: {"score": []int64{802}, "tag": []*string{elemNullStr("second")}},
+		}
+		for i := 0; i < rows.ResultCount; i++ {
+			id, err := rows.GetColumn("id").GetAsInt64(i)
+			require.NoError(t, err)
+			value, err := rows.GetColumn("metadata").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, want[id], value)
+		}
+	}
+	checkStructSearch := func() {
+		t.Helper()
+		search, err := mc.Search(ctx, client.NewSearchOption(targetName, 1,
+			[]entity.Vector{entity.FloatVector{21, 22, 23, 24}}).WithOutputFields("id", "metadata"))
+		require.NoError(t, err)
+		require.Len(t, search, 1)
+		require.Equal(t, 1, search[0].ResultCount)
+		value, err := search[0].GetColumn("metadata").Get(0)
+		require.NoError(t, err)
+		require.Equal(t, []*string{elemNullStr("first")}, value.(map[string]any)["tag"])
+	}
+	checkStructValues()
+	checkStructSearch()
+
+	// Reapplying the same snapshot while loaded proves the newly mapped child
+	// remains available after refresh and query-view refresh.
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName).
+		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	checkStructValues()
+	checkStructSearch()
+}
+
 func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
 	ctx := hp.CreateContext(t, 5*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -4823,7 +5433,7 @@ func TestOrdinaryExternalStructProjection(t *testing.T) {
 				var previousPK map[int64]int64
 				for epoch := 0; epoch < 2; epoch++ {
 					infoFile := filepath.Join(t.TempDir(), "source.json")
-					cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", shape, "--format", format, "--prefix", fmt.Sprintf("%s/round%d", prefix, epoch), "--start-id", strconv.Itoa(epoch), infoFile, "0")
+					cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", shape, "--format", format, "--prefix", fmt.Sprintf("%s/round%d", prefix, epoch), "--start-id", strconv.Itoa(epoch), infoFile, "0") // #nosec G204 -- Fixed fixture script; arguments are test-generated values, without a shell.
 					cmd.Env = append(os.Environ(), "MINIO_ADDRESS="+cfg.address, "MINIO_BUCKET="+cfg.bucket, "MINIO_ACCESS_KEY="+cfg.accessKey, "MINIO_SECRET_KEY="+cfg.secretKey)
 					output, err := cmd.CombinedOutput()
 					require.NoError(t, err, "fixture generation: %s", output)
@@ -4943,7 +5553,7 @@ func ordinaryStructSource(ctx context.Context, t *testing.T, cfg minioConfig, na
 	prefix := "external-e2e-test/" + name
 	t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), store, cfg.bucket, prefix+"/") })
 	infoFile := filepath.Join(t.TempDir(), "source.json")
-	cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", "list_struct", "--format", format, "--struct-case", scenario, "--prefix", prefix, infoFile, "0")
+	cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", "list_struct", "--format", format, "--struct-case", scenario, "--prefix", prefix, infoFile, "0") // #nosec G204 -- Fixed fixture script; arguments are test-generated values, without a shell.
 	cmd.Env = append(os.Environ(), "MINIO_ADDRESS="+cfg.address, "MINIO_BUCKET="+cfg.bucket, "MINIO_ACCESS_KEY="+cfg.accessKey, "MINIO_SECRET_KEY="+cfg.secretKey)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "fixture: %s", output)
@@ -5207,11 +5817,11 @@ func testMilvusTableDeferredFieldBindingSnapshot(t *testing.T, disableWarmup boo
 	}
 	assertUnbound()
 	// Missing external data must not become a successful NULL/default index,
-	// nor retry indefinitely against the same immutable manifest.
+	// and must remain retriable while waiting for an explicit refresh.
 	require.NoError(t, targetClient.ReleaseCollection(ctx, client.NewReleaseCollectionOption(target)))
 	_, err = targetClient.CreateIndex(ctx, client.NewCreateIndexOption(target, "score", index.NewSortedIndex()).WithIndexName("unbound_score"))
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
+	require.Never(t, func() bool {
 		desc, err := targetClient.GetService().DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			CollectionName: target, FieldName: "score", IndexName: "unbound_score",
 		})
@@ -5222,12 +5832,11 @@ func testMilvusTableDeferredFieldBindingSnapshot(t *testing.T, disableWarmup boo
 			}
 			require.NotEqual(t, commonpb.IndexState_Finished, info.GetState(), "unbound field must not build a default index")
 			if info.GetState() == commonpb.IndexState_Failed {
-				require.Contains(t, info.GetIndexStateFailReason(), "manifest")
 				return true
 			}
 		}
 		return false
-	}, 2*time.Minute, time.Second, "index build must fail without retrying the immutable missing field")
+	}, 10*time.Second, time.Second, "unbound index must remain retriable before refresh")
 	require.NoError(t, targetClient.DropIndex(ctx, client.NewDropIndexOption(target, "unbound_score")))
 	load, err := targetClient.LoadCollection(ctx, client.NewLoadCollectionOption(target))
 	require.NoError(t, err)

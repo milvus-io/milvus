@@ -20,8 +20,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
@@ -30,17 +28,4 @@ func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.Coll
 		oldSchema = oldColl.ToCollectionSchemaPB()
 	}
 	return schemautil.ValidateSchemaEvolution(oldSchema, newSchema)
-}
-
-// Validate the declaration locally; refresh resolves physical IDs from its snapshot.
-func validateMilvusTableFieldAddition(coll *model.Collection) error {
-	if coll.ExternalSource == "" {
-		return nil
-	}
-	_, err := specutil.ParseExternalSpec(coll.ExternalSpec)
-	if err != nil {
-		return merr.Wrap(err, "parse external collection spec for field addition")
-	}
-
-	return nil
 }

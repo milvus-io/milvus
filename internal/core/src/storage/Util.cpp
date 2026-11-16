@@ -1837,6 +1837,21 @@ IterateFieldDataFromManifest(
         column_name = std::to_string(field_meta.field_id);
     }
 
+    const auto missing_field = [&]() {
+        // External mappings become readable only after explicit refresh.
+        // FieldMissing allows index builders to synthesize NULL/default rows;
+        // report a retriable error instead so they retry the refreshed manifest.
+        if (is_external) {
+            ThrowInfo(FieldNotLoaded,
+                      "mapped external field {} ({}) is not available in the "
+                      "current segment manifest; run RefreshExternalCollection "
+                      "before accessing this field",
+                      field_meta.field_id,
+                      ext_field);
+        }
+        return;
+    };
+
     if (field_id_mapping != nullptr) {
         const auto mapped =
             field_id_mapping->physical_columns.find(field_meta.field_id);
@@ -1868,10 +1883,7 @@ IterateFieldDataFromManifest(
             if (!local_identity ||
                 field_id_mapping->target_fields.find(candidate) !=
                     field_id_mapping->target_fields.end()) {
-                ThrowInfo(
-                    FieldNotLoaded,
-                    "external field {} has no binding in the loaded manifest",
-                    field_meta.field_id);
+                return missing_field();
             }
         }
     }
@@ -1889,12 +1901,7 @@ IterateFieldDataFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        if (is_external) {
-            ThrowInfo(FieldNotLoaded,
-                      "external field {} is absent from the loaded manifest",
-                      field_meta.field_id);
-        }
-        return;
+        return missing_field();
     }
 
     std::vector<std::string> needed_columns = {column_name};

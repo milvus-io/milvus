@@ -233,14 +233,6 @@ func IsSegcoreDataFormatBroken(err error) bool {
 	return errors.As(err, &segcoreErr) && segcoreErr.code == 2024
 }
 
-// IsSegcoreFieldNotLoaded identifies the C++ FieldNotLoaded (2027) code.
-// Query retries remain enabled in segcoreCodeTable; immutable-manifest tasks
-// can use this identity to reject a field that another worker cannot supply.
-func IsSegcoreFieldNotLoaded(err error) bool {
-	var segcoreErr *segcoreErrorCode
-	return errors.As(err, &segcoreErr) && segcoreErr.code == 2027
-}
-
 // IsPermanentSegcoreErr reports whether err carries a C++ segcore code that is
 // known to fail identically on every attempt and every node. Callers that would
 // otherwise retry — the index/stats/analyze scheduler in particular — must treat

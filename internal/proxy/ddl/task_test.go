@@ -8101,6 +8101,23 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		assert.True(t, field.GetNullable())
 		assert.Equal(t, "profile[c]", field.GetName())
 	})
+	t.Run("milvus table explicit mapping", func(t *testing.T) {
+		schema := structSubFieldDDLTestSchema(true)
+		schema.ExternalSource = "s3://bucket/snapshot"
+		schema.ExternalSpec = `{"format":"milvus-table"}`
+		field := newField("profile[c]")
+		field.ExternalField = "profile[c]"
+		require.NoError(t, preExecute(schema, field, nil, ""))
+		assert.Equal(t, "profile[c]", field.GetExternalField())
+	})
+	t.Run("milvus table renamed child", func(t *testing.T) {
+		schema := structSubFieldDDLTestSchema(true)
+		schema.ExternalSource = "s3://bucket/snapshot"
+		schema.ExternalSpec = `{"format":"milvus-table"}`
+		field := newField("profile[c]")
+		field.ExternalField = "profile[other]"
+		require.ErrorContains(t, preExecute(schema, field, nil, ""), "must retain its source name")
+	})
 	t.Run("non nullable parent", func(t *testing.T) {
 		field := newField("profile[c]")
 		require.NoError(t, preExecute(structSubFieldDDLTestSchema(false), field, nil, ""))

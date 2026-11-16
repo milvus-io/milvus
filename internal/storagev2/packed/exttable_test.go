@@ -2660,6 +2660,265 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 }
 
 // Import validates columns from the source manifest before committing a target.
+func TestMilvusTableHistoricalStructManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored []string
+	}{
+		{"whole parent", []string{"100"}},
+		{"new child", []string{"100", "102"}},
+		{"newer physical field", []string{"100", "102", "104"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: tc.stored, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}}}}, DeltaLogs: []DeltaLogEntry{{Path: filepath.Join(dir, "delta"), NumEntries: 1}}})
+			require.NoError(t, err)
+			ext := ExternalSpecContext{}
+			required := []string{"100", "102", "103"}
+			deltas, deltaErr := GetMilvusTableSourceDeltalogs(source, cfg, ext, required)
+			target, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), required, []Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ext)
+			require.ErrorIs(t, deltaErr, merr.ErrOperationNotSupported)
+			require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			require.Empty(t, deltas)
+			require.Empty(t, target)
+		})
+	}
+}
+
+func TestSampleExternalFieldSizesHistoricalStruct(t *testing.T) {
+	for _, hasSibling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sibling=%t", hasSibling), func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			columns := []string{"1", "100"}
+			fields := []arrow.Field{{Name: "1", Type: arrow.PrimitiveTypes.Int64}, {Name: "100", Type: arrow.PrimitiveTypes.Int64}}
+			if hasSibling {
+				columns = append(columns, "102")
+				fields = append(fields, arrow.Field{Name: "102", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true})
+			}
+			as := arrow.NewSchema(fields, nil)
+			b := array.NewRecordBuilder(memory.DefaultAllocator, as)
+			defer b.Release()
+			b.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			if hasSibling {
+				list := b.Field(2).(*array.ListBuilder)
+				list.Append(true)
+				list.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{10, 20, 30}, nil)
+				list.AppendNull()
+				list.Append(true)
+			}
+			rec := b.NewRecord()
+			defer rec.Release()
+			filename := filepath.Join(dir, "data.parquet")
+			f, err := os.Create(filename)
+			require.NoError(t, err)
+			defer f.Close()
+			writer, err := pqarrow.NewFileWriter(as, f, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+			manifest, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: columns, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filename, EndIndex: 3}}}}})
+			require.NoError(t, err)
+			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", FieldID: 101, Nullable: true}}}
+			for _, id := range []int64{102, 103} {
+				child := &schemapb.FieldSchema{Name: fmt.Sprintf("clips[f%d]", id), FieldID: id, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: id == 103, TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "4"}}}
+				schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, child)
+			}
+			_, err = SampleExternalFieldSizes(manifest, 3, 42, "", schema.ExternalSpec, schema, cfg)
+			require.ErrorContains(t, err, "not found in schema")
+		})
+	}
+}
+
+func TestMilvusTableImportPreservesFieldIDMapping(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg,
+		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"101", "102", "103"}, Format: "parquet",
+			Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
+		}}})
+	require.NoError(t, err)
+	const mapping = `{"101":"103","103":"101"}`
+	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"101", "103"},
+		[]Fragment{{
+			FilePath: source, RowCount: 3, EndRow: 3,
+			Properties: map[string]string{MilvusTableFieldIDMappingProperty: mapping},
+		}}, cfg, ExternalSpecContext{})
+	require.NoError(t, err)
+	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101", "103"})
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, []string{"101", "103"}, groups[0].Columns)
+	require.Len(t, groups[0].Files, 1)
+	require.JSONEq(t, mapping, groups[0].Files[0].Properties[MilvusTableFieldIDMappingProperty])
+}
+
+func TestMilvusTableImportProjectsFieldIDMapping(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	properties := map[string]string{MilvusTableFieldIDMappingProperty: `{"999":"998"}`, "opaque": "preserved"}
+	source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg,
+		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{
+			{Columns: []string{"1", "101", "102"}, Format: "parquet", Files: []ColumnGroupFileEntry{
+				{Path: filepath.Join(dir, "first.parquet"), EndIndex: 2, Properties: properties},
+				{Path: filepath.Join(dir, "second.parquet"), StartIndex: 2, EndIndex: 3, Properties: properties},
+			}},
+			{Columns: []string{"103"}, Format: "parquet", Files: []ColumnGroupFileEntry{
+				{Path: filepath.Join(dir, "third.parquet"), EndIndex: 3, Properties: properties},
+			}},
+			{Columns: []string{"104"}, Format: "parquet", Files: []ColumnGroupFileEntry{
+				{Path: filepath.Join(dir, "omitted.parquet"), EndIndex: 3},
+			}},
+		}})
+	require.NoError(t, err)
+	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"1", "101", "103"},
+		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
+			MilvusTableFieldIDMappingProperty: `{"103":"101","1":"1","101":"103","105":"104"}`,
+		}}}, cfg, ExternalSpecContext{})
+	require.NoError(t, err)
+	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"1", "101", "103"})
+	require.NoError(t, err)
+	require.Len(t, groups, 2)
+	require.Equal(t, []string{"1", "101"}, groups[0].Columns)
+	require.Equal(t, []string{"103"}, groups[1].Columns)
+	require.Len(t, groups[0].Files, 2)
+	require.Len(t, groups[1].Files, 1)
+	for i, want := range []string{`{"1":"1","103":"101"}`, `{"101":"103"}`} {
+		for _, file := range groups[i].Files {
+			require.Equal(t, want, file.Properties[MilvusTableFieldIDMappingProperty])
+			require.Equal(t, "preserved", file.Properties["opaque"])
+			require.Equal(t, source, file.Properties[milvusTableSourceManifestPathProperty])
+			require.Equal(t, "3", file.Properties[milvusTableSourceRowCountProperty])
+		}
+	}
+}
+
+func TestMilvusTableImportRejectsInvalidFieldIDMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mapping string
+		message string
+	}{
+		{name: "missing source", mapping: `{"1":"1"}`, message: "missing source column 101"},
+		{name: "missing timestamp", mapping: `{"201":"101"}`, message: "missing source column 1"},
+		{name: "empty object", mapping: `{}`, message: "missing source column"},
+		{name: "duplicate source", mapping: `{"1":"1","201":"101","202":"101"}`, message: "duplicate source field ID 101"},
+		{name: "duplicate target", mapping: `{"1":"1","201":"101","201":"102"}`, message: "duplicate target field ID 201"},
+		{name: "target leading zero", mapping: `{"1":"1","0201":"101"}`, message: "canonical nonnegative int64"},
+		{name: "source leading zero", mapping: `{"1":"1","201":"0101"}`, message: "canonical nonnegative int64"},
+		{name: "negative target", mapping: `{"1":"1","-1":"101"}`, message: "canonical nonnegative int64"},
+		{name: "negative source", mapping: `{"1":"1","201":"-101"}`, message: "canonical nonnegative int64"},
+		{name: "plus sign", mapping: `{"1":"1","+201":"101"}`, message: "canonical nonnegative int64"},
+		{name: "empty target", mapping: `{"1":"1","":"101"}`, message: "canonical nonnegative int64"},
+		{name: "overflow", mapping: `{"1":"1","9223372036854775808":"101"}`, message: "canonical nonnegative int64"},
+		{name: "numeric source", mapping: `{"1":"1","201":101}`, message: "must be a string"},
+		{name: "null source", mapping: `{"1":"1","201":null}`, message: "must be a string"},
+		{name: "nested source", mapping: `{"1":"1","201":{"nested":"101"}}`, message: "must be a string"},
+		{name: "array", mapping: `[]`, message: "must be an object"},
+		{name: "null", mapping: `null`, message: "must be an object"},
+		{name: "malformed", mapping: `{`, message: "invalid field ID mapping JSON"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg,
+				&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+					Columns: []string{"1", "101"}, Format: "parquet",
+					Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
+				}}})
+			require.NoError(t, err)
+			result, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"1", "101"},
+				[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
+					MilvusTableFieldIDMappingProperty: tc.mapping,
+				}}}, cfg, ExternalSpecContext{})
+			require.ErrorContains(t, err, tc.message)
+			require.ErrorIs(t, err, ErrLoonPermanent)
+			require.Empty(t, result)
+			manifests, err := filepath.Glob(filepath.Join(dir, "target", "_metadata", "manifest-*.avro"))
+			require.NoError(t, err)
+			require.Empty(t, manifests)
+		})
+	}
+}
+
+func TestMilvusTableImportLegacyStripsSourceMapping(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg,
+		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"101"}, Format: "parquet",
+			Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3, Properties: map[string]string{
+				MilvusTableFieldIDMappingProperty: `{"999":"998"}`, "opaque": "preserved",
+			}}},
+		}}})
+	require.NoError(t, err)
+	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"101"},
+		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ExternalSpecContext{})
+	require.NoError(t, err)
+	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101"})
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].Files, 1)
+	require.NotContains(t, groups[0].Files[0].Properties, MilvusTableFieldIDMappingProperty)
+	require.Equal(t, "preserved", groups[0].Files[0].Properties["opaque"])
+}
+
+func TestMilvusTableImportRebindsBloomFilterStats(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mapping string
+		mode    MilvusTablePrimaryKeyMode
+		wantKey string
+	}{
+		{name: "bound external PK", mapping: `{"201":"101","202":"102"}`, mode: MilvusTablePrimaryKeyModeExternal, wantKey: "bloom_filter.201"},
+		{name: "legacy external PK", mode: MilvusTablePrimaryKeyModeExternal, wantKey: "bloom_filter.101"},
+		{name: "virtual PK", mapping: `{"201":"101"}`, mode: MilvusTablePrimaryKeyModeVirtual},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			bloomPath := filepath.Join(dir, "source-bloom")
+			source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg,
+				&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
+					Columns: []string{"101", "102"}, Format: "parquet",
+					Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
+				}}, Stats: []StatEntry{
+					{Key: "bloom_filter.101", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "32", "opaque": "preserved"}},
+					{Key: "bloom_filter.102", Files: []string{filepath.Join(dir, "omitted-bloom")}},
+					{Key: "text_index.101", Files: []string{filepath.Join(dir, "source-text")}},
+				}})
+			require.NoError(t, err)
+			targetTextPath := filepath.Join(dir, "target-text")
+			manifest, err := createMilvusTableManifest(context.Background(), filepath.Join(dir, "target"), []string{"101"},
+				[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
+					MilvusTableFieldIDMappingProperty: tc.mapping,
+				}}}, cfg, ExternalSpecContext{MilvusTablePKMode: tc.mode},
+				&ManifestUpdates{Stats: []StatEntry{{Key: "text_index.201", Files: []string{targetTextPath}}}})
+			require.NoError(t, err)
+			stats, err := GetManifestStats(manifest, cfg)
+			require.NoError(t, err)
+			if tc.wantKey == "" {
+				require.NotContains(t, stats, "bloom_filter.101")
+				require.NotContains(t, stats, "bloom_filter.201")
+			} else {
+				require.Contains(t, stats, tc.wantKey)
+				require.Equal(t, []string{bloomPath}, stats[tc.wantKey].Paths)
+				require.Equal(t, map[string]string{"memory_size": "32", "opaque": "preserved"}, stats[tc.wantKey].Metadata)
+			}
+			if tc.mapping != "" {
+				require.NotContains(t, stats, "bloom_filter.101")
+				require.NotContains(t, stats, "bloom_filter.102")
+				require.NotContains(t, stats, "bloom_filter.202")
+			}
+			require.NotContains(t, stats, "text_index.101")
+			require.Equal(t, []string{targetTextPath}, stats["text_index.201"].Paths)
+		})
+	}
+}
+
 func TestMilvusTableImportRejectsMissingColumn(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -2799,265 +3058,6 @@ func TestMilvusTableImportSourceReadFailurePreservesClassification(t *testing.T)
 	require.NotContains(t, err.Error(), "backfill")
 }
 
-func TestMilvusTableHistoricalStructManifest(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		stored []string
-	}{
-		{"whole parent", []string{"100"}},
-		{"new child", []string{"100", "102"}},
-		{"newer physical field", []string{"100", "102", "104"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-			source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: tc.stored, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}}}}, DeltaLogs: []DeltaLogEntry{{Path: filepath.Join(dir, "delta"), NumEntries: 1}}})
-			require.NoError(t, err)
-			ext := ExternalSpecContext{}
-			required := []string{"100", "102", "103"}
-			deltas, deltaErr := GetMilvusTableSourceDeltalogs(source, cfg, ext, required)
-			target, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), required, []Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ext)
-			require.ErrorIs(t, deltaErr, merr.ErrOperationNotSupported)
-			require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-			require.Empty(t, deltas)
-			require.Empty(t, target)
-		})
-	}
-}
-
-func TestSampleExternalFieldSizesHistoricalStruct(t *testing.T) {
-	for _, hasSibling := range []bool{false, true} {
-		t.Run(fmt.Sprintf("sibling=%t", hasSibling), func(t *testing.T) {
-			dir := t.TempDir()
-			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-			columns := []string{"1", "100"}
-			fields := []arrow.Field{{Name: "1", Type: arrow.PrimitiveTypes.Int64}, {Name: "100", Type: arrow.PrimitiveTypes.Int64}}
-			if hasSibling {
-				columns = append(columns, "102")
-				fields = append(fields, arrow.Field{Name: "102", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true})
-			}
-			as := arrow.NewSchema(fields, nil)
-			b := array.NewRecordBuilder(memory.DefaultAllocator, as)
-			defer b.Release()
-			b.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
-			b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
-			if hasSibling {
-				list := b.Field(2).(*array.ListBuilder)
-				list.Append(true)
-				list.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{10, 20, 30}, nil)
-				list.AppendNull()
-				list.Append(true)
-			}
-			rec := b.NewRecord()
-			defer rec.Release()
-			filename := filepath.Join(dir, "data.parquet")
-			f, err := os.Create(filename)
-			require.NoError(t, err)
-			defer f.Close()
-			writer, err := pqarrow.NewFileWriter(as, f, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
-			require.NoError(t, err)
-			require.NoError(t, writer.Write(rec))
-			require.NoError(t, writer.Close())
-			manifest, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: columns, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filename, EndIndex: 3}}}}})
-			require.NoError(t, err)
-			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", FieldID: 101, Nullable: true}}}
-			for _, id := range []int64{102, 103} {
-				child := &schemapb.FieldSchema{Name: fmt.Sprintf("clips[f%d]", id), FieldID: id, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: id == 103, TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "4"}}}
-				schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, child)
-			}
-			_, err = SampleExternalFieldSizes(manifest, 3, 42, "", schema.ExternalSpec, schema, cfg)
-			require.ErrorContains(t, err, "not found in schema")
-		})
-	}
-}
-
-func TestMilvusTableImportPreservesFieldIDMapping(t *testing.T) {
-	dir := t.TempDir()
-	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-	source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
-		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
-			Columns: []string{"101", "102", "103"}, Format: "parquet",
-			Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
-		}}})
-	require.NoError(t, err)
-	const mapping = `{"101":"103","103":"101"}`
-	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"101", "103"},
-		[]Fragment{{
-			FilePath: source, RowCount: 3, EndRow: 3,
-			Properties: map[string]string{MilvusTableFieldIDMappingProperty: mapping},
-		}}, cfg, ExternalSpecContext{})
-	require.NoError(t, err)
-	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101", "103"})
-	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	require.Equal(t, []string{"101", "103"}, groups[0].Columns)
-	require.Len(t, groups[0].Files, 1)
-	require.JSONEq(t, mapping, groups[0].Files[0].Properties[MilvusTableFieldIDMappingProperty])
-}
-
-func TestMilvusTableImportProjectsFieldIDMapping(t *testing.T) {
-	dir := t.TempDir()
-	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-	properties := map[string]string{MilvusTableFieldIDMappingProperty: `{"999":"998"}`, "opaque": "preserved"}
-	source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
-		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{
-			{Columns: []string{"1", "101", "102"}, Format: "parquet", Files: []ColumnGroupFileEntry{
-				{Path: filepath.Join(dir, "first.parquet"), EndIndex: 2, Properties: properties},
-				{Path: filepath.Join(dir, "second.parquet"), StartIndex: 2, EndIndex: 3, Properties: properties},
-			}},
-			{Columns: []string{"103"}, Format: "parquet", Files: []ColumnGroupFileEntry{
-				{Path: filepath.Join(dir, "third.parquet"), EndIndex: 3, Properties: properties},
-			}},
-			{Columns: []string{"104"}, Format: "parquet", Files: []ColumnGroupFileEntry{
-				{Path: filepath.Join(dir, "omitted.parquet"), EndIndex: 3},
-			}},
-		}})
-	require.NoError(t, err)
-	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"1", "101", "103"},
-		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
-			MilvusTableFieldIDMappingProperty: `{"103":"101","1":"1","101":"103","105":"104"}`,
-		}}}, cfg, ExternalSpecContext{})
-	require.NoError(t, err)
-	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"1", "101", "103"})
-	require.NoError(t, err)
-	require.Len(t, groups, 2)
-	require.Equal(t, []string{"1", "101"}, groups[0].Columns)
-	require.Equal(t, []string{"103"}, groups[1].Columns)
-	require.Len(t, groups[0].Files, 2)
-	require.Len(t, groups[1].Files, 1)
-	for i, want := range []string{`{"1":"1","103":"101"}`, `{"101":"103"}`} {
-		for _, file := range groups[i].Files {
-			require.Equal(t, want, file.Properties[MilvusTableFieldIDMappingProperty])
-			require.Equal(t, "preserved", file.Properties["opaque"])
-			require.Equal(t, source, file.Properties[milvusTableSourceManifestPathProperty])
-			require.Equal(t, "3", file.Properties[milvusTableSourceRowCountProperty])
-		}
-	}
-}
-
-func TestMilvusTableImportRejectsInvalidFieldIDMapping(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		mapping string
-		message string
-	}{
-		{name: "missing source", mapping: `{"1":"1"}`, message: "missing source column 101"},
-		{name: "missing timestamp", mapping: `{"201":"101"}`, message: "missing source column 1"},
-		{name: "empty object", mapping: `{}`, message: "missing source column"},
-		{name: "duplicate source", mapping: `{"1":"1","201":"101","202":"101"}`, message: "duplicate source field ID 101"},
-		{name: "duplicate target", mapping: `{"1":"1","201":"101","201":"102"}`, message: "duplicate target field ID 201"},
-		{name: "target leading zero", mapping: `{"1":"1","0201":"101"}`, message: "canonical nonnegative int64"},
-		{name: "source leading zero", mapping: `{"1":"1","201":"0101"}`, message: "canonical nonnegative int64"},
-		{name: "negative target", mapping: `{"1":"1","-1":"101"}`, message: "canonical nonnegative int64"},
-		{name: "negative source", mapping: `{"1":"1","201":"-101"}`, message: "canonical nonnegative int64"},
-		{name: "plus sign", mapping: `{"1":"1","+201":"101"}`, message: "canonical nonnegative int64"},
-		{name: "empty target", mapping: `{"1":"1","":"101"}`, message: "canonical nonnegative int64"},
-		{name: "overflow", mapping: `{"1":"1","9223372036854775808":"101"}`, message: "canonical nonnegative int64"},
-		{name: "numeric source", mapping: `{"1":"1","201":101}`, message: "must be a string"},
-		{name: "null source", mapping: `{"1":"1","201":null}`, message: "must be a string"},
-		{name: "nested source", mapping: `{"1":"1","201":{"nested":"101"}}`, message: "must be a string"},
-		{name: "array", mapping: `[]`, message: "must be an object"},
-		{name: "null", mapping: `null`, message: "must be an object"},
-		{name: "malformed", mapping: `{`, message: "invalid field ID mapping JSON"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-			source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
-				&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
-					Columns: []string{"1", "101"}, Format: "parquet",
-					Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
-				}}})
-			require.NoError(t, err)
-			result, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"1", "101"},
-				[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
-					MilvusTableFieldIDMappingProperty: tc.mapping,
-				}}}, cfg, ExternalSpecContext{})
-			require.ErrorContains(t, err, tc.message)
-			require.ErrorIs(t, err, ErrLoonPermanent)
-			require.Empty(t, result)
-			manifests, err := filepath.Glob(filepath.Join(dir, "target", "_metadata", "manifest-*.avro"))
-			require.NoError(t, err)
-			require.Empty(t, manifests)
-		})
-	}
-}
-
-func TestMilvusTableImportLegacyStripsSourceMapping(t *testing.T) {
-	dir := t.TempDir()
-	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-	source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
-		&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
-			Columns: []string{"101"}, Format: "parquet",
-			Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3, Properties: map[string]string{
-				MilvusTableFieldIDMappingProperty: `{"999":"998"}`, "opaque": "preserved",
-			}}},
-		}}})
-	require.NoError(t, err)
-	manifest, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), []string{"101"},
-		[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ExternalSpecContext{})
-	require.NoError(t, err)
-	groups, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101"})
-	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	require.Len(t, groups[0].Files, 1)
-	require.NotContains(t, groups[0].Files[0].Properties, MilvusTableFieldIDMappingProperty)
-	require.Equal(t, "preserved", groups[0].Files[0].Properties["opaque"])
-}
-
-func TestMilvusTableImportRebindsBloomFilterStats(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		mapping string
-		mode    MilvusTablePrimaryKeyMode
-		wantKey string
-	}{
-		{name: "bound external PK", mapping: `{"201":"101","202":"102"}`, mode: MilvusTablePrimaryKeyModeExternal, wantKey: "bloom_filter.201"},
-		{name: "legacy external PK", mode: MilvusTablePrimaryKeyModeExternal, wantKey: "bloom_filter.101"},
-		{name: "virtual PK", mapping: `{"201":"101"}`, mode: MilvusTablePrimaryKeyModeVirtual},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-			bloomPath := filepath.Join(dir, "source-bloom")
-			source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg,
-				&ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{
-					Columns: []string{"101", "102"}, Format: "parquet",
-					Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}},
-				}}, Stats: []StatEntry{
-					{Key: "bloom_filter.101", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "32", "opaque": "preserved"}},
-					{Key: "bloom_filter.102", Files: []string{filepath.Join(dir, "omitted-bloom")}},
-					{Key: "text_index.101", Files: []string{filepath.Join(dir, "source-text")}},
-				}})
-			require.NoError(t, err)
-			targetTextPath := filepath.Join(dir, "target-text")
-			manifest, err := createMilvusTableManifest(context.Background(), filepath.Join(dir, "target"), []string{"101"},
-				[]Fragment{{FilePath: source, RowCount: 3, EndRow: 3, Properties: map[string]string{
-					MilvusTableFieldIDMappingProperty: tc.mapping,
-				}}}, cfg, ExternalSpecContext{MilvusTablePKMode: tc.mode},
-				&ManifestUpdates{Stats: []StatEntry{{Key: "text_index.201", Files: []string{targetTextPath}}}})
-			require.NoError(t, err)
-			stats, err := GetManifestStats(manifest, cfg)
-			require.NoError(t, err)
-			if tc.wantKey == "" {
-				require.NotContains(t, stats, "bloom_filter.101")
-				require.NotContains(t, stats, "bloom_filter.201")
-			} else {
-				require.Contains(t, stats, tc.wantKey)
-				require.Equal(t, []string{bloomPath}, stats[tc.wantKey].Paths)
-				require.Equal(t, map[string]string{"memory_size": "32", "opaque": "preserved"}, stats[tc.wantKey].Metadata)
-			}
-			if tc.mapping != "" {
-				require.NotContains(t, stats, "bloom_filter.101")
-				require.NotContains(t, stats, "bloom_filter.102")
-				require.NotContains(t, stats, "bloom_filter.202")
-			}
-			require.NotContains(t, stats, "text_index.101")
-			require.Equal(t, []string{targetTextPath}, stats["text_index.201"].Paths)
-		})
-	}
-}
-
 func TestMilvusTableManifestBindingValidation(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -3088,7 +3088,7 @@ func TestMilvusTableManifestBindingValidation(t *testing.T) {
 			}
 			groups := []ColumnGroupEntry{{Columns: test.columns, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: "source.parquet", EndIndex: 3, Properties: properties}}}}
 			groups = append(groups, test.extra...)
-			manifest, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "target"), ManifestEarliest), cfg, &ManifestUpdates{ColumnGroups: groups})
+			manifest, err := CommitManifestUpdates(filepath.Join(dir, "target"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: groups})
 			require.NoError(t, err)
 			missing, err := MissingMilvusTableMappedFields(manifest, cfg, test.expected)
 			if test.errorText != "" {

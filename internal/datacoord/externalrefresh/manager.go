@@ -1224,7 +1224,7 @@ func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, 
 	if typeutil.IsExternalCollection(sourceSchema) {
 		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "source snapshot is an external collection")
 	}
-	if err := typeutil.ValidateMilvusTableRefreshSchema(targetSchema, sourceSchema); err != nil {
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema); err != nil {
 		return merr.Wrap(errMilvusTableRefreshSchemaInvalid,
 			"source schema does not match target collection schema: "+err.Error())
 	}
