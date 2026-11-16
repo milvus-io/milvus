@@ -205,6 +205,55 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 	}, nil
 }
 
+// openVchannelStreams coordinates cancellation only until all shard streams open.
+// The registered worker contexts outlive setup and are owned by their shard streams.
+func openVchannelStreams[T any](ctx context.Context, count int, open func(context.Context, func(context.CancelFunc), int) (T, *ShardPlan, error), closeStream func(T)) ([]T, []ShardPlan, []*ShardPlan, error) {
+	streams := make([]T, count)
+	plans := make([]ShardPlan, count)
+	streamPlans := make([]*ShardPlan, count)
+	// setupCtx cancels shard setup on failure; worker contexts must outlive it on success.
+	group, setupCtx := errgroup.WithContext(ctx)
+	var mu sync.Mutex                // Serializes failure with worker cancellation registration.
+	var firstErr error               // Preserves the initiating error instead of a sibling's cancellation.
+	var cancels []context.CancelFunc // Worker cancels retained only while vchannel setup is in progress.
+	// A worker registered after failure must be canceled immediately.
+	register := func(cancel context.CancelFunc) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil {
+			cancel()
+		} else {
+			cancels = append(cancels, cancel)
+		}
+	}
+	for i := 0; i < count; i++ {
+		i := i
+		group.Go(func() error {
+			stream, plan, err := open(setupCtx, register, i)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					for _, cancel := range cancels {
+						cancel()
+					}
+				}
+				mu.Unlock()
+				return err
+			}
+			streams[i], plans[i], streamPlans[i] = stream, *plan, plan
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		for _, stream := range streams {
+			closeStream(stream)
+		}
+		return nil, nil, nil, firstErr
+	}
+	return streams, plans, streamPlans, nil
+}
+
 func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchRequest, chunkBytes int) (*LegacySearchResult, error) {
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.GetCollectionID())
 	if err != nil {
@@ -218,38 +267,25 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 			return nil, err
 		}
 	}
-	vchannelStreams := make([][]searchreducestream.ReduceStream, len(vchannels))
-	shardPlans := make([]ShardPlan, len(vchannels))
-	streamPlans := make([]*ShardPlan, len(vchannels))
-	var g errgroup.Group
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			streams, plan, err := c.shardClient.SearchStreams(ctx, &ShardSearchRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				retryErrors: req.RetryErrors,
+	vchannelStreams, shardPlans, streamPlans, err := openVchannelStreams(ctx, len(vchannels),
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) ([]searchreducestream.ReduceStream, *ShardPlan, error) {
+			return c.shardClient.SearchStreams(ctx, &ShardSearchRequest{
+				VChannel:       vchannels[i],
+				Req:            req.Req,
+				MVCC:           req.MVCC,
+				BarrierMVCC:    req.BarrierMVCC,
+				retryErrors:    req.RetryErrors,
+				setupCtx:       setupCtx,
+				registerCancel: register,
 			}, chunkBytes)
-			if err != nil {
-				return err
-			}
-			vchannelStreams[i] = streams
-			shardPlans[i] = *plan
-			streamPlans[i] = plan
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		for _, streams := range vchannelStreams {
+		}, func(streams []searchreducestream.ReduceStream) {
 			for _, stream := range streams {
 				if closeErr := stream.Close(); closeErr != nil {
 					mlog.Warn(ctx, "failed to close Search vchannel stream after setup failure", mlog.Err(closeErr))
 				}
 			}
-		}
+		})
+	if err != nil {
 		return nil, err
 	}
 
@@ -334,38 +370,26 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 		return nil, err
 	}
 
-	vchannelStreams := make([]queryreducestream.ReduceStream, len(vchannels))
-	shardPlans := make([]ShardPlan, len(vchannels))
-	streamPlans := make([]*ShardPlan, len(vchannels))
-	var group errgroup.Group
-	for i := range vchannels {
-		i := i
-		group.Go(func() error {
-			stream, plan, err := c.shardClient.QueryStream(ctx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				Schema:      req.Schema,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				retryErrors: req.RetryErrors,
+	vchannelStreams, shardPlans, streamPlans, err := openVchannelStreams(ctx, len(vchannels),
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) (queryreducestream.ReduceStream, *ShardPlan, error) {
+			return c.shardClient.QueryStream(ctx, &ShardQueryRequest{
+				VChannel:       vchannels[i],
+				Req:            req.Req,
+				Schema:         req.Schema,
+				MVCC:           req.MVCC,
+				BarrierMVCC:    req.BarrierMVCC,
+				retryErrors:    req.RetryErrors,
+				setupCtx:       setupCtx,
+				registerCancel: register,
 			}, chunkBytes)
-			if err != nil {
-				return err
-			}
-			vchannelStreams[i] = stream
-			shardPlans[i] = *plan
-			streamPlans[i] = plan
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		for _, stream := range vchannelStreams {
+		}, func(stream queryreducestream.ReduceStream) {
 			if stream != nil {
 				if closeErr := stream.Close(); closeErr != nil {
 					mlog.Warn(ctx, "failed to close Query vchannel stream after setup failure", mlog.Err(closeErr))
 				}
 			}
-		}
+		})
+	if err != nil {
 		return nil, err
 	}
 

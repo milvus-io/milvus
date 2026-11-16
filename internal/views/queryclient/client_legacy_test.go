@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -71,6 +72,109 @@ func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 		result.Results[1].GetBase().GetSourceID(),
 	})
 	require.Len(t, result.Plans, 2)
+}
+
+func TestOpenVchannelStreamsCancelsLateRegistration(t *testing.T) {
+	primaryErr := errors.New("vchannel failed")
+	failed := make(chan struct{})
+	registered := make(chan struct{})
+	_, _, _, err := openVchannelStreams(t.Context(), 2,
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) (int, *ShardPlan, error) {
+			if i == 0 {
+				close(failed)
+				return 0, nil, primaryErr
+			}
+			<-failed
+			<-setupCtx.Done()
+			workerCtx, cancel := context.WithCancel(t.Context())
+			register(cancel)
+			close(registered)
+			<-workerCtx.Done()
+			return 0, nil, workerCtx.Err()
+		}, func(int) {})
+	require.ErrorIs(t, err, primaryErr)
+	select {
+	case <-registered:
+	default:
+		t.Fatal("late worker context was not registered")
+	}
+}
+
+func TestOpenVchannelStreamsKeepsWorkerContextAfterSetup(t *testing.T) {
+	workerCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	_, _, _, err := openVchannelStreams(t.Context(), 1,
+		func(_ context.Context, register func(context.CancelFunc), _ int) (int, *ShardPlan, error) {
+			register(cancel)
+			return 1, &ShardPlan{}, nil
+		}, func(int) {})
+	require.NoError(t, err)
+	require.NoError(t, workerCtx.Err())
+}
+
+func TestLegacyStreamSetupCancelsBlockedVChannel(t *testing.T) {
+	for _, mode := range []string{"query", "search", "hybrid"} {
+		t.Run(mode, func(t *testing.T) {
+			search := mode != "query"
+			setupTestReplicaRouting(t)
+			shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+			shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+			node := qviews.NewQueryNode(11)
+			plans := map[string]*viewpb.QueryPlan{}
+			for _, shard := range []qviews.ShardID{shardA, shardB} {
+				if search {
+					plans[shard.VChannel] = legacySearchPlan(shard, node)
+				} else {
+					plans[shard.VChannel] = legacyQueryPlan(shard, node)
+				}
+			}
+			started := make(chan struct{})
+			primaryErr := merr.WrapErrParameterInvalidMsg("vchannel open failed")
+			open := func(ctx context.Context, vchannel string) error {
+				if vchannel == shardA.VChannel {
+					close(started)
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				<-started
+				return primaryErr
+			}
+			service := &legacyServiceClient{
+				searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					return nil, open(ctx, req.GetShardId().GetVchannel())
+				},
+				queryOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+					return nil, open(ctx, req.GetShardId().GetVchannel())
+				},
+			}
+			client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				if search {
+					request := newTestSearchRequest(1)
+					if mode == "hybrid" {
+						request = hybridStreamRequest()
+						for _, plan := range plans {
+							plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+						}
+					}
+					_, err := client.Legacy().Search(ctx, &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 32})
+					done <- err
+				} else {
+					_, err := client.Legacy().Query(ctx, &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: 100, Limit: 1}, AllowStreaming: true, ReduceStreamChunkBytes: 32})
+					done <- err
+				}
+			}()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, primaryErr)
+			case <-time.After(time.Second):
+				t.Fatal("blocked vchannel was not canceled after sibling failure")
+			}
+		})
+	}
 }
 
 func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {

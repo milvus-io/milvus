@@ -743,6 +743,15 @@ before later `Recv()` calls. QueryPlan-selected segments, versions, worker MVCC
 and execution summary remain part of existing routing, rather than being
 reconstructed by a reducer.
 
+Each vchannel sub-search has its own worker context, shared only by workers in
+that sub-search. If a worker open fails, the vchannel cancels its sub-search
+contexts before retrying; fresh contexts are created for the next attempt.
+During setup, legacyClient tracks those cancel functions so a terminal vchannel
+failure can cancel blocked sibling opens. After setup succeeds, each shard
+reducer owns its worker context; closing one sub-search does not cancel another.
+Query and ordinary Search retain their existing pre-output shard retry policy;
+Hybrid sub-searches do not independently retry.
+
 For ordinary Search, `SearchStreams()` returns one stream per vchannel; Query
 uses `QueryStream()`. `legacyClient` composes the final stream(s). Opening a
 stream does not mean a worker result was fully received. The worker handlers

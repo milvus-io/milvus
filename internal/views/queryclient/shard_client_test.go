@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -359,13 +361,126 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 	require.Equal(t, 1, openedStream.closeCount())
 }
 
+func TestShardStreamSetupCancelsBlockedWorker(t *testing.T) {
+	for _, mode := range []string{"query", "search", "hybrid"} {
+		t.Run(mode, func(t *testing.T) {
+			search := mode != "query"
+			setupTestReplicaRouting(t)
+			shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+			left, right := qviews.NewQueryNode(11), qviews.NewQueryNode(12)
+			searchReq := newTestSearchRequest(1)
+			if mode == "hybrid" {
+				searchReq = hybridStreamRequest()
+			}
+			queryReq := &internalpb.RetrieveRequest{CollectionID: 100, Limit: 1}
+			plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
+			if search {
+				plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
+			} else {
+				plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: queryReq}
+			}
+			plan.WorkNodes = []*viewpb.QueryPlanWorkNode{
+				{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: left.ID}}},
+				{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: right.ID}}},
+			}
+			started := make(chan struct{})
+			primaryErr := merr.WrapErrParameterInvalidMsg("worker open failed")
+			open := func(ctx context.Context, node qviews.WorkNode) error {
+				if node.Key() == left.Key() {
+					close(started)
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				<-started
+				return primaryErr
+			}
+			service := &fakeViewQueryServiceClient{
+				searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					return nil, open(ctx, node)
+				},
+				queryOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+					return nil, open(ctx, node)
+				},
+			}
+			client := newTestShardClient(1, shardID, plan, service)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				if search {
+					_, _, err := client.SearchStreams(ctx, &ShardSearchRequest{VChannel: shardID.VChannel, Req: searchReq}, 32)
+					done <- err
+				} else {
+					_, _, err := client.QueryStream(ctx, &ShardQueryRequest{VChannel: shardID.VChannel, Req: queryReq}, 32)
+					done <- err
+				}
+			}()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, primaryErr)
+			case <-time.After(time.Second):
+				t.Fatal("blocked worker was not canceled after sibling failure")
+			}
+		})
+	}
+}
+
+func TestHybridSetupFailureCancelsOtherSubSearch(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	left, right := qviews.NewQueryNode(11), qviews.NewQueryNode(12)
+	request := hybridStreamRequest()
+	plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
+	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+	plan.WorkNodes = []*viewpb.QueryPlanWorkNode{
+		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: left.ID}}},
+		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: right.ID}}},
+	}
+	started := make(chan struct{})
+	primaryErr := merr.WrapErrParameterInvalidMsg("worker open failed")
+	opened := &fakeSearchStream{}
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		if node.Key() == right.Key() {
+			<-started
+			return nil, primaryErr
+		}
+		if req.GetLegacyReq().GetFieldId() == 101 {
+			return opened, nil
+		}
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	client := newTestShardClient(1, shardID, plan, service)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := client.SearchStreams(ctx, &ShardSearchRequest{VChannel: shardID.VChannel, Req: request}, 32)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, primaryErr)
+	case <-time.After(time.Second):
+		t.Fatal("failure did not cancel the blocked sibling sub-search")
+	}
+	require.Equal(t, 1, opened.closeCount())
+}
+
 func TestShardStreamCloseFailureStopsRetryWithPrimaryError(t *testing.T) {
 	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "warn"})
 	primaryErr := status.Error(codes.Unavailable, "worker unavailable")
 	closeErr := errors.New("retry cleanup failed")
 	child := &fakeQueryStream{recv: []fakeQueryStreamRecv{{err: primaryErr}}, closeErr: closeErr}
 	ctx, cancel := context.WithCancel(t.Context())
-	stream := &shardReduceStream[*internalpb.RetrieveResults]{stream: child, ctx: ctx, cancel: cancel}
+	stream := &shardReduceStream[*internalpb.RetrieveResults]{
+		stream: child, ctx: ctx, cancel: cancel,
+		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
+			t.Fatal("retry must not proceed after cleanup fails")
+			return nil, nil, nil, nil
+		},
+	}
 	_, err := stream.Recv()
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	require.NotErrorIs(t, err, closeErr)

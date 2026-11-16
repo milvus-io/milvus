@@ -70,7 +70,7 @@ func TestWorkerReduceStreamSharedContract(t *testing.T) {
 
 func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 	for _, query := range []bool{false, true} {
-		for _, stage := range []string{"before_data", "buffered", "emitted"} {
+		for _, stage := range []string{"setup", "before_data", "buffered", "emitted"} {
 			t.Run(fmt.Sprintf("query_%t/%s", query, stage), func(t *testing.T) {
 				afterChunk := stage == "emitted"
 				chunkBytes := 1
@@ -125,6 +125,9 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 				service := &legacyServiceClient{
 					queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 						id := node.(qviews.QueryNode).ID
+						if id == 100 && stage == "setup" {
+							return nil, failure
+						}
 						worker := &fakeQueryStream{}
 						if id != 100 || stage != "before_data" {
 							chunk := newTestQueryChunk([]int64{id, id + 2, id + 4})
@@ -141,6 +144,9 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 					},
 					searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 						id := node.(qviews.QueryNode).ID
+						if id == 100 && stage == "setup" {
+							return nil, failure
+						}
 						worker := &fakeSearchStream{}
 						if id != 100 || stage != "before_data" {
 							score := float32(1) - float32(id%100)*0.01
@@ -177,7 +183,9 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 							Req: &internalpb.RetrieveRequest{Limit: 6}, AllowStreaming: true, ReduceStreamChunkBytes: chunkBytes, RetryErrors: retryErrors,
 						})
 						require.NoError(t, err)
-						require.Len(t, selected[channels[0]], attempt+1, "opening must not prefetch")
+						if stage != "setup" {
+							require.Len(t, selected[channels[0]], attempt+1, "opening must not prefetch")
+						}
 						for {
 							chunk, err := result.Stream.Recv()
 							if err != nil {
@@ -196,7 +204,9 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 							Req: request, AllowStreaming: true, ReduceStreamChunkBytes: chunkBytes, RetryErrors: retryErrors,
 						})
 						require.NoError(t, err)
-						require.Len(t, selected[channels[0]], attempt+1, "opening must not prefetch")
+						if stage != "setup" {
+							require.Len(t, selected[channels[0]], attempt+1, "opening must not prefetch")
+						}
 						for {
 							chunk, err := result.Stream.Recv()
 							if err != nil {
@@ -365,9 +375,9 @@ func TestShardReduceStreamMetadataCommitsAttempt(t *testing.T) {
 	}}
 	stream := &shardReduceStream[*internalpb.RetrieveResults]{
 		ctx: ctx, cancel: cancel, stream: child,
-		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], *ShardPlan, error) {
+		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
 			t.Fatal("metadata-only output also forbids local retry")
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		},
 	}
 	chunk, err := stream.Recv()
@@ -401,10 +411,10 @@ func TestShardReduceStreamCloseDuringReceiveOrReplan(t *testing.T) {
 			stream := &shardReduceStream[*internalpb.RetrieveResults]{ctx: ctx, cancel: cancel, stream: child}
 			if replanning {
 				stream.stream = &fakeQueryStream{recv: []fakeQueryStreamRecv{{err: status.Error(codes.Unavailable, "retry")}}}
-				stream.restart = func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], *ShardPlan, error) {
+				stream.restart = func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
 					close(entered)
 					<-ctx.Done()
-					return nil, nil, ctx.Err()
+					return nil, nil, nil, ctx.Err()
 				}
 			}
 			received := make(chan error, 1)
@@ -587,6 +597,165 @@ func TestHybridReceiveFailureDoesNotReplanShard(t *testing.T) {
 	}
 }
 
+func TestHybridClosingOneStreamKeepsSiblingAlive(t *testing.T) {
+	setupTestReplicaRouting(t)
+	request := hybridStreamRequest()
+	source := &legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+	}}
+	var workerContexts []context.Context
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		workerContexts = append(workerContexts, ctx)
+		chunk := newTestSearchChunk(2, []int64{1}, []float32{0.9})
+		chunk.MetricType = req.GetLegacyReq().GetMetricType()
+		return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
+	}}
+	client := newShardViewQueryClient(1, source, service)
+	defer client.replicas.Close()
+	streams, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: request}, 128)
+	require.NoError(t, err)
+	require.Len(t, streams, 2)
+	require.Len(t, workerContexts, 2)
+	require.NoError(t, streams[0].Close())
+	require.NoError(t, workerContexts[1].Err())
+	chunk, err := streams[1].Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.NoError(t, streams[1].Close())
+	require.ErrorIs(t, workerContexts[1].Err(), context.Canceled)
+}
+
+type blockingHybridSearchStream struct {
+	ctx     context.Context
+	entered chan struct{}
+}
+
+func (s *blockingHybridSearchStream) Recv() (*internalpb.SearchResults, error) {
+	close(s.entered)
+	<-s.ctx.Done()
+	return nil, s.ctx.Err()
+}
+
+func (*blockingHybridSearchStream) Close() error { return nil }
+
+func (*blockingHybridSearchStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestHybridCloseUnblocksReceiveWithoutCancelingSibling(t *testing.T) {
+	setupTestReplicaRouting(t)
+	request := hybridStreamRequest()
+	source := &legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+	}}
+	entered := make(chan struct{})
+	var siblingCtx context.Context
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		if req.GetLegacyReq().GetFieldId() == 101 {
+			return &blockingHybridSearchStream{ctx: ctx, entered: entered}, nil
+		}
+		siblingCtx = ctx
+		chunk := newTestSearchChunk(2, []int64{1}, []float32{0.9})
+		chunk.MetricType = req.GetLegacyReq().GetMetricType()
+		return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
+	}}
+	client := newShardViewQueryClient(1, source, service)
+	defer client.replicas.Close()
+	streams, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: request}, 128)
+	require.NoError(t, err)
+	received := make(chan error, 1)
+	go func() { _, err := streams[0].Recv(); received <- err }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("sub-search receive did not start")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- streams[0].Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("close did not unblock the sub-search receive")
+	}
+	<-received
+	require.NoError(t, siblingCtx.Err())
+	_, err = streams[1].Recv()
+	require.NoError(t, err)
+	require.NoError(t, streams[1].Close())
+}
+
+func TestStreamingSetupRetryUsesFreshContext(t *testing.T) {
+	for _, query := range []bool{false, true} {
+		t.Run(fmt.Sprintf("query=%t", query), func(t *testing.T) {
+			router, directory := newTestReplicaRouter(t)
+			version := qviews.QueryViewVersion{QueryVersion: 1}
+			for _, replica := range []int64{1, 2} {
+				directory.Set("p_1v0", replica, &version, false)
+			}
+			route, err := router.route("p_1v0")
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				route.mu.Lock()
+				defer route.mu.Unlock()
+				return len(route.snapshot.Replicas) == 2
+			}, time.Second, time.Millisecond)
+			var plans atomic.Int32
+			source := &legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+				attempt := plans.Add(1)
+				plan := legacySearchPlan(shard, qviews.NewQueryNode(int64(attempt*100)))
+				if query {
+					plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: req.GetLegacyRetrieveRequest()}
+				} else {
+					plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: req.GetLegacySearchRequest()}
+				}
+				return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+			}}
+			open := func(ctx context.Context, node qviews.WorkNode) error {
+				if node.(qviews.QueryNode).ID == 100 {
+					return status.Error(codes.Unavailable, "first attempt")
+				}
+				return ctx.Err()
+			}
+			service := &legacyServiceClient{
+				queryOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+					if err := open(ctx, node); err != nil {
+						return nil, err
+					}
+					return &fakeQueryStream{ctx: ctx, recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{1})}}}, nil
+				},
+				searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					if err := open(ctx, node); err != nil {
+						return nil, err
+					}
+					return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(1, []int64{1}, []float32{0.9})}}}, nil
+				},
+			}
+			client := newShardViewQueryClient(2, source, service)
+			client.replicas = router
+			defer client.replicas.Close()
+			if query {
+				stream, _, err := client.QueryStream(t.Context(), &ShardQueryRequest{VChannel: "p_1v0", Req: &internalpb.RetrieveRequest{Limit: 1}}, 128)
+				require.NoError(t, err)
+				_, err = stream.Recv()
+				require.NoError(t, err)
+				require.NoError(t, stream.Close())
+			} else {
+				streams, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: newTestSearchRequest(1)}, 128)
+				require.NoError(t, err)
+				_, err = streams[0].Recv()
+				require.NoError(t, err)
+				require.NoError(t, streams[0].Close())
+			}
+			require.EqualValues(t, 2, plans.Load())
+		})
+	}
+}
+
 func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 	setupTestReplicaRouting(t)
 	for _, kind := range []string{"Search", "Hybrid", "Query"} {
@@ -633,9 +802,9 @@ func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 				stream, plan, err := client.QueryStream(t.Context(), &ShardQueryRequest{VChannel: "p_1v0", Req: &internalpb.RetrieveRequest{Limit: 1}}, 128)
 				require.NoError(t, err)
 				retained = plan
+				require.NoError(t, workerCtx.Err(), "opening must retain the stream context")
 				_, err = stream.Recv()
 				require.ErrorIs(t, err, io.EOF)
-				require.NoError(t, workerCtx.Err(), "opening must retain the stream context")
 				require.NoError(t, stream.Close())
 			} else {
 				request := newTestSearchRequest(1)
@@ -645,10 +814,10 @@ func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 				streams, plan, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: request}, 128)
 				require.NoError(t, err)
 				retained = plan
+				require.NoError(t, workerCtx.Err(), "opening must retain the stream context")
 				for _, stream := range streams {
 					_, err := stream.Recv()
 					require.ErrorIs(t, err, io.EOF)
-					require.NoError(t, workerCtx.Err(), "opening must retain the stream context")
 					require.NoError(t, stream.Close())
 				}
 			}

@@ -107,6 +107,36 @@ func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
 	require.Equal(t, 1, child.closeCount())
 }
 
+func TestLegacyHybridClosingOneStreamKeepsSiblingAlive(t *testing.T) {
+	setupTestReplicaRouting(t)
+	request := hybridStreamRequest()
+	shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+	var workerContexts []context.Context
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		workerContexts = append(workerContexts, ctx)
+		chunk := newTestSearchChunk(2, []int64{1}, []float32{0.9})
+		chunk.MetricType = req.GetLegacyReq().GetMetricType()
+		return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
+	}}
+	client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1}, &legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: plan}}, service, &legacyResolver{vchannels: []string{shard.VChannel}})
+	result, err := client.Legacy().Search(t.Context(), &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 128})
+	require.NoError(t, err)
+	for _, stream := range result.SubStreams {
+		defer stream.Close()
+	}
+	require.Len(t, result.SubStreams, 2)
+	require.Len(t, workerContexts, 2)
+	require.NoError(t, result.SubStreams[0].Close())
+	require.NoError(t, workerContexts[1].Err())
+	chunk, err := result.SubStreams[1].Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.NoError(t, result.SubStreams[1].Close())
+	require.ErrorIs(t, workerContexts[1].Err(), context.Canceled)
+}
+
 func TestHybridStreamsPreserveElementAndEmbeddingListRequests(t *testing.T) {
 	setupTestReplicaRouting(t)
 	request := hybridStreamRequest()
@@ -222,6 +252,9 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 	client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})
 	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 20})
 	require.NoError(t, err)
+	for _, stream := range result.SubStreams {
+		defer stream.Close()
+	}
 	require.Nil(t, result.Stream)
 	require.Empty(t, result.Results)
 	require.Len(t, result.SubStreams, 2)
@@ -276,6 +309,9 @@ func TestLegacyHybridGroupStreamsPreserveVChannelCandidates(t *testing.T) {
 	client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})
 	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 1})
 	require.NoError(t, err)
+	for _, stream := range result.SubStreams {
+		defer stream.Close()
+	}
 	require.Len(t, result.SubStreams, 2)
 	for i, stream := range result.SubStreams {
 		var ids []int64
