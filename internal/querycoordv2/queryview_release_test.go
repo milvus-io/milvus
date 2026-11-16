@@ -225,9 +225,7 @@ func TestQueryViewReleaseRuntimeShutdown(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			s := newReleaseTestServer(t)
 			runtime := s.qviewsRuntime
-			configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
-			require.NoError(t, err)
-			runtime.viewFeedback = viewfeedback.New(configs, &fakeRuntimeDataViewProvider{})
+			runtime.viewFeedback = viewfeedback.New(&loadmgr.LoadConfigStore{}, &fakeRuntimeDataViewProvider{})
 			t.Cleanup(runtime.viewFeedback.Close)
 			runtime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
 			completion := syncutil.NewFuture[error]()

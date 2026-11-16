@@ -888,6 +888,8 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.defaultRootPassword", "defaultMilvus")
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
 
+		assert.Equal(t, "bcrypt", Params.PasswordHashAlgorithm.GetValue())
+
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())
 
@@ -2150,6 +2152,27 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	// Excessive native concurrency is clamped independently of integer overflow.
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
 	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+}
+
+func TestManifestFFIConcurrency(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// Process-wide budget for blocking manifest FFI calls; a sane default that
+	// still leaves headroom above the per-context datacoord pools (commits 16,
+	// reads 64, GC 1) so they keep independent throughput while the process
+	// wide ceiling caps cgo thread growth.
+	assert.Equal(t, 128, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+
+	// A zero or negative budget would deadlock every manifest FFI call.
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "0")
+	assert.Equal(t, 1, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "-3")
+	assert.Equal(t, 1, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+
+	// Excessive concurrency defeats the thread cap and is clamped.
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "100000")
+	assert.Equal(t, 2048, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
 }
 
 func TestStorageRuntimeThreadPoolsRequireRestart(t *testing.T) {

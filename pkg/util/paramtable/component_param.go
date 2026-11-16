@@ -380,6 +380,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
 	UseArrowFSChunkManager        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
@@ -398,6 +399,7 @@ type commonConfig struct {
 	AdminAuthEnabled            ParamItem `refreshable:"true"`
 	SuperUsers                  ParamItem `refreshable:"true"`
 	DefaultRootPassword         ParamItem `refreshable:"false"`
+	PasswordHashAlgorithm       ParamItem `refreshable:"true"`
 	RootShouldBindRole          ParamItem `refreshable:"true"`
 	EnablePublicPrivilege       ParamItem `refreshable:"false"`
 	FeatureUsageEnabled         ParamItem `refreshable:"false"`
@@ -881,6 +883,23 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
 
+	p.ManifestFFIConcurrency = ParamItem{
+		Key:          "common.storage.manifestFFIConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Formatter: func(v string) string {
+			return strconv.Itoa(min(2048, max(1, getAsInt(v))))
+		},
+		Doc: "Maximum number of goroutines that may concurrently execute blocking milvus-storage manifest FFI calls " +
+			"in one process. cgo pins each such goroutine to an OS thread, so unbounded concurrency across the " +
+			"synchronous manifest transaction/filesystem entry points and the async manifest executor workers inflates " +
+			"thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is " +
+			"process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at " +
+			"first manifest I/O, changes require restart.",
+		Export: false,
+	}
+	p.ManifestFFIConcurrency.Init(base.mgr)
+
 	p.UseArrowFSChunkManager = ParamItem{
 		Key:          "common.storage.useArrowFileSystemChunkManager",
 		Version:      "3.0.1",
@@ -1308,6 +1327,19 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Sensitivity: Sensitive,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.PasswordHashAlgorithm = ParamItem{
+		Key:     "common.security.passwordHashAlgorithm",
+		Version: "3.1.0",
+		Doc: `Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.`,
+		DefaultValue: "bcrypt",
+		Export:       true,
+		Sensitivity:  NonSensitive,
+	}
+	p.PasswordHashAlgorithm.Init(base.mgr)
 
 	p.RootShouldBindRole = ParamItem{
 		Key:          "common.security.rootShouldBindRole",

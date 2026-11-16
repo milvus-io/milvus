@@ -190,3 +190,8 @@ counter	mixcoord	compaction=_other
 counter	proxy	two_stage_search
 counter	proxy	segment_prune
 counter	proxy	run_analyzer
+counter	proxy	upsert_write_condition=gt
+counter	proxy	upsert_write_condition=gte
+counter	proxy	upsert_on_missing=insert
+counter	proxy	upsert_on_missing=skip
+counter	proxy	upsert_on_missing=error

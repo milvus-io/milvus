@@ -27,7 +27,6 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
@@ -287,14 +286,12 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	log := mlog.With(mlog.FieldCollectionID(100))
 	ctx := context.Background()
 	var decodeCalls atomic.Int64
-	var unmarshal func([]byte, proto.Message) error
-	patch := mockey.Mock(proto.Unmarshal).Origin(&unmarshal).To(func(data []byte, message proto.Message) error {
-		if _, ok := message.(*commonpb.PlaceholderGroup); ok {
-			decodeCalls.Add(1)
-		}
-		return unmarshal(data, message)
-	}).Build()
-	defer patch.UnPatch()
+	origUnmarshal := unmarshalPlaceholderGroup
+	unmarshalPlaceholderGroup = func(data []byte, group *commonpb.PlaceholderGroup) error {
+		decodeCalls.Add(1)
+		return origUnmarshal(data, group)
+	}
+	defer func() { unmarshalPlaceholderGroup = origUnmarshal }()
 	checkDisabled := func(limit string) {
 		t.Helper()
 		before := decodeCalls.Load()
