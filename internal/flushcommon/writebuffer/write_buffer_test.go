@@ -255,7 +255,6 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 	})
 
 	s.Run("streaming_requires_create_segment_storage_version", func() {
-
 		s.metacache.EXPECT().GetSegmentByID(int64(2005)).Return(nil, false).Once()
 
 		err := s.wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
