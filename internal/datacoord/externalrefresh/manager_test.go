@@ -1323,7 +1323,7 @@ func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
 			defer read.UnPatch()
 			err := validateMilvusTableRefreshSchema(&datapb.ExternalCollectionRefreshJob{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: target.ExternalSpec}, target)
 			switch change {
-			case "none", "added", "parent_added", "parent_added_to_scalar_projection", "unselected_changed", "unselected_removed":
+			case "none", "added", "parent_added", "parent_added_to_scalar_projection", "unselected_changed", "unselected_removed", "field_id":
 				require.NoError(t, err)
 			case "parent_missing":
 				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
@@ -1412,7 +1412,7 @@ func TestValidateMilvusTableRefreshSchemaErrorClass(t *testing.T) {
 
 	t.Run("schema_mismatch_is_non_retriable", func(t *testing.T) {
 		sourceSchema := testMilvusTableRefreshSchema(false)
-		sourceSchema.Fields[0].FieldID = 101
+		sourceSchema.Fields[0].DataType = schemapb.DataType_VarChar
 		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 			Return(&datapb.SnapshotMetadata{
 				Collection: &datapb.CollectionDescription{

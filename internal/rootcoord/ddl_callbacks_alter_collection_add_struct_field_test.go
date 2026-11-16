@@ -79,28 +79,24 @@ func TestAlignMilvusTableAddedStructFields(t *testing.T) {
 			before := proto.Clone(old)
 			require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), coll, candidate))
 			bound := candidate.StructArrayFields[0].Fields[len(candidate.StructArrayFields[0].Fields)-1]
-			require.Equal(t, int64(121), bound.FieldID)
+			if addChild {
+				require.Equal(t, int64(112), bound.FieldID)
+			} else {
+				require.Equal(t, int64(102), bound.FieldID)
+			}
 			require.Equal(t, bound.Name, bound.ExternalField)
-			require.Equal(t, source.StructArrayFields[0].FieldID, candidate.StructArrayFields[0].FieldID)
+			if addChild {
+				require.Equal(t, int64(110), candidate.StructArrayFields[0].FieldID)
+			} else {
+				require.Equal(t, int64(101), candidate.StructArrayFields[0].FieldID)
+			}
+			require.Zero(t, read.Times())
 			require.Equal(t, int64(100), candidate.Fields[0].FieldID)
 			if addChild {
 				require.Equal(t, int64(111), candidate.StructArrayFields[0].Fields[0].FieldID)
 			}
 			require.True(t, proto.Equal(before, old))
 
-			// Alignment cannot silently remap an already published parent or leaf.
-			wrongID := proto.Clone(candidate).(*schemapb.CollectionSchema)
-			wrongID.Fields[0].FieldID++
-			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), coll, wrongID), merr.ErrParameterInvalid)
-			wrongType := proto.Clone(candidate).(*schemapb.CollectionSchema)
-			wrongType.StructArrayFields[0].Fields[len(wrongType.StructArrayFields[0].Fields)-1].ElementType = schemapb.DataType_Double
-			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), coll, wrongType), merr.ErrParameterInvalid)
-			missingChild := proto.Clone(candidate).(*schemapb.CollectionSchema)
-			missingChild.StructArrayFields[0].Fields[len(missingChild.StructArrayFields[0].Fields)-1].Name = "clips[missing]"
-			require.ErrorContains(t, alignMilvusTableAddedStructFields(context.Background(), coll, missingChild), "absent from the selected source snapshot")
-			missingParent := proto.Clone(candidate).(*schemapb.CollectionSchema)
-			missingParent.StructArrayFields[0].Name = "missing"
-			require.ErrorContains(t, alignMilvusTableAddedStructFields(context.Background(), coll, missingParent), "absent from the selected source snapshot")
 		})
 	}
 }
@@ -279,34 +275,35 @@ func newRootAddStructFieldSchema(name string) *schemapb.StructArrayFieldSchema {
 	}
 }
 
-func TestAlignMilvusTableAddedStructFieldsFailures(t *testing.T) {
-	storageErr := merr.WrapErrServiceUnavailableMsg("snapshot unavailable")
-	for _, tc := range []struct {
-		name     string
-		metadata *datapb.SnapshotMetadata
-		readErr  error
-		want     error
-	}{
-		{name: "storage unavailable", readErr: storageErr, want: storageErr},
-		{name: "missing collection", metadata: &datapb.SnapshotMetadata{}, want: merr.ErrDataIntegrity},
-		{name: "missing schema", metadata: &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{}}, want: merr.ErrDataIntegrity},
-		{name: "external source", metadata: &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "id", ExternalField: "id"}}}}}, want: merr.ErrParameterInvalid},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`}
-			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(tc.metadata, tc.readErr).Build()
-			defer read.UnPatch()
-			require.ErrorIs(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema), tc.want)
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			require.ErrorIs(t, alignMilvusTableAddedStructFields(ctx, &model.Collection{}, schema), context.Canceled)
-			require.Equal(t, 1, read.Times(), "cancellation must not issue source I/O")
-			schema.ExternalSource = ""
-			require.Error(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema))
-			require.Equal(t, 1, read.Times(), "invalid source must fail before I/O")
-			schema.ExternalSpec = `{"format":"parquet"}`
-			require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema))
-			require.Equal(t, 1, read.Times(), "other external formats must not read Milvus snapshots")
-		})
+func TestAlignMilvusTableAddedStructFieldsCancellation(t *testing.T) {
+	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, alignMilvusTableAddedStructFields(ctx, &model.Collection{}, schema), context.Canceled)
+	schema.ExternalSpec = `{"format":"parquet"}`
+	require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), &model.Collection{}, schema))
+}
+
+// Declaring a projection must not bind it to the previously selected snapshot.
+func TestAlignMilvusTableAddedStructFieldsDefersSnapshotBinding(t *testing.T) {
+	old := &schemapb.CollectionSchema{
+		Name: "target", ExternalSource: "s3://bucket/old-snapshot",
+		ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 110, Name: "items", Nullable: true,
+			Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "items[a]", ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true}},
+		}},
 	}
+	candidate := proto.Clone(old).(*schemapb.CollectionSchema)
+	candidate.StructArrayFields[0].Fields = append(candidate.StructArrayFields[0].Fields,
+		&schemapb.FieldSchema{FieldID: 112, Name: "items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true})
+	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, merr.WrapErrServiceUnavailableMsg("old snapshot must not be consulted during declaration")).Build()
+	defer read.UnPatch()
+	coll := model.UnmarshalCollectionModel(&etcdpb.CollectionInfo{Schema: old})
+	require.NoError(t, alignMilvusTableAddedStructFields(context.Background(), coll, candidate))
+	added := candidate.StructArrayFields[0].Fields[1]
+	require.Equal(t, int64(112), added.GetFieldID(), "target identity must remain stable")
+	require.Equal(t, "items[b]", added.GetExternalField())
+	require.Equal(t, 0, read.Times())
+	require.True(t, proto.Equal(old.StructArrayFields[0].Fields[0], candidate.StructArrayFields[0].Fields[0]))
 }

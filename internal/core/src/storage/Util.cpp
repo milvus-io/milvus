@@ -1816,6 +1816,7 @@ IterateFieldDataFromManifest(
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
+    const auto field_id_mapping = ReadMilvusTableFieldIdMapping(*column_groups);
 
     // Determine the column name to use. New index-build callers pass the
     // storage column mapping through FileManagerContext. The fallback keeps
@@ -1836,6 +1837,45 @@ IterateFieldDataFromManifest(
         column_name = std::to_string(field_meta.field_id);
     }
 
+    if (field_id_mapping != nullptr) {
+        const auto mapped =
+            field_id_mapping->physical_columns.find(field_meta.field_id);
+        if (mapped != field_id_mapping->physical_columns.end()) {
+            column_name = mapped->second;
+            is_external = true;
+        } else {
+            // An unmapped field can be a target-local output, but a mapped
+            // source column must never be selected through numeric identity.
+            const auto candidate = column_name;
+            const bool local_identity = std::any_of(
+                column_groups->begin(),
+                column_groups->end(),
+                [&](const auto& group) {
+                    if (std::find(group->columns.begin(),
+                                  group->columns.end(),
+                                  candidate) == group->columns.end()) {
+                        return false;
+                    }
+                    return std::all_of(
+                        group->files.begin(),
+                        group->files.end(),
+                        [](const auto& file) {
+                            return file.properties.find(
+                                       "milvus_table.field_id_mapping") ==
+                                   file.properties.end();
+                        });
+                });
+            if (!local_identity ||
+                field_id_mapping->target_fields.find(candidate) !=
+                    field_id_mapping->target_fields.end()) {
+                ThrowInfo(
+                    FieldNotLoaded,
+                    "external field {} has no binding in the loaded manifest",
+                    field_meta.field_id);
+            }
+        }
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     auto column_exists = [&](const std::string& name) {
         for (size_t i = 0; i < column_groups->size(); i++) {
@@ -1849,6 +1889,11 @@ IterateFieldDataFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
+        if (is_external) {
+            ThrowInfo(FieldNotLoaded,
+                      "external field {} is absent from the loaded manifest",
+                      field_meta.field_id);
+        }
         return;
     }
 

@@ -37,6 +37,7 @@
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "storage/loon_ffi/util.h"
 #include "common/protobuf_utils.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
@@ -105,7 +106,9 @@ class ManifestGroupTranslator
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
             MmapChunkWritebackMode::Disabled,
-        OrdinaryStructProjections struct_projections = {});
+        OrdinaryStructProjections struct_projections = {},
+        std::shared_ptr<const MilvusTableFieldIdMapping> field_mapping =
+            nullptr);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -221,6 +224,7 @@ class ManifestGroupTranslator
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     OrdinaryStructProjections struct_projections_;
+    std::shared_ptr<const MilvusTableFieldIdMapping> field_mapping_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

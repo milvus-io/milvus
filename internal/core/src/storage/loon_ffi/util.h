@@ -13,9 +13,11 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/properties.h"
 #include "storage/Types.h"
@@ -78,6 +80,18 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);
+
+// Immutable source-to-target column bindings persisted by milvus-table.
+struct MilvusTableFieldIdMapping {
+    std::unordered_map<int64_t, std::string> physical_columns;
+    std::unordered_map<std::string, int64_t> target_fields;
+};
+
+// Returns nullptr only for a fully legacy column-group set with no mapping
+// property. Corrupt or inconsistent persisted metadata is rejected.
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups);
 
 /**
  * @brief Inject every external_spec-derived property for external collections.

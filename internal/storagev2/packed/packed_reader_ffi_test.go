@@ -424,3 +424,59 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 	err = reader.Close()
 	require.NoError(t, err)
 }
+
+func TestPackedFFIReaderMilvusTableFieldMapping(t *testing.T) {
+	paramtable.Init()
+	dir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "101", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "103", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{11, 12}, nil)
+	builder.Field(1).(*array.Int64Builder).AppendValues([]int64{31, 32}, nil)
+	record := builder.NewRecord()
+	defer record.Release()
+	base := path.Join(dir, "source")
+	writer, err := NewFFIPackedWriter(base, schema, []storagecommon.ColumnGroup{{Columns: []int{0, 1}}}, config, nil)
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteRecordBatch(record))
+	files, err := writer.Close()
+	require.NoError(t, err)
+	defer files.Destroy()
+	source, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), config, &ManifestUpdates{NewFiles: files})
+	require.NoError(t, err)
+	groups, err := readManifestColumnGroupEntries(source, config, []string{"101", "103"})
+	require.NoError(t, err)
+	for i := range groups {
+		for j := range groups[i].Files {
+			groups[i].Files[j].Properties = map[string]string{
+				"milvus_table.field_id_mapping": `{"101":"103","103":"101"}`,
+			}
+		}
+	}
+	target, err := CommitManifestUpdates(MarshalManifestPath(path.Join(dir, "target"), ManifestEarliest), config,
+		&ManifestUpdates{ColumnGroups: groups})
+	require.NoError(t, err)
+	reader, err := NewFFIPackedReader(target, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})
+	require.NoError(t, err)
+	defer reader.Close()
+	got, err := reader.ReadNext()
+	require.NoError(t, err)
+	defer got.Release()
+	require.Equal(t, []int64{31, 32}, got.Column(0).(*array.Int64).Int64Values())
+	require.Equal(t, []int64{11, 12}, got.Column(1).(*array.Int64).Int64Values())
+
+	for i := range groups {
+		for j := range groups[i].Files {
+			groups[i].Files[j].Properties["milvus_table.field_id_mapping"] = `{"101":"103","101":"101"}`
+		}
+	}
+	corrupt, err := CommitManifestUpdates(MarshalManifestPath(path.Join(dir, "corrupt"), ManifestEarliest), config,
+		&ManifestUpdates{ColumnGroups: groups})
+	require.NoError(t, err)
+	_, err = NewFFIPackedReader(corrupt, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})
+	require.Error(t, err)
+}

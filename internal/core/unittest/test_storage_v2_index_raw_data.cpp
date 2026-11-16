@@ -81,6 +81,114 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
     int64_t index_version = 4001;
 };
 
+TEST_F(StorageV2IndexRawDataTest,
+       MilvusTableManifestBindingControlsIndexReads) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder;
+    arrow::Int64Builder second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto first = first_builder.Finish().ValueOrDie();
+    auto second = second_builder.Finish().ValueOrDie();
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {first, second});
+    auto source_path = path_ + "/mapping_index_source";
+    auto target_path = path_ + "/mapping_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101|103");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto source = GetLoonManifest(
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump(),
+        properties);
+    auto groups = source->columnGroups();
+    for (auto& group : groups) {
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"101":"103","103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    auto target_version = transaction->Commit().ValueOrDie();
+    auto target_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+    auto meta = gen_field_meta(collection_id,
+                               partition_id,
+                               segment_id,
+                               101,
+                               DataType::INT64,
+                               DataType::NONE,
+                               false);
+    meta.field_schema.set_external_field("second");
+    std::vector<int64_t> values;
+    IterateFieldDataFromManifest(
+        target_manifest,
+        properties,
+        meta,
+        DataType::INT64,
+        1,
+        DataType::NONE,
+        StorageColumnMapping{"101", "101", true},
+        [&](FieldDataPtr data) {
+            auto begin = static_cast<const int64_t*>(data->Data());
+            values.insert(values.end(), begin, begin + data->get_num_rows());
+        },
+        kStreamingInflightBytes);
+    EXPECT_EQ(values, (std::vector<int64_t>{31, 32}));
+    auto pending = gen_field_meta(collection_id,
+                                  partition_id,
+                                  segment_id,
+                                  105,
+                                  DataType::INT64,
+                                  DataType::NONE,
+                                  true);
+    pending.field_schema.set_external_field("future");
+    EXPECT_THROW(
+        GetFieldDatasFromManifest(target_manifest,
+                                  properties,
+                                  pending,
+                                  DataType::INT64,
+                                  1,
+                                  DataType::NONE,
+                                  StorageColumnMapping{"105", "105", true}),
+        SegcoreError);
+    auto legacy_manifest =
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump();
+    EXPECT_THROW(
+        GetFieldDatasFromManifest(legacy_manifest,
+                                  properties,
+                                  pending,
+                                  DataType::INT64,
+                                  1,
+                                  DataType::NONE,
+                                  StorageColumnMapping{"105", "105", true}),
+        SegcoreError);
+    pending.field_schema.clear_external_field();
+    EXPECT_TRUE(
+        GetFieldDatasFromManifest(legacy_manifest,
+                                  properties,
+                                  pending,
+                                  DataType::INT64,
+                                  1,
+                                  DataType::NONE,
+                                  StorageColumnMapping{"105", "105", false})
+            .empty());
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
+
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
     auto schema = gen_all_data_types_schema();

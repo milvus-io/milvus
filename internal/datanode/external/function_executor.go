@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path"
@@ -61,6 +62,21 @@ func ExecuteFunctionsForSegment(
 		mlog.Int("numFunctions", len(schema.GetFunctions())))
 
 	sourceColumns := packed.GetColumnNamesFromSchema(schema)
+	if format == "milvus-table" && len(fragments) != 0 {
+		if encoded, found := fragments[0].Properties[packed.MilvusTableFieldIDMappingProperty]; found {
+			var mapping map[string]string
+			if err := json.Unmarshal([]byte(encoded), &mapping); err != nil {
+				return "", merr.Wrap(err, "decode task field mapping")
+			}
+			for i, id := range sourceColumns {
+				physical, found := mapping[id]
+				if !found {
+					return "", merr.WrapErrServiceInternalMsg("function input target field %s has no source binding", id)
+				}
+				sourceColumns[i] = physical
+			}
+		}
+	}
 
 	inputManifestPath, err := packed.CreateSegmentManifestWithBasePathAndExtfs(
 		ctx,

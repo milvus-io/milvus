@@ -7835,3 +7835,17 @@ func TestMilvusTableStructParentColumnAliasUsesIndependentFieldIDs(t *testing.T)
 	require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 	require.Equal(t, []string{"103", "102"}, NewStorageColumnResolver(schema).SourceDataColumnNames())
 }
+
+func TestValidateMilvusTableRefreshSchemaAllowsNewSourceStructs(t *testing.T) {
+	source := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 110, Name: "items", Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}, {FieldID: 120, Name: "extra", Fields: []*schemapb.FieldSchema{{FieldID: 121, Name: "extra[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}}
+	target := proto.Clone(source).(*schemapb.CollectionSchema)
+	target.Fields[0].ExternalField = "id"
+	target.StructArrayFields = target.StructArrayFields[:1]
+	target.StructArrayFields[0].FieldID = 130
+	target.StructArrayFields[0].Fields[0].FieldID = 131
+	target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
+	require.ErrorContains(t, ValidateMilvusTableSchemaIdentity(target, source, false), "struct field count mismatch")
+	require.NoError(t, ValidateMilvusTableRefreshSchema(target, source))
+	target.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
+	require.Error(t, ValidateMilvusTableRefreshSchema(target, source))
+}

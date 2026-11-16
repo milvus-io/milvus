@@ -38,6 +38,12 @@ import (
 )
 
 func TestGetStateFromError(t *testing.T) {
+	t.Run("unbound external field is terminal for this manifest", func(t *testing.T) {
+		err := merr.Wrap(merr.SegcoreError(2027, "external field has no manifest binding"), "create index")
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		assert.True(t, merr.IsRetryableErr(err), "queries may retry a different replica")
+	})
 	t.Run("sparse conversion limit is terminal but allocation failures retry", func(t *testing.T) {
 		for _, tc := range []struct {
 			name  string

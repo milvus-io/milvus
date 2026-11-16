@@ -52,9 +52,60 @@ SegmentLoadInfo::GetColumnGroups() const {
                           .GetProperties();
 
     auto loon_manifest = ::GetLoonManifest(manifest_path, properties);
-    column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
+    auto mapping = ReadMilvusTableFieldIdMapping(*groups);
+    column_groups_ = std::move(groups);
+    field_mapping_ = std::move(mapping);
     return column_groups_;
+}
+
+std::string
+SegmentLoadInfo::GetStorageColumnName(const Schema& schema,
+                                      FieldId field_id) const {
+    if (field_mapping_ && schema.IsExternalManifestStoredField(field_id) &&
+        !schema.is_function_output(field_id)) {
+        auto it = field_mapping_->physical_columns.find(field_id.get());
+        if (it == field_mapping_->physical_columns.end()) {
+            ThrowInfo(FieldNotLoaded,
+                      "external field {} has no binding in the loaded manifest",
+                      field_id.get());
+        }
+        return it->second;
+    }
+    return schema.get_storage_column_name(field_id);
+}
+
+bool
+SegmentLoadInfo::HasFieldInManifest(const Schema& schema,
+                                    FieldId field_id) const {
+    if (!schema.has_field(field_id)) {
+        return false;
+    }
+    if (field_mapping_ && schema.IsExternalManifestStoredField(field_id) &&
+        !schema.is_function_output(field_id)) {
+        auto it = field_mapping_->physical_columns.find(field_id.get());
+        return it != field_mapping_->physical_columns.end() &&
+               HasManifestColumn(it->second);
+    }
+    return HasManifestColumn(schema.get_storage_column_name(field_id));
+}
+
+std::optional<FieldId>
+SegmentLoadInfo::ResolveManifestColumn(const Schema& schema,
+                                       const std::string& column) const {
+    if (field_mapping_) {
+        auto it = field_mapping_->target_fields.find(column);
+        if (it != field_mapping_->target_fields.end()) {
+            return FieldId(it->second);
+        }
+        const auto field_id = schema.ResolveColumnFieldId(column);
+        if (schema.IsExternalDataField(field_id)) {
+            return std::nullopt;
+        }
+        return field_id;
+    }
+    return schema.ResolveColumnFieldId(column);
 }
 
 // Looks up a storage column in the cached manifest column groups only.

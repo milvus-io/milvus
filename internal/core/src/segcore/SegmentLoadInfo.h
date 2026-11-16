@@ -37,6 +37,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::segcore {
 
@@ -443,6 +444,7 @@ class SegmentLoadInfo {
           field_index_has_raw_data_(other.field_index_has_raw_data_),
           fields_filled_with_default_(other.fields_filled_with_default_),
           column_groups_(other.column_groups_),
+          field_mapping_(other.field_mapping_),
           created_text_indexes_(other.created_text_indexes_) {
         BuildFieldBinlogCache();
     }
@@ -462,6 +464,7 @@ class SegmentLoadInfo {
               std::move(other.fields_filled_with_default_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)),
+          field_mapping_(std::move(other.field_mapping_)),
           created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
@@ -480,6 +483,7 @@ class SegmentLoadInfo {
             json_index_path_cache_ = other.json_index_path_cache_;
             field_index_has_raw_data_ = other.field_index_has_raw_data_;
             column_groups_ = other.column_groups_;
+            field_mapping_ = other.field_mapping_;
             fields_filled_with_default_ = other.fields_filled_with_default_;
             created_text_indexes_ = other.created_text_indexes_;
             BuildFieldBinlogCache();
@@ -505,6 +509,7 @@ class SegmentLoadInfo {
                 std::move(other.fields_filled_with_default_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            field_mapping_ = std::move(other.field_mapping_);
             created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
@@ -816,6 +821,23 @@ class SegmentLoadInfo {
     [[nodiscard]] bool
     HasManifestColumn(const std::string& column_name) const;
 
+    // These access the binding cached with this manifest, never live collection
+    // metadata. Published readers and lazy translators retain the same binding.
+    [[nodiscard]] const std::shared_ptr<const MilvusTableFieldIdMapping>&
+    GetFieldMapping() const {
+        return field_mapping_;
+    }
+
+    [[nodiscard]] std::string
+    GetStorageColumnName(const Schema& schema, FieldId field_id) const;
+
+    [[nodiscard]] bool
+    HasFieldInManifest(const Schema& schema, FieldId field_id) const;
+
+    [[nodiscard]] std::optional<FieldId>
+    ResolveManifestColumn(const Schema& schema,
+                          const std::string& column) const;
+
     // Reuses manifest column groups when another load info points at the same
     // manifest path.
     void
@@ -823,6 +845,7 @@ class SegmentLoadInfo {
         if (source.HasManifestPath() &&
             source.GetManifestPath() == GetManifestPath()) {
             column_groups_ = source.column_groups_;
+            field_mapping_ = source.field_mapping_;
         }
     }
 
@@ -844,6 +867,9 @@ class SegmentLoadInfo {
     SetColumnGroupsForTesting(
         std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
         column_groups_ = std::move(cg);
+        field_mapping_ = column_groups_
+                             ? ReadMilvusTableFieldIdMapping(*column_groups_)
+                             : nullptr;
     }
 
     // ==================== Stats & Delta Logs ====================
@@ -1300,6 +1326,7 @@ class SegmentLoadInfo {
     // GetColumnGroups() can be const — the cache is a memoization of an
     // immutable manifest path.
     mutable std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+    mutable std::shared_ptr<const MilvusTableFieldIdMapping> field_mapping_;
 
     // Field IDs where text indexes were created from raw data (not loaded from files)
     // These should NOT be re-loaded in diff computation

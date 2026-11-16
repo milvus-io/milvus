@@ -23,6 +23,8 @@ package packed
 #include "milvus-storage/ffi_exttable_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+#include "common/type_c.h"
+CStatus ReadMilvusTableManifestFieldMapping(const LoonColumnGroups* groups, char** output);
 
 LoonFFIResult loon_milvus_table_append_source_manifests(
     LoonTransactionHandle transaction,
@@ -33,7 +35,8 @@ LoonFFIResult loon_milvus_table_append_source_manifests(
     size_t num_target_columns,
     const char* external_source,
     const LoonProperties* properties,
-    int has_external_primary_key);
+    int has_external_primary_key,
+    const char* field_id_mapping);
 */
 import "C"
 
@@ -52,6 +55,8 @@ import (
 )
 
 const (
+	// MilvusTableFieldIDMappingProperty binds target field IDs to physical source columns.
+	MilvusTableFieldIDMappingProperty     = "milvus_table.field_id_mapping"
 	milvusTableSourceManifestPathProperty = "milvus_table.source_manifest_path"
 	milvusTableSourceRowCountProperty     = "milvus_table.source_row_count"
 )
@@ -342,6 +347,12 @@ func createMilvusTableManifest(
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
 	}
+	rawMapping := fragments[0].Properties[MilvusTableFieldIDMappingProperty]
+	if strings.IndexByte(rawMapping, 0) >= 0 {
+		return "", merr.WrapErrParameterInvalidMsg("milvus-table field mapping contains a NUL byte")
+	}
+	cFieldIDMapping := C.CString(rawMapping)
+	defer C.free(unsafe.Pointer(cFieldIDMapping))
 	result := C.loon_milvus_table_append_source_manifests(
 		handle,
 		cPathsPtr,
@@ -352,6 +363,7 @@ func createMilvusTableManifest(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
+		cFieldIDMapping,
 	)
 	unsupported := result.err_code == C.LOON_NOT_SUPPORT
 	if err := HandleLoonFFIResult(result); err != nil {
@@ -597,6 +609,57 @@ func ManifestMissingColumns(
 			delete(required, column)
 		}
 	}
+	return missing, nil
+}
+
+// MissingMilvusTableMappedFields checks logical coverage and rejects a source
+// identity change for an already mapped target. Explicit bindings never fall
+// back to coincidentally matching numeric source column names.
+func MissingMilvusTableMappedFields(manifestPath string, config *indexpb.StorageConfig, expected map[string]string) ([]string, error) {
+	manifest, err := GetManifestHandle(manifestPath, config)
+	if err != nil {
+		return nil, err
+	}
+	if manifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("nil milvus-table manifest")
+	}
+	defer C.loon_manifest_destroy(manifest)
+	var encoded *C.char
+	status := C.ReadMilvusTableManifestFieldMapping(&manifest.column_groups, &encoded)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(encoded))
+	var previous map[string]string
+	if encoded != nil {
+		if err := json.Unmarshal([]byte(C.GoString(encoded)), &previous); err != nil {
+			return nil, merr.Wrap(err, "decode validated manifest mapping")
+		}
+	} else {
+		// All older target manifests used target ID == source ID.
+		groups, err := columnGroupEntriesFromC(&manifest.column_groups)
+		if err != nil {
+			return nil, err
+		}
+		previous = make(map[string]string)
+		for _, group := range groups {
+			for _, column := range group.Columns {
+				previous[column] = column
+			}
+		}
+	}
+	var missing []string
+	for target, physical := range expected {
+		old, exists := previous[target]
+		if !exists {
+			missing = append(missing, target)
+			continue
+		}
+		if old != physical {
+			return nil, merr.WrapErrParameterInvalidMsg("milvus-table source Field ID changed for target field %s: previous=%s, snapshot=%s", target, old, physical)
+		}
+	}
+	sort.Strings(missing)
 	return missing, nil
 }
 

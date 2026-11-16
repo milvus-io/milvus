@@ -51,8 +51,8 @@ live in the target PK space.
   table source.
 - Keep the public source contract minimal: `external_source` points to the
   snapshot metadata JSON file, and `external_spec.format` is `milvus-table`.
-- Preserve source field IDs for target data fields so StorageV3 physical column
-  names remain valid.
+- Keep target logical field IDs stable and resolve physical source IDs in each
+  imported manifest, including independently added fields.
 - Keep user-facing `external_field` as the source field name instead of storing
   source field IDs in the collection schema.
 - Support both real primary key and virtual primary key target collections.
@@ -69,8 +69,8 @@ live in the target PK space.
 - Changing the definitions or field IDs of mapped source fields between refreshes.
 - Reading mapped columns that are physically absent from historical source segments.
 - Reusing source primary-key bloom filters for virtual primary key targets.
-- Supporting dynamic fields, struct fields, partition keys, clustering keys,
-  text match, or auto ID for external collections.
+- Adding partition keys, clustering keys, text match, or auto ID through
+  external field additions.
 - Reading target function output fields from external source data. Target
   function outputs are target-owned fields and are regenerated during refresh.
 
@@ -123,19 +123,21 @@ must have a unique, compatible source mapping; source primary, partition, and
 clustering keys must remain mapped. Adding an unmapped ordinary source field
 does not prevent refresh.
 
-Online addition of mapped data fields to an existing `milvus-table` collection
-is not supported. RootCoord rejects both `AddCollectionField` and the field-add
-operation of `AlterCollectionSchema` before broadcasting a schema change. Create
-a new external collection to include additional source columns; this keeps every
-mapped field ID aligned with the source snapshot. Other external formats retain
-their existing add-field behavior.
+Mapped fields and Struct children may be declared before the bound snapshot
+contains them. Add validates the declaration without reading the old snapshot;
+new fields keep their target-assigned IDs. Refresh validates names and types
+against the snapshot selected for that refresh, then persists the resulting
+physical bindings in the imported manifests. Until the loaded manifest contains
+a binding, the existing missing-column query check rejects access to the new
+field; queries using only previously available fields remain readable. Add does
+not submit a refresh job. Other external formats retain their existing behavior.
 
 ## Schema Alignment
 
 Milvus StorageV3 segment manifests store physical columns by field ID string.
 For example, source field ID `101` is stored as physical column `"101"`.
-If the target collection generated different field IDs, data reads would point
-to missing or incorrect columns.
+Target IDs can differ after independent additions. Reading a target ID directly
+as a source column would then read a missing or incorrect column.
 
 RootCoord handles this at collection creation:
 
@@ -146,6 +148,15 @@ RootCoord handles this at collection creation:
 5. For each target user data field, set `target.field_id` to the matching
    source field ID found through `target.external_field`.
 6. Mark the create request with `preserve_field_ids=true`.
+
+During refresh, DataNode resolves each selected field name in the new snapshot
+and writes `milvus_table.field_id_mapping` into imported column-group file
+properties. The JSON object maps target field ID strings to physical source ID
+strings. Source column names and files are not renamed. Load, take, index reads,
+and sampling use this manifest-local binding, so publishing a newer schema alone
+does not change the meaning of older loaded data. Legacy manifests without this
+property retain the original identity-ID mapping. Malformed or conflicting maps
+are rejected; existing source bindings cannot silently change across refreshes.
 
 System fields and the target virtual primary key field are target-owned fields.
 They do not map to source data columns.
@@ -245,7 +256,7 @@ a target segment manifest:
 | Format | Physical column name |
 |--------|----------------------|
 | Parquet, Lance, Vortex, Iceberg | `external_field` |
-| Milvus table | target field ID string, aligned to source field ID |
+| Milvus table | source field ID string resolved from the manifest binding |
 
 For `milvus-table`, source data fields use numeric field ID strings because the
 source StorageV3 manifests were written by Milvus. Target-only fields, such as
@@ -358,8 +369,8 @@ During load:
 
 During search/query/retrieve/take:
 
-- Segcore requests physical columns using `Schema::GetPhysicalColumnName`.
-- For `milvus-table`, this returns the field ID string.
+- Segcore resolves physical columns from the loaded segment.
+- For `milvus-table`, its manifest binding maps a target ID to the source ID string.
 - For other external formats, this returns `external_field`.
 - Output field IDs and result IDs remain target Milvus field IDs and target PKs.
 
@@ -369,11 +380,14 @@ DataNode passes `external_source` and `external_spec` through
 `BuildIndexInfo`. The C++ index build path reads `external_spec` and resolves
 manifest columns with the same rule as the query path:
 
-- `milvus-table`: field ID string.
+- `milvus-table`: source field ID string resolved from the manifest binding.
 - Other external formats: `external_field`.
 
 This keeps index build consistent with load/search/query/take and avoids a
 separate schema mutation path for indexes.
+A raw index read with no external binding or physical column fails instead of
+synthesizing NULL/default rows. The index task fails for that immutable manifest;
+the query-side field-not-loaded error remains retryable across replicas.
 
 ## Compatibility and Failure Behavior
 
@@ -387,7 +401,7 @@ separate schema mutation path for indexes.
 - If target schema does not match the source snapshot schema, create or refresh
   fails instead of reading data with mismatched field IDs.
 - If a later snapshot changes a mapped field's definition or field ID, refresh
-  fails schema identity validation. Additional unmapped ordinary fields are allowed.
+  fails definition or prior-binding validation. Additional unmapped ordinary fields are allowed.
 - If any source data segment lacks a mapped column, its DataNode task fails
   before the job publishes segment results; nullable and default-value
   declarations do not bypass this check.

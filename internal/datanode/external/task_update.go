@@ -93,6 +93,9 @@ type RefreshExternalCollectionTask struct {
 
 	milvusTableSourcePKFieldMu sync.Mutex
 	milvusTableSourcePKField   *schemapb.FieldSchema
+	milvusTableSourceSchemaMu  sync.Mutex
+	milvusTableSourceSchema    *schemapb.CollectionSchema
+	milvusTableFieldIDMapping  map[string]string
 
 	milvusTableSourceDeltalogsMu sync.Mutex
 	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
@@ -200,6 +203,13 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.req.Schema = schema
 	t.columns = packed.GetColumnNamesFromSchema(schema)
+	if spec.Format == externalspec.FormatMilvusTable {
+		// Bind all task reads to the requested snapshot, including function
+		// inputs. The collection schema may still describe the preceding one.
+		schema.ExternalSource = t.req.GetExternalSource()
+		schema.ExternalSpec = t.req.GetExternalSpec()
+		return t.initializeMilvusTableFieldMapping()
+	}
 
 	return nil
 }
@@ -261,7 +271,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	return packed.FetchFragmentsFromExternalSourceWithRange(
+	fragments, err := packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
 		t.parsedSpec.Format,
 		t.columns,
@@ -276,6 +286,10 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 			RowLimit:     t.req.GetTargetRowsPerSegment(),
 		},
 	)
+	if err != nil {
+		return nil, err
+	}
+	return t.bindMilvusTableFragments(fragments)
 }
 
 func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
@@ -370,6 +384,17 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		if err := ensureContext(ctx); err != nil {
 			return nil, err
 		}
+		var missingColumns []string
+		if t.milvusTableFieldIDMapping != nil {
+			var err error
+			// Validate old logical identities even when this snapshot replaces
+			// all data fragments. Compaction must not hide a source field reuse.
+			missingColumns, err = t.missingExternalColumns(seg)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		fragments := currentSegmentFragments[seg.GetID()]
 		allFragmentsExist := true
 		matchedNewFragments := make([]packed.Fragment, 0, len(fragments))
@@ -420,9 +445,12 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
-		missingColumns, err := t.missingExternalColumns(seg)
-		if err != nil {
-			return nil, err
+		if t.milvusTableFieldIDMapping == nil {
+			var err error
+			missingColumns, err = t.missingExternalColumns(seg)
+			if err != nil {
+				return nil, err
+			}
 		}
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
@@ -656,6 +684,22 @@ func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.Segme
 	schema := t.req.GetSchema()
 	if schema == nil {
 		return nil, nil
+	}
+	if t.milvusTableFieldIDMapping != nil && seg.GetManifestPath() != "" {
+		missing, err := packed.MissingMilvusTableMappedFields(seg.GetManifestPath(), t.req.GetStorageConfig(), t.milvusTableFieldIDMapping)
+		if err != nil {
+			return nil, merr.Wrapf(err, "check projection for segment %d", seg.GetID())
+		}
+		names := make(map[string]string)
+		for _, field := range typeutil.GetAllFieldSchemas(schema) {
+			names[strconv.FormatInt(field.GetFieldID(), 10)] = field.GetExternalField()
+		}
+		for i, id := range missing {
+			if name := names[id]; name != "" {
+				missing[i] = name
+			}
+		}
+		return missing, nil
 	}
 	resolver := typeutil.NewStorageColumnResolver(schema,
 		typeutil.WithStorageColumnExternalSpec(t.req.GetExternalSpec()))

@@ -96,7 +96,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     MmapChunkWritebackMode writeback_mode,
-    OrdinaryStructProjections struct_projections)
+    OrdinaryStructProjections struct_projections,
+    std::shared_ptr<const MilvusTableFieldIdMapping> field_mapping)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -109,6 +110,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              cache_key_suffix)),
       field_metas_(field_metas),
       struct_projections_(std::move(struct_projections)),
+      field_mapping_(std::move(field_mapping)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -772,6 +774,10 @@ ManifestGroupTranslator::load_group_chunk(
         const auto projection = struct_projections_.find(column_name);
         if (projection != struct_projections_.end()) {
             logical_field_ids = projection->second.child_field_ids;
+        } else if (field_mapping_ &&
+                   field_mapping_->target_fields.count(column_name)) {
+            logical_field_ids.emplace_back(
+                field_mapping_->target_fields.at(column_name));
         } else if (auto parsed = ParseFieldIdColumnName(column_name);
                    parsed.has_value()) {
             logical_field_ids.push_back(parsed.value());

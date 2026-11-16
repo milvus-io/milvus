@@ -173,6 +173,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         // 2. Read manifest → ColumnGroups
         auto cgs = ReadManifestColumnGroupsWithFFI(manifest_path, c_properties);
+        auto field_id_mapping = ReadMilvusTableFieldIdMapping(*cgs);
 
         // 3. Determine total rows from column group files
         int64_t total_rows = 0;
@@ -228,7 +229,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 bool is_milvus_table_data_field =
                     is_milvus_table &&
                     field_schema.fieldid() >= START_USER_FIELDID &&
-                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME;
+                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME &&
+                    !field_schema.is_function_output();
                 if (is_milvus_table_data_field &&
                     field_schema.is_primary_key()) {
                     uses_external_primary_key = true;
@@ -243,6 +245,16 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 auto sample_name = is_milvus_table_data_field
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
+                if (is_milvus_table_data_field && field_id_mapping) {
+                    auto it = field_id_mapping->physical_columns.find(
+                        field_schema.fieldid());
+                    if (it == field_id_mapping->physical_columns.end()) {
+                        ThrowInfo(milvus::FieldNotLoaded,
+                                  "external field {} has no manifest binding",
+                                  field_schema.fieldid());
+                    }
+                    mapping.storage_column_name = it->second;
+                }
                 external_fields.push_back(
                     {std::move(field_meta),
                      std::move(mapping.storage_column_name),

@@ -229,7 +229,7 @@ func TestMappedFieldAdditionAdmission(t *testing.T) {
 		mapping  string
 		rejected bool
 	}{
-		{name: "milvus table", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, mapping: "extra", rejected: true},
+		{name: "milvus table", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, mapping: "extra"},
 		{name: "parquet", source: "s3://bucket/data", spec: `{"format":"parquet"}`, mapping: "extra"},
 		{name: "internal"},
 	} {

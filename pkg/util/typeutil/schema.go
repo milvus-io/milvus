@@ -2997,10 +2997,20 @@ func isExternalSystemOrVirtualField(name string) bool {
 // Source function outputs are optional source columns: a target ordinary field
 // may map to them, but a target function output remains target-local and is
 // regenerated during refresh. Create-time validation may ignore field IDs so
-// RootCoord can copy them from the snapshot; refresh-time validation must
-// require field IDs to prevent reading source manifests through a mismatched
-// target schema.
+// RootCoord can copy them from the snapshot. Mapping-aware refresh uses
+// ValidateMilvusTableRefreshSchema and persists physical bindings in manifests.
 func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
+	return validateMilvusTableSchemaIdentity(target, source, requireFieldID, requireFieldID)
+}
+
+// ValidateMilvusTableRefreshSchema validates a projection against the selected
+// snapshot. Physical IDs are bound by the imported manifest, independently of
+// target IDs, and newly added unselected source Structs do not change it.
+func ValidateMilvusTableRefreshSchema(target, source *schemapb.CollectionSchema) error {
+	return validateMilvusTableSchemaIdentity(target, source, false, true)
+}
+
+func validateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID, allowExtraSourceStructs bool) error {
 	if target == nil {
 		return merr.WrapErrParameterInvalidMsg("target schema is nil")
 	}
@@ -3022,7 +3032,7 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 		}
 	}
 	// Refresh validates the existing projection and can ignore new source Structs.
-	if !requireFieldID && len(target.GetStructArrayFields()) != len(sourceStructs) {
+	if !allowExtraSourceStructs && len(target.GetStructArrayFields()) != len(sourceStructs) {
 		return merr.WrapErrParameterInvalidMsg("struct field count mismatch")
 	}
 	targetParents := make(map[string]string)

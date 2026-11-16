@@ -170,6 +170,54 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 	s.Equal(int64(1), task.GetSlot())
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteResolvesMilvusTableSourceColumnsOnce() {
+	ctx := context.Background()
+	source := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 103, Name: "source_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "source_value", DataType: schemapb.DataType_Int64},
+	}}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID, ExternalSource: "s3://bucket/snapshot.json",
+		ExternalSpec: `{"format":"milvus-table"}`, TargetRowsPerSegment: 1000,
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "pk", ExternalField: "source_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 103, Name: "value", ExternalField: "source_value", DataType: schemapb.DataType_Int64},
+		}},
+	}
+	reads := 0
+	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(
+		func(src, spec string, cfg *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+			reads++
+			s.Equal(req.GetExternalSource(), src)
+			return &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil
+		}).Build()
+	defer read.UnPatch()
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	s.Require().NoError(task.PreExecute(ctx))
+	s.Equal([]string{"103", "101", "1"}, task.columns)
+	s.Equal(1, reads)
+	pk, err := task.getMilvusTableSourcePKField()
+	s.Require().NoError(err)
+	s.Equal(int64(103), pk.GetFieldID())
+	s.Equal(1, reads)
+	s.Equal(int64(101), req.GetSchema().GetFields()[0].GetFieldID())
+	fragments := []packed.Fragment{{
+		FilePath: "source-manifest", RowCount: 3,
+		Properties: map[string]string{"opaque": "kept"},
+	}}
+	fetch := mockey.Mock(packed.FetchFragmentsFromExternalSourceWithRange).Return(fragments, nil).Build()
+	defer fetch.UnPatch()
+	req.ExploreManifestPath = "explore-manifest"
+	bound, err := task.fetchFragmentsFromExternalSource(ctx)
+	s.Require().NoError(err)
+	s.Require().Len(bound, 1)
+	s.JSONEq(`{"1":"1","101":"103","103":"101"}`, bound[0].Properties["milvus_table.field_id_mapping"])
+	s.Equal("kept", bound[0].Properties["opaque"])
+	s.NotContains(fragments[0].Properties, "milvus_table.field_id_mapping")
+	s.Equal(1, reads)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteClonesSchemaBeforeFillingExternalMetadata() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

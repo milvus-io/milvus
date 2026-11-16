@@ -174,7 +174,11 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 
 	extfs := t.milvusTableExternalSpecContext()
 	resolver := typeutil.NewStorageColumnResolver(t.req.GetSchema(), typeutil.WithStorageColumnExternalSpec(extfs.Spec))
-	deltalogs, err := packed.GetMilvusTableSourceDeltalogs(manifestPath, t.req.GetStorageConfig(), extfs, resolver.SourceDataColumnNames())
+	columns := resolver.SourceDataColumnNames()
+	if t.milvusTableFieldIDMapping != nil {
+		columns = t.columns
+	}
+	deltalogs, err := packed.GetMilvusTableSourceDeltalogs(manifestPath, t.req.GetStorageConfig(), extfs, columns)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read milvus-table source manifest deltalogs %s", manifestPath)
 	}
@@ -378,17 +382,10 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	}
 	t.milvusTableSourcePKFieldMu.Unlock()
 
-	extfs := t.milvusTableExternalSpecContext()
-	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
-		t.req.GetExternalSource(),
-		t.req.GetExternalSpec(),
-		t.req.GetStorageConfig(),
-		extfs,
-	)
+	sourceSchema, err := t.getMilvusTableSourceSchema()
 	if err != nil {
 		return nil, err
 	}
-	sourceSchema := metadata.GetCollection().GetSchema()
 	sourcePKField, err := typeutil.GetPrimaryFieldSchema(sourceSchema)
 	if err != nil {
 		return nil, merr.Wrap(err, "milvus-table source schema primary key")

@@ -225,6 +225,11 @@ func getStateFromError(err error) indexpb.JobState {
 		// stays a system error on purpose: the request is well formed, it is Milvus
 		// state that is inconsistent, so the blame must not move to the caller.
 		return indexpb.JobState_JobStateFailed
+	} else if merr.IsSegcoreFieldNotLoaded(err) {
+		// Index tasks read an immutable manifest. Moving to another worker
+		// cannot bind a missing field; a refresh must publish a new manifest.
+		// Queries retain their global retry policy for other replicas.
+		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
 	} else if merr.IsPermanentSegcoreErr(err) {

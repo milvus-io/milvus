@@ -18,18 +18,115 @@ package external
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// getMilvusTableSourceSchema shares one successful snapshot metadata read
+// between projection resolution and virtual-PK delete translation. It is scoped
+// to this task's immutable request, never to a collection-wide cache.
+func (t *RefreshExternalCollectionTask) getMilvusTableSourceSchema() (*schemapb.CollectionSchema, error) {
+	t.milvusTableSourceSchemaMu.Lock()
+	defer t.milvusTableSourceSchemaMu.Unlock()
+	if t.milvusTableSourceSchema != nil {
+		return t.milvusTableSourceSchema, nil
+	}
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(t.req.GetExternalSource(),
+		t.req.GetExternalSpec(), t.req.GetStorageConfig(), t.milvusTableExternalSpecContext())
+	if err != nil {
+		return nil, err
+	}
+	source := metadata.GetCollection().GetSchema()
+	if source == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("milvus-table snapshot has no collection schema")
+	}
+	if typeutil.IsExternalCollection(source) {
+		return nil, merr.WrapErrOperationNotSupportedMsg("milvus-table cannot use an external collection snapshot as source")
+	}
+	t.milvusTableSourceSchema = source
+	return source, nil
+}
+
+func (t *RefreshExternalCollectionTask) initializeMilvusTableFieldMapping() error {
+	source, err := t.getMilvusTableSourceSchema()
+	if err != nil {
+		return err
+	}
+	target := t.req.GetSchema()
+	if err := typeutil.ValidateMilvusTableRefreshSchema(target, source); err != nil {
+		return merr.Wrap(err, "resolve milvus-table source fields")
+	}
+	sourceFields := make(map[string]*schemapb.FieldSchema)
+	for _, field := range typeutil.GetAllFieldSchemas(source) {
+		sourceFields[field.GetName()] = field
+	}
+	resolver := typeutil.NewStorageColumnResolver(target)
+	mapping := make(map[string]string)
+	columns := make([]string, 0, len(sourceFields))
+	localColumns := make(map[string]struct{})
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		if typeutil.IsFunctionOutputField(target, field) {
+			localColumns[strconv.FormatInt(field.GetFieldID(), 10)] = struct{}{}
+		}
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		if !resolver.IsSourceDataField(field) {
+			continue
+		}
+		sourceField := sourceFields[field.GetExternalField()]
+		if sourceField == nil {
+			return merr.WrapErrParameterInvalidMsg("target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
+		}
+		physical := strconv.FormatInt(sourceField.GetFieldID(), 10)
+		if _, exists := localColumns[physical]; exists {
+			return merr.WrapErrOperationNotSupportedMsg("source physical column %s conflicts with a target function output column", physical)
+		}
+		mapping[strconv.FormatInt(field.GetFieldID(), 10)] = physical
+		columns = append(columns, physical)
+	}
+	if packed.HasExternalPrimaryKey(target) {
+		timestamp := strconv.FormatInt(common.TimeStampField, 10)
+		mapping[timestamp] = timestamp
+		columns = append(columns, timestamp)
+	}
+	t.milvusTableFieldIDMapping = mapping
+	t.columns = columns
+	return nil
+}
+
+func (t *RefreshExternalCollectionTask) bindMilvusTableFragments(fragments []packed.Fragment) ([]packed.Fragment, error) {
+	if t.milvusTableFieldIDMapping == nil {
+		return fragments, nil
+	}
+	encoded, err := json.Marshal(t.milvusTableFieldIDMapping)
+	if err != nil {
+		return nil, merr.Wrap(err, "encode milvus-table field mapping")
+	}
+	bound := make([]packed.Fragment, len(fragments))
+	copy(bound, fragments)
+	for i := range bound {
+		bound[i].Properties = maps.Clone(fragments[i].Properties)
+		if bound[i].Properties == nil {
+			bound[i].Properties = make(map[string]string)
+		}
+		bound[i].Properties[packed.MilvusTableFieldIDMappingProperty] = string(encoded)
+	}
+	return bound, nil
+}
 
 // prepareMilvusTableDeltalogFragments returns the fragments that should be used
 // to build a target segment manifest. Virtual-PK collections include source
