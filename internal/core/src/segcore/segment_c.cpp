@@ -1743,11 +1743,12 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CStatus
-ExprResCacheEraseSegment(int64_t segment_id) {
+ExprResCacheEraseLegacySegment(int64_t segment_id) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        milvus::exec::ExprResCacheManager::Instance().EraseSegment(segment_id);
+        milvus::exec::ExprResCacheManager::Instance().EraseLegacySegment(
+            segment_id);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

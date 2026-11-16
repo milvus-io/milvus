@@ -3491,3 +3491,83 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
         return info.param.type_name;
     });
+
+TEST_F(MatchExprTest, WholeFilterCacheDistinguishesInnerPredicates) {
+    using exec::ExprResCacheManager;
+    auto& cache = ExprResCacheManager::Instance();
+    auto reset = folly::makeGuard([&] {
+        cache.Clear();
+        ExprResCacheManager::SetEnabled(false);
+        EXPECT_TRUE(cache.SetConfig(exec::CacheConfig{}));
+    });
+    auto data = DataGen(schema_, N_);
+    *data.raw_ = *insert_data_;
+    auto sealed = CreateSealedWithFieldDataLoaded(schema_, data);
+    const auto path =
+        (std::filesystem::temp_directory_path() /
+         ("match-generation-" +
+          std::to_string(
+              std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    auto cleanup = folly::makeGuard([&] {
+        cache.Clear();
+        std::filesystem::remove_all(path);
+    });
+    for (auto mode : {exec::CacheMode::Memory, exec::CacheMode::Disk}) {
+        exec::CacheConfig config;
+        config.mode = mode;
+        config.disk_base_path = path;
+        config.disk_max_file_size = 1 << 20;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = config.disk_min_eval_duration_us = 0;
+        ASSERT_TRUE(cache.SetConfig(config));
+        ExprResCacheManager::SetEnabled(true);
+        for (auto type : {expr::MatchType::MatchAny,
+                          expr::MatchType::MatchAll,
+                          expr::MatchType::MatchLeast,
+                          expr::MatchType::MatchMost,
+                          expr::MatchType::MatchExact}) {
+            cache.Clear();
+            const int64_t count = type == expr::MatchType::MatchExact
+                                      ? array_len_
+                                  : type == expr::MatchType::MatchLeast ? 1
+                                                                        : 0;
+            std::vector<std::shared_ptr<plan::FilterBitsNode>> plans;
+            for (int threshold : {0, 1000}) {
+                auto column = expr::ColumnInfo(sub_int_fid_, DataType::ARRAY);
+                column.element_type_ = DataType::INT32;
+                column.element_level_ = true;
+                proto::plan::GenericValue value;
+                value.set_int64_val(threshold);
+                auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    column, proto::plan::OpType::GreaterThan, value);
+                auto match = std::make_shared<expr::MatchExpr>(
+                    "struct_array", type, count, predicate);
+                plans.push_back(std::make_shared<plan::FilterBitsNode>(
+                    DEFAULT_PLANNODE_ID, match));
+            }
+            ASSERT_NE(plans[0]->ToString(), plans[1]->ToString());
+            for (int pass = 0; pass < 3; ++pass) {
+                for (size_t i = 0; i < plans.size(); ++i) {
+                    auto context = std::make_shared<exec::QueryContext>(
+                        DEAFULT_QUERY_ID, sealed.get(), N_, MAX_TIMESTAMP);
+                    context->set_read_snapshot(sealed->CaptureReadSnapshot());
+                    context->set_enable_expr_cache(true);
+                    context->set_enable_sub_expr_cache_write(false);
+                    auto fragment = plan::PlanFragment(plans[i]);
+                    auto result = query::ExecPlanNodeVisitor::ExecuteTask(
+                        fragment, context);
+                    auto column = std::dynamic_pointer_cast<ColumnVector>(
+                        result->childrens()[0]);
+                    ASSERT_NE(column, nullptr);
+                    BitsetTypeView excluded(column->GetRawData(),
+                                            column->size());
+                    const bool matches =
+                        type == expr::MatchType::MatchMost ? i == 1 : i == 0;
+                    EXPECT_EQ(excluded.count(), matches ? 0 : N_);
+                }
+            }
+            EXPECT_EQ(cache.GetEntryCount(), 2);
+        }
+    }
+}

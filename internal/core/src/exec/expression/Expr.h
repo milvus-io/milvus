@@ -1176,12 +1176,23 @@ class SegmentExpr : public Expr {
         ApplyValidMask(validity, res, valid_res, size);
     }
 
+    bool
+    HasExprCacheIdentity() const {
+        return ExprCacheHelper::HasCacheIdentity(segment_, snapshot_);
+    }
+
+    ExprResCacheManager::Key
+    MakeExprCacheKey(std::string signature) const {
+        return ExprCacheHelper::MakeKey(
+            segment_, snapshot_, std::move(signature));
+    }
+
     // Try to load the full bitset from ExprResCache.
     // Returns true if cache hit (cached_index_chunk_res_ populated).
     // Call at the top of ByStats / ByIndex methods to skip computation.
     bool
     TryCacheGet() {
-        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+        if (!ExprResCacheManager::IsEnabled() || !HasExprCacheIdentity()) {
             return false;
         }
         bool cache_hit = false;
@@ -1190,8 +1201,7 @@ class SegmentExpr : public Expr {
             if (!manager.CanCacheSegment(segment_->type())) {
                 return;
             }
-            ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                         this->ToString()};
+            auto key = MakeExprCacheKey(this->ToString());
             ExprResCacheManager::Value got;
             got.active_count = active_count_;
             if (manager.Get(key, got)) {
@@ -1211,7 +1221,7 @@ class SegmentExpr : public Expr {
     // Call after full bitset computation completes.
     void
     CachePut(int64_t eval_duration_us) {
-        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+        if (!ExprResCacheManager::IsEnabled() || !HasExprCacheIdentity()) {
             return;
         }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
@@ -1222,8 +1232,7 @@ class SegmentExpr : public Expr {
             if (!manager.CanCacheSegment(segment_->type())) {
                 return;
             }
-            ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                         this->ToString()};
+            auto key = MakeExprCacheKey(this->ToString());
             ExprResCacheManager::Value v;
             v.result = cached_index_chunk_res_;
             v.valid_result = cached_index_chunk_valid_res_;
@@ -3330,6 +3339,7 @@ class SegmentExpr : public Expr {
 
             auto cached = ExprCacheHelper::GetOrCompute(
                 segment_,
+                snapshot_,
                 [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
@@ -3397,6 +3407,7 @@ class SegmentExpr : public Expr {
                         if (ExprResCacheManager::IsEnabled()) {
                             auto validity = ExprCacheHelper::GetOrComputeBitmap(
                                 segment_,
+                                snapshot_,
                                 signature,
                                 active_count_,
                                 compute_validity);
