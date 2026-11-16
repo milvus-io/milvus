@@ -20,7 +20,6 @@
 #include <absl/container/btree_map.h>
 #include <absl/container/inlined_vector.h>
 #include <algorithm>
-#include <array>
 #include <deque>
 #include <iterator>
 #include <limits>
@@ -58,21 +57,15 @@ struct Version {
 // remains append-only, with random access for binary search. GC is out of scope.
 using History = absl::InlinedVector<Version*, 1>;
 
-// Sparse histories are grouped by row-offset range. Each heap-owned SoA block
-// keeps offsets and History objects in separate contiguous arrays. Appending a
-// block never moves existing histories referenced by writers or pending updates.
-// Range readers walk blocks directly; arbitrary-offset gathers retain the hash.
+// Sparse AoS entries are grouped by row-offset range. Range readers walk the
+// matching buckets directly; writers and arbitrary-offset gathers retain a hash
+// directory. Deque append preserves History addresses held by pending updates.
 class OffsetHistories {
- private:
-    static constexpr size_t kBlockSize = 64;
-    struct Block {
-        std::array<int64_t, kBlockSize> offsets;
-        std::array<History, kBlockSize> histories;
-        size_t size = 0;
-    };
-    using Bucket = std::vector<std::unique_ptr<Block>>;
-
  public:
+    struct Entry {
+        int64_t offset = 0;
+        History history;
+    };
     static constexpr size_t kRangeSize = 1024;
 
     History&
@@ -89,17 +82,17 @@ class OffsetHistories {
             buckets_[range] = std::make_unique<Bucket>();
         }
         auto& bucket = *buckets_[range];
-        if (bucket.empty() || bucket.back()->size == kBlockSize) {
-            bucket.push_back(std::make_unique<Block>());
+        auto& entry = bucket.emplace_back();
+        entry.offset = offset;
+        try {
+            positions_.emplace(offset, &entry.history);
+        } catch (...) {
+            // No directory entry refers to the failed append. Existing History
+            // addresses remain valid, and a retry must not duplicate this row.
+            bucket.pop_back();
+            throw;
         }
-        auto& block = *bucket.back();
-        const auto slot = block.size;
-        // Publish size only after directory allocation succeeds. On failure the
-        // unused slot remains empty and a retry cannot duplicate the offset.
-        positions_.emplace(offset, &block.histories[slot]);
-        block.offsets[slot] = offset;
-        ++block.size;
-        return block.histories[slot];
+        return entry.history;
     }
 
     const History*
@@ -113,10 +106,8 @@ class OffsetHistories {
     ForEach(Visitor&& visit) const {
         for (const auto& bucket : buckets_) {
             if (bucket) {
-                for (const auto& block : *bucket) {
-                    for (size_t slot = 0; slot < block->size; ++slot) {
-                        visit(block->offsets[slot], block->histories[slot]);
-                    }
+                for (const auto& entry : *bucket) {
+                    visit(entry.offset, entry.history);
                 }
             }
         }
@@ -136,20 +127,10 @@ class OffsetHistories {
             std::min((end - 1) / kRangeSize + 1, buckets_.size());
         for (auto range = first; range < limit; ++range) {
             if (const auto& bucket = buckets_[range]) {
-                const auto range_begin = range * kRangeSize;
-                const bool whole_bucket =
-                    static_cast<size_t>(begin) <= range_begin &&
-                    end - range_begin >= kRangeSize;
-                for (const auto& block : *bucket) {
-                    for (size_t slot = 0; slot < block->size; ++slot) {
-                        const auto offset = block->offsets[slot];
-                        // Boundary filtering reads only the compact offset
-                        // array; rejected rows do not touch their history.
-                        if (whole_bucket ||
-                            (offset >= begin &&
-                             static_cast<size_t>(offset) < end)) {
-                            visit(offset, block->histories[slot]);
-                        }
+                for (const auto& entry : *bucket) {
+                    if (entry.offset >= begin &&
+                        static_cast<size_t>(entry.offset) < end) {
+                        visit(entry.offset, entry.history);
                     }
                 }
             }
@@ -157,6 +138,7 @@ class OffsetHistories {
     }
 
  private:
+    using Bucket = std::deque<Entry>;
     std::unordered_map<int64_t, History*> positions_;
     std::vector<std::unique_ptr<Bucket>> buckets_;
 };
