@@ -1601,7 +1601,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			RetryErrors:            retryErrors,
 		})
 		if err != nil {
-			if ctx.Err() != nil {
+			if retryStreaming && ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if retryStreaming && viewerror.AsViewError(err).IsRetryable() {

@@ -711,6 +711,33 @@ func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 	}
 }
 
+func TestQueryViewBatchCancellationErrorPrecedence(t *testing.T) {
+	for _, query := range []bool{true, false} {
+		ctx, cancel := context.WithCancel(t.Context())
+		primaryErr := merr.WrapErrParameterInvalidMsg("batch failed")
+		legacy := &fakeLegacyQueryClient{maxRetries: 2}
+		legacy.query = func(int) (*queryclient.LegacyQueryResult, error) {
+			cancel()
+			return nil, primaryErr
+		}
+		legacy.search = func(int) (*queryclient.LegacySearchResult, error) {
+			cancel()
+			return nil, primaryErr
+		}
+		var execute func(context.Context) error
+		if query {
+			execute = newQueryViewQueryTask(t, legacy, 1).Execute
+		} else {
+			execute = newQueryViewSearchTask(t, legacy, 1).Execute
+		}
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.EnableReduceStream.Key, "false"))
+		err := execute(ctx)
+		require.ErrorIs(t, err, primaryErr, "query=%t", query)
+		require.EqualValues(t, 1100, merr.Status(err).GetCode(), "query=%t", query)
+		require.Equal(t, 1, legacy.queryCalled+legacy.searchCalled)
+	}
+}
+
 func TestQueryViewUnavailableRetryBudget(t *testing.T) {
 	for _, query := range []bool{false, true} {
 		for _, canceled := range []bool{false, true} {

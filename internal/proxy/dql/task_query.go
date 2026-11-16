@@ -1248,7 +1248,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := legacy.Query(ctx, request)
 		if err != nil {
-			if ctx.Err() != nil {
+			if retryStreaming && ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if retryStreaming && viewerror.AsViewError(err).IsRetryable() {
