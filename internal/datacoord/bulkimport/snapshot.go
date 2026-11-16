@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -776,5 +777,77 @@ func prepareSnapshotImportOptions(target, source *schemapb.CollectionSchema, opt
 	// Renaming a field does not remap its data; callers must retain the intended
 	// field-ID correspondence, just as when importing binlog backups. Optional
 	// target columns, AutoID and target routing use the existing Import behavior.
+	if err := validateSnapshotSchema(target, source); err != nil {
+		return nil, err
+	}
 	return options, nil
+}
+
+func validateSnapshotSchema(target, source *schemapb.CollectionSchema) error {
+	sourceFields := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range typeutil.GetAllFieldSchemas(source) {
+		sourceFields[field.GetFieldID()] = field
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		sourceField := sourceFields[field.GetFieldID()]
+		if sourceField == nil {
+			continue // Missing columns retain reader validation and default filling.
+		}
+		if sourceField.GetNullable() != field.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetNullable(), field.GetNullable())
+		}
+		if sourceField.GetDataType() == schemapb.DataType_VarChar && field.GetDataType() == schemapb.DataType_VarChar {
+			sourceLength, err := parameterutil.GetMaxLength(sourceField)
+			if err != nil {
+				return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+			}
+			targetLength, err := parameterutil.GetMaxLength(field)
+			if err != nil {
+				return merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+			}
+			if sourceLength > targetLength {
+				return merr.WrapErrImportFailedMsg(
+					"source max_length exceeds target for field %s (ID %d): source %d, target %d",
+					field.GetName(), field.GetFieldID(), sourceLength, targetLength)
+			}
+			continue
+		}
+		if sourceField.GetDataType() != field.GetDataType() &&
+			(typeutil.IsVectorType(sourceField.GetDataType()) || typeutil.IsVectorType(field.GetDataType())) {
+			return merr.WrapErrImportFailedMsg(
+				"vector data type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetDataType(), field.GetDataType())
+		}
+		if !typeutil.IsFixDimVectorType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
+			continue
+		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementType() != field.GetElementType() {
+			return merr.WrapErrImportFailedMsg(
+				"vector element type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementType(), field.GetElementType())
+		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementNullable() != field.GetElementNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"vector element nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementNullable(), field.GetElementNullable())
+		}
+		sourceDim, err := typeutil.GetDim(sourceField)
+		if err != nil {
+			return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+		}
+		targetDim, err := typeutil.GetDim(field)
+		if err != nil {
+			// The target schema comes from coordinator-owned collection metadata.
+			return merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+		}
+		// Reject before FFI can interpret the source buffer with the target width.
+		if sourceDim != targetDim {
+			return merr.WrapErrImportFailedMsg(
+				"vector dimension mismatch for field %s (ID %d): source %d, target %d",
+				field.GetName(), field.GetFieldID(), sourceDim, targetDim)
+		}
+	}
+	return nil
 }
