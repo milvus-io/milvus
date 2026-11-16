@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -28,6 +29,7 @@ func exitWhenStopTimeout(stop func() error, timeout time.Duration) error {
 			zap.String("component", paramtable.GetRole()),
 			zap.Duration("cost", time.Since(start)),
 			zap.Error(err))
+		sessionutil.RevokeLeasesBeforeExit(time.Second)
 		log.Cleanup()
 		os.Exit(1)
 	}

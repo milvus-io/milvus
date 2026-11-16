@@ -605,6 +605,7 @@ func (s *Session) processKeepAliveResponse() {
 			s.Logger().Error("failed to revoke lease", zap.Error(err), zap.Int64("leaseID", int64(*s.LeaseID)))
 		}
 		s.Logger().Info("lease revoked successfully", zap.Int64("leaseID", int64(*s.LeaseID)))
+		liveSessions.Delete(s)
 		s.wg.Done()
 	}()
 
@@ -689,8 +690,31 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 }
 
 func (s *Session) startKeepAliveLoop() {
+	liveSessions.Store(s, struct{}{})
 	s.wg.Add(1)
 	go s.processKeepAliveResponse()
+}
+
+// liveSessions holds the sessions whose lease this process keeps alive.
+var liveSessions sync.Map
+
+// RevokeLeasesBeforeExit revokes every lease this process keeps alive. A forced
+// exit skips the graceful stop that would revoke them, so without this a
+// standby coordinator waits out the session TTL before it can take over.
+// Call it immediately before exiting: once a lease is gone, a standby may
+// become active.
+func RevokeLeasesBeforeExit(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	liveSessions.Range(func(key, _ any) bool {
+		s := key.(*Session)
+		if _, err := s.etcdCli.Revoke(ctx, *s.LeaseID); err != nil {
+			s.Logger().Warn("failed to revoke lease before exit", zap.Int64("leaseID", int64(*s.LeaseID)), zap.Error(err))
+			return true
+		}
+		s.Logger().Info("lease revoked before exit", zap.Int64("leaseID", int64(*s.LeaseID)))
+		return true
+	})
 }
 
 // GetSessions will get all sessions registered in etcd.
