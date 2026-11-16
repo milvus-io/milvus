@@ -125,37 +125,32 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                JsonNumericBoundRequiresPreciseInt64Comparison(
                                    expr_->upper_val_));
 
-            if (exec_path_ == ExprExecPath::ScalarIndex &&
-                (!has_offset_input_ || !PinnedJsonIndexIsFlat())) {
+            if (exec_path_ == ExprExecPath::ScalarIndex) {
                 if (is_numeric) {
-                    if (!use_double && PinnedJsonIndexIsFlat()) {
-                        result = ExecRangeVisitorImplForIndex<int64_t>(input);
+                    proto::plan::GenericValue double_lower_val;
+                    if (lower_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
+                        double_lower_val.set_float_val(
+                            static_cast<double>(expr_->lower_val_.int64_val()));
                     } else {
-                        proto::plan::GenericValue double_lower_val;
-                        if (lower_type ==
-                            proto::plan::GenericValue::ValCase::kInt64Val) {
-                            double_lower_val.set_float_val(static_cast<double>(
-                                expr_->lower_val_.int64_val()));
-                        } else {
-                            double_lower_val.set_float_val(
-                                expr_->lower_val_.float_val());
-                        }
-                        proto::plan::GenericValue double_upper_val;
-                        if (upper_type ==
-                            proto::plan::GenericValue::ValCase::kInt64Val) {
-                            double_upper_val.set_float_val(static_cast<double>(
-                                expr_->upper_val_.int64_val()));
-                        } else {
-                            double_upper_val.set_float_val(
-                                expr_->upper_val_.float_val());
-                        }
-
-                        lower_arg_.SetValue<double>(double_lower_val);
-                        upper_arg_.SetValue<double>(double_upper_val);
-                        arg_inited_ = true;
-
-                        result = ExecRangeVisitorImplForIndex<double>(input);
+                        double_lower_val.set_float_val(
+                            expr_->lower_val_.float_val());
                     }
+                    proto::plan::GenericValue double_upper_val;
+                    if (upper_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
+                        double_upper_val.set_float_val(
+                            static_cast<double>(expr_->upper_val_.int64_val()));
+                    } else {
+                        double_upper_val.set_float_val(
+                            expr_->upper_val_.float_val());
+                    }
+
+                    lower_arg_.SetValue<double>(double_lower_val);
+                    upper_arg_.SetValue<double>(double_upper_val);
+                    arg_inited_ = true;
+
+                    result = ExecRangeVisitorImplForIndex<double>(input);
                 } else if (lower_type ==
                            proto::plan::GenericValue::ValCase::kStringVal) {
                     result = ExecRangeVisitorImplForIndex<std::string>(input);

@@ -134,7 +134,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         for i in range(len(schema.fields)):
             field_name = schema.fields[i].name
             if field_name == "json_field":
-                index_params.add_index(field_name, index_type="AUTOINDEX", params={"json_cast_type": "json"})
+                continue
             elif field_name == text_sparse_emb_field_name:
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:
@@ -596,7 +596,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             field_name = schema.fields[i].name
             # print(f"field_name: {field_name}")
             if field_name == "json_field":
-                index_params.add_index(field_name, index_type="AUTOINDEX", params={"json_cast_type": "json"})
+                continue
             elif field_name == "text_sparse_emb":
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:

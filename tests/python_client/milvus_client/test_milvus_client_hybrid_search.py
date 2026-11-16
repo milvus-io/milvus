@@ -273,7 +273,6 @@ _json_path_index_params = [
     pytest.param(("INVERTED", "BOOL"), id="INVERTED_BOOL"),
     pytest.param(("INVERTED", "DOUBLE"), id="INVERTED_DOUBLE"),
     pytest.param(("INVERTED", "VARCHAR"), id="INVERTED_VARCHAR"),
-    pytest.param(("INVERTED", "JSON"), id="INVERTED_JSON"),
     pytest.param(
         ("STL_SORT", "DOUBLE"),
         marks=pytest.mark.requires_scalar_index_version(4),

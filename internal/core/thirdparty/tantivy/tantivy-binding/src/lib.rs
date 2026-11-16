@@ -22,7 +22,6 @@ mod index_writer_text;
 mod index_writer_text_c;
 mod index_writer_v5;
 mod index_writer_v7;
-mod json_exists_query;
 mod log;
 mod log_c;
 mod milvus_id_collector;

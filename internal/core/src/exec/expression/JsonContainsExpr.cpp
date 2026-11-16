@@ -189,13 +189,9 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                if (value_type_ == DataType::INT64 && PinnedJsonIndexIsFlat()) {
-                    result = EvalArrayContainsForIndexSegment(DataType::INT64);
-                } else {
-                    result = EvalArrayContainsForIndexSegment(
-                        value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                       : value_type_);
-                }
+                result = EvalArrayContainsForIndexSegment(
+                    value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                   : value_type_);
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }
@@ -2569,11 +2565,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     };
 
     // Use WithRowLevel version since func handles element-to-row conversion for nested index
-    auto validity_mode = field_type_ == DataType::JSON
-                             ? IndexValidityMode::JsonExactPath
-                             : IndexValidityMode::Default;
-    auto res = ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch,
-                                                       validity_mode);
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

@@ -262,9 +262,6 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             if constexpr (std::is_same_v<ValueType, int64_t>) {
-                if (PinnedJsonIndexIsFlat()) {
-                    return ExecVisitorImplForIndex<int64_t>();
-                }
                 return ExecVisitorImplForIndex<double>();
             } else {
                 return ExecVisitorImplForIndex<ValueType>();
@@ -1292,23 +1289,17 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
-        return;
-    }
-
     if (data_type == DataType::JSON && !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==
-            proto::plan::GenericValue::ValCase::kInt64Val) {
-        const auto has_unsafe_literal = std::any_of(
+            proto::plan::GenericValue::ValCase::kInt64Val &&
+        std::any_of(
             expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
-            });
-        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
-            exec_path_ = ExprExecPath::RawData;
-        }
+            })) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
+    SegmentExpr::DetermineExecPath();
 }
 
 void
