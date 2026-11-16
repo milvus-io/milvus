@@ -1235,10 +1235,10 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 
 	firstSegmentRead := make(chan struct{})
 	continueSnapshot := make(chan struct{})
-	var getSegmentIndexesOrigin func(*IndexMeta, UniqueID, UniqueID, func(*model.Index) bool) map[UniqueID]*model.SegmentIndex
+	var getSegmentIndexesOrigin func(*IndexMeta, UniqueID, UniqueID, func(*model.Index) indexKind) map[UniqueID]*model.SegmentIndex
 	getSegmentIndexesMock := mockey.Mock((*IndexMeta).getSegmentIndexes).To(
-		func(meta *IndexMeta, collectionID, segmentID UniqueID, isFlat func(*model.Index) bool) map[UniqueID]*model.SegmentIndex {
-			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID, isFlat)
+		func(meta *IndexMeta, collectionID, segmentID UniqueID, classify func(*model.Index) indexKind) map[UniqueID]*model.SegmentIndex {
+			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID, classify)
 			if segmentID == segment1ID {
 				close(firstSegmentRead)
 				<-continueSnapshot

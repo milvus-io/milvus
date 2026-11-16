@@ -158,3 +158,23 @@ func TestJSONFlatIndexPreservesScalarWithIgnoredJSONExtras(t *testing.T) {
 	assert.Zero(t, info.GetIndexedRows())
 	assert.EqualValues(t, 100, info.GetPendingIndexRows())
 }
+
+func TestJSONFlatPinnedQueryViewClassification(t *testing.T) {
+	im := index.NewSegmentIndexMeta(nil)
+	flat := jsonFlatDefinition()
+	flat.IsDeleted = true // An older live view can still reference this ID.
+	typed := model.CloneIndex(flat)
+	typed.IndexID = 11
+	typed.IndexParams[1].Value = "DOUBLE"
+	im.Indexes[1] = map[int64]*model.Index{10: flat, 11: typed}
+	var schema *schemapb.CollectionSchema
+	im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
+	server := &Server{domainMetas: domainMetas{indexMeta: im}}
+	for _, view := range []*schemapb.CollectionSchema{nil, jsonFlatTestSchema()} {
+		schema = view
+		infos := server.GetQueryViewCollectionIndexInfos(1, 10, 11)
+		require.Len(t, infos, 1)
+		assert.EqualValues(t, 11, infos[0].GetIndexID(), "retain a pinned typed index, exclude unknown/flat artifacts")
+		assert.Empty(t, server.GetQueryViewCollectionIndexInfos(1))
+	}
+}

@@ -215,7 +215,7 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 	// Filter records before touching segment metadata. Manifest-resident and
 	// task-only records do not cause per-segment lookups or index-map copies.
 	groups := make(map[int64]*segmentManifestIndexBackfill)
-	classify := i.indexMeta.jsonFlatIndexMigrationFilter()
+	classify := i.indexMeta.indexMigrationClassifier()
 	pending := 0
 	i.indexMeta.SegmentBuildInfo.buildID2SegmentIndex.Range(func(_ int64, record *model.SegmentIndex) bool {
 		if ctx.Err() != nil {
@@ -235,11 +235,11 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 		if !ok || current.BuildID != record.BuildID {
 			return true
 		}
-		retired, resolved := classify(record.CollectionID, record.IndexID)
-		if retired {
+		kind := classify(record.CollectionID, record.IndexID)
+		if kind == indexLogicalOnlyJSONFlat || kind == indexAbsent {
 			return true
 		}
-		if !resolved {
+		if kind == indexUnknown {
 			pending++ // Retry schema resolution without copying an ambiguous artifact.
 			return true
 		}

@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -320,11 +319,22 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 		return nil
 	}
 
-	indexes := i.indexMeta.GetPhysicalIndexesForCollection(segment.CollectionID)
-	indexIDToSegIndexes := i.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	classify := i.indexMeta.indexClassifier(segment.CollectionID)
+	indexes := i.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	// Deduplicate against current records, not the physical projection: an
+	// unknown record must remain present if schema visibility changes at admission.
+	indexIDsWithBuild := typeutil.NewUniqueSet()
+	for _, record := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {
+		if !record.IsDeleted {
+			indexIDsWithBuild.Insert(record.IndexID)
+		}
+	}
 
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+		if classify(index) == indexLogicalOnlyJSONFlat {
+			continue
+		}
+		if indexIDsWithBuild.Contain(index.IndexID) {
 			continue
 		}
 		collection, ok := i.CanCreateIndexForSegment(ctx, segment, index)
@@ -342,8 +352,8 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 
 // canCreateIndexForSegment reports whether the segment is ready to build the
 // index, returning the resolved collection so the caller does not have to look
-// it up again. The schema is resolved through the handler (lazy-loading on
-// cache miss, e.g. right after a datacoord restart); the check fails closed,
+// it up again. The handler uses local metadata with bounded retry on a cache
+// miss; the check fails closed,
 // deferring to the next inspection round on an unresolvable or inconsistent
 // view.
 func (i *IndexInspector) CanCreateIndexForSegment(ctx context.Context, segment *meta.SegmentInfo, index *model.Index) (*meta.CollectionInfo, bool) {
@@ -353,7 +363,7 @@ func (i *IndexInspector) CanCreateIndexForSegment(ctx context.Context, segment *
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return nil, false
 	}
-	if indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(collection.Schema, index.FieldID).GetDataType(), index.IndexParams) {
+	if index.IsDeleted || classifyIndex(collection.Schema, index) != indexPhysical {
 		return nil, false
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
@@ -497,8 +507,8 @@ func (i *IndexInspector) estimateIndexFieldSize(ctx context.Context, coll *meta.
 
 func (i *IndexInspector) reloadFromMeta() {
 	// Include historical logical-only records here so their dispatch/poll guards
-	// cancel the worker and persist a terminal abort. Regular build selection
-	// continues to use GetPhysicalIndexesForCollection/GetSegmentIndexes.
+	// cancel the worker and persist a terminal abort. New build admission still
+	// requires a confirmed physical definition.
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {

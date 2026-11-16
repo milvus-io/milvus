@@ -172,8 +172,8 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs .
 		return s.queryViewCollectionIndexInfos(collectionID)
 	}
 	indexes := s.indexMeta.GetIndexesByID(collectionID, indexIDs)
-	isFlat := s.indexMeta.JSONFlatIndexFilter(collectionID)
-	return packQueryViewCollectionIndexInfos(lo.Filter(indexes, func(index *model.Index, _ int) bool { return !isFlat(index) }))
+	isPhysical := s.indexMeta.PhysicalIndexFilter(collectionID)
+	return packQueryViewCollectionIndexInfos(lo.Filter(indexes, func(index *model.Index, _ int) bool { return isPhysical(index) }))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {

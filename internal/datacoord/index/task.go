@@ -194,8 +194,11 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 // segment's current revision instead of the possibly-stale revision the build
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
-	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+	switch it.indexMeta.indexKindByID(it.CollectionID, it.IndexID) {
+	case indexLogicalOnlyJSONFlat:
 		return false, nil
+	case indexUnknown:
+		return false, merr.Wrap(merr.ErrServiceUnavailable, "index field schema is not visible yet")
 	}
 	ctx := it.meta.Ctx
 	if result.GetState() != commonpb.IndexState_Finished {
@@ -318,6 +321,12 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
 		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
 		it.abortForDroppedTarget(ctx, reason)
+		return
+	}
+
+	// A recovered JSON-cast task must wait for local schema visibility before
+	// either physical dispatch or the small-segment completion path.
+	if it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) == indexUnknown {
 		return
 	}
 
