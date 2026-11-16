@@ -455,10 +455,10 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 // across replicas must watch every candidate. Taking the notification under the
 // same mutex as the state inspection prevents lost wakeups.
 func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
-	return s.tryAcquireUpViewWithExclusions(ctx, schema, nil)
+	return s.tryAcquireUpViewWithExclusions(ctx, schema, nil, false)
 }
 
-func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema *int32, exclusions *qviews.QueryRoutingExclusions) (*QueryViewLease, <-chan struct{}, error) {
+func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema *int32, exclusions *qviews.QueryRoutingExclusions, bypassHandoff bool) (*QueryViewLease, <-chan struct{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -501,7 +501,9 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 		}
 	}
 	if selected != nil {
-		selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected)
+		if !bypassHandoff {
+			selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected)
+		}
 		// Filter the normally selected version before granting/renewing a
 		// serving lease. Never bypass the constraints by choosing an older
 		// data/load generation or by removing workers from the plan.

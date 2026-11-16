@@ -45,6 +45,36 @@ func TestHandoffLinearWeight(t *testing.T) {
 	}
 }
 
+func TestHandoffRetrySelectsTargetWithinEligibility(t *testing.T) {
+	useLinearHandoff(t)
+	h, shard, old, _, _ := leasedUpView(t, time.Minute)
+	schema, load := old.sm.meta.GetSchemaVersion(), old.sm.meta.GetLoadInfoVersion()
+	target := addHandoffView(t, h, 2, schema, load)
+	patch := mockey.Mock(rand.Float64).Return(.99).Build()
+	defer patch.UnPatch()
+	for _, bypass := range []bool{false, true, false} {
+		lease, err := h.AcquireUpViewForRouting(t.Context(), shard.shardID.VChannel, &schema, &viewpb.QueryRoutingConstraints{BypassHandoff: bypass})
+		require.NoError(t, err)
+		want := old.View.QueryViewKey().QueryViewVersion
+		if bypass {
+			want = target.View.QueryViewKey().QueryViewVersion
+		}
+		require.Equal(t, want, lease.Version)
+		lease.Release()
+		require.NotNil(t, target.handoff, "retry must not change the policy for other requests")
+	}
+	addHandoffView(t, h, 3, schema+1, load)
+	lease, err := h.AcquireUpViewForRouting(t.Context(), shard.shardID.VChannel, &schema, &viewpb.QueryRoutingConstraints{BypassHandoff: true})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, lease.Version.QueryVersion, "retry preserves exact schema")
+	lease.Release()
+	addHandoffView(t, h, 4, schema, load+1)
+	lease, err = h.AcquireUpViewForRouting(t.Context(), shard.shardID.VChannel, &schema, &viewpb.QueryRoutingConstraints{BypassHandoff: true})
+	require.NoError(t, err)
+	require.EqualValues(t, 4, lease.Version.QueryVersion, "retry respects the greatest Up LoadInfoVersion")
+	lease.Release()
+}
+
 func TestHandoffPlanningAndExplicitVersions(t *testing.T) {
 	useLinearHandoff(t)
 	h, shard, old, _, reports := leasedUpView(t, time.Minute)

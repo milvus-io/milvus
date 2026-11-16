@@ -528,3 +528,34 @@ func TestQueryPlanFeedbackAdmissionBoundary(t *testing.T) {
 		require.EqualValues(t, 1, samples[qviews.NewShardIDFromQVMeta(meta)].RequestCount)
 	})
 }
+
+func TestQueryPlanForwardsHandoffRetryAndExactSchema(t *testing.T) {
+	for _, req := range []*viewpb.GetQueryPlanRequest{
+		{Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 7}}},
+		{Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 7}}},
+		{Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{}}},
+	} {
+		for _, bypass := range []bool{false, true} {
+			req.Vchannel = "p_1v0"
+			req.RoutingConstraints = &viewpb.QueryRoutingConstraints{BypassHandoff: bypass}
+			unavailable := viewerror.NewViewNotFound("not ready")
+			patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).To(func(_ *snview.SNQueryViewHandler, _ context.Context, channel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*snview.QueryViewLease, error) {
+				require.Equal(t, req.Vchannel, channel)
+				require.Equal(t, bypass, constraints.GetBypassHandoff())
+				if req.GetStatisticsRequest() != nil {
+					require.Nil(t, schema)
+				} else {
+					require.NotNil(t, schema)
+					require.EqualValues(t, 7, *schema)
+				}
+				return nil, unavailable
+			}).Build()
+			w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+			_, err := w.GetQueryPlan(t.Context(), req)
+			require.ErrorIs(t, err, unavailable)
+			require.Equal(t, 1, patch.Times())
+			patch.UnPatch()
+		}
+	}
+}
+

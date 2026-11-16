@@ -394,10 +394,13 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
-	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
-	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(common.DefaultNb*5))
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	// Compare pages against one indexed dataset. Loading before insert/flush
+	// allows the two requests to use different growing/sealed ANN candidates
+	// during handoff, which need not have identical rankings.
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// hybrid search with different offset
 

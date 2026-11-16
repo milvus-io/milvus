@@ -67,6 +67,7 @@ func TestClientPreservesViewQueryRPCError(t *testing.T) {
 
 type fakeLazyService[T any] struct {
 	service T
+	err     error
 }
 
 func (s fakeLazyService[T]) GetConn(context.Context) (*grpc.ClientConn, error) {
@@ -74,7 +75,19 @@ func (s fakeLazyService[T]) GetConn(context.Context) (*grpc.ClientConn, error) {
 }
 
 func (s fakeLazyService[T]) GetService(context.Context) (T, error) {
-	return s.service, nil
+	return s.service, s.err
+}
+
+func TestQueryViewServiceAcquisitionFailure(t *testing.T) {
+	failure := status.Error(codes.Unavailable, "connection is closing")
+	client := &queryViewClient{
+		owner:   &clientImpl{lifetime: typeutil.NewLifetime()},
+		service: fakeLazyService[viewpb.ViewQueryServiceClient]{err: failure},
+	}
+	_, err := client.QueryOnView(t.Context(), 11, &viewpb.QueryOnViewRequest{})
+	require.Same(t, failure, err)
+	var unavailable *viewerror.NodeSessionUnavailable
+	require.NotErrorAs(t, err, &unavailable, "service acquisition failure does not prove a missing QN session")
 }
 
 func (s fakeLazyService[T]) Close() {}
@@ -119,6 +132,43 @@ func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
 	case <-unavailable.Changed:
 	default:
 		t.Fatal("resolver update lost")
+	}
+}
+
+func TestQueryNodeReplacementIsSessionUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		failure     error
+		unavailable bool
+	}{
+		{"node replaced", viewerror.NewNotPrimaryError("node not match"), false},
+		{"missing session", picker.ErrSubConnNotExist, true},
+		{"temporary connection", picker.ErrSubConnNotReady, false},
+		{"view retired", viewerror.NewViewInvalidated("retired"), false},
+		{"success", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := make(chan struct{})
+			owner := &clientImpl{lifetime: typeutil.NewLifetime(), sessionChanges: &sessionChanges{changed: changed}}
+			client := &queryViewClient{owner: owner, service: fakeLazyService[viewpb.ViewQueryServiceClient]{}}
+			_, err := executeViewQueryRPC(t.Context(), client, 11, func(ctx context.Context, _ viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
+				require.True(t, contextutil.IsFailFastPick(ctx))
+				// The resolver may update while the old address is being called.
+				owner.sessionChanges.mu.Lock()
+				close(changed)
+				owner.sessionChanges.changed = make(chan struct{})
+				owner.sessionChanges.mu.Unlock()
+				return nil, tc.failure
+			})
+			if tc.unavailable {
+				var unavailable *viewerror.NodeSessionUnavailable
+				require.ErrorAs(t, err, &unavailable)
+				require.Same(t, tc.failure, unavailable.Cause)
+				require.Equal(t, (<-chan struct{})(changed), unavailable.Changed)
+			} else {
+				require.Equal(t, tc.failure, err)
+			}
+		})
 	}
 }
 

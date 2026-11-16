@@ -288,16 +288,16 @@ func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID 
 }
 
 func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
-	return h.acquireUpViewWithExclusions(ctx, shardID, schema, nil)
+	return h.acquireUpViewWithExclusions(ctx, shardID, schema, nil, false)
 }
 
 // AcquireUpViewForRouting applies request-local exclusions before any View
 // lease or inline execution. A nil schema is used only for statistics.
 func (h *SNQueryViewHandler) AcquireUpViewForRouting(ctx context.Context, vchannel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*QueryViewLease, error) {
-	return h.acquireUpViewWithExclusions(ctx, qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}, schema, qviews.NewQueryRoutingExclusions(vchannel, constraints))
+	return h.acquireUpViewWithExclusions(ctx, qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}, schema, qviews.NewQueryRoutingExclusions(vchannel, constraints), constraints.GetBypassHandoff())
 }
 
-func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, shardID qviews.ShardID, schema *int32, exclusions *qviews.QueryRoutingExclusions) (*QueryViewLease, error) {
+func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, shardID qviews.ShardID, schema *int32, exclusions *qviews.QueryRoutingExclusions, bypassHandoff bool) (*QueryViewLease, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -321,7 +321,7 @@ func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, sh
 		recovering := false
 		excluded := false
 		for _, candidate := range candidates {
-			lease, changed, err := candidate.tryAcquireUpViewWithExclusions(ctx, schema, exclusions)
+			lease, changed, err := candidate.tryAcquireUpViewWithExclusions(ctx, schema, exclusions, bypassHandoff)
 			if lease != nil {
 				return lease, nil
 			}

@@ -263,6 +263,8 @@ message QueryViewIdentity {
 message QueryRoutingConstraints {
     repeated int64 excluded_query_node_ids = 1;
     repeated QueryViewIdentity excluded_query_views = 2;
+    // Retry on the newest eligible View without relaxing exclusions or versions.
+    bool bypass_handoff = 3;
 }
 
 //

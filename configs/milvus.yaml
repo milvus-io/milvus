@@ -1743,10 +1743,10 @@ streamingNode:
 # Any configuration related to query views.
 queryView:
   handoffPolicy:
-    type: linear # linear | immediate; unknown values use immediate. Use immediate during upgrades until all coordinators support MinimumDataVersion.
+    type: linear # New query plan handoff policy: linear or immediate. Unknown values use immediate. Linear shifts traffic between same-schema Up Views at the greatest LoadInfoVersion; old Views may retire before the window ends. Use immediate during upgrades until all coordinators support MinimumDataVersion.
     linear:
-      duration: 30s # Linear window sampled on Ready-to-Up; old Views may retire early. Non-positive uses immediate handoff.
-      initialRatio: 0.1 # Initial target traffic fraction in [0,1); sampled on Ready-to-Up. Invalid values use immediate handoff.
+      duration: 30s # Linear handoff window from local Ready-to-Up. Sampled at transition; non-positive durations use immediate handoff for that transition.
+      initialRatio: 0.1 # Initial fraction of new plans routed to the target View, in [0,1). Sampled at transition; out-of-range values use immediate handoff for that transition.
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.

@@ -227,6 +227,7 @@ func (s *shardViewQueryClient) executeShard(
 			}
 		}
 		attemptCtx, permit := s.breaker.begin(ctx, vchannel, failedNodes, failedViews)
+		permit.constraints.BypassHandoff = attempt > 0
 		plan, err := s.executeRoutingAttempt(attemptCtx, vchannel, params, permit)
 		permit.release()
 		if err == nil {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -73,10 +74,12 @@ func (s *PartialSearchTestSuit) initCollection(collectionName string, replica in
 }
 
 func (s *PartialSearchTestSuit) executeQuery(collection string) (int, error) {
-	return s.executeQueryWithContext(context.Background(), collection)
+	return s.executeQueryWithContext(s.T().Context(), collection)
 }
 
 func (s *PartialSearchTestSuit) executeQueryWithContext(ctx context.Context, collection string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	time.Sleep(100 * time.Millisecond)
 	queryResult, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         "",
@@ -494,28 +497,31 @@ func (s *PartialSearchTestSuit) TestSkipWaitTSafe() {
 	// init collection with 1 replica, 1 channels, 4 segments, 2000 rows per segment
 	// expect each node has 1 channel and 2 segments
 	name := "test_balance_" + funcutil.GenRandomStr()
-	s.initCollection(name, 1, 1, 4, 2000)
 	channelNum := 1
 	segmentNumInChannel := 4
 	segmentRowNum := 2000
 	s.initCollection(name, 1, channelNum, segmentNumInChannel, segmentRowNum)
 	totalEntities := segmentNumInChannel * segmentRowNum
 
-	stopSearchCh := make(chan struct{})
+	queryCtx, stopQueries := context.WithCancel(s.T().Context())
 	failCounter := atomic.NewInt64(0)
 	partialResultCounter := atomic.NewInt64(0)
 
 	wg := sync.WaitGroup{}
+	defer func() {
+		stopQueries()
+		wg.Wait()
+	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
-			case <-stopSearchCh:
+			case <-queryCtx.Done():
 				mlog.Info(context.TODO(), "stop search")
 				return
 			default:
-				numEntities, err := s.executeQuery(name)
+				numEntities, err := s.executeQueryWithContext(queryCtx, name)
 				if err != nil {
 					mlog.Info(context.TODO(), "query failed", mlog.Err(err))
 					failCounter.Inc()
@@ -537,8 +543,15 @@ func (s *PartialSearchTestSuit) TestSkipWaitTSafe() {
 	time.Sleep(10 * time.Second)
 	s.True(failCounter.Load() >= 0)
 	s.True(partialResultCounter.Load() >= 0)
-	close(stopSearchCh)
+	stopQueries()
 	wg.Wait()
+	// Cancellation bounds the fault workload, but does not establish recovery.
+	// Require a complete result from the remaining QueryNodes as well.
+	s.Require().EventuallyWithT(func(c *assert.CollectT) {
+		count, err := s.executeQuery(name)
+		assert.NoError(c, err)
+		assert.Equal(c, totalEntities, count)
+	}, 2*time.Minute, 200*time.Millisecond)
 }
 
 func TestPartialResult(t *testing.T) {
