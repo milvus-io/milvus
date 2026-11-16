@@ -238,8 +238,11 @@ func cloneColumnGroups(groups map[int64]*datapb.ColumnGroupStatistics) map[int64
 // FieldBinlog (nil if none), statsBlobSize the bloom-filter/BM25 blob bytes
 // this sync produced, rows the sync's insert row count, and tsFrom/tsTo the
 // batch's insert timestamp range. Every member field of a non-empty insert
-// FieldBinlog gets a NullCounts entry (zero included) — the presence contract
-// the index task relies on.
+// FieldBinlog gets a NullCounts entry (zero included). The coord keeps only
+// the entries of nullable fields and VectorArray fields in memory (metacache
+// pruneNullCounts), so the presence contract holds for those fields only: the
+// index task reads it for nullable fields, and digestValidElementCounts for
+// VectorArray fields once a collector is reseeded from coord stats.
 func (c *StatisticsCollector) Digest(
 	inserts map[int64]*datapb.FieldBinlog,
 	delta *datapb.FieldBinlog,
@@ -348,6 +351,8 @@ func (c *StatisticsCollector) digestValidElementCounts(inserts map[int64]*datapb
 				counted += n
 			}
 			_, known := c.validElementCounts[f]
+			// Reseeded coord stats keep this key for VectorArray fields
+			// even when not nullable (see Digest).
 			_, hadData := c.nullCounts[f]
 			switch {
 			case missing == len(fb.GetBinlogs()) && !known:

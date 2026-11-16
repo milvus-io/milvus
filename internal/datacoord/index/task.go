@@ -430,7 +430,9 @@ func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.
 }
 
 // effectiveIndexRows applies the same nullable-vector rule during cached
-// classification and worker preparation. A missing NullCounts entry means the
+// classification and worker preparation. NullCounts carries an entry for every
+// nullable field present in the segment's data (zero included); the coord
+// drops only the entries of not-nullable fields. A missing entry means the
 // field was added after this segment was flushed, so every row reads as null.
 func effectiveIndexRows(segment *meta.SegmentInfo, rows int64, field *schemapb.FieldSchema) int64 {
 	if !field.GetNullable() || !typeutil.IsVectorType(field.GetDataType()) {
