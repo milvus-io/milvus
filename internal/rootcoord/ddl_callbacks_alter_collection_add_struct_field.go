@@ -53,6 +53,13 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
+	schema := coll.ToCollectionSchemaPB()
+	// Ordinary external Struct projection is supported at creation time only.
+	// Keep additive DDL restricted to snapshot-backed milvus-table schemas.
+	if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct fields", coll.Name)
+	}
+
 	if req.GetStructArrayFieldSchema() == nil {
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
 	}
@@ -78,7 +85,6 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	schema := coll.ToCollectionSchemaPB()
 	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {

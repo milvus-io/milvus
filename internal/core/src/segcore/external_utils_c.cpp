@@ -209,6 +209,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         struct SampleField {
             milvus::FieldMeta field_meta;
             std::string column_name;
+            std::string sample_name;
         };
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
@@ -237,25 +238,27 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                     return;
                 }
                 auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
-                auto column_name = is_milvus_table_data_field
+                auto mapping = milvus::ResolvePhysicalColumnMapping(
+                    is_milvus_table, field_schema);
+                auto sample_name = is_milvus_table_data_field
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
                 external_fields.push_back(
-                    {std::move(field_meta), std::move(column_name)});
+                    {std::move(field_meta),
+                     std::move(mapping.storage_column_name),
+                     std::move(sample_name)});
             };
             for (const auto& field_schema : schema.fields()) {
                 append_sample_field(field_schema);
             }
-            if (is_milvus_table) {
-                // Struct leaves are physical columns, just like top-level fields.
-                // Match Schema::ParseFrom when inheriting parent nullability.
-                for (const auto& parent : schema.struct_array_fields()) {
-                    for (const auto& child : parent.fields()) {
-                        auto field_schema = child;
-                        field_schema.set_nullable(child.nullable() ||
-                                                  parent.nullable());
-                        append_sample_field(field_schema);
-                    }
+            // Ordinary Struct children share a physical parent column, but
+            // each projection contributes its own decoded memory footprint.
+            for (const auto& parent : schema.struct_array_fields()) {
+                for (const auto& child : parent.fields()) {
+                    auto field_schema = child;
+                    field_schema.set_nullable(child.nullable() ||
+                                              parent.nullable());
+                    append_sample_field(field_schema);
                 }
             }
             if (is_milvus_table && uses_external_primary_key) {
@@ -268,6 +271,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                        milvus::DataType::INT64,
                                        false,
                                        std::nullopt),
+                     std::to_string(TimestampFieldID.get()),
                      std::to_string(TimestampFieldID.get())});
             }
         }
@@ -315,10 +319,11 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 int64_t col_bytes = 0;
                 for (int c = 0; c < chunked->num_chunks(); c++) {
                     auto chunk = milvus::storage::NormalizeExternalArrow(
-                        chunked->chunk(c), field_meta);
+                        chunked->chunk(c), field_meta, column_name);
                     col_bytes += calcArrayDataSize(chunk->data());
                 }
-                sampled_sizes.emplace_back(column_name, col_bytes / num_rows);
+                sampled_sizes.emplace_back(sample_field.sample_name,
+                                           col_bytes / num_rows);
             }
         } else {
             int num_cols = table->num_columns();

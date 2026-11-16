@@ -3258,3 +3258,40 @@ func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.
 		})
 	}
 }
+
+func TestPrepareSchemaOrdinaryExternalStruct(t *testing.T) {
+	for _, mapping := range []string{"", "items[other]"} {
+		t.Run(fmt.Sprintf("mapping=%s", mapping), func(t *testing.T) {
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, merr.ErrServiceInternal).Build()
+			defer read.UnPatch()
+			schema := &schemapb.CollectionSchema{
+				Name: "external_struct", ExternalSource: "s3://bucket/data",
+				ExternalSpec: `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+				Fields: []*schemapb.FieldSchema{
+					{Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{{Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
+			}
+			task := &createCollectionTask{Req: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name}, body: &message.CreateCollectionRequest{CollectionSchema: schema}}
+			err := task.prepareSchema(context.Background())
+			require.Zero(t, read.Times(), "ordinary source must not read Milvus snapshot metadata")
+			if mapping != "" {
+				require.ErrorContains(t, err, "must retain its source name")
+				return
+			}
+			require.NoError(t, err)
+			parent := schema.GetStructArrayFields()[0]
+			child := parent.GetFields()[0]
+			require.True(t, parent.GetNullable())
+			require.True(t, child.GetNullable())
+			require.Equal(t, "items[score]", child.GetExternalField())
+			require.GreaterOrEqual(t, parent.GetFieldID(), int64(StartOfUserFieldID))
+			require.Greater(t, child.GetFieldID(), parent.GetFieldID())
+			pk, err := typeutil.GetPrimaryFieldSchema(schema)
+			require.NoError(t, err)
+			require.Equal(t, common.VirtualPKFieldName, pk.GetName())
+			require.False(t, pk.GetNullable())
+		})
+	}
+}

@@ -235,7 +235,7 @@ func TestDDLCallbacksExternalCollectionRejectsAddStructField(t *testing.T) {
 		DbName: dbName, CollectionName: collectionName, StructArrayFieldSchema: structField,
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetReason(), "does not support struct fields")
+	require.Contains(t, resp.GetReason(), "does not support adding struct fields")
 
 	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)

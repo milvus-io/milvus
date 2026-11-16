@@ -2647,7 +2647,7 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 	return all
 }
 
-// IsExternalCollection includes implicit same-name Struct mappings for milvus-table.
+// IsExternalCollection includes implicit same-name Struct mappings when an external spec is supplied.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
@@ -2657,7 +2657,7 @@ func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 			return true
 		}
 	}
-	return len(schema.GetStructArrayFields()) > 0 && schema.GetExternalSpec() != "" && isMilvusTableStorageSpec(schema.GetExternalSpec())
+	return len(schema.GetStructArrayFields()) > 0 && schema.GetExternalSpec() != ""
 }
 
 // GetVectorFieldSchemas get vector fields schema from collection schema.
@@ -2734,10 +2734,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return merr.WrapErrParameterInvalidMsg("external collection %s does not support dynamic field", schema.GetName())
 	}
 
-	if len(schema.GetStructArrayFields()) > 0 && !isMilvusTableStorageSpec(schema.GetExternalSpec()) {
-		return merr.WrapErrParameterInvalidMsg("external collection %s does not support struct fields", schema.GetName())
-	}
-
 	generatedColumns := externalGeneratedColumnOwners(schema)
 
 	isMilvusTable := false
@@ -2749,20 +2745,9 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		}
 	}
 	allowRealPrimaryKey := hasUserPrimaryKey(schema) && isMilvusTable
-	structColumns := make(map[*schemapb.FieldSchema]string)
-	if isMilvusTable {
-		for _, parent := range schema.GetStructArrayFields() {
-			for _, field := range parent.GetFields() {
-				name := field.GetName()
-				if !IsStructSubField(name) {
-					name = ConcatStructFieldName(parent.GetName(), name)
-				}
-				if field.GetExternalField() != "" && field.GetExternalField() != name {
-					return merr.WrapErrParameterInvalidMsg("struct %q child %q must retain its source name; external_field=%q", parent.GetName(), field.GetName(), field.GetExternalField())
-				}
-				structColumns[field] = name
-			}
-		}
+	structColumns, err := externalStructMappings(schema)
+	if err != nil {
+		return err
 	}
 
 	// Pass 1: validate all user fields. No mutation here so a failure at any
@@ -2820,12 +2805,15 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return err
 	}
 
+	// Fill implicit mappings only after validation, without changing field names.
+	for field, name := range structColumns {
+		field.ExternalField = name
+	}
 	if isMilvusTable {
-		// Fill implicit mappings only after validation, without changing field names.
-		for field, name := range structColumns {
-			field.ExternalField = name
-		}
 		return nil
+	}
+	for _, parent := range schema.GetStructArrayFields() {
+		parent.Nullable = true
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
@@ -2842,9 +2830,57 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		if !field.GetNullable() {
 			field.Nullable = true
 		}
+		if _, ok := structColumns[field]; ok && field.GetTypeSchema() != nil {
+			field.TypeSchema.Nullable = true
+		}
 	}
 
 	return nil
+}
+
+// externalStructMappings validates logical child paths before any schema mutation.
+func externalStructMappings(schema *schemapb.CollectionSchema) (map[*schemapb.FieldSchema]string, error) {
+	mappings := make(map[*schemapb.FieldSchema]string)
+	isMilvusTable := isMilvusTableStorageSpec(schema.GetExternalSpec())
+	for _, parent := range schema.GetStructArrayFields() {
+		if !isMilvusTable {
+			// A parent Arrow column can back its children, but cannot also be
+			// interpreted as an unrelated top-level scalar or JSON field.
+			for _, field := range schema.GetFields() {
+				if field.GetExternalField() != "" && field.GetExternalField() == parent.GetName() {
+					return nil, merr.WrapErrParameterInvalidMsg("external_field %q on field %q conflicts with Struct parent %q", field.GetExternalField(), field.GetName(), parent.GetName())
+				}
+			}
+		}
+		for _, field := range parent.GetFields() {
+			name := field.GetName()
+			if !IsStructSubField(name) {
+				name = ConcatStructFieldName(parent.GetName(), name)
+			} else if !strings.HasPrefix(name, parent.GetName()+"[") || !strings.HasSuffix(name, "]") {
+				return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q has an invalid source path", parent.GetName(), field.GetName())
+			}
+			if field.GetExternalField() != "" && field.GetExternalField() != name {
+				return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q must retain its source name; external_field=%q", parent.GetName(), field.GetName(), field.GetExternalField())
+			}
+			mappings[field] = name
+		}
+	}
+	return mappings, nil
+}
+
+// externalStructParent uses schema membership rather than parsing arbitrary source column names.
+func externalStructParent(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) string {
+	if field == nil {
+		return ""
+	}
+	for _, parent := range schema.GetStructArrayFields() {
+		for _, child := range parent.GetFields() {
+			if child == field || (field.GetFieldID() != 0 && child.GetFieldID() == field.GetFieldID()) {
+				return parent.GetName()
+			}
+		}
+	}
+	return ""
 }
 
 func validateUniqueExternalFieldOwners(externalFieldOwners map[string][]*schemapb.FieldSchema) error {
@@ -2891,8 +2927,8 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 	if !IsExternalCollection(schema) {
 		return nil
 	}
-	if len(schema.GetStructArrayFields()) > 0 && !isMilvusTableStorageSpec(schema.GetExternalSpec()) {
-		return merr.WrapErrParameterInvalidMsg("external collection %s does not support struct fields", schema.GetName())
+	if _, err := externalStructMappings(schema); err != nil {
+		return err
 	}
 	generatedColumns := externalGeneratedColumnOwners(schema)
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
@@ -3160,13 +3196,19 @@ func (r *StorageColumnResolver) SourceDataColumnName(field *schemapb.FieldSchema
 		return strconv.FormatInt(field.GetFieldID(), 10), true
 	}
 	if extField := field.GetExternalField(); extField != "" {
+		if r != nil {
+			if parent := externalStructParent(r.schema, field); parent != "" {
+				return parent, true
+			}
+		}
 		return extField, true
 	}
 	return "", false
 }
 
 // SourceDataColumnNames returns source physical columns required by refresh,
-// including Struct leaves. Milvus-table uses numeric field IDs and includes
+// including parent columns shared by ordinary Struct children. Milvus-table
+// addresses Struct leaves by numeric field IDs and includes
 // insert timestamps when retaining a source primary key.
 func (r *StorageColumnResolver) SourceDataColumnNames() []string {
 	if r == nil || r.schema == nil {
@@ -3176,7 +3218,9 @@ func (r *StorageColumnResolver) SourceDataColumnNames() []string {
 	for _, field := range GetAllFieldSchemas(r.schema) {
 		columnName, ok := r.SourceDataColumnName(field)
 		if ok {
-			columns = append(columns, columnName)
+			if !slices.Contains(columns, columnName) {
+				columns = append(columns, columnName)
+			}
 		} else if !r.hasSource && !r.isMilvusTable && !IsFunctionOutputField(r.schema, field) && !IsExternalSystemOrVirtualField(field.GetName()) {
 			// Preserve the historical helper behavior for non-external schemas:
 			// callers that use this on ordinary schemas get field names.
@@ -3217,6 +3261,11 @@ func (r *StorageColumnResolver) ManifestStoredColumnName(field *schemapb.FieldSc
 		return strconv.FormatInt(field.GetFieldID(), 10), true
 	}
 	if extField := field.GetExternalField(); extField != "" {
+		if r != nil {
+			if parent := externalStructParent(r.schema, field); parent != "" {
+				return parent, true
+			}
+		}
 		return extField, true
 	}
 	return strconv.FormatInt(field.GetFieldID(), 10), true
@@ -3337,9 +3386,9 @@ func normalizeMilvusTableKVPairs(kvs []*commonpb.KeyValuePair) []*commonpb.KeyVa
 	return out
 }
 
-// validateExternalFieldTypeForSchema preserves native list arrays for Milvus snapshots.
+// validateExternalFieldTypeForSchema admits native list arrays for snapshots and declared Struct children.
 func validateExternalFieldTypeForSchema(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) error {
-	if isMilvusTableStorageSpec(schema.GetExternalSpec()) && IsNativeListArrayField(field) {
+	if (isMilvusTableStorageSpec(schema.GetExternalSpec()) || externalStructParent(schema, field) != "") && IsNativeListArrayField(field) {
 		return ValidateFieldTypeSchema(field)
 	}
 	return validateExternalFieldType(schema.GetName(), field)

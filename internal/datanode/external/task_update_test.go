@@ -4286,3 +4286,12 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
 	suite.Run(t, new(RefreshExternalCollectionTaskSuite))
 }
+
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizesOrdinaryStructProjection() {
+	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 100, Fields: []*schemapb.FieldSchema{
+			{Name: "items[a]", FieldID: 101, ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{Name: "items[b]", FieldID: 102, ExternalField: "items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		}}}}
+	s.Equal(int64(48), sumFieldSizes(map[string]int64{"items[a]": 16, "items[b]": 32, "items[ignored]": 100}, schema))
+}

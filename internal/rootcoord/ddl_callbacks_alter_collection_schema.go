@@ -93,6 +93,10 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	}
 	if plan.HasField() {
 		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+			schema := coll.ToCollectionSchemaPB()
+			if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+				return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct sub-fields", coll.Name)
+			}
 			if err := prepareAlterSchemaAddStructSubField(coll, plan); err != nil {
 				return err
 			}

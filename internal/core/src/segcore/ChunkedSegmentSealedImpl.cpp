@@ -171,6 +171,36 @@ struct ColumnSizeEstimateState {
 
 namespace {
 
+// Resolves logical field identifiers to the physical projection names expected
+// by the storage reader API.
+[[nodiscard]] std::shared_ptr<std::vector<std::string>>
+GetStorageColumnNames(const SchemaPtr& schema_snapshot,
+                      const std::vector<FieldId>& field_ids) {
+    auto columns = std::make_shared<std::vector<std::string>>();
+    columns->reserve(field_ids.size());
+    std::unordered_set<std::string> seen;
+    seen.reserve(field_ids.size());
+    for (const auto& field_id : field_ids) {
+        auto column = schema_snapshot->get_storage_column_name(field_id);
+        if (seen.emplace(column).second) {
+            columns->push_back(std::move(column));
+        }
+    }
+    return columns;
+}
+
+OrdinaryStructProjections
+GetStructProjections(
+    const SchemaPtr& schema_snapshot,
+    const std::unordered_map<FieldId, FieldMeta>& field_metas) {
+    std::vector<FieldId> selected;
+    selected.reserve(field_metas.size());
+    for (const auto& [field_id, _] : field_metas) {
+        selected.push_back(field_id);
+    }
+    return schema_snapshot->GetOrdinaryStructProjections(selected);
+}
+
 struct ColumnGroupMaterializationParams {
     int64_t segment_id;
     int64_t original_column_group_index;
@@ -179,6 +209,7 @@ struct ColumnGroupMaterializationParams {
     std::shared_ptr<const std::vector<std::string>> column_group_columns;
     std::shared_ptr<std::vector<std::string>> needed_columns;
     std::unordered_map<FieldId, FieldMeta> field_metas;
+    OrdinaryStructProjections struct_projections;
     bool use_mmap;
     bool mmap_populate;
     MmapChunkWritebackMode writeback_mode;
@@ -231,7 +262,7 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
             context.use_mmap,
             context.mmap_populate,
             context.mmap_dir_path,
-            static_cast<int64_t>(context.needed_columns->size()),
+            static_cast<int64_t>(context.field_metas.size()),
             context.load_priority,
             /*eager_load=*/false,
             /*warmup_policy=*/"disable",
@@ -239,7 +270,8 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
             context.fallback_bytes_per_row,
             context.insert_channel,
             std::move(column_size_estimate),
-            context.writeback_mode);
+            context.writeback_mode,
+            context.struct_projections);
     return translator;
 }
 
@@ -2362,12 +2394,10 @@ ChunkedSegmentSealedImpl::TryLoadLazyManifestColumnGroup(
                id_,
                index);
 
-    auto needed_columns = std::make_shared<std::vector<std::string>>();
-    needed_columns->reserve(milvus_field_ids.size());
-    for (const auto& field_id : milvus_field_ids) {
-        needed_columns->push_back(
-            schema_snapshot->get_storage_column_name(field_id));
-    }
+    auto needed_columns =
+        GetStorageColumnNames(schema_snapshot, milvus_field_ids);
+    auto struct_projections =
+        GetStructProjections(schema_snapshot, field_metas);
 
     auto mmap_dir_path =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
@@ -2383,6 +2413,7 @@ ChunkedSegmentSealedImpl::TryLoadLazyManifestColumnGroup(
         .column_group_columns = column_group_columns,
         .needed_columns = needed_columns,
         .field_metas = field_metas,
+        .struct_projections = std::move(struct_projections),
         .use_mmap = use_mmap,
         .mmap_populate = mmap_config.GetMmapPopulate(),
         .writeback_mode = CreateMmapChunkWritebackMode(mmap_config),
@@ -2516,18 +2547,28 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     // produces no load task) instead of tripping the schema lookup on it.
     std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     cg_field_ids.reserve(column_groups->size());
+    const auto struct_projections =
+        schema_snapshot->GetOrdinaryStructProjections(
+            schema_snapshot->get_field_ids());
     for (size_t i = 0; i < column_groups->size(); ++i) {
         auto cg = column_groups->at(i);
         std::vector<FieldId> field_ids;
         std::vector<int64_t> dropped_fields;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
-            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
-            if (!schema_snapshot->has_field(field_id)) {
-                dropped_fields.push_back(field_id.get());
-                continue;
+            const auto projection = struct_projections.find(column);
+            const auto logical_ids =
+                projection != struct_projections.end()
+                    ? projection->second.child_field_ids
+                    : std::vector<FieldId>{
+                          schema_snapshot->ResolveColumnFieldId(column)};
+            for (auto field_id : logical_ids) {
+                if (!schema_snapshot->has_field(field_id)) {
+                    dropped_fields.push_back(field_id.get());
+                    continue;
+                }
+                field_ids.emplace_back(field_id);
             }
-            field_ids.emplace_back(field_id);
         }
         if (!dropped_fields.empty()) {
             LOG_INFO(
@@ -8834,12 +8875,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         return;
     }
 
-    auto needed_columns = std::make_shared<std::vector<std::string>>();
-    needed_columns->reserve(milvus_field_ids.size());
-    for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(
-            schema_snapshot->get_storage_column_name(fid));
-    }
+    auto needed_columns =
+        GetStorageColumnNames(schema_snapshot, milvus_field_ids);
+    auto struct_projections =
+        GetStructProjections(schema_snapshot, field_metas);
     AssertInfo(
         reader != nullptr,
         "reader must exist before loading manifest column group, segment {}",
@@ -8898,7 +8937,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
             std::move(column_size_estimate),
-            writeback_mode);
+            writeback_mode,
+            std::move(struct_projections));
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -9997,7 +10037,6 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     // Collect manifest-backed columns and their field IDs. Internal storage v2
     // uses field-id strings; external collections may use mapped source column
     // names, while milvus-table source fields use field-id strings.
-    auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
@@ -10023,13 +10062,14 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             // disappears from the positional result schema.
             return false;
         }
-        needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
     }
     if (take_field_ids.empty()) {
         return false;
     }
+    auto needed_columns =
+        GetStorageColumnNames(schema_snapshot, take_field_ids);
 
     auto ctx = BuildTakeContext(offsets, size);
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
@@ -10079,8 +10119,16 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     // Pre-combine Arrow chunks for each external / function-output column
     std::vector<std::shared_ptr<arrow::Array>> combined_arrays(
         take_field_ids.size());
+    // Struct children share the same physical parent, but normalize separately.
+    std::unordered_map<std::string, std::shared_ptr<arrow::Array>>
+        combined_columns;
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
         auto column_name = take_column_names[fi];
+        if (auto it = combined_columns.find(column_name);
+            it != combined_columns.end()) {
+            combined_arrays[fi] = it->second;
+            continue;
+        }
         auto col = table->GetColumnByName(column_name);
         if (!col || col->num_chunks() == 0) {
             LOG_WARN(
@@ -10115,6 +10163,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             }
             combined_arrays[fi] = *combined_result;
         }
+        combined_columns.emplace(column_name, combined_arrays[fi]);
     }
 
     // Emit fields in plan->field_ids_ order so the positional index
@@ -10177,7 +10226,10 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         // Normalize external arrow types to Milvus internal format.
         if (is_external_collection) {
-            arr = storage::NormalizeExternalArrow(arr, field_meta);
+            arr = storage::NormalizeExternalArrow(
+                arr,
+                field_meta,
+                schema_snapshot->GetPhysicalColumnName(field_id));
         }
 
         auto dynamic_field_names =
@@ -10295,7 +10347,6 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
     // Collect manifest-backed columns. Internal storage v2 uses field-id
     // strings; external collections may use mapped source column names, while
     // milvus-table source fields use field-id strings.
-    auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<const FieldMeta*> take_field_metas;
     std::vector<std::string> take_column_names;
@@ -10316,7 +10367,6 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
             // disappears from the positional result schema.
             return false;
         }
-        needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
         take_column_names.push_back(std::move(column_name));
@@ -10324,6 +10374,8 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
     if (take_field_ids.empty()) {
         return false;
     }
+    auto needed_columns =
+        GetStorageColumnNames(schema_snapshot, take_field_ids);
 
     auto ctx = BuildTakeContext(seg_offsets, size);
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
@@ -10361,6 +10413,13 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         op_ctx, id_, "TryTakeForSearch(pre-arrow-convert)");
 
     // Convert Arrow Table columns to DataArray and store in SearchResult
+    // Cache raw parents only; each child needs its own normalization below.
+    std::unordered_map<std::string, std::shared_ptr<arrow::Array>>
+        combined_columns;
+    std::unordered_map<std::string, size_t> remaining_column_uses;
+    for (const auto& name : take_column_names) {
+        ++remaining_column_uses[name];
+    }
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
         auto field_id = take_field_ids[fi];
         auto& field_meta = *take_field_metas[fi];
@@ -10380,7 +10439,10 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         }
 
         std::shared_ptr<arrow::Array> arr;
-        if (col->num_chunks() == 1) {
+        if (auto it = combined_columns.find(column_name);
+            it != combined_columns.end()) {
+            arr = it->second;
+        } else if (col->num_chunks() == 1) {
             arr = col->chunk(0);
         } else {
             auto combined_result = arrow::Concatenate(col->chunks());
@@ -10397,10 +10459,19 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
             }
             arr = *combined_result;
         }
+        if (--remaining_column_uses[column_name] > 0) {
+            combined_columns.emplace(column_name, arr);
+        } else {
+            // Do not retain unique columns or parents whose last child is read.
+            combined_columns.erase(column_name);
+        }
 
         // Normalize external arrow types to Milvus internal format.
         if (is_external_collection) {
-            arr = storage::NormalizeExternalArrow(arr, field_meta);
+            arr = storage::NormalizeExternalArrow(
+                arr,
+                field_meta,
+                schema_snapshot->GetPhysicalColumnName(field_id));
         }
 
         auto dynamic_field_names =

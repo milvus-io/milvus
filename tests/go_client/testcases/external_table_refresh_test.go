@@ -3,11 +3,13 @@ package testcases
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -4703,4 +4705,294 @@ func TestMilvusTableStructSchemaEvolutionSnapshot(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOrdinaryExternalStructProjection uses real nested files and deliberately
+// selects only one of the source Struct children.
+func TestOrdinaryExternalStructProjection(t *testing.T) {
+	for _, format := range []string{"parquet", "vortex", "lance-table", "iceberg-table"} {
+		for _, shape := range []string{"struct", "list_struct"} {
+			t.Run(format+"/"+shape, func(t *testing.T) {
+				ctx := hp.CreateContext(t, 15*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t)
+				cfg := getMinIOConfig()
+				store, err := newMinIOClient(cfg)
+				require.NoError(t, err)
+				name := common.GenRandomString("ordinary_struct", 8)
+				prefix := "external-e2e-test/" + name
+				t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), store, cfg.bucket, prefix+"/") })
+				var previousPK map[int64]int64
+				for epoch := 0; epoch < 2; epoch++ {
+					infoFile := filepath.Join(t.TempDir(), "source.json")
+					cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", shape, "--format", format, "--prefix", fmt.Sprintf("%s/round%d", prefix, epoch), "--start-id", strconv.Itoa(epoch), infoFile, "0")
+					cmd.Env = append(os.Environ(), "MINIO_ADDRESS="+cfg.address, "MINIO_BUCKET="+cfg.bucket, "MINIO_ACCESS_KEY="+cfg.accessKey, "MINIO_SECRET_KEY="+cfg.secretKey)
+					output, err := cmd.CombinedOutput()
+					require.NoError(t, err, "fixture generation: %s", output)
+					info, err := os.ReadFile(infoFile)
+					require.NoError(t, err)
+					var source struct {
+						Source string `json:"source"`
+					}
+					require.NoError(t, json.Unmarshal(info, &source))
+					uri, spec := ordinaryStructSourceURI(cfg, source.Source, format), ordinaryStructSpec(cfg, format)
+					if epoch == 0 {
+						children := entity.NewStructSchema().WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64))
+						schema := entity.NewSchema().WithName(name).WithExternalSource(uri).WithExternalSpec(spec).
+							WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+							WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
+							WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+						require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).
+							WithProperty("warmup.scalarField", "disable").WithProperty("warmup.vectorField", "disable").
+							WithProperty("warmup.scalarIndex", "disable").WithProperty("warmup.vectorIndex", "disable")))
+						t.Cleanup(func() {
+							require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
+						})
+					}
+					job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(name).WithExternalSource(uri).WithExternalSpec(spec))
+					require.NoError(t, err)
+					waitForRefreshComplete(ctx, t, mc, job.JobID, 3*time.Minute)
+					if epoch == 0 {
+						indexAndLoadCollection(ctx, t, mc, name, "embedding")
+					} else {
+						task, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
+						require.NoError(t, err)
+						require.NoError(t, task.Await(ctx))
+					}
+					previousPK = make(map[int64]int64)
+					for repeat := 0; repeat < 2; repeat++ {
+						if repeat == 1 {
+							require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
+							task, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+							require.NoError(t, err)
+							require.NoError(t, task.Await(ctx))
+						}
+						result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id >= 0").WithOutputFields("id", "clips", "__virtual_pk__").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.Equal(t, 4+epoch, result.ResultCount)
+						seen := map[int64]bool{}
+						for row := 0; row < result.ResultCount; row++ {
+							id, err := result.GetColumn("id").GetAsInt64(row)
+							require.NoError(t, err)
+							require.GreaterOrEqual(t, id, int64(0))
+							require.Less(t, id, int64(4+epoch))
+							require.False(t, seen[id])
+							seen[id] = true
+							got, err := result.GetColumn("clips").Get(row)
+							require.NoError(t, err)
+							if id == 0 {
+								require.Nil(t, got)
+							} else {
+								expected := []int64{id + int64(epoch*100)}
+								if shape == "list_struct" {
+									if id == 1 {
+										expected = []int64{}
+									} else {
+										expected = append(expected, -id)
+									}
+								}
+								value, ok := got.(map[string]interface{})
+								require.True(t, ok, "%T", got)
+								require.Len(t, value, 1)
+								scores, ok := value["score"].([]int64)
+								require.True(t, ok, "%T", value["score"])
+								if len(expected) == 0 {
+									require.Empty(t, scores)
+								} else {
+									require.Equal(t, expected, scores)
+								}
+							}
+							pk, err := result.GetColumn("__virtual_pk__").GetAsInt64(row)
+							require.NoError(t, err)
+							if repeat == 0 {
+								previousPK[id] = pk
+							} else {
+								require.Equal(t, previousPK[id], pk)
+							}
+						}
+						filtered, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter(fmt.Sprintf("element_filter(clips, $[score] == %d)", 2+epoch*100)).WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.Equal(t, 1, filtered.ResultCount)
+						id, err := filtered.GetColumn("id").GetAsInt64(0)
+						require.NoError(t, err)
+						require.Equal(t, int64(2), id)
+						require.Equal(t, [][]int64{{0}}, filtered.QueryElementOffsets)
+						hits, err := mc.Search(ctx, client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{2, 1}}).WithANNSField("embedding").WithOutputFields("id", "clips").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.Len(t, hits, 1)
+						require.Equal(t, 1, hits[0].ResultCount)
+						id, err = hits[0].GetColumn("id").GetAsInt64(0)
+						require.NoError(t, err)
+						require.Equal(t, int64(2), id)
+						got, err := hits[0].GetColumn("clips").Get(0)
+						require.NoError(t, err)
+						expected := []int64{int64(2 + epoch*100)}
+						if shape == "list_struct" {
+							expected = append(expected, -2)
+						}
+						require.Equal(t, map[string]interface{}{"score": expected}, got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func ordinaryStructSource(ctx context.Context, t *testing.T, cfg minioConfig, name, format, scenario string) string {
+	t.Helper()
+	store, err := newMinIOClient(cfg)
+	require.NoError(t, err)
+	prefix := "external-e2e-test/" + name
+	t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), store, cfg.bucket, prefix+"/") })
+	infoFile := filepath.Join(t.TempDir(), "source.json")
+	cmd := exec.CommandContext(ctx, "python3", "generate_parquet_data.py", "--schema", "list_struct", "--format", format, "--struct-case", scenario, "--prefix", prefix, infoFile, "0")
+	cmd.Env = append(os.Environ(), "MINIO_ADDRESS="+cfg.address, "MINIO_BUCKET="+cfg.bucket, "MINIO_ACCESS_KEY="+cfg.accessKey, "MINIO_SECRET_KEY="+cfg.secretKey)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "fixture: %s", output)
+	data, err := os.ReadFile(infoFile)
+	require.NoError(t, err)
+	var source struct {
+		Source string `json:"source"`
+	}
+	require.NoError(t, json.Unmarshal(data, &source))
+	return ordinaryStructSourceURI(cfg, source.Source, format)
+}
+
+func TestOrdinaryExternalStructInvalidSource(t *testing.T) {
+	for _, format := range []string{"parquet", "vortex", "lance-table", "iceberg-table"} {
+		for _, scenario := range []string{"missing_child", "null_element"} {
+			t.Run(format+"/"+scenario, func(t *testing.T) {
+				ctx := hp.CreateContext(t, 10*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t)
+				cfg := getMinIOConfig()
+				name := common.GenRandomString("invalid_struct", 8)
+				source := ordinaryStructSource(ctx, t, cfg, name, format, scenario)
+				children := entity.NewStructSchema().WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64))
+				schema := entity.NewSchema().WithName(name).WithExternalSource(source).WithExternalSpec(ordinaryStructSpec(cfg, format)).
+					WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+					WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
+					WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+				require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
+				t.Cleanup(func() {
+					require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
+				})
+				job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(name))
+				require.NoError(t, err)
+				require.Eventually(t, func() bool {
+					progress, err := mc.GetRefreshExternalCollectionProgress(ctx, client.NewGetRefreshExternalCollectionProgressOption(job.JobID))
+					require.NoError(t, err)
+					require.NotEqual(t, entity.RefreshStateCompleted, progress.State, "invalid source must fail refresh")
+					if progress.State != entity.RefreshStateFailed {
+						return false
+					}
+					reason := strings.ToLower(progress.Reason)
+					if scenario == "missing_child" {
+						require.Contains(t, reason, "score")
+						require.True(t, strings.Contains(reason, "missing") || strings.Contains(reason, "not found"), reason)
+					} else {
+						require.Contains(t, reason, "null")
+						require.Contains(t, reason, "struct")
+					}
+					return true
+				}, 3*time.Minute, time.Second)
+			})
+		}
+	}
+}
+
+func TestOrdinaryExternalStructNestedValues(t *testing.T) {
+	for _, format := range []string{"parquet", "vortex", "lance-table", "iceberg-table"} {
+		t.Run(format, func(t *testing.T) {
+			ctx := hp.CreateContext(t, 10*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+			cfg := getMinIOConfig()
+			name := common.GenRandomString("rich_struct", 8)
+			source := ordinaryStructSource(ctx, t, cfg, name, format, "rich")
+			children := entity.NewStructSchema().
+				WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64).WithNullable(true)).
+				WithField(entity.NewField().WithName("tags").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64).WithMaxCapacity(4).WithNullable(true)).
+				WithField(entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithNullable(true))
+			schema := entity.NewSchema().WithName(name).WithExternalSource(source).WithExternalSpec(ordinaryStructSpec(cfg, format)).
+				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
+				WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).
+				WithProperty("warmup.scalarField", "disable").WithProperty("warmup.vectorField", "disable").WithProperty("warmup.scalarIndex", "disable").WithProperty("warmup.vectorIndex", "disable")))
+			t.Cleanup(func() {
+				require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
+			})
+			refreshAndWait(ctx, t, mc, name)
+			task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "clips[vec]", index.NewAutoIndex(entity.L2)))
+			require.NoError(t, err)
+			require.NoError(t, task.Await(ctx))
+			indexAndLoadCollection(ctx, t, mc, name, "embedding")
+			score, extraScore := int64(20), int64(40)
+			expected := map[string]interface{}{"score": []*int64{nil, &score, &extraScore}, "tags": [][]int64{{}, {1, 2}, {}}, "vec": []entity.FloatVector{{2, 1}, {3, 1}, nil}}
+			rows, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 2").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Equal(t, 1, rows.ResultCount)
+			value, err := rows.GetColumn("clips").Get(0)
+			require.NoError(t, err)
+			require.Equal(t, expected, value)
+			nullArrayRow, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 3").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Equal(t, 1, nullArrayRow.ResultCount)
+			nullArrayValue, err := nullArrayRow.GetColumn("clips").Get(0)
+			require.NoError(t, err)
+			lastScore := int64(30)
+			require.Equal(t, map[string]interface{}{"score": []*int64{&lastScore}, "tags": [][]int64{nil}, "vec": []entity.FloatVector{{4, 1}}}, nullArrayValue)
+
+			for _, tc := range []struct {
+				expr   string
+				id     int64
+				offset int64
+			}{
+				{"$[score] IS NULL", 2, 0}, {"ARRAY_CONTAINS($[tags], 2)", 2, 1}, {"$[tags] IS NULL", 3, 0}, {"$[vec] IS NULL", 2, 2},
+			} {
+				filtered, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("element_filter(clips, "+tc.expr+")").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Equal(t, 1, filtered.ResultCount)
+				id, err := filtered.GetColumn("id").GetAsInt64(0)
+				require.NoError(t, err)
+				require.Equal(t, tc.id, id)
+				require.Equal(t, [][]int64{{tc.offset}}, filtered.QueryElementOffsets)
+			}
+			hits, err := mc.Search(ctx, client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{2, 1}}).WithANNSField("clips[vec]").WithOutputFields("id", "clips").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Len(t, hits, 1)
+			require.Equal(t, 1, hits[0].ResultCount)
+			id, err := hits[0].GetColumn("id").GetAsInt64(0)
+			require.NoError(t, err)
+			require.Equal(t, int64(2), id)
+			require.Equal(t, []int64{0}, hits[0].ElementOffsets)
+			value, err = hits[0].GetColumn("clips").Get(0)
+			require.NoError(t, err)
+			require.Equal(t, expected, value)
+			// The third element has a null vector and must not become a hit.
+			allHits, err := mc.Search(ctx, client.NewSearchOption(name, 10, []entity.Vector{entity.FloatVector{2, 1}}).
+				WithANNSField("clips[vec]").WithFilter("id == 2").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Len(t, allHits, 1)
+			require.Equal(t, 2, allHits[0].ResultCount)
+			require.ElementsMatch(t, []int64{0, 1}, allHits[0].ElementOffsets)
+			for row := 0; row < allHits[0].ResultCount; row++ {
+				id, err := allHits[0].GetColumn("id").GetAsInt64(row)
+				require.NoError(t, err)
+				require.Equal(t, int64(2), id)
+			}
+		})
+	}
+}
+
+func ordinaryStructSourceURI(cfg minioConfig, source, format string) string {
+	if format == "iceberg-table" {
+		return toMilvusS3URIForMinIO("s3://"+cfg.bucket+"/"+source, cfg.address)
+	}
+	return extTestURI(cfg, source)
+}
+
+func ordinaryStructSpec(cfg minioConfig, format string) string {
+	if format == "iceberg-table" {
+		return fmt.Sprintf(`{"format":%q,"extfs":{"cloud_provider":"minio","access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false"}}`, format, cfg.accessKey, cfg.secretKey)
+	}
+	return extTestSpec(cfg, format)
 }

@@ -5578,12 +5578,12 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
-	t.Run("struct fields disabled", func(t *testing.T) {
+	t.Run("struct fields supported", func(t *testing.T) {
 		schema := buildSchema()
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
-			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
+			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
 		}
-		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("primary key disabled for non milvus table", func(t *testing.T) {
@@ -6038,7 +6038,7 @@ func TestExternalCollectionRejectsElementNullableArrays(t *testing.T) {
 	}
 }
 
-func TestExternalCollectionResolvedSchemaRejectsStructFields(t *testing.T) {
+func TestExternalCollectionResolvedSchemaSupportsStructFields(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name:           "external",
 		ExternalSource: "s3://bucket/path",
@@ -6055,8 +6055,7 @@ func TestExternalCollectionResolvedSchemaRejectsStructFields(t *testing.T) {
 		}},
 	}
 	err := ValidateExternalCollectionResolvedSchema(schema)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.Contains(t, err.Error(), "does not support struct fields")
+	require.NoError(t, err)
 
 	schema.ExternalSource = ""
 	schema.ExternalSpec = ""
@@ -7732,11 +7731,7 @@ func TestMilvusTableNativeListFieldValidation(t *testing.T) {
 					NormalizeAndValidateExternalCollectionSchema, ValidateExternalCollectionResolvedSchema,
 				} {
 					err := validate(proto.Clone(schema).(*schemapb.CollectionSchema))
-					if format == "milvus-table" {
-						require.NoError(t, err)
-					} else {
-						require.ErrorContains(t, err, "does not support struct fields")
-					}
+					require.NoError(t, err)
 				}
 			})
 		}
@@ -7761,4 +7756,82 @@ func TestMilvusTableDynamicFieldValidation(t *testing.T) {
 	require.Error(t, ValidateMilvusTableSchemaIdentity(schema, source, false))
 	schema.ExternalSpec = `{"format":"parquet"}`
 	require.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
+}
+
+func TestOrdinaryExternalStructAutomaticMapping(t *testing.T) {
+	for _, format := range []string{"parquet", "vortex", "lance-table", "iceberg-table"} {
+		t.Run(format, func(t *testing.T) {
+			child := &schemapb.FieldSchema{Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+			parent := &schemapb.StructArrayFieldSchema{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}
+			schema := &schemapb.CollectionSchema{Name: "external_struct", ExternalSource: "s3://bucket/data", ExternalSpec: fmt.Sprintf(`{"format":%q}`, format), StructArrayFields: []*schemapb.StructArrayFieldSchema{parent}}
+			require.True(t, IsExternalCollection(schema))
+			require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+			require.Equal(t, "items[score]", child.GetExternalField())
+			require.True(t, parent.GetNullable())
+			require.True(t, child.GetNullable())
+			require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+			require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		})
+	}
+}
+
+func TestOrdinaryExternalStructPhysicalColumns(t *testing.T) {
+	a := &schemapb.FieldSchema{Name: "items[a]", FieldID: 102, ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	b := &schemapb.FieldSchema{Name: "items[b]", FieldID: 103, ExternalField: "items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}
+	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{a, b}}}}
+	resolver := NewStorageColumnResolver(schema)
+	require.Equal(t, []string{"items"}, resolver.SourceDataColumnNames())
+	for _, field := range []*schemapb.FieldSchema{a, b} {
+		column, ok := resolver.SourceDataColumnName(field)
+		require.True(t, ok)
+		require.Equal(t, "items", column)
+		column, ok = resolver.ManifestStoredColumnName(field)
+		require.True(t, ok)
+		require.Equal(t, "items", column)
+	}
+}
+
+func TestOrdinaryExternalStructRejectsRemappingWithoutMutation(t *testing.T) {
+	for _, validate := range []func(*schemapb.CollectionSchema) error{NormalizeAndValidateExternalCollectionSchema, ValidateExternalCollectionResolvedSchema} {
+		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{
+			{Name: "a", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{Name: "b", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: "items[renamed]"},
+		}}}}
+		before := proto.Clone(schema)
+		require.ErrorContains(t, validate(schema), "must retain its source name")
+		require.True(t, proto.Equal(before, schema))
+	}
+}
+
+func TestOrdinaryExternalStructRejectsParentColumnAlias(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		validate func(*schemapb.CollectionSchema) error
+	}{{"normalize", NormalizeAndValidateExternalCollectionSchema}, {"resolved", ValidateExternalCollectionResolvedSchema}} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{
+				ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
+				Fields: []*schemapb.FieldSchema{{Name: "raw", FieldID: 103, DataType: schemapb.DataType_JSON, ExternalField: "items"}},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
+					Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				}}}},
+			}
+			before := proto.Clone(schema)
+			require.ErrorIs(t, tc.validate(schema), merr.ErrParameterInvalid)
+			require.True(t, proto.Equal(before, schema), "rejected alias must not normalize nullable or implicit child mappings")
+		})
+	}
+}
+
+func TestMilvusTableStructParentColumnAliasUsesIndependentFieldIDs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{{Name: "raw", FieldID: 103, DataType: schemapb.DataType_JSON, ExternalField: "items"}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
+			Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		}}}},
+	}
+	require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	require.Equal(t, []string{"103", "102"}, NewStorageColumnResolver(schema).SourceDataColumnNames())
 }

@@ -212,11 +212,95 @@ def write_parquet(
             writer.close()
 
 
+
+def write_struct_dataset(output_file, shape, fmt, prefix, epoch, scenario="basic"):
+    """Create isolated nested source files; credentials are supplied via env."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from pyarrow.fs import S3FileSystem
+    endpoint = os.environ["MINIO_ADDRESS"]
+    bucket = os.environ["MINIO_BUCKET"]
+    access = os.environ["MINIO_ACCESS_KEY"]
+    secret = os.environ["MINIO_SECRET_KEY"]
+    store = S3FileSystem(access_key=access, secret_key=secret, endpoint_override=endpoint, scheme="http", region="us-east-1")
+    vector_type = pa.binary() if fmt in ("vortex", "lance-table") else pa.binary(8)
+    count = 4 + epoch
+    nested_type = pa.struct([("score", pa.int64()), ("ignored", pa.string())])
+    clips = []
+    for i in range(count):
+        value = {"score": i + epoch * 100, "ignored": "unselected"}
+        clips.append(None if i == 0 else (value if shape == "struct" else ([] if i == 1 else [value, {"score": -i, "ignored": "unselected"}])))
+    if scenario == "missing_child":
+        nested_type = pa.struct([("ignored", pa.string())])
+    elif scenario == "null_element":
+        assert shape == "list_struct"
+        clips = [[None, {"score": i, "ignored": "valid"}] for i in range(count)]
+    elif scenario == "rich":
+        assert shape == "list_struct"
+        nested_type = pa.struct([("score", pa.int64()), ("tags", pa.list_(pa.int64())),
+                                 ("vec", vector_type), ("ignored", pa.string())])
+        clips = [None, [],
+                 [{"score": None, "tags": [], "vec": struct.pack("<2f", 2., 1.), "ignored": "a"},
+                  {"score": 20, "tags": [1, 2], "vec": struct.pack("<2f", 3., 1.), "ignored": "b"},
+                  {"score": 40, "tags": [], "vec": None, "ignored": "d"}],
+                 [{"score": 30, "tags": None, "vec": struct.pack("<2f", 4., 1.), "ignored": "c"}]]
+        count = len(clips)
+    table = pa.table({"id": pa.array(range(count), type=pa.int64()),
+                      "embedding": pa.array([struct.pack("<2f", float(i), 1.0) for i in range(count)], type=vector_type),
+                      "clips": pa.array(clips, type=nested_type if shape == "struct" else pa.list_(nested_type))})
+    source = prefix
+    with tempfile.TemporaryDirectory() as tmp:
+        if fmt == "iceberg-table":
+            from pyiceberg.catalog.sql import SqlCatalog
+            from pyiceberg.schema import Schema
+            from pyiceberg.types import NestedField, LongType, StringType, FixedType, StructType, ListType
+            child = StructType(NestedField(6, "ignored", StringType())) if scenario == "missing_child" else StructType(NestedField(5, "score", LongType()), NestedField(6, "ignored", StringType()))
+            if scenario == "rich":
+                child = StructType(NestedField(5, "score", LongType()),
+                    NestedField(7, "tags", ListType(8, LongType(), element_required=False)),
+                    NestedField(9, "vec", FixedType(8)), NestedField(6, "ignored", StringType()))
+            schema = Schema(NestedField(1, "id", LongType()), NestedField(2, "embedding", FixedType(8)),
+                            NestedField(3, "clips", child if shape == "struct" else ListType(4, child, element_required=False)))
+            catalog = SqlCatalog("test", **{"uri": f"sqlite:///{tmp}/catalog.db", "warehouse": f"s3://{bucket}/{prefix}",
+                "s3.endpoint": f"http://{endpoint}", "s3.access-key-id": access, "s3.secret-access-key": secret,
+                "s3.region": "us-east-1", "s3.path-style-access": "true"})
+            catalog.create_namespace("test")
+            target = catalog.create_table("test.nested", schema=schema)
+            # Register Arrow-written Parquet without PyIceberg's nested-array
+            # projection, which drops List validity in the pinned writer.
+            data_path = f"{bucket}/{prefix}/source.parquet"
+            with store.open_output_stream(data_path) as stream:
+                pq.write_table(table, stream, row_group_size=2)
+            with store.open_input_file(data_path) as stream:
+                restored = pq.read_table(stream)
+            assert restored.equals(table), "Iceberg data file roundtrip changed nested values"
+            target.add_files([f"s3://{data_path}"])
+            source = target.metadata_location.removeprefix(f"s3://{bucket}/")
+        else:
+            if fmt == "parquet":
+                pq.write_table(table, f"{tmp}/data.parquet", row_group_size=2)
+            elif fmt == "vortex":
+                import vortex.io
+                vortex.io.write(table, f"{tmp}/data.vortex")
+            else:
+                import lance
+                lance.write_dataset(table, f"{tmp}/dataset.lance", data_storage_version="2.1")
+                restored = lance.dataset(f"{tmp}/dataset.lance").to_table()
+                assert restored.equals(table), f"Lance source roundtrip changed data: expected={table.to_pylist()} actual={restored.to_pylist()}"
+                source = f"{prefix}/dataset.lance"
+            for path in Path(tmp).rglob("*"):
+                if path.is_file():
+                    with store.open_output_stream(f"{bucket}/{prefix}/{path.relative_to(tmp)}") as stream:
+                        stream.write(path.read_bytes())
+    Path(output_file).write_text(json.dumps({"source": source}))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate Parquet e2e data")
     parser.add_argument(
         "--schema",
-        choices=("basic", "multi", "large", "nullable_vector", "snapshot_restore"),
+        choices=("basic", "multi", "large", "nullable_vector", "snapshot_restore", "struct", "list_struct"),
         default="basic",
     )
     parser.add_argument("output_file")
@@ -226,7 +310,13 @@ def main() -> None:
     parser.add_argument("--bin-vec-dim", type=int, default=8)
     parser.add_argument("--compression", default=None)
     parser.add_argument("--batch-size", type=int, default=10000)
+    parser.add_argument("--format", default="parquet", choices=("parquet", "vortex", "lance-table", "iceberg-table"))
+    parser.add_argument("--prefix", default="")
+    parser.add_argument("--struct-case", choices=("basic", "missing_child", "null_element", "rich"), default="basic")
     args = parser.parse_args()
+    if args.schema in ("struct", "list_struct"):
+        write_struct_dataset(args.output_file, args.schema, args.format, args.prefix, args.start_id, args.struct_case)
+        return
 
     write_parquet(
         args.output_file,

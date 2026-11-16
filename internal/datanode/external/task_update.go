@@ -1263,6 +1263,11 @@ func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchem
 		if !ok {
 			continue
 		}
+		if !columnResolver.IsMilvusTable() {
+			// Sampling reports each logical projection separately: sibling Struct
+			// children share a physical parent but have distinct decoded sizes.
+			columnName = field.GetExternalField()
+		}
 		if avgBytes, ok := fieldSizes[columnName]; ok && avgBytes > 0 {
 			total += avgBytes
 		}
