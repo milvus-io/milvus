@@ -141,6 +141,32 @@ class TestMultiSearch:
         assert results[0]["code"] == 0, results
         assert int(results[0]["data"][0]["id"]) == BASE_ID
 
+    def test_structure_and_expired_budget(self, endpoint, token, search_targets):
+        _, shared, _, _ = search_targets
+        valid_search = {"search": search_request(shared)}
+        for payload in [
+            {"requests": []},
+            {"requests": [valid_search, {"query": {}}]},
+            {"requests": [valid_search, {}]},
+            {"requests": [valid_search], "timeoutMs": -1},
+        ]:
+            response = post_search(endpoint, token, "multi_search", payload)
+            assert response.json()["code"] != 0, response.text
+            assert not response.json().get("data"), response.text
+        response = post_search(endpoint, "unknown:bad", "multi_search", {"requests": [valid_search]})
+        assert response.json()["code"] != 0, response.text
+        assert not response.json().get("data"), response.text
+
+        results = run_batch(
+            endpoint, token, [search_request(shared), search_request(shared)], {"timeoutMs": 0, "maxConcurrency": 1}
+        )
+        assert [item["code"] for item in results] == [TIMEOUT_CODE, TIMEOUT_CODE], results
+        assert all("data" not in item for item in results)
+        assert run_batch(endpoint, token, [search_request(shared)], {"timeoutMs": 10000})[0]["code"] == 0
+
+
+@pytest.mark.tags(CaseLabel.RBAC)
+class TestMultiSearchRBAC:
     def test_cached_targets_still_require_search_privilege(self, endpoint, token, search_targets, request):
         db, shared, _, _ = search_targets
         user, role, password = gen_unique_str("searcher"), gen_unique_str("search_role"), "searcher123"
@@ -172,26 +198,3 @@ class TestMultiSearch:
         results = run_batch(endpoint, f"{user}:{password}", searches, {"maxConcurrency": 2})
         assert [item["code"] for item in results] == [PRIVILEGE_NOT_PERMITTED, 0], results
         assert int(results[1]["data"][0]["id"]) == BASE_ID
-
-    def test_structure_and_expired_budget(self, endpoint, token, search_targets):
-        _, shared, _, _ = search_targets
-        valid_search = {"search": search_request(shared)}
-        for payload in [
-            {"requests": []},
-            {"requests": [valid_search, {"query": {}}]},
-            {"requests": [valid_search, {}]},
-            {"requests": [valid_search], "timeoutMs": -1},
-        ]:
-            response = post_search(endpoint, token, "multi_search", payload)
-            assert response.json()["code"] != 0, response.text
-            assert not response.json().get("data"), response.text
-        response = post_search(endpoint, "unknown:bad", "multi_search", {"requests": [valid_search]})
-        assert response.json()["code"] != 0, response.text
-        assert not response.json().get("data"), response.text
-
-        results = run_batch(
-            endpoint, token, [search_request(shared), search_request(shared)], {"timeoutMs": 0, "maxConcurrency": 1}
-        )
-        assert [item["code"] for item in results] == [TIMEOUT_CODE, TIMEOUT_CODE], results
-        assert all("data" not in item for item in results)
-        assert run_batch(endpoint, token, [search_request(shared)], {"timeoutMs": 10000})[0]["code"] == 0
