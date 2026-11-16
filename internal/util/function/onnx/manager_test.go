@@ -377,7 +377,7 @@ func TestManagerRejectsOversizedModelBeforeLoad(t *testing.T) {
 
 	_, err = manager.Acquire(context.Background(), newTestModel(t))
 	require.Error(t, err)
-	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Equal(t, merr.Code(merr.ErrParameterTooLarge), merr.Code(err))
 	require.Equal(t, int32(0), backend.loads.Load())
 }
 
@@ -541,6 +541,17 @@ func TestManagerRejectsNULModelPath(t *testing.T) {
 	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 }
 
+func TestManagerRejectsNonDirectoryModelPath(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
+	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	_, err = manager.Acquire(context.Background(), newTestModel(t)+"/child.onnx")
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
+}
+
 func TestManagerRejectsOverlongModelPath(t *testing.T) {
 	backend := &testBackend{new: func(string) *testSession { return &testSession{} }}
 	manager, err := NewManager(backend, Config{IdleTTL: time.Hour})
@@ -686,6 +697,69 @@ func TestManagerRejectsLoadWhenPendingMemoryConsumesBudget(t *testing.T) {
 	require.Equal(t, int32(1), loads.Load())
 	releaseClose()
 	require.Eventually(t, func() bool { return manager.MemoryBytes() == 0 }, time.Second, time.Millisecond)
+}
+
+func TestManagerDiscardsCapacityRejectedSessionAsynchronously(t *testing.T) {
+	closeStarted := make(chan struct{})
+	closeRelease := make(chan struct{})
+	var closeOnce sync.Once
+	var loads atomic.Int32
+	backend := &testBackend{load: func(context.Context, string) (Session, error) {
+		if loads.Add(1) == 1 {
+			return &testSession{memory: 16, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}, nil
+		}
+		return &testSession{
+			memory: 16,
+			closeFunc: func() {
+				closeOnce.Do(func() { close(closeStarted) })
+				<-closeRelease
+			},
+			run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil },
+		}, nil
+	}}
+	manager, err := NewManager(backend, Config{MaxMemoryBytes: 16, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+	first, err := manager.Acquire(context.Background(), newTestModel(t))
+	require.NoError(t, err)
+
+	started := time.Now()
+	secondModel := t.TempDir() + "/second.onnx"
+	require.NoError(t, os.WriteFile(secondModel, []byte("second model"), 0o600))
+	_, err = manager.Acquire(context.Background(), secondModel)
+	require.Error(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
+	require.Less(t, time.Since(started), time.Second)
+	<-closeStarted
+
+	close(closeRelease)
+	require.Eventually(t, func() bool { return manager.MemoryBytes() == 16 }, time.Second, time.Millisecond)
+	first.Release()
+	manager.Close()
+	require.Zero(t, manager.MemoryBytes())
+}
+
+func TestManagerEvictsOnlyRequiredIdleMemory(t *testing.T) {
+	backend := &testBackend{new: func(string) *testSession {
+		return &testSession{memory: 16, run: func(context.Context, []Tensor) ([]Tensor, error) { return nil, nil }}
+	}}
+	manager, err := NewManager(backend, Config{MaxSessions: 8, MaxMemoryBytes: 48, IdleTTL: time.Hour})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	for i := 0; i < 3; i++ {
+		model := t.TempDir() + "/model.onnx"
+		require.NoError(t, os.WriteFile(model, []byte{byte(i + 1)}, 0o600))
+		lease, acquireErr := manager.Acquire(context.Background(), model)
+		require.NoError(t, acquireErr)
+		lease.Release()
+	}
+	model := t.TempDir() + "/incoming.onnx"
+	require.NoError(t, os.WriteFile(model, []byte("incoming"), 0o600))
+	lease, err := manager.Acquire(context.Background(), model)
+	require.NoError(t, err)
+	defer lease.Release()
+	require.Equal(t, 3, manager.SessionCount())
 }
 
 func TestManagerRejectsOverBudgetSessionBeforeEviction(t *testing.T) {

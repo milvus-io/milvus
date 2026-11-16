@@ -14,6 +14,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -315,7 +316,7 @@ func (m *Manager) load(ctx context.Context, sourcePath, key, digest string) (*Le
 		}
 		m.mu.Unlock()
 		if len(evicted) == 0 {
-			_ = session.Close()
+			discardSessionAsync(m, session, memory, sourcePath)
 			return nil, merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: resident session memory limit exceeded (%d > %d bytes)", memory, available)
 		}
 		startCloseEntries(evicted)
@@ -354,6 +355,9 @@ func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, strin
 		if errors.Is(err, os.ErrNotExist) {
 			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: stat model %q failed", abs)
 		}
+		if errors.Is(err, syscall.ENOTDIR) {
+			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: model path %q contains a non-directory component", abs)
+		}
 		if errors.Is(err, syscall.ENAMETOOLONG) {
 			return "", "", "", merr.WrapErrParameterInvalidErr(err, "onnx: model path %q is too long", abs)
 		}
@@ -363,7 +367,7 @@ func (m *Manager) modelKey(ctx context.Context, modelPath string) (string, strin
 		return "", "", "", merr.WrapErrParameterInvalidMsg("onnx: model path %q is not a regular file", abs)
 	}
 	if m.config.MaxModelBytes > 0 && info.Size() > m.config.MaxModelBytes {
-		return "", "", "", merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "onnx: model %q exceeds the configured model size (%d > %d bytes)", abs, info.Size(), m.config.MaxModelBytes)
+		return "", "", "", merr.WrapErrParameterTooLarge("onnx model", fmt.Sprintf("%q exceeds the configured model size (%d > %d bytes)", abs, info.Size(), m.config.MaxModelBytes))
 	}
 	digest, err := hashFile(ctx, abs, m.config.MaxModelBytes)
 	if err != nil {
@@ -856,7 +860,21 @@ func (m *Manager) evictIdleForMemoryLocked(incoming uint64) []*managerEntry {
 		(m.memBytes <= m.config.MaxMemoryBytes && incoming <= m.config.MaxMemoryBytes-m.memBytes) {
 		return nil
 	}
-	return m.evictIdleLocked(len(m.entries))
+	shortfall := m.memBytes - (m.config.MaxMemoryBytes - incoming)
+	var evicted []*managerEntry
+	var freed uint64
+	for freed < shortfall {
+		victim := m.evictIdleLocked(1)
+		if len(victim) == 0 {
+			break
+		}
+		evicted = append(evicted, victim...)
+		if ^uint64(0)-freed < victim[0].memory {
+			break
+		}
+		freed += victim[0].memory
+	}
+	return evicted
 }
 
 func startCloseEntries(entries []*managerEntry) {
