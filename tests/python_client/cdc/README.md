@@ -269,7 +269,7 @@ collection and row checks use `MilvusClient`.
 | `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
 | `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; local restore data with continued DML replication |
 | `test_api_control.py` | RestoreRBAC, AlterRole, restored credentials and effective permissions; phrase slop; local heartbeat/telemetry/client commands |
-| `test_api_storage.py` | Local file-resource registration/removal; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
+| `test_api_storage.py` | Replicated file-resource registration/removal and rejected secondary mutations; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
 | `test_import_2pc.py` | Manual import commit/abort, rejected auto-commit without visible rows, and subsequent successful imports |
 | `test_resource_group.py` | Actual create/update/drop/transfer calls, with local/replicated-state assertions |
 
