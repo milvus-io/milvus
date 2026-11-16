@@ -9,7 +9,6 @@ Tests for struct array element-level query features:
 
 import random
 
-import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -32,13 +31,8 @@ CATEGORIES = ["A", "B", "C", "D"]
 
 
 def _seed_vector(seed, dim=default_dim):
-    """Generate a deterministic vector from a seed."""
-    rng = np.random.RandomState(seed)
-    vec = rng.rand(dim).astype(np.float32)
-    norm = np.linalg.norm(vec)
-    if norm > 0:
-        vec = vec / norm
-    return vec.tolist()
+    """Generate a deterministic vector using the shared functional-test profile."""
+    return cf.gen_vectors(1, dim, seed=seed)[0]
 
 
 def gt_element_filter_query(data, elem_filter_fn, doc_filter_fn=None):
