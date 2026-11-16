@@ -146,12 +146,13 @@ func (bw *BulkPackWriterV3) loadPriorBM25Stats(ctx context.Context, fieldPaths m
 	return combined, nil
 }
 
-// Write executes a SyncPack as do-then-commit:
+// Write executes one Storage V3 write attempt as do-then-commit:
 //
-//  1. Phase 1 (slow, runs once): write all data files — parquet/LOB via the
+//  1. Phase 1 (slow, runs once per attempt): write all data files — parquet/LOB via the
 //     loon writer, deltalog via the deltalog writer, stat blobs via the
 //     filesystem FFI — and assemble a single packed.ManifestUpdates payload
-//     describing every change the segment needs to register.
+//     describing every change the segment needs to register. SyncTask retries
+//     transient failures with a fresh writer, including failures in Write/Close.
 //  2. Phase 2 (fast, retried on transient loon errors): call
 //     packed.CommitManifestUpdates once. The loon transaction handle is
 //     opened, all changes are staged, and the transaction is committed in
@@ -227,7 +228,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	err = retry.Do(ctx, func() error {
 		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
 		if commitErr != nil {
-			return classifyLoonErr(commitErr)
+			return classifyStorageV3Err(commitErr)
 		}
 		bw.manifestPath = newPath
 		return nil
@@ -244,21 +245,23 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// V3 feeds the tracked statsBlobSize instead of summing a stats array (it
 	// returns no stats array); finalizeStats produces the cumulative Statistics.
 	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize)
+	if err != nil {
+		// The manifest is already committed. A bookkeeping failure must not
+		// restart phase 1 and publish the same batch a second time.
+		err = retry.Unrecoverable(err)
+	}
 	return
 }
 
-// classifyLoonErr maps loon FFI failures to retryable errors and everything
-// else to retry.Unrecoverable so the outer retry loop terminates immediately.
-//
-// HandleLoonFFIResult now classifies by the FFI err_code (the producer's
-// loon_ffi_is_retryable_errcode): only genuinely transient failures carry
-// packed.ErrLoonTransient; access-denied/corrupt-data/malformed-input carry
-// packed.ErrLoonPermanent and terminate the loop via retry.Unrecoverable.
-func classifyLoonErr(err error) error {
+// classifyStorageV3Err retries explicitly transient failures. Loon FFI errors
+// carry ErrLoonTransient/ErrLoonPermanent; the older packed writer used for
+// deltalogs carries a retriable merr classification instead. Other failures
+// terminate the retry loop immediately.
+func classifyStorageV3Err(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, packed.ErrLoonTransient) {
+	if errors.Is(err, packed.ErrLoonTransient) || merr.IsRetryableErr(err) {
 		return err
 	}
 	return retry.Unrecoverable(err)
