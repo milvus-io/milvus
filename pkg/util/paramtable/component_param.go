@@ -2195,6 +2195,14 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	// latency_weighted replica selection, see docs/design-docs/design_docs/20261113-latency-weighted-replica-selection.md
+	LatencyWeightedEnabled         ParamItem `refreshable:"true"`
+	LatencyWeightedDecay           ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare        ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeEnabled    ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeMinDelay   ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeMinWinRate ParamItem `refreshable:"true"`
 }
 
 func positiveProxyLimitFormatter(defaultValue string) func(string) string {
@@ -2575,9 +2583,57 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and latency_weighted",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.LatencyWeightedEnabled = ParamItem{
+		Key:          "proxy.latencyWeighted.enabled",
+		Version:      "2.6.28",
+		DefaultValue: "true",
+		Doc:          "Switch of the latency_weighted replica selection policy (proxy.replicaSelectionPolicy: latency_weighted). When false, the policy behaves as look_aside. Takes effect immediately.",
+	}
+	p.LatencyWeightedEnabled.Init(base.mgr)
+
+	p.LatencyWeightedDecay = ParamItem{
+		Key:          "proxy.latencyWeighted.decay",
+		Version:      "2.6.28",
+		DefaultValue: "10s",
+		Doc:          "Time constant of the decay of the latency statistics kept per channel, request class and replica: a sample, and a failure penalty, weigh 1/e after this long.",
+	}
+	p.LatencyWeightedDecay.Init(base.mgr)
+
+	p.LatencyWeightedMinShare = ParamItem{
+		Key:          "proxy.latencyWeighted.minShare",
+		Version:      "2.6.28",
+		DefaultValue: "0.001",
+		Doc:          "Minimum share of the requests of a channel and request class every replica keeps, so that a slow or failing replica keeps being probed. Probes that hang are covered by hedging.",
+	}
+	p.LatencyWeightedMinShare.Init(base.mgr)
+
+	p.LatencyWeightedHedgeEnabled = ParamItem{
+		Key:          "proxy.latencyWeighted.hedge.enabled",
+		Version:      "2.6.28",
+		DefaultValue: "true",
+		Doc:          "Send a second attempt of a search or query of a channel to another replica when the first has not returned within the p99 latency of the recent requests of that channel and request class (at least hedge.minDelay).",
+	}
+	p.LatencyWeightedHedgeEnabled.Init(base.mgr)
+
+	p.LatencyWeightedHedgeMinDelay = ParamItem{
+		Key:          "proxy.latencyWeighted.hedge.minDelay",
+		Version:      "2.6.28",
+		DefaultValue: "200ms",
+		Doc:          "Shortest wait before a hedged attempt, whatever the p99 latency.",
+	}
+	p.LatencyWeightedHedgeMinDelay.Init(base.mgr)
+
+	p.LatencyWeightedHedgeMinWinRate = ParamItem{
+		Key:          "proxy.latencyWeighted.hedge.minWinRate",
+		Version:      "2.6.28",
+		DefaultValue: "0.3",
+		Doc:          "When fewer than this share of the recent hedges (about the last 10s) of a channel and request class won, only 10% of its hedges are sent, as samples: a hedge that loses only adds load, as when every replica is slow under overall overload.",
+	}
+	p.LatencyWeightedHedgeMinWinRate.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
