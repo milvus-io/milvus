@@ -41,6 +41,30 @@
 namespace milvus {
 namespace exec {
 
+namespace {
+
+void
+EvaluateShreddedArrayExists(const std::string_view* values,
+                            ValidityView valid,
+                            size_t size,
+                            TargetBitmapView result,
+                            TargetBitmapView /*valid_result*/) {
+    for (size_t i = 0; i < size; ++i) {
+        if (valid && !valid[i]) {
+            result[i] = false;
+            continue;
+        }
+        // A valid BSON array can still be recursively empty ([], [null],
+        // [[]], ...). Match Json::exist and the shared BSON evaluator.
+        BsonView bson(reinterpret_cast<const uint8_t*>(values[i].data()),
+                      values[i].size());
+        auto array = bson.ParseAsArrayAtOffset(0);
+        result[i] = array.has_value() && !BsonView::IsBsonValueEmpty(*array);
+    }
+}
+
+}  // namespace
+
 void
 PhyExistsFilterExpr::DetermineExecPath() {
     // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
@@ -244,9 +268,22 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
-                        index->ExecutorForGettingValid(
-                            op_ctx_, field, temp_valid_view);
-                        res_view |= temp_valid_view;
+                        if (index->GetShreddingJsonType(field) ==
+                            index::JSONType::ARRAY) {
+                            TargetBitmap array_exists(active_count_, false);
+                            index->ExecutorForShreddingData<std::string_view>(
+                                op_ctx_,
+                                field,
+                                EvaluateShreddedArrayExists,
+                                nullptr,
+                                TargetBitmapView(array_exists),
+                                temp_valid_view);
+                            res_view |= TargetBitmapView(array_exists);
+                        } else {
+                            index->ExecutorForGettingValid(
+                                op_ctx_, field, temp_valid_view);
+                            res_view |= temp_valid_view;
+                        }
                     }
                 }
 
@@ -261,7 +298,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         bson_index_,
                         pointer,
                         [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                            // A parent can have children in both layouts. An
+                            // empty shared child must not erase a shredded hit.
+                            if (!bson.IsBsonValueEmpty(offset)) {
+                                res_view[row_id] = true;
+                            }
                         });
                 }
 
