@@ -346,7 +346,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 // broadcastDisableDynamicField removes the $meta field to disable dynamic schema.
 func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.AlterCollectionRequest, coll *model.Collection, bc broadcaster.BroadcastAPI) error {
 	// Find and remove $meta field, record its ID for cascade index cleanup.
-	fields := model.MarshalFieldModels(coll.Fields)
+	fields := model.CloneFields(coll.Fields)
 	var dynamicFieldID int64
 	newFields := make([]*schemapb.FieldSchema, 0, len(fields))
 	for _, f := range fields {

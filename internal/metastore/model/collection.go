@@ -29,6 +29,11 @@ import (
 )
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
+//
+// Fields and the Fields of each StructArrayFields entry are shared with
+// the published collection view (see SchemaView) and with every
+// ShallowClone: they are read-only. To change a field, replace it with
+// a modified CloneField, or modify a Clone of the collection.
 type Collection struct {
 	TenantID          string
 	DBID              int64
@@ -153,12 +158,30 @@ func (c *Collection) Clone() *Collection {
 // Centralizing the conversion here ensures that newly added schema fields are
 // propagated consistently across every rootcoord broadcast/response path.
 func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
+	return c.schemaPB(CloneFields)
+}
+
+// SchemaView returns the schema ToCollectionSchemaPB returns, except that
+// it shares the model's field schemas instead of copying them: Fields
+// holds c.Fields' elements, and each StructArrayFields entry is a new
+// shell whose Fields holds the model's sub-fields. Callers must not
+// modify the fields; use ToCollectionSchemaPB for a schema they may
+// change.
+func (c *Collection) SchemaView() *schemapb.CollectionSchema {
+	// Clip so an append by a reader reallocates instead of writing into
+	// the model's backing array.
+	return c.schemaPB(slices.Clip[[]*Field])
+}
+
+// schemaPB builds the CollectionSchema with Fields and each struct
+// field's sub-fields taken from fields(...).
+func (c *Collection) schemaPB(fields func([]*Field) []*Field) *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Name:               c.Name,
 		Description:        c.Description,
 		AutoID:             c.AutoID,
-		Fields:             MarshalFieldModels(c.Fields),
-		StructArrayFields:  MarshalStructArrayFieldModels(c.StructArrayFields),
+		Fields:             fields(c.Fields),
+		StructArrayFields:  marshalStructArrayFieldModels(c.StructArrayFields, fields),
 		Functions:          MarshalFunctionModels(c.Functions),
 		EnableDynamicField: c.EnableDynamicField,
 		EnableNamespace:    c.EnableNamespace,
@@ -212,7 +235,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Properties = updates.Properties
 		case message.FieldMaskCollectionSchema:
 			c.AutoID = updates.Schema.AutoID
-			c.Fields = UnmarshalFieldModels(updates.Schema.Fields)
+			c.Fields = CloneFields(updates.Schema.Fields)
 			c.EnableDynamicField = updates.Schema.EnableDynamicField
 			c.EnableNamespace = updates.Schema.EnableNamespace
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
@@ -275,7 +298,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		DBName:               coll.Schema.DbName,
 		Description:          coll.Schema.Description,
 		AutoID:               coll.Schema.AutoID,
-		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
+		Fields:               CloneFields(coll.GetSchema().GetFields()),
 		StructArrayFields:    UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
 		Partitions:           partitions,
 		VirtualChannelNames:  coll.VirtualChannelNames,
@@ -352,7 +375,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 	}
 
 	if c.withFields {
-		fields := MarshalFieldModels(coll.Fields)
+		fields := CloneFields(coll.Fields)
 		collSchema.Fields = fields
 	}
 

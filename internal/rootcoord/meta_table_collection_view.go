@@ -26,9 +26,10 @@ import (
 
 // collectionSchemaPB builds the schema RootCoord reports for coll, with
 // DbName set to dbName: the model's DBName may be out of sync with the
-// database resolved from DBID.
+// database resolved from DBID. The schema shares coll's field schemas
+// (see model.Collection.SchemaView), so callers must not modify them.
 func collectionSchemaPB(coll *model.Collection, dbName string) *schemapb.CollectionSchema {
-	schema := coll.ToCollectionSchemaPB()
+	schema := coll.SchemaView()
 	schema.DbName = dbName
 	return schema
 }

@@ -54,6 +54,10 @@ import (
 // the CollectionSource. It shares its slices and maps with RootCoord's
 // model, which RootCoord replaces rather than modifies: callers must not
 // modify any field, and copy one before handing it to code that may.
+// Schema.Fields, and the Fields of each Schema.StructArrayFields entry,
+// hold RootCoord's own field schemas (model.Field), shared with its
+// model and with other views: clone the schema (typeutil.Clone) before
+// modifying any field in it.
 type CollectionInfo struct {
 	ID     int64
 	Schema *schemapb.CollectionSchema
