@@ -44,11 +44,12 @@ func MaxAttemptsFromContextOrDefault(ctx context.Context, defaultVal uint) uint 
 }
 
 type config struct {
-	attempts     uint
-	sleep        time.Duration
-	maxSleepTime time.Duration
-	isRetryErr   func(err error) bool
-	onBackoff    func()
+	attempts         uint
+	sleep            time.Duration
+	maxSleepTime     time.Duration
+	isRetryErr       func(err error) bool
+	onBackoff        func()
+	retryImmediately func(err error) bool
 }
 
 func newDefaultConfig() *config {
@@ -109,4 +110,12 @@ func OnBackoff(observe func()) Option {
 	return func(c *config) {
 		c.onBackoff = observe
 	}
+}
+
+// RetryImmediately lets Handle skip one backoff when fn reports that retrying
+// can make progress now. It is called only for a retryable error with another
+// attempt available. Skipping sleep still consumes an attempt, preserves the
+// current backoff, and observes context cancellation. Do ignores this option.
+func RetryImmediately(fn func(error) bool) Option {
+	return func(c *config) { c.retryImmediately = fn }
 }

@@ -170,6 +170,13 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
+	// Enable deferred sizing only when multiple outputs are expected to avoid hash caching overhead for single-output compactions.
+	// An inaccurate estimate affects memory usage, not correctness.
+	if t.compactionParams.EnableDeferredBloomFilter && t.estimatedOutputSegmentCount > 1 {
+		pkStatsConfig := storage.DefaultPkStatsConfig(t.maxRows)
+		pkStatsConfig.UseDeferredBloomFilter = true
+		writerOpts = append(writerOpts, storage.WithPkStatsConfig(pkStatsConfig))
+	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		// LOB base path at partition level, sharing the manifest root rule so

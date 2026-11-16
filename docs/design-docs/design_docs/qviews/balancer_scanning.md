@@ -95,6 +95,24 @@ There is no cancellation or rollback of an in-flight batch and no strict FIFO
 guarantee for management callers. Sustained scoped traffic may defer background
 scanning. Scoped events themselves are not split by this scan budget.
 
+`TriggerWithCompletion` enqueues scoped work and returns the completion future
+for the background pass that consumes it. Callers joining the same pending batch
+share one future;
+`takePending` detaches that future together with the dirty keys. Later callers
+join a successor batch, including while an older pass is still planning or
+applying. The pass publishes its result after releasing `reconcileMu`.
+QueryCoord owns the batch wait, using the request context and the runtime's
+existing `readyChanges.Done()` signal. Canceling a caller affects only its wait; the pass
+uses the controller context. Runtime shutdown wakes pending batch waiters,
+including before recovery finishes. Final shard-removal waiting uses the request
+context and collection removal notifications.
+
+Collection release joins a batch after withdrawing load intent, so completion
+also drains any older pass that could still accept a Preparing view. It then
+waits for that collection's final shard removal before deleting LoadInfo and
+acknowledging the broadcast. Batch completion alone does not certify node
+cleanup, and a failed pass returns its error to the waiting callbacks for retry.
+
 Failed schema reads and apply operations keep their affected keys in a separate
 retry set. A timer implements exponential backoff from 100 ms, capped at 5 s;
 waiting does not block fresh events or scan continuation. Successful work resets

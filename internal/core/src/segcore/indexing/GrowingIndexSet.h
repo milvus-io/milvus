@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -74,7 +75,8 @@ class GrowingIndexSet {
                const IndexMetaPtr& index_meta,
                const SegcoreConfig& segcore_config,
                int64_t segment_id,
-               const InsertRecordGrowing& insert_record);
+               const InsertRecordGrowing& insert_record,
+               const std::function<bool(FieldId)>& include_field);
 
     // Construct without registering. Reopen backfills and flushes this owner
     // through the segment's stable raw prefix before registering the complete

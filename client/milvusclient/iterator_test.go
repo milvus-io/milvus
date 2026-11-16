@@ -21,9 +21,12 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -847,4 +850,38 @@ func (s *QueryIteratorSuite) TestQueryIteratorWithFilter() {
 
 func TestQueryIterator(t *testing.T) {
 	suite.Run(t, new(QueryIteratorSuite))
+}
+
+func TestComposeIteratorExprVarChar(t *testing.T) {
+	newIt := func(expr string, pk any) *queryIterator {
+		return &queryIterator{
+			expr:    expr,
+			pkField: entity.NewField().WithName("ID").WithDataType(entity.FieldTypeVarChar),
+			lastPK:  pk,
+		}
+	}
+
+	t.Run("plain value", func(t *testing.T) {
+		assert.Equal(t, `ID > "abc"`, newIt("", "abc").composeIteratorExpr())
+	})
+
+	t.Run("value with double quote", func(t *testing.T) {
+		assert.Equal(t, `ID > "a\"b"`, newIt("", `a"b`).composeIteratorExpr())
+	})
+
+	t.Run("special characters round-trip", func(t *testing.T) {
+		// The emitted literal must unquote back to the original value, the way the
+		// server parses it, so iteration keeps advancing past such a key.
+		for _, pk := range []string{`a"b`, `a\b`, "a\nb", "trailing\\", "plain"} {
+			got := newIt("", pk).composeIteratorExpr()
+			literal := strings.TrimPrefix(got, "ID > ")
+			unquoted, err := strconv.Unquote(literal)
+			assert.NoError(t, err)
+			assert.Equal(t, pk, unquoted)
+		}
+	})
+
+	t.Run("combined with base expression", func(t *testing.T) {
+		assert.Equal(t, `(age > 10) and ID > "a\"b"`, newIt("age > 10", `a"b`).composeIteratorExpr())
+	})
 }

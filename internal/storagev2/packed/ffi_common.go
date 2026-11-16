@@ -13,6 +13,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -508,6 +509,11 @@ func openTransaction(manifest ManifestJSON, cProperties *C.LoonProperties, resol
 	cBasePath := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 	var handle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(manifest.ManifestVersion),
 		C.int64_t(manifest.Size), resolveID, retryLimit, &handle)
 	return handle, HandleLoonFFIResult(result)
@@ -531,6 +537,10 @@ func openManifest(manifest ManifestJSON, cProperties *C.LoonProperties) (*C.Loon
 // revision it wrote on basePath, recording the size of the manifest object.
 func commitTransaction(handle C.LoonTransactionHandle, basePath string, storageConfig *indexpb.StorageConfig) (string, error) {
 	var version, size C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like openTransaction.
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &version, &size)); err != nil {
 		return "", err
 	}

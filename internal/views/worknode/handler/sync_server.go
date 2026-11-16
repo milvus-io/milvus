@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -73,10 +74,30 @@ func (s *ViewSyncServer) sendLoop(
 	stream viewpb.ViewSyncService_SyncQueryViewServer,
 	pending *pendingReports,
 ) {
+	timer := time.NewTimer(qviews.ViewFeedbackInterval)
+	defer timer.Stop()
+	sizeReady := s.handler.ViewFeedbackReady()
+	feedbackReady := sizeReady
+	lastFeedbackTake := time.Now()
+	if s.sendViewFeedback(stream, pending) {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-timer.C:
+			lastFeedbackTake = time.Now()
+			timer.Reset(qviews.ViewFeedbackInterval)
+			if s.sendViewFeedback(stream, pending) {
+				return
+			}
+			feedbackReady = sizeReady
+		case <-feedbackReady:
+			// Coalesce size notifications until the next allowed take. Keep
+			// serving state reports while the timer enforces the minimum gap.
+			feedbackReady = nil
+			timer.Reset(max(0, time.Until(lastFeedbackTake.Add(qviews.ViewFeedbackMinInterval))))
 		case _, ok := <-pending.Ready():
 			// Drain pending reports regardless of whether the channel is
 			// still open or was closed (final drain before exit).
@@ -86,6 +107,40 @@ func (s *ViewSyncServer) sendLoop(
 			}
 		}
 	}
+}
+
+// sendViewFeedback runs only in sendLoop. Return true when sending must stop.
+func (s *ViewSyncServer) sendViewFeedback(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports) bool {
+	window := s.handler.TakeViewFeedback()
+	batch := make([]*viewpb.ViewFeedback, 0, min(256, len(window.Shards)))
+	sendBatch := func() bool {
+		// State/close reports take precedence between bounded feedback batches.
+		select {
+		case <-stream.Context().Done():
+			return true
+		case _, ok := <-pending.Ready():
+			closing, err := s.sendPendingReports(stream, pending)
+			if !ok || closing || err != nil {
+				return true
+			}
+		default:
+		}
+		err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_ViewFeedback{ViewFeedback: &viewpb.ViewFeedbackReport{
+			Shards: batch, WindowStartUnixNanos: window.StartUnixNanos, WindowEndUnixNanos: window.EndUnixNanos,
+		}}})
+		// Detached windows are best effort; never restore or replay them.
+		return err != nil
+	}
+	for id, sample := range window.Shards {
+		batch = append(batch, &viewpb.ViewFeedback{ShardId: id.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
+		if len(batch) == 256 {
+			if sendBatch() {
+				return true
+			}
+			batch = make([]*viewpb.ViewFeedback, 0, 256)
+		}
+	}
+	return len(batch) > 0 && sendBatch()
 }
 
 // sendPendingReports drains all pending reports and sends them on the stream.

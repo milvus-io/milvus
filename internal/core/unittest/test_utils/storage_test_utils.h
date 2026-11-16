@@ -83,11 +83,12 @@ PrepareInsertBinlog(int64_t collection_id,
                     const GeneratedData& dataset,
                     const ChunkManagerPtr cm,
                     std::string mmap_dir_path = "",
-                    std::vector<int64_t> excluded_field_ids = {}) {
+                    std::vector<int64_t> excluded_field_ids = {},
+                    const std::string& binlog_prefix = TestRemotePath) {
     bool enable_mmap = !mmap_dir_path.empty();
     LoadFieldDataInfo load_info;
     auto row_count = dataset.row_ids_.size();
-    const std::string prefix = TestRemotePath;
+    const std::string& prefix = binlog_prefix;
 
     auto SaveFieldData = [&](const FieldDataPtr field_data,
                              const std::string& file,

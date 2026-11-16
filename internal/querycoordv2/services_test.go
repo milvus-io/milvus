@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
@@ -332,6 +333,10 @@ func (suite *ServiceSuite) SetupTest() {
 		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager:   suite.meta,
 		dataViewProvider:       newRuntimeDataViewProvider(suite.T()),
+		// Service tests assert metadata updates without running reconciliation.
+		balancerFactory: func(*cache.Cache) qviewsBalancer {
+			return &fakeRuntimeBalancer{}
+		},
 	})
 	suite.Require().NoError(err)
 	suite.server.qviewsRuntime = runtime

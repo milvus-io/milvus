@@ -24,4 +24,12 @@ type QueryViewHandler interface {
 	// State updates (both immediate and asynchronous) are reported
 	// exclusively through the OnReport callback in each ApplyView.
 	ApplyViews(views []ApplyView)
+
+	// TakeViewFeedback transfers the current window and starts an empty one.
+	// The caller owns the samples and may discard them on send failure.
+	TakeViewFeedback() qviews.ViewFeedbackWindow
+
+	// ViewFeedbackReady signals that the current window reached its size threshold.
+	// QueryNodes return nil and never produce feedback.
+	ViewFeedbackReady() <-chan struct{}
 }
