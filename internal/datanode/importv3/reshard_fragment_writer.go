@@ -22,10 +22,12 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // fragmentOutcome carries what one fragment write produced: the manifest
@@ -101,7 +103,7 @@ func (w *fragmentWriter) dispatch(vchannelOrdinal, partitionOrdinal int, input f
 		defer w.spill.Release(input.ranges())
 		defer w.inflight.Add(-input.accounted)
 		writeStart := time.Now()
-		outcome, err := writeFragment(w.spec, w.spill, vchannelOrdinal, partitionOrdinal, input, seq)
+		outcome, err := writeFragment(w.ctx, w.spec, w.spill, vchannelOrdinal, partitionOrdinal, input, seq)
 		wall := time.Since(writeStart)
 		w.mu.Lock()
 		defer w.mu.Unlock()
@@ -179,9 +181,24 @@ func (w *fragmentWriter) inflightBytes() int64 {
 	return w.inflight.Load()
 }
 
-// writeFragment sorts one fragment input into a single fragment parquet and
-// returns its manifest descriptor plus the run observations.
-func writeFragment(spec *writeSpec, spill *SpillManager, vchannelOrdinal, partitionOrdinal int, input fragmentInput, seq int64) (*fragmentOutcome, error) {
+const fragmentWriteAttempts uint = 3
+
+// writeFragment retries one whole fragment write. A packed writer is stateful:
+// a failed WriteRecordBatch may already have appended rows, so retrying a batch
+// would duplicate data. Recreating the writer, re-reading the inputs and
+// re-sorting the fragment is the smallest idempotent unit. The output path is
+// deterministic (runId_seq), so a retry overwrites the failed attempt.
+func writeFragment(ctx context.Context, spec *writeSpec, spill *SpillManager, vchannelOrdinal, partitionOrdinal int, input fragmentInput, seq int64) (*fragmentOutcome, error) {
+	var outcome *fragmentOutcome
+	err := retry.Do(ctx, func() error {
+		var err error
+		outcome, err = writeFragmentOnce(ctx, spec, spill, vchannelOrdinal, partitionOrdinal, input, seq)
+		return packed.ClassifyLoonErr(err)
+	}, retry.Attempts(fragmentWriteAttempts))
+	return outcome, err
+}
+
+func writeFragmentOnce(ctx context.Context, spec *writeSpec, spill *SpillManager, vchannelOrdinal, partitionOrdinal int, input fragmentInput, seq int64) (*fragmentOutcome, error) {
 	req, plan := spec.req, spec.plan
 	fragmentPath := path.Join(
 		req.GetStorageConfig().GetRootPath(),
@@ -209,9 +226,15 @@ func writeFragment(spec *writeSpec, spill *SpillManager, vchannelOrdinal, partit
 			err    error
 		)
 		if p.disk != nil {
-			reader, err = spill.RangeReader(*p.disk)
+			open := func(context.Context) (storage.RecordReader, error) {
+				return spill.RangeReader(*p.disk)
+			}
+			reader, err = storage.NewRetryableRecordReader(ctx, open, storage.DefaultRetryableRecordReaderAttempts)
 		} else {
-			reader, err = storage.NewInsertDataRecordReader(p.mem, spec.fragmentSchema)
+			open := func(context.Context) (storage.RecordReader, error) {
+				return storage.NewInsertDataRecordReader(p.mem, spec.fragmentSchema)
+			}
+			reader, err = storage.NewRetryableRecordReader(ctx, open, storage.DefaultRetryableRecordReaderAttempts)
 		}
 		if err != nil {
 			_ = writer.Close()
