@@ -517,7 +517,6 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.server.targetObserver,
-		suite.server.checkerController,
 		suite.server.proxyClientManager,
 	)
 

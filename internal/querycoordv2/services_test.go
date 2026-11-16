@@ -45,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
-	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -114,7 +112,6 @@ type ServiceSuite struct {
 	cluster            *session.MockCluster
 	nodeMgr            *session.NodeManager
 	taskScheduler      *task.MockScheduler
-	balancer           balance.Balance
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
@@ -279,14 +276,6 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	assign.ResetGlobalAssignPolicyFactoryForTest()
-	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	suite.balancer = balance.NewRowCountBasedBalancer(
-		suite.taskScheduler,
-		suite.nodeMgr,
-		suite.dist,
-		suite.targetMgr,
-	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
@@ -296,7 +285,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
-		&checkers.CheckerController{},
 		suite.proxyManager,
 	)
 	suite.collectionObserver.Start()
@@ -2071,7 +2059,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.server.qviewsRuntime.stop()
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
-	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
 func TestService(t *testing.T) {

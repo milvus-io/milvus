@@ -17,33 +17,9 @@
 package checkers
 
 import (
-	"testing"
-
-	"github.com/bytedance/mockey"
-
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// useStreamingQueryNodes exposes this fixture's registered nodes as SQNs.
-// Keep the WAL owner outside the replica to exercise candidate scoring.
-func useStreamingQueryNodes(t *testing.T, nodeManager *session.NodeManager) {
-	t.Helper()
-	nodes := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).To(
-		func(*snmanager.StreamingNodeManager) typeutil.UniqueSet {
-			ids := typeutil.NewUniqueSet()
-			for _, node := range nodeManager.GetAll() {
-				ids.Insert(node.ID())
-			}
-			return ids
-		}).Build()
-	t.Cleanup(func() { nodes.UnPatch() })
-	wal := mockey.Mock((*snmanager.StreamingNodeManager).GetWALLocated).Return(int64(10000)).Build()
-	t.Cleanup(func() { wal.UnPatch() })
-}
 
 // createStreamingTestReplica gives the existing workload fixture explicit SQNs.
 func createStreamingTestReplica(id, collectionID int64, nodes []int64) *meta.Replica {
