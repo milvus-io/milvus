@@ -19,6 +19,8 @@
 #include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "monitor/Monitor.h"
+#include "segcore/memory_planner.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -26,6 +28,15 @@
 namespace milvus {
 
 struct ThreadPoolsTestAccess {
+    // Replace the executor before publishing the pool or starting its sampler.
+    static std::unique_ptr<ThreadPool>
+    MakePool(std::unique_ptr<folly::CPUThreadPoolExecutor> executor) {
+        auto pool = std::make_unique<ThreadPool>(1.0, "rejected_load_test");
+        pool->ShutDown();
+        pool->executor_ = std::move(executor);
+        return pool;
+    }
+
     static std::unique_lock<std::shared_mutex>
     LockPoolMap() {
         return std::unique_lock<std::shared_mutex>(ThreadPools::mutex_);
@@ -57,6 +68,17 @@ struct ThreadPoolsTestAccess {
 }  // namespace milvus
 
 namespace {
+
+class RejectingLoadExecutor : public folly::CPUThreadPoolExecutor {
+ public:
+    RejectingLoadExecutor() : folly::CPUThreadPoolExecutor(1) {
+    }
+
+    void
+    add(folly::Func) override {
+        throw std::runtime_error("injected queue rejection");
+    }
+};
 
 class SearchFanoutPoolTest : public testing::Test {
  protected:
@@ -91,6 +113,79 @@ class SearchFanoutPoolTest : public testing::Test {
 };
 
 }  // namespace
+
+TEST(ThreadPoolSubmission, RejectionDestroysCapturesBeforeFutureConsumption) {
+    auto pool = milvus::ThreadPoolsTestAccess::MakePool(
+        std::make_unique<RejectingLoadExecutor>());
+    bool released = false;
+    auto future = pool->Submit(
+        [guard = folly::makeGuard([&released] { released = true; })] {});
+
+    // Retaining an exceptional future must not retain the rejected callable.
+    EXPECT_TRUE(released);
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(0)),
+              std::future_status::ready);
+    try {
+        future.get();
+        FAIL() << "expected broken promise";
+    } catch (const std::future_error& error) {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::future_errc::broken_promise));
+    }
+}
+
+TEST(ThreadPoolSubmission, RejectedCellBatchReturnsBudgetBeforeConsumption) {
+    using namespace milvus::segcore;
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    const auto old_capacity = budget.CapacityBytes();
+    auto restore_budget =
+        folly::makeGuard([&] { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacityBytes(1);
+
+    for (const auto priority : {milvus::HIGH, milvus::LOW}) {
+        auto previous = milvus::ThreadPoolsTestAccess::ExtractPool(priority);
+        auto restore_pool = folly::makeGuard([&] {
+            milvus::ThreadPoolsTestAccess::RestorePool(priority,
+                                                       std::move(previous));
+        });
+        milvus::ThreadPoolsTestAccess::RestorePool(
+            priority,
+            milvus::ThreadPoolsTestAccess::MakePool(
+                std::make_unique<RejectingLoadExecutor>()));
+        int reader_calls = 0;
+        auto futures = LoadCellBatchAsync(
+            nullptr,
+            {{0, 0, 0, 1, 1}},
+            [&reader_calls](size_t, int64_t, int64_t, int64_t)
+                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+                ++reader_calls;
+                return std::vector<std::shared_ptr<arrow::Table>>{};
+            },
+            1,
+            priority == milvus::HIGH ? milvus::proto::common::LoadPriority::HIGH
+                                     : milvus::proto::common::LoadPriority::LOW,
+            [](const std::vector<std::shared_ptr<arrow::Table>>&, int64_t) {
+                return std::make_unique<milvus::GroupChunk>();
+            });
+
+        ASSERT_EQ(futures.size(), 1);
+        const bool acquired = budget.TryAcquire(1);
+        EXPECT_TRUE(acquired)
+            << "rejected batch kept its budget in an unconsumed future";
+        if (acquired) {
+            budget.Release(1);
+        }
+        EXPECT_EQ(reader_calls, 0);
+        EXPECT_THROW(futures.front().get(), std::future_error);
+        if (!acquired) {
+            // Keep the global budget clean even against the pre-fix version:
+            // either claim the now-released byte, or release the leaked byte.
+            budget.TryAcquire(1);
+            budget.Release(1);
+        }
+    }
+}
 
 TEST_F(SearchFanoutPoolTest, ResizeBeforeFirstUse) {
     milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);

@@ -464,22 +464,23 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             continue;
         }
 
+        auto release_guard =
+            folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
+                budget.Release(batch_loading_overhead_bytes);
+            });
         try {
             futures.emplace_back(pool.Submit([batch = std::move(batch),
                                               shared_factory,
-                                              batch_loading_overhead_bytes,
+                                              release_guard =
+                                                  std::move(release_guard),
                                               reader_memory_limit,
                                               shared_finalizer,
                                               op_ctx]() mutable {
-                auto& budget = milvus::storage::TransientMemoryBudget::
-                    GetLoadTransientBudget();
                 // This guard is declared before the Arrow table locals below,
                 // so their shared backing buffers are destroyed before the
-                // batch reservation is released.
-                auto release_guard =
-                    folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
-                        budget.Release(batch_loading_overhead_bytes);
-                    });
+                // batch reservation is released. Moving the captured guard
+                // also releases it before the result future is consumed.
+                auto worker_release_guard = std::move(release_guard);
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
                 auto tables_result = (*shared_factory)(batch.file_idx,
@@ -522,10 +523,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 return loaded_cells;
             }));
         } catch (...) {
-            if (budget_admitted) {
-                milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                    .Release(batch_loading_overhead_bytes);
-            }
             append_failed_future(std::current_exception());
         }
     }
