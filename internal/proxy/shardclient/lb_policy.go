@@ -47,6 +47,10 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// StatsClass separates latency observations by request kind and consistency.
+	StatsClass string
+	// Hedgeable requires Exec to call CommitAttempt before publishing results.
+	Hedgeable bool
 	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
 	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
 	// the candidates of this one channel only -- the channel itself is still
@@ -73,6 +77,8 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	StatsClass     string
+	Hedgeable      bool
 	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates,
 	// through ForChannel. The fan-out itself stays unscoped: every shard is
 	// visited, and a shard the group cannot serve fails its channel rather
@@ -97,6 +103,8 @@ func (w CollectionWorkLoad) ForChannel(channel string, preferredNodeID int64) Ch
 		Exec:            w.Exec,
 		PreferredNodeID: preferredNodeID,
 		ResourceGroup:   w.ResourceGroup,
+		StatsClass:      w.StatsClass,
+		Hedgeable:       w.Hedgeable,
 	}
 }
 
@@ -110,8 +118,9 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin      = "round_robin"
+	LookAside       = "look_aside"
+	LatencyWeighted = "latency_weighted"
 )
 
 type LBPolicyImpl struct {
@@ -126,6 +135,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
+	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
 	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
@@ -351,6 +361,10 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	// stamped on here, at the load balancer's own entry, so that no call site
 	// can silently omit it. Empty with no provider installed.
 	workload = scopedChannelWorkload(ctx, workload)
+	balancer, lw := snapshotBalancer(lb.getBalancer())
+	if lw != nil {
+		return lb.executeWeightedWithRetry(ctx, workload, balancer, lw)
+	}
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 		mlog.String("channelName", workload.Channel),
@@ -395,7 +409,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
-		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
 			log.Warn(ctx, "failed to select node for shard",
