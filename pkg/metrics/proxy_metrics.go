@@ -464,6 +464,15 @@ var (
 			Buckets: subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName, "path"})
 
+	// ProxyReplicaHedgeCount counts hedged read decisions without per-channel labels.
+	ProxyReplicaHedgeCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "replica_hedge_total",
+			Help:      "hedged attempts of the latency_weighted replica selection, by decision",
+		}, []string{nodeIDLabelName, "decision"})
+
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
 	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
 	ProxyRetrySearchResultInsufficientCount = newCollectionCounterVec(
@@ -607,6 +616,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
+	registry.MustRegister(ProxyReplicaHedgeCount)
 	registry.MustRegister(ProxyMaterializeFallbackTotal)
 	registry.MustRegister(ProxyMaterializeShardTotal)
 	registry.MustRegister(ProxyQueryExecuteLatency)

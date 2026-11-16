@@ -82,6 +82,10 @@ func (r *replicaRouter) Close() {
 // maximum or QN session directory changes. The caller additionally rejects
 // plans containing dead nodes.
 func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica]bool, sessionChanged <-chan struct{}, checkLoad func(context.Context) (time.Time, error)) (qviews.Replica, bool, error) {
+	return r.nextReplicaWithSelector(ctx, tried, sessionChanged, checkLoad, nil)
+}
+
+func (r *replicaRoute) nextReplicaWithSelector(ctx context.Context, tried map[qviews.Replica]bool, sessionChanged <-chan struct{}, checkLoad func(context.Context) (time.Time, error), selectReplica func([]qviews.Replica) qviews.Replica) (qviews.Replica, bool, error) {
 	for {
 		select {
 		case <-sessionChanged:
@@ -99,15 +103,24 @@ func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica
 		snapshot, changed := r.snapshot, r.changed
 		retry := false
 		if snapshot.Valid {
+			var eligible []qviews.Replica
 			for i := 0; i < len(snapshot.Replicas); i++ {
 				candidate := snapshot.Replicas[(r.next+uint64(i))%uint64(len(snapshot.Replicas))]
 				permanent, attempted := tried[candidate]
 				if !attempted {
+					if selectReplica != nil {
+						eligible = append(eligible, candidate)
+						continue
+					}
 					r.next += uint64(i) + 1
 					r.mu.Unlock()
 					return candidate, false, nil
 				}
 				retry = retry || !permanent
+			}
+			if len(eligible) > 0 {
+				r.mu.Unlock()
+				return selectReplica(eligible), false, nil
 			}
 		}
 		r.mu.Unlock()
@@ -157,6 +170,25 @@ func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica
 			}
 		}
 	}
+}
+
+// alternative uses only the subscription's current snapshot. A disconnected
+// directory or a lack of another eligible replica never stalls a running primary.
+func (r *replicaRoute) alternative(primary int64, tried map[qviews.Replica]bool, selectReplica func([]qviews.Replica) qviews.Replica) (qviews.Replica, bool) {
+	r.mu.Lock()
+	var eligible []qviews.Replica
+	if !r.closed && r.snapshot.Valid {
+		for _, candidate := range r.snapshot.Replicas {
+			if _, attempted := tried[candidate]; !attempted && candidate.ReplicaID != primary {
+				eligible = append(eligible, candidate)
+			}
+		}
+	}
+	r.mu.Unlock()
+	if len(eligible) == 0 {
+		return qviews.Replica{}, false
+	}
+	return selectReplica(eligible), true
 }
 
 func (r *replicaRoute) hasUntried(tried map[qviews.Replica]bool) bool {

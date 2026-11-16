@@ -2883,6 +2883,12 @@ type proxyConfig struct {
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	LatencyWeightedEnabled            ParamItem `refreshable:"true"`
+	LatencyWeightedDecay              ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare           ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeEnabled       ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeMinDelay      ParamItem `refreshable:"true"`
+	LatencyWeightedHedgeMinWinRate    ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -3390,9 +3396,45 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and refined_look_aside",
+		Doc:          "Replica selection policy: round_robin, look_aside, refined_look_aside, or latency_weighted. QueryView uses its existing router unless latency_weighted is selected.",
+		Export:       true,
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+	p.LatencyWeightedEnabled = ParamItem{
+		Key: "proxy.latencyWeighted.enabled", DefaultValue: "true", Version: "3.0.0",
+		Doc: "Enable latency-weighted QueryView replica selection when proxy.replicaSelectionPolicy is latency_weighted. Live changes apply to new shard requests.", Export: true,
+	}
+	p.LatencyWeightedEnabled.Init(base.mgr)
+
+	p.LatencyWeightedDecay = ParamItem{
+		Key: "proxy.latencyWeighted.decay", DefaultValue: "10s", Version: "3.0.0",
+		Doc: "Time constant for successful latency samples and failure penalties.", Export: true,
+	}
+	p.LatencyWeightedDecay.Init(base.mgr)
+
+	p.LatencyWeightedMinShare = ParamItem{
+		Key: "proxy.latencyWeighted.minShare", DefaultValue: "0.001", Version: "3.0.0",
+		Doc: "Minimum selection share of each eligible QueryView replica.", Export: true,
+	}
+	p.LatencyWeightedMinShare.Init(base.mgr)
+
+	p.LatencyWeightedHedgeEnabled = ParamItem{
+		Key: "proxy.latencyWeighted.hedge.enabled", DefaultValue: "true", Version: "3.0.0",
+		Doc: "Allow one speculative replica attempt per Search/Query retry round.", Export: true,
+	}
+	p.LatencyWeightedHedgeEnabled.Init(base.mgr)
+
+	p.LatencyWeightedHedgeMinDelay = ParamItem{
+		Key: "proxy.latencyWeighted.hedge.minDelay", DefaultValue: "200ms", Version: "3.0.0",
+		Doc: "Minimum delay before attempting a second QueryView replica.", Export: true,
+	}
+	p.LatencyWeightedHedgeMinDelay.Init(base.mgr)
+
+	p.LatencyWeightedHedgeMinWinRate = ParamItem{
+		Key: "proxy.latencyWeighted.hedge.minWinRate", DefaultValue: "0.3", Version: "3.0.0",
+		Doc: "Below this recent hedge win rate, send only ten percent of eligible hedges as probes.", Export: true,
+	}
+	p.LatencyWeightedHedgeMinWinRate.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",

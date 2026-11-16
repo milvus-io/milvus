@@ -35,6 +35,8 @@ type shardViewQueryClient struct {
 	replicas           *replicaRouter
 	queryPlanClient    QueryPlanClient
 	queryServiceClient ViewQueryServiceClient
+	selectionConfig    func() ReplicaSelectionConfig
+	selection          *replicaPolicy
 }
 
 func newShardViewQueryClient(
@@ -48,6 +50,7 @@ func newShardViewQueryClient(
 		replicas:           newReplicaRouter(queryPlanClient),
 		queryPlanClient:    queryPlanClient,
 		queryServiceClient: queryServiceClient,
+		selection:          newReplicaPolicy(),
 	}
 }
 
@@ -74,6 +77,9 @@ type ShardQueryRequest struct {
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+	if cfg := s.replicaSelectionConfig(); cfg.Enabled {
+		return s.searchWithReplicaSelection(ctx, req, cfg)
+	}
 	var stage twoStageSearch
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
@@ -118,6 +124,9 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
+	if cfg := s.replicaSelectionConfig(); cfg.Enabled {
+		return s.queryWithReplicaSelection(ctx, req, cfg)
+	}
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
@@ -305,6 +314,48 @@ func (s *shardViewQueryClient) executeShard(
 			ExecutionSummary: response.GetExecutionSummary(),
 		}, nil
 	}
+}
+
+// executeReplica completes one replica attempt. Only the caller decides whether
+// its results are published or another replica is tried.
+func (s *shardViewQueryClient) executeReplica(ctx context.Context, targetShardID qviews.ShardID, params *shardExecParams, deadNodes map[int64]struct{}) (*ShardPlan, bool, error) {
+	planReq := params.buildPlanReq(targetShardID)
+	response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+	if err != nil {
+		return nil, false, err
+	}
+	plan := response.GetPlan()
+	if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
+		return nil, false, err
+	}
+	for _, worker := range plan.GetWorkNodes() {
+		if qn := worker.GetQueryNode(); qn != nil {
+			if _, dead := deadNodes[qn.GetNodeId()]; dead {
+				return nil, true, nil
+			}
+		}
+	}
+	if params.consumeResponse != nil {
+		if err := params.consumeResponse(response); err != nil {
+			return nil, false, err
+		}
+	}
+	shardID := qviews.FromProtoShardID(plan.ShardId)
+	workNodes := workNodesFromPlan(plan)
+	retained := &ShardPlan{
+		ShardID: shardID, Version: plan.Version, Mvcc: plan.GetMvcc(),
+		WorkNodes: workNodes, Selections: plan.GetWorkNodes(), ExecutionSummary: response.GetExecutionSummary(),
+	}
+	if params.beforeDispatch != nil {
+		err = params.beforeDispatch(ctx, response, shardID)
+	}
+	if err == nil {
+		err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
+	}
+	if err != nil {
+		return retained, false, err
+	}
+	return retained, false, nil
 }
 
 // executeGetQueryPlan handles consistency-level routing and dispatches Phase 1.
