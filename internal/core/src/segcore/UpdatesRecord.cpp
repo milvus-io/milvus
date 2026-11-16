@@ -57,59 +57,90 @@ struct Version {
 // remains append-only, with random access for binary search. GC is out of scope.
 using History = absl::InlinedVector<Version*, 1>;
 
-// Sparse lookup remains indexed, while correction scans compact entries.
-// Fixed blocks keep histories stable across append and pending publication.
+// Sparse AoS entries are grouped by row-offset range. Range readers walk the
+// matching buckets directly; writers and arbitrary-offset gathers retain a hash
+// directory. Deque append preserves History addresses held by pending updates.
 class OffsetHistories {
  public:
     struct Entry {
         int64_t offset = 0;
         History history;
     };
-    static constexpr size_t kBlockSize = 1024;
+    static constexpr size_t kRangeSize = 1024;
 
     History&
     operator[](int64_t offset) {
         auto found = positions_.find(offset);
         if (found != positions_.end()) {
-            return At(found->second).history;
+            return *found->second;
         }
-        if (size_ == blocks_.size() * kBlockSize) {
-            blocks_.push_back(std::make_unique<Entry[]>(kBlockSize));
+        const auto range = static_cast<size_t>(offset) / kRangeSize;
+        if (range >= buckets_.size()) {
+            buckets_.resize(range + 1);
         }
-        // A failed insertion may leave an empty block, but no visible entry.
-        positions_.emplace(offset, size_);
-        auto& entry = At(size_++);
+        if (!buckets_[range]) {
+            buckets_[range] = std::make_unique<Bucket>();
+        }
+        auto& bucket = *buckets_[range];
+        auto& entry = bucket.emplace_back();
         entry.offset = offset;
+        try {
+            positions_.emplace(offset, &entry.history);
+        } catch (...) {
+            // No directory entry refers to the failed append. Existing History
+            // addresses remain valid, and a retry must not duplicate this row.
+            bucket.pop_back();
+            throw;
+        }
         return entry.history;
     }
 
     const History*
     Find(int64_t offset) const {
         auto found = positions_.find(offset);
-        return found == positions_.end() ? nullptr : &At(found->second).history;
+        return found == positions_.end() ? nullptr : found->second;
     }
 
     template <typename Visitor>
     void
     ForEach(Visitor&& visit) const {
-        size_t remaining = size_;
-        for (const auto& block : blocks_) {
-            const auto count = std::min(remaining, kBlockSize);
-            for (size_t i = 0; i < count; ++i) {
-                visit(block[i].offset, block[i].history);
+        for (const auto& bucket : buckets_) {
+            if (bucket) {
+                for (const auto& entry : *bucket) {
+                    visit(entry.offset, entry.history);
+                }
             }
-            remaining -= count;
+        }
+    }
+
+    // Entries inside a bucket follow first-update order, not offset order.
+    // Filter the boundary buckets so arbitrary raw-reader batch sizes work.
+    template <typename Visitor>
+    void
+    ForEachRange(int64_t begin, size_t count, Visitor&& visit) const {
+        if (count == 0) {
+            return;
+        }
+        const auto end = static_cast<size_t>(begin) + count;
+        const auto first = static_cast<size_t>(begin) / kRangeSize;
+        const auto limit =
+            std::min((end - 1) / kRangeSize + 1, buckets_.size());
+        for (auto range = first; range < limit; ++range) {
+            if (const auto& bucket = buckets_[range]) {
+                for (const auto& entry : *bucket) {
+                    if (entry.offset >= begin &&
+                        static_cast<size_t>(entry.offset) < end) {
+                        visit(entry.offset, entry.history);
+                    }
+                }
+            }
         }
     }
 
  private:
-    Entry&
-    At(size_t position) const {
-        return blocks_[position / kBlockSize][position % kBlockSize];
-    }
-    std::unordered_map<int64_t, size_t> positions_;
-    std::vector<std::unique_ptr<Entry[]>> blocks_;
-    size_t size_ = 0;
+    using Bucket = std::deque<Entry>;
+    std::unordered_map<int64_t, History*> positions_;
+    std::vector<std::unique_ptr<Bucket>> buckets_;
 };
 
 const Version*
@@ -774,16 +805,21 @@ UpdatesRecord::ReadRangeUpdates(int64_t field_id,
         std::shared_lock lock(impl_->mutex);
         const auto& field = impl_->GetField(field_id);
         auto updated = field.updated_offsets.view(begin_offset, count);
-        for (auto pos = updated.find_first(); pos;
-             pos = updated.find_next(*pos)) {
-            if (masked && !(*candidates)[candidate_offset + *pos])
-                continue;
-            ++visited;
-            const auto* history = field.offsets.Find(begin_offset + *pos);
-            const auto* version =
-                history ? Visible(*history, query_ts) : nullptr;
-            if (version)
-                patches.push_back({*pos, version->value});
+        if (updated.find_first()) {
+            field.offsets.ForEachRange(
+                begin_offset,
+                count,
+                [&](int64_t offset, const History& history) {
+                    const auto pos = static_cast<size_t>(offset - begin_offset);
+                    // Failed Apply preparation may leave an empty history. The
+                    // bitset records published updates, not reserved entries.
+                    if (!updated[pos] ||
+                        (masked && !(*candidates)[candidate_offset + pos]))
+                        return;
+                    ++visited;
+                    if (const auto* version = Visible(history, query_ts))
+                        patches.push_back({pos, version->value});
+                });
         }
     }
     impl_->overlay_batches.fetch_add(1, std::memory_order_relaxed);
