@@ -17,14 +17,20 @@
 package metacache
 
 import (
+	"context"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestStore_PutSegmentAndGet(t *testing.T) {
@@ -262,4 +268,236 @@ func TestStore_RemoveSegmentDeletesEmptyIndexBuckets(t *testing.T) {
 	s.PutSegment(&datapb.SegmentInfo{ID: 4, CollectionID: 100, InsertChannel: "ch-0"})
 	assert.Len(t, s.GetSegments(100), 1)
 	assert.Len(t, s.GetSegmentsByChannel("ch-0"), 1)
+}
+
+// fullNullCountsSchema has two not-nullable fields (100, 101) and one
+// nullable field (102).
+func fullNullCountsSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+		{FieldID: 102, DataType: schemapb.DataType_VarChar, Nullable: true},
+	}}
+}
+
+func fullNullCounts() map[int64]int64 {
+	return map[int64]int64{100: 0, 101: 0, 102: 3}
+}
+
+func TestNormalizeSegment_PrunesOnPut(t *testing.T) {
+	s := NewMetaStore(nil)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: fullNullCountsSchema()})
+
+	s.PutSegment(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	})
+	s.ApplySegments([]*datapb.SegmentInfo{{
+		ID: 2, CollectionID: 100, InsertChannel: "ch-0",
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	}}, nil, nil)
+	s.LoadSegments([]*datapb.SegmentInfo{{
+		ID: 3, CollectionID: 100, InsertChannel: "ch-0",
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	}})
+
+	for _, id := range []int64{1, 2, 3} {
+		got, ok := s.GetSegment(id)
+		require.True(t, ok)
+		assert.Equal(t, map[int64]int64{102: 3}, got.GetStats().GetNullCounts(), "segment %d", id)
+	}
+}
+
+func TestNormalizeSegment_PrunableFieldsCache(t *testing.T) {
+	const collID = int64(100)
+	s := NewMetaStore(nil).(*metaStore)
+	altered := fullNullCountsSchema()
+	altered.Fields[2].Nullable = false
+
+	steps := []struct {
+		name   string
+		change func()
+		want   map[int64]struct{}
+	}{
+		{
+			name:   "unknown collection",
+			change: func() {},
+			want:   nil,
+		},
+		{
+			name: "built from the schema",
+			change: func() {
+				collectionsOf(s).Put(&CollectionInfo{ID: collID, Schema: fullNullCountsSchema()})
+			},
+			want: map[int64]struct{}{100: {}, 101: {}},
+		},
+		{
+			name:   "rebuilt when the schema is replaced",
+			change: func() { collectionsOf(s).Put(&CollectionInfo{ID: collID, Schema: altered}) },
+			want:   map[int64]struct{}{100: {}, 101: {}, 102: {}},
+		},
+		{
+			name:   "dropped with the collection",
+			change: func() { collectionsOf(s).Remove(collID) },
+			want:   nil,
+		},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			step.change()
+			first := s.prunableNullCountFields(collID)
+			assert.Equal(t, step.want, first)
+			if step.want == nil {
+				assert.False(t, s.prunable.Contain(collID))
+				return
+			}
+			// Later lookups for the same schema reuse the cached set.
+			second := s.prunableNullCountFields(collID)
+			assert.Equal(t, reflect.ValueOf(first).UnsafePointer(), reflect.ValueOf(second).UnsafePointer())
+		})
+	}
+}
+
+// removeAfterGetSource returns a collection once and removes it right after,
+// as if a drop ran between the lookup and the caller's next step.
+type removeAfterGetSource struct {
+	*Collections
+	armed bool
+}
+
+func (s *removeAfterGetSource) GetCollection(collectionID int64) (*CollectionInfo, bool) {
+	info, ok := s.Collections.GetCollection(collectionID)
+	if ok && s.armed {
+		s.armed = false
+		s.Remove(collectionID)
+	}
+	return info, ok
+}
+
+// TestNormalizeSegment_PrunableFieldsDropRace pins that a lookup racing with
+// the collection's removal does not leave a cache entry behind.
+func TestNormalizeSegment_PrunableFieldsDropRace(t *testing.T) {
+	const collID = int64(100)
+	s := NewMetaStore(nil).(*metaStore)
+	source := &removeAfterGetSource{Collections: NewCollections()}
+	s.SetCollectionSource(source)
+	source.Put(&CollectionInfo{ID: collID, Schema: fullNullCountsSchema()})
+	source.armed = true
+
+	assert.Equal(t, map[int64]struct{}{100: {}, 101: {}}, s.prunableNullCountFields(collID))
+	_, ok := s.GetCollection(collID)
+	require.False(t, ok)
+	assert.False(t, s.prunable.Contain(collID))
+}
+
+func TestNormalizeSegment_UnknownCollection(t *testing.T) {
+	s := NewMetaStore(nil)
+
+	s.PutSegment(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	})
+
+	got, ok := s.GetSegment(1)
+	require.True(t, ok)
+	assert.Equal(t, fullNullCounts(), got.GetStats().GetNullCounts())
+}
+
+// TestNormalizeSegment_ImportingKeepsNullCounts pins that an importing
+// segment keeps all its null counts, on runtime puts and on catalog load, and
+// that a put after IsImporting is cleared prunes them.
+func TestNormalizeSegment_ImportingKeepsNullCounts(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegments(mock.Anything, int64(100)).Return([]*datapb.SegmentInfo{{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0", IsImporting: true,
+		State: commonpb.SegmentState_Flushed,
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	}}, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
+
+	s := NewMetaStore(catalog)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: fullNullCountsSchema()})
+	require.NoError(t, s.LoadFromCatalog(context.Background(), []int64{100}, nil))
+	s.PutSegment(&datapb.SegmentInfo{
+		ID: 2, CollectionID: 100, InsertChannel: "ch-0", IsImporting: true,
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	})
+	for _, id := range []int64{1, 2} {
+		got, ok := s.GetSegment(id)
+		require.True(t, ok)
+		assert.Equal(t, fullNullCounts(), got.GetStats().GetNullCounts(), "segment %d", id)
+	}
+
+	committed, _ := s.GetSegment(2)
+	committed = proto.Clone(committed).(*datapb.SegmentInfo)
+	committed.IsImporting = false
+	s.PutSegment(committed)
+	got, ok := s.GetSegment(2)
+	require.True(t, ok)
+	assert.Equal(t, map[int64]int64{102: 3}, got.GetStats().GetNullCounts())
+}
+
+func TestNormalizeSegment_LoadFromCatalog(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegments(mock.Anything, int64(100)).Return([]*datapb.SegmentInfo{{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+		State: commonpb.SegmentState_Flushed,
+		Stats: &datapb.Statistics{NullCounts: fullNullCounts()},
+	}}, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{}, nil)
+
+	s := NewMetaStore(catalog)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: fullNullCountsSchema()})
+	require.NoError(t, s.LoadFromCatalog(context.Background(), []int64{100}, nil))
+
+	got, ok := s.GetSegment(1)
+	require.True(t, ok)
+	assert.Equal(t, map[int64]int64{102: 3}, got.GetStats().GetNullCounts())
+}
+
+// TestNormalizeSegment_SharedStatsNotMutated pins that pruning is
+// copy-on-write: DataCoord may hand two segments one *Statistics, so putting
+// one of them must not write the object the other still exposes. Under -race
+// an in-place delete races with the reader goroutine; without -race the final
+// assertion still catches it.
+func TestNormalizeSegment_SharedStatsNotMutated(t *testing.T) {
+	s := NewMetaStore(nil)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: fullNullCountsSchema()})
+
+	shared := &datapb.Statistics{NullCounts: fullNullCounts()}
+	second := &datapb.SegmentInfo{ID: 2, CollectionID: 100, InsertChannel: "ch-0", Stats: shared}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			sum := int64(0)
+			for _, v := range second.GetStats().GetNullCounts() {
+				sum += v
+			}
+			_ = sum
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		// Each put hands over a fresh top-level SegmentInfo, as the
+		// contract requires; only the nested Statistics is shared.
+		s.PutSegment(&datapb.SegmentInfo{ID: 1, CollectionID: 100, InsertChannel: "ch-0", Stats: shared})
+	}
+	close(stop)
+	<-done
+
+	assert.Same(t, shared, second.GetStats())
+	assert.Equal(t, fullNullCounts(), shared.GetNullCounts(), "the shared object keeps all its keys")
+	got, ok := s.GetSegment(1)
+	require.True(t, ok)
+	assert.NotSame(t, shared, got.GetStats())
+	assert.Equal(t, map[int64]int64{102: 3}, got.GetStats().GetNullCounts())
 }

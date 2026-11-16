@@ -330,11 +330,13 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 						// instead of iterating field binlogs.
 						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
 						if !ok {
-							// NullCounts carries an entry for every field present
-							// in the segment's data (zero included). A missing key
-							// means the field was added to the schema after this
-							// segment was flushed: every row reads as null, so
-							// there is nothing to index.
+							// NullCounts carries an entry for every nullable field
+							// present in the segment's data (zero included); the
+							// coord keeps entries only for nullable fields and
+							// VectorArray fields, dropping the rest. A
+							// missing key means the field was added to the schema
+							// after this segment was flushed: every row reads as
+							// null, so there is nothing to index.
 							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
 								mlog.Int64("fieldID", fieldID))
 							nullCount = segIndex.NumRows
