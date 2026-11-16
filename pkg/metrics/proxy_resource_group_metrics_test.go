@@ -25,21 +25,21 @@ import (
 
 func resourceGroupSQLatencySeries() int {
 	ch := make(chan prometheus.Metric, 64)
-	ProxyResourceGroupSQLatency.Collect(ch)
+	ProxySQLatency.Collect(ch)
 	return len(ch)
 }
 
-// The per-resource-group latency family carries db_name and collection_name,
+// The latency family with an rg label carries db_name and collection_name,
 // so dropping a collection or a database must take its series down with the
 // rest of the proxy's collection-scoped metrics, or every scoped query leaves a
 // series behind for the life of the proxy.
 func TestCleanupProxyMetricsDropsResourceGroupSQLatency(t *testing.T) {
-	ProxyResourceGroupSQLatency.Reset()
+	ProxySQLatency.Reset()
 	const node = "7"
 	for _, queryType := range []string{SearchLabel, HybridSearchLabel, QueryLabel} {
-		ProxyResourceGroupSQLatency.WithLabelValues(node, queryType, "db_a", "coll_1", "rg-a").Observe(1)
-		ProxyResourceGroupSQLatency.WithLabelValues(node, queryType, "db_a", "coll_2", "rg-b").Observe(1)
-		ProxyResourceGroupSQLatency.WithLabelValues(node, queryType, "db_b", "coll_1", "rg-a").Observe(1)
+		ProxySQLatency.WithLabelValues(node, queryType, "db_a", "coll_1", "rg-a").Observe(1)
+		ProxySQLatency.WithLabelValues(node, queryType, "db_a", "coll_2", "rg-b").Observe(1)
+		ProxySQLatency.WithLabelValues(node, queryType, "db_b", "coll_1", "rg-a").Observe(1)
 	}
 	assert.Equal(t, 9, resourceGroupSQLatencySeries())
 

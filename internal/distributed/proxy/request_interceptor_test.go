@@ -130,7 +130,7 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 		suite.Run(tc.tag, func() {
 			UnaryRequestStatsInterceptor(ctx, tc.req, tc.info, tc.handler)
 			for _, labels := range tc.expectLabels {
-				suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(labels...), 1)
+				suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(append(labels, "")...), 1)
 			}
 			metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
 		})
