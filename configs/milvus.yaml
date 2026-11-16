@@ -352,6 +352,7 @@ proxy:
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
+  replicaSelectionPolicy: look_aside # replica selection policy in multiple replicas load balancing, support round_robin, look_aside and latency_weighted. Requires a proxy restart.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
@@ -390,6 +391,14 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  latencyWeighted:
+    enabled: true # Switch of the latency_weighted replica selection policy (proxy.replicaSelectionPolicy: latency_weighted). When false, new requests use look_aside. In-flight requests retain the policy and accounting captured at entry.
+    decay: 10s # Time constant of the decay of the latency statistics kept per channel, request class and replica: a sample, and a failure penalty, weigh 1/e after this long.
+    minShare: 0.001 # Minimum selection share among eligible replicas of a channel and request class, allowing slow or failing replicas to be probed. Existing serviceability and reachability checks still apply.
+    hedge:
+      enabled: true # Send a second attempt of a search or query of a channel to another replica when the first has not returned within the p99 latency of the recent requests of that channel and request class (at least hedge.minDelay).
+      minDelay: 200ms # Shortest wait before a hedged attempt, whatever the p99 latency.
+      minWinRate: 0.3 # When fewer than this share of the recent hedges (about the last 10s) of a channel and request class won, only 10% of its hedges are sent, as samples: a hedge that loses only adds load, as when every replica is slow under overall overload.
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     # Enable the REST value handling fixes, including exact numbers, input validation,
