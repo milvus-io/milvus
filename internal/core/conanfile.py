@@ -27,7 +27,6 @@ class MilvusConan(ConanFile):
         "glog/0.7.1#a306e61d7b8311db8cb148ad62c48030",
         "gflags/2.2.2#7671803f1dc19354cc90bd32874dcfda",
         "double-conversion/3.3.0#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/1.0.19",
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
