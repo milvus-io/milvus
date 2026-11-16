@@ -28,7 +28,6 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
-#include <future>
 #include <limits>
 #include <memory>
 #include <string_view>
@@ -80,8 +79,6 @@
 #include "common/Types.h"
 #include "common/VectorArray.h"
 #include "storage/ThreadPools.h"
-#include "storage/MemFileManagerImpl.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
@@ -1177,14 +1174,14 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     return std::make_pair(std::move(object_key), serialized_index_size);
 }
 
-std::vector<std::future<std::unique_ptr<DataCodec>>>
+std::vector<folly::SemiFuture<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files,
               milvus::ThreadPoolPriority priority,
               bool is_field_data,
               std::optional<proto::schema::TypeSchema> array_type) {
-    auto& pool = ThreadPools::GetThreadPool(priority);
-    std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    auto& pool = ThreadPools::GetExecutor(priority);
+    std::vector<folly::SemiFuture<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
     auto DownloadAndDeserialize =
@@ -1202,11 +1199,13 @@ GetObjectData(ChunkManager* remote_chunk_manager,
         };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(DownloadAndDeserialize,
-                                         remote_chunk_manager,
-                                         is_field_data,
-                                         array_type,
-                                         file));
+        futures.emplace_back(folly::via(&pool,
+                                        std::bind(DownloadAndDeserialize,
+                                                  remote_chunk_manager,
+                                                  is_field_data,
+                                                  array_type,
+                                                  file))
+                                 .semi());
     }
     return futures;
 }
@@ -1219,8 +1218,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              FieldDataMeta& field_meta,
              IndexMeta& index_meta,
              std::shared_ptr<CPluginContext> plugin_context) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<std::pair<std::string, size_t>>> futures;
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(),
                "inconsistent data slices size {} with slice sizes {}",
                data_slices.size(),
@@ -1231,21 +1230,24 @@ PutIndexData(ChunkManager* remote_chunk_manager,
                slice_names.size());
 
     for (int64_t i = 0; i < data_slices.size(); ++i) {
-        futures.push_back(pool.Submit(EncodeAndUploadIndexSlice,
-                                      remote_chunk_manager,
-                                      const_cast<uint8_t*>(data_slices[i]),
-                                      slice_sizes[i],
-                                      index_meta,
-                                      field_meta,
-                                      slice_names[i],
-                                      plugin_context));
+        futures.push_back(
+            folly::via(&pool,
+                       std::bind(EncodeAndUploadIndexSlice,
+                                 remote_chunk_manager,
+                                 const_cast<uint8_t*>(data_slices[i]),
+                                 slice_sizes[i],
+                                 index_meta,
+                                 field_meta,
+                                 slice_names[i],
+                                 plugin_context))
+                .semi());
     }
 
     std::map<std::string, int64_t> remote_paths_to_size;
     std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
         try {
-            auto res = future.get();
+            auto res = std::move(future).get();
             remote_paths_to_size[res.first] = res.second;
         } catch (...) {
             if (!first_exception) {
@@ -1876,7 +1878,7 @@ detail::VisitFieldDataFromStorageV2Paged(
     AssertInfo(fs != nullptr,
                "[StorageV2] storage v2 arrow file system is not initialized");
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
     size_t total_num_rows = 0;
 
     for (const auto& column_group_file : remote_chunk_files) {
@@ -2002,28 +2004,31 @@ detail::VisitFieldDataFromStorageV2Paged(
             auto channel =
                 std::make_shared<ArrowReaderChannel>(parallel_degree);
             auto load_future =
-                pool.Submit([channel,
-                             column_group_file,
-                             fs,
-                             prepared,
-                             parallel_degree,
-                             row_groups = std::move(row_groups)]() mutable {
-                    auto strategy =
-                        std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+                folly::via(
+                    &pool,
+                    [channel,
+                     column_group_file,
+                     fs,
+                     prepared,
+                     parallel_degree,
+                     row_groups = std::move(row_groups)]() mutable {
+                        auto strategy = std::make_unique<
+                            segcore::ParallelDegreeSplitStrategy>(
                             parallel_degree);
-                    std::vector<std::vector<int64_t>> row_group_lists;
-                    row_group_lists.emplace_back(std::move(row_groups));
-                    LoadWithStrategy(
-                        std::vector<std::string>{column_group_file},
-                        channel,
-                        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                        std::move(strategy),
-                        row_group_lists,
-                        fs,
-                        nullptr,
-                        milvus::proto::common::LoadPriority::HIGH,
-                        {prepared});
-                });
+                        std::vector<std::vector<int64_t>> row_group_lists;
+                        row_group_lists.emplace_back(std::move(row_groups));
+                        LoadWithStrategy(
+                            std::vector<std::string>{column_group_file},
+                            channel,
+                            DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                            std::move(strategy),
+                            row_group_lists,
+                            fs,
+                            nullptr,
+                            milvus::proto::common::LoadPriority::HIGH,
+                            {prepared});
+                    })
+                    .semi();
 
             bool channel_exhausted = false;
             auto drain = [&] {
@@ -2073,7 +2078,7 @@ detail::VisitFieldDataFromStorageV2Paged(
                     }
                 }
                 channel_exhausted = true;
-                load_future.get();
+                std::move(load_future).get();
             } catch (...) {
                 drain();
                 throw;
@@ -2489,10 +2494,10 @@ VisitFieldDataFromManifestPaged(
     // Invariant this relies on: the calling thread blocks on decode futures,
     // so this function must not be called from a LOW-pool thread. Index
     // build tasks enter segcore from Go, so no caller does today.
-    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetExecutor(ThreadPoolPriority::LOW);
     const size_t max_inflight_batches =
-        std::max<size_t>(2, pool.GetMaxThreadNum() * 2);
-    std::deque<std::pair<std::future<FieldDataPtr>, int64_t>> pending;
+        std::max<size_t>(2, pool.numThreads() * 2);
+    std::deque<std::pair<folly::SemiFuture<FieldDataPtr>, int64_t>> pending;
     int64_t pending_bytes = 0;
 
     // No decode task may outlive this scope, on any exit path: ReadNext
@@ -2504,7 +2509,8 @@ VisitFieldDataFromManifestPaged(
     // re-derive. A future already consumed by a throwing get() is invalid
     // and is skipped.
     struct PendingDrainGuard {
-        std::deque<std::pair<std::future<FieldDataPtr>, int64_t>>& pending;
+        std::deque<std::pair<folly::SemiFuture<FieldDataPtr>, int64_t>>&
+            pending;
 
         ~PendingDrainGuard() {
             for (auto& entry : pending) {
@@ -2537,7 +2543,7 @@ VisitFieldDataFromManifestPaged(
 
     auto deliver_front = [&]() {
         auto t0 = now_ns();
-        auto field_data = pending.front().first.get();
+        auto field_data = std::move(pending.front().first).get();
         auto t1 = now_ns();
         pending_bytes -= pending.front().second;
         pending.pop_front();
@@ -2553,7 +2559,7 @@ VisitFieldDataFromManifestPaged(
         std::exception_ptr first_failure;
         while (!pending.empty()) {
             try {
-                pending.front().first.get();
+                std::move(pending.front().first).get();
             } catch (...) {
                 if (!first_failure) {
                     first_failure = std::current_exception();
@@ -2609,32 +2615,39 @@ VisitFieldDataFromManifestPaged(
             // slice references.
             auto batch_bytes = EstimateRecordBatchBytes(*batch);
 
-            auto decode_future = pool.Submit([batch,
-                                              column_name,
-                                              is_external,
-                                              data_type_v,
-                                              element_type_v,
-                                              dim,
-                                              nullable,
-                                              normalize_field_meta,
-                                              num_rows]() -> FieldDataPtr {
-                auto raw_column = batch->GetColumnByName(column_name);
-                if (is_external) {
-                    raw_column =
-                        NormalizeExternalArrowByType(raw_column,
-                                                     data_type_v,
-                                                     dim,
-                                                     nullable,
-                                                     element_type_v,
-                                                     *normalize_field_meta);
-                }
-                auto chunked_array =
-                    std::make_shared<arrow::ChunkedArray>(raw_column);
-                auto field_data = CreateFieldData(
-                    data_type_v, element_type_v, nullable, dim, num_rows);
-                field_data->FillFieldData(chunked_array);
-                return field_data;
-            });
+            auto decode_future =
+                folly::via(
+                    &pool,
+                    [batch,
+                     column_name,
+                     is_external,
+                     data_type_v,
+                     element_type_v,
+                     dim,
+                     nullable,
+                     normalize_field_meta,
+                     num_rows]() -> FieldDataPtr {
+                        auto raw_column = batch->GetColumnByName(column_name);
+                        if (is_external) {
+                            raw_column = NormalizeExternalArrowByType(
+                                raw_column,
+                                data_type_v,
+                                dim,
+                                nullable,
+                                element_type_v,
+                                *normalize_field_meta);
+                        }
+                        auto chunked_array =
+                            std::make_shared<arrow::ChunkedArray>(raw_column);
+                        auto field_data = CreateFieldData(data_type_v,
+                                                          element_type_v,
+                                                          nullable,
+                                                          dim,
+                                                          num_rows);
+                        field_data->FillFieldData(chunked_array);
+                        return field_data;
+                    })
+                    .semi();
             pending.emplace_back(std::move(decode_future), batch_bytes);
             pending_bytes += batch_bytes;
             total_batch_bytes += batch_bytes;
@@ -2656,9 +2669,7 @@ VisitFieldDataFromManifestPaged(
             }
             // Opportunistically deliver whatever is already done, keeping
             // consumer-side work (e.g. disk writes) interleaved with fetching.
-            while (!pending.empty() &&
-                   pending.front().first.wait_for(std::chrono::seconds(0)) ==
-                       std::future_status::ready) {
+            while (!pending.empty() && pending.front().first.isReady()) {
                 if (deliver_front() == VisitControl::Stop) {
                     stopped = true;
                     break;

@@ -722,7 +722,7 @@ ManifestGroupTranslator::get_cells_legacy(
     std::exception_ptr first_error;
     for (auto& future : load_futures) {
         try {
-            auto loaded_cells = future.get();
+            auto loaded_cells = std::move(future).get();
             if (first_error) {
                 continue;
             }

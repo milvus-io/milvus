@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/futures/Future.h>
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 
 #include <fcntl.h>
@@ -39,7 +40,6 @@
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/RemoteOutputStream.h"
-#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -57,7 +57,7 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
       ez_id_(ez_id),
       collection_id_(collection_id),
       slice_size_(slice_size),
-      pool_(ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE)) {
+      pool_(ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE)) {
     AssertInfo(IsStreamSliceSizeAligned(slice_size_),
                "Encrypted entry slice_size must be {}-byte aligned, got {}",
                kStreamSliceAlignment,
@@ -145,9 +145,9 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
     CheckDuplicateName(name);
 
     std::vector<SliceMeta> slices;
-    const size_t W = std::max(static_cast<size_t>(pool_.GetMaxThreadNum()),
+    const size_t W = std::max(static_cast<size_t>(pool_.numThreads()),
                               static_cast<size_t>(1));
-    std::deque<std::future<std::string>> pending;
+    std::deque<folly::SemiFuture<std::string>> pending;
     size_t remaining = size;
     uint32_t crc = 0;
 
@@ -163,14 +163,15 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
             auto slice_data = ReadExact(fd, len);
             crc = Crc32cUpdate(
                 crc, reinterpret_cast<const uint8_t*>(slice_data.data()), len);
-            pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                return encryptor_->Encrypt(s);
-            }));
+            pending.push_back(
+                folly::via(&pool_, [this, s = std::move(slice_data)]() {
+                    return encryptor_->Encrypt(s);
+                }).semi());
             remaining -= len;
         }
         // Drain the oldest completed future
         if (!pending.empty()) {
-            auto encrypted = pending.front().get();
+            auto encrypted = std::move(pending.front()).get();
             pending.pop_front();
             auto written =
                 ::write(local_fd_, encrypted.data(), encrypted.size());
@@ -192,9 +193,9 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
                                                       const uint8_t* data,
                                                       size_t size) {
     std::vector<SliceMeta> slices;
-    const size_t W = std::max(static_cast<size_t>(pool_.GetMaxThreadNum()),
+    const size_t W = std::max(static_cast<size_t>(pool_.numThreads()),
                               static_cast<size_t>(1));
-    std::deque<std::future<std::string>> pending;
+    std::deque<folly::SemiFuture<std::string>> pending;
     size_t remaining = size;
     size_t read_offset = 0;
     uint32_t crc = 0;
@@ -210,14 +211,15 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             crc = Crc32cUpdate(crc, data + read_offset, len);
             auto slice_data = std::string(
                 reinterpret_cast<const char*>(data + read_offset), len);
-            pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
-                return encryptor_->Encrypt(s);
-            }));
+            pending.push_back(
+                folly::via(&pool_, [this, s = std::move(slice_data)]() {
+                    return encryptor_->Encrypt(s);
+                }).semi());
             read_offset += len;
             remaining -= len;
         }
         if (!pending.empty()) {
-            auto encrypted = pending.front().get();
+            auto encrypted = std::move(pending.front()).get();
             pending.pop_front();
             auto written =
                 ::write(local_fd_, encrypted.data(), encrypted.size());

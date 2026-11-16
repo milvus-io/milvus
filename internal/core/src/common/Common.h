@@ -19,7 +19,6 @@
 #include <atomic>
 #include <iostream>
 #include "common/Consts.h"
-#include "storage/ThreadPool.h"
 
 namespace milvus {
 
