@@ -417,7 +417,7 @@ func TestCatalog_GetCollectionByID(t *testing.T) {
 	ss.EXPECT().Load(mock.Anything, mock.Anything).Return("", errors.New("load error")).Once()
 	coll, err := c.GetCollectionByID(ctx, 0, 1, 1)
 	assert.Error(t, err)
-	assert.True(t, merr.ErrIoFailed.Is(err))
+	assert.False(t, merr.ErrCollectionNotFound.Is(err))
 	assert.Nil(t, coll)
 
 	ss.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string) (string, error) {

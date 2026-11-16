@@ -99,6 +99,24 @@ func TestCatalog_GetCollectionByID_DefaultLoadErrorDoesNotFallback(t *testing.T)
 	assert.Nil(t, got)
 }
 
+func TestCatalog_GetCollectionByID_DefaultLoadContextErrorIsPreserved(t *testing.T) {
+	ctx := context.Background()
+	defaultKey := BuildCollectionKey(util.DefaultDBID, 42)
+	for _, loadErr := range []error{context.DeadlineExceeded, context.Canceled} {
+		kv := mocks.NewTxnKV(t)
+		// The KV layer returns the context error unwrapped. It must reach the
+		// caller unchanged and must not trigger the legacy fallback.
+		kv.EXPECT().Load(mock.Anything, defaultKey).Return("", loadErr).Once()
+
+		kc := NewCatalog(kv)
+		got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 42)
+		assert.ErrorIs(t, err, loadErr)
+		assert.True(t, merr.IsCanceledOrTimeout(err))
+		assert.False(t, merr.ErrCollectionNotFound.Is(err))
+		assert.Nil(t, got)
+	}
+}
+
 func TestCatalog_GetCollectionByID_DefaultKeyNotFoundFallsBackToLegacy(t *testing.T) {
 	ctx := context.Background()
 	defaultKey := BuildCollectionKey(util.DefaultDBID, 42)

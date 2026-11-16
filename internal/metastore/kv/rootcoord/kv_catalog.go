@@ -267,12 +267,10 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Txn.Load(ctx, collKey)
 	if err != nil {
-		// Keep the storage error intact. The default-database compatibility
+		// Return the storage error as is. The default-database compatibility
 		// fallback must distinguish a missing key from a tombstone or an I/O
-		// failure.
-		if !merr.IsMilvusError(err) {
-			return nil, merr.WrapErrIoFailed(collKey, err)
-		}
+		// failure, and callers must still see a cancellation or a timeout as
+		// such.
 		return nil, err
 	}
 
