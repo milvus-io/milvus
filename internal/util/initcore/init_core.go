@@ -83,7 +83,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 	// oltp grpc may hangs forever, add timeout logic at go side
@@ -117,7 +117,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 
@@ -460,8 +460,6 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
-	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
-	defer C.free(unsafe.Pointer(diskPath))
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
@@ -475,7 +473,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage,
 		loadingTimeoutMs, warmupLoadingTimeoutMs, rejectRemoteVectorOutput, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
