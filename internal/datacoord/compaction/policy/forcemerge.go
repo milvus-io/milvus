@@ -57,7 +57,7 @@ func (policy *ForceMergeCompactionPolicy) TriggerOneCollection(
 		return nil, 0, err
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "failed to get collection ttl, use default", mlog.Err(err))
 		collectionTTL = 0

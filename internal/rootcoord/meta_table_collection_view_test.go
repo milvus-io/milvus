@@ -97,17 +97,17 @@ func assertViewMatchesModel(t *testing.T, mt *MetaTable, collectionID int64) *me
 	want := mt.buildCollectionViewLocked(coll)
 	assert.True(t, proto.Equal(want.Schema, view.Schema))
 	// Compare the rest on copies: the published view must stay untouched.
-	// PropertyPairs holds protos too; it is checked against describe below.
+	// Properties holds protos too; it is checked against describe below.
 	wantRest, gotRest := *want, *view
 	wantRest.Schema, gotRest.Schema = nil, nil
-	wantRest.PropertyPairs, gotRest.PropertyPairs = nil, nil
+	wantRest.Properties, gotRest.Properties = nil, nil
 	assert.Equal(t, wantRest, gotRest)
 	desc := convertModelToDesc(coll, nil, viewTestDBName)
 	assert.True(t, proto.Equal(desc.GetSchema(), view.Schema))
 	assert.Equal(t, desc.GetShardsNum(), view.ShardsNum)
 	assert.Equal(t, desc.GetConsistencyLevel(), view.ConsistencyLevel)
 	assert.Equal(t, desc.GetUpdateTimestamp(), view.UpdateTimestamp)
-	assert.True(t, slices.EqualFunc(desc.GetProperties(), view.PropertyPairs, func(a, b *commonpb.KeyValuePair) bool {
+	assert.True(t, slices.EqualFunc(desc.GetProperties(), view.Properties, func(a, b *commonpb.KeyValuePair) bool {
 		return proto.Equal(a, b)
 	}))
 	return view
@@ -199,7 +199,9 @@ func TestCollectionView_FollowsDDL(t *testing.T) {
 		assert.Equal(t, step.names, view.PartitionIDsByName, step.name)
 		assert.Equal(t, viewTestDBName, view.DatabaseName, step.name)
 		assert.Equal(t, viewTestDBName, view.Schema.GetDbName(), step.name)
-		assert.Equal(t, map[string]string{"k": "v"}, view.Properties, step.name)
+		got, ok := common.GetStringValue(view.Properties, "k")
+		assert.True(t, ok, step.name)
+		assert.Equal(t, "v", got, step.name)
 		assert.Equal(t, []int64{viewTestCollID}, mt.CollectionSource().GetCollectionIDs(), step.name)
 	}
 	assert.Equal(t, []int64{viewTestCollID}, droppingIDs, "dropping fires once, on drop collection")

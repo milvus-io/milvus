@@ -1516,7 +1516,7 @@ func createSortCompactionTask(ctx context.Context,
 		return nil, err
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "Failed to create sort compaction task because get collection ttl failed")
 		return nil, err

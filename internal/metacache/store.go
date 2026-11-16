@@ -70,10 +70,9 @@ type CollectionInfo struct {
 	// partition may share it with a Dropping one; the live one wins.
 	PartitionIDsByName map[string]int64
 	VChannelNames      []string
-	Properties         map[string]string
-	// PropertyPairs holds Properties in RootCoord's order, as describe
-	// reports them.
-	PropertyPairs  []*commonpb.KeyValuePair
+	// Properties holds the collection properties in RootCoord's order,
+	// as describe reports them.
+	Properties     []*commonpb.KeyValuePair
 	DatabaseName   string
 	DatabaseID     int64
 	StartPositions []*commonpb.KeyDataPair

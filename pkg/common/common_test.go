@@ -141,12 +141,6 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 		}
 	}
 
-	getMp := func(val string) map[string]string {
-		return map[string]string{
-			PartitionKeyIsolationKey: val,
-		}
-	}
-
 	t.Run("pb", func(t *testing.T) {
 		props := getProto("true")
 		res, err := IsPartitionKeyIsolationKvEnabled(props...)
@@ -166,28 +160,6 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 		props = getProto("invalid")
 		res, err = IsPartitionKeyIsolationKvEnabled(props...)
 		assert.ErrorContains(t, err, "failed to parse partition key isolation")
-		assert.False(t, res)
-	})
-
-	t.Run("map", func(t *testing.T) {
-		props := getMp("true")
-		res, err := IsPartitionKeyIsolationPropEnabled(props)
-		assert.NoError(t, err)
-		assert.True(t, res)
-
-		props = getMp("false")
-		res, err = IsPartitionKeyIsolationPropEnabled(props)
-		assert.NoError(t, err)
-		assert.False(t, res)
-
-		props = getMp("")
-		res, err = IsPartitionKeyIsolationPropEnabled(props)
-		assert.ErrorContains(t, err, "failed to parse partition key isolation property")
-		assert.False(t, res)
-
-		props = getMp("invalid")
-		res, err = IsPartitionKeyIsolationPropEnabled(props)
-		assert.ErrorContains(t, err, "failed to parse partition key isolation property")
 		assert.False(t, res)
 	})
 }
@@ -409,20 +381,11 @@ func TestGetCollectionTTL(t *testing.T) {
 			} else {
 				assert.EqualValues(t, tc.expect, result)
 			}
-			result, err = GetCollectionTTLFromMap(map[string]string{CollectionTTLConfigKey: tc.value})
-			if tc.expectErr {
-				assert.Error(t, err)
-			} else {
-				assert.EqualValues(t, tc.expect, result)
-			}
 		})
 	}
 
 	t.Run("not_config", func(t *testing.T) {
 		result, err := GetCollectionTTL([]*commonpb.KeyValuePair{})
-		assert.NoError(t, err)
-		assert.EqualValues(t, -1, result)
-		result, err = GetCollectionTTLFromMap(map[string]string{})
 		assert.NoError(t, err)
 		assert.EqualValues(t, -1, result)
 	})

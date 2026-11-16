@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // CollectionForPreparation overlays pending intent on an immutable cache
@@ -36,7 +35,7 @@ func (m *Meta) CollectionForPreparation(ctx context.Context, collection *Collect
 	copy := *collection
 	copy.Schema = schema
 	if schema != collection.Schema {
-		copy.Properties = funcutil.KeyValuePair2Map(schema.GetProperties())
+		copy.Properties = schema.GetProperties()
 	}
 	return &copy, nil
 }

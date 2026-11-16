@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // collectionSchemaPB builds the schema RootCoord reports for coll, with
@@ -84,8 +83,7 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 		DroppingPartitions: dropping,
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
-		Properties:         funcutil.KeyValuePair2Map(coll.Properties),
-		PropertyPairs:      coll.Properties,
+		Properties:         coll.Properties,
 		DatabaseName:       dbName,
 		DatabaseID:         coll.DBID,
 		StartPositions:     coll.StartPositions,

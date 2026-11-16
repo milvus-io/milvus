@@ -1248,9 +1248,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		handler := meta.NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&meta.CollectionInfo{
-				ID:         s.testLabel.CollectionID,
-				Schema:     collectionSchema,
-				Properties: map[string]string{common.CollectionTTLConfigKey: "3600"},
+				ID:     s.testLabel.CollectionID,
+				Schema: collectionSchema,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.CollectionTTLConfigKey, Value: "3600"},
+				},
 			}, nil).Once()
 		s.triggerManager.handler = handler
 		s.inspector.EXPECT().EnqueueCompaction(mock.Anything).

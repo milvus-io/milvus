@@ -2104,8 +2104,7 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		VChannelNames:      []string{"ch-1"},
 		Partitions:         []int64{0},
 		PartitionIDsByName: map[string]int64{"_default": 0},
-		Properties:         funcutil.KeyValuePair2Map(properties),
-		PropertyPairs:      properties,
+		Properties:         properties,
 	})
 
 	positions := []*msgpb.MsgPosition{

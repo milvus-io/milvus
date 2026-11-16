@@ -142,7 +142,7 @@ func (policy *SingleCompactionPolicy) TriggerSegmentSortCompaction(
 		return nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "failed to apply triggerSegmentSortCompaction, get collection ttl failed")
 		return nil
@@ -266,7 +266,7 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 		return nil, nil, nil, 0, nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, get collection ttl failed")
 		return nil, nil, nil, 0, err
