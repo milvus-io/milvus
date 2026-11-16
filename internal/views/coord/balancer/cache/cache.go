@@ -346,6 +346,8 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	defer c.finishCollection(id, slot)
 	next := *slot.value.Load()
 	previous := next
+	// AutoLoad-only publications retain the requirements version but replace
+	// cfg. Compare both so subsequent planning sees the latest scheduling input.
 	if next.config == cfg && next.configVersion == version {
 		return
 	}

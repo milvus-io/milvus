@@ -715,3 +715,47 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	require.Equal(t, total+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel)))
 	require.Equal(t, fail+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel)))
 }
+
+func TestAutoLoadSourceUpdateKeepsPreparingReadinessWaiter(t *testing.T) {
+	const channel = "by-dev-rootcoord-dml_100v0"
+	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: channel}
+	s, _, syncer := newReadinessTestServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	store := s.qviewsRuntime.loadConfigStore
+	cfg := store.GetConfig(100).Clone()
+	cfg.AutoLoad = true
+	require.NoError(t, store.Put(ctx, cfg))
+	version := store.GetConfigVersion(100)
+	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, &viewpb.DataViewOfCollection{
+		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{Vchannel: channel}},
+	}, channel).SetLoadInfoVersion(version).SetPreparationPriority(12)
+	require.NoError(t, s.qviewsRuntime.shardViewRegistry.Ensure(shardID).AddPreparing(ctx, builder))
+	preparing := receiveReadinessSync(t, syncer, qviews.QueryViewStatePreparing)
+	client := newEnsureRPCClient(t, s)
+	result := make(chan error, 1)
+	go func() {
+		status, err := client.EnsureCollectionReady(ctx, readinessRequest(channel))
+		result <- merr.CheckRPCCall(status, err)
+	}()
+	assertReadinessBlocked(t, result)
+	cfg.AutoLoad = false
+	require.NoError(t, store.Put(ctx, cfg))
+	require.Equal(t, version, store.GetConfigVersion(100))
+	assertReadinessBlocked(t, result)
+	ready := preparing.View.IntoProto()
+	ready.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+	preparing.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(ready))
+	up := receiveReadinessSync(t, syncer, qviews.QueryViewStateUp)
+	require.EqualValues(t, 12, up.View.IntoProto().Meta.Control.PreparationPriority)
+	up.OnSyncResponse(up.View)
+	select {
+	case err := <-result:
+		require.NoError(t, err, "the originally admitted view must satisfy the waiter")
+	case <-ctx.Done():
+		t.Fatal("source-only update left the waiter waiting for a successor view")
+	}
+	status, err := client.EnsureCollectionReady(ctx, readinessRequest(channel))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+}

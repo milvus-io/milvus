@@ -12,7 +12,12 @@ import (
 // It unifies the DDL-side config (CollectionLoadInfo + LoadReplicaConfig).
 // Runtime node membership is derived from ResourceGroup by the Balancer.
 type LoadConfig struct {
-	AutoLoad                 bool // Persisted loading intent source, independent of current query waiters.
+	// AutoLoad is persisted scheduling metadata, independent of current waiters.
+	// Changing only this source publishes a new snapshot at the same Version;
+	// it affects future View priorities without rebuilding existing Views.
+	AutoLoad bool
+	// Version identifies immutable resource requirements, not every metadata
+	// publication. Use snapshot identity to detect an AutoLoad-only change.
 	Version                  uint64
 	DbID                     int64
 	CollectionID             int64

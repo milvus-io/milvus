@@ -10,7 +10,7 @@ The design covers Coordinator metadata and its QN/SN consumers. It does not
 change SchemaVersion, DataVersion or Manifest identity, introduce a metadata
 watch stream, or implement general storage/schema history GC.
 
-## One immutable record per version
+## Immutable resource requirements per version
 
 Use `coord/load_info/<collectionID>/<version>` for both current
 load configuration and retained historical requirements. One owner/catalog
@@ -69,8 +69,13 @@ not from today's partition keys. This merge does not require removing legacy
 partition APIs before their remaining consumers are adapted.
 
 Allocate and persist a new version under the collection's serialized update
-boundary before publishing it to planners. A committed version is immutable.
-Recovery and callback retries must not reuse an identity for different contents;
+boundary before publishing it to planners. Resource requirements at a committed
+version are immutable. The `auto_load` scheduling metadata is the sole exception
+to whole-record immutability: a source-only update replaces the current catalog
+record at the same version and publishes a new immutable in-memory object.
+Previously returned objects are never mutated. Recovery reads the persisted
+source; callback replay of the same source is a no-op.
+Recovery and callback retries must not reuse an identity for different requirements;
 version allocation must remain safe across complete Release and reload, even
 though no old LoadInfo record is retained. Version zero remains a current-state
 probe, never a resource-preparation identity. Exact historical lookup never
@@ -87,8 +92,9 @@ single-index hint does not restrict the new record's multiple-index selection.
 
 The catalog lives in `internal/metastore/kv/queryview/`. Each version is a single
 key containing partitions, required fields, preload hints and replicas. Save
-writes that key once, without separate partition or replica keys and without
-legacy dual writes. Release removes only this collection's new-format prefix.
+writes resource requirements once, and may replace only the current record's
+`auto_load` metadata without changing its version. This uses no separate partition
+or replica keys and no legacy dual writes. Release removes only this collection's new-format prefix.
 The legacy CollectionLoadInfo/PartitionLoadInfo catalogs and ReplicaManager
 retain the master implementation and are not QueryView state owners.
 
@@ -258,3 +264,17 @@ Recent traffic without a healthy Up View still selects the recovery baseline
 and traffic bonus first. Otherwise AutoLoad without a healthy Up View selects
 +10, even with cold access history. AutoLoad with a healthy Up View follows
 ordinary active/cold handoff scoring. Existing QueryView priorities stay immutable.
+
+A source-only change retains LoadInfoVersion and all View references. Under the
+existing collection update lock, persist the replacement before publishing it to
+both the latest-config and retained-version maps. Snapshot/listener revisions
+still advance so the Balancer sees the new source for future Views. A failed
+save publishes nothing; retry after a successful save is idempotent, including
+recovery between persistence and memory publication. GC uses the unchanged
+requirements version and the existing reference counts.
+
+Readiness compares requirements versions, not config pointers: a concurrent
+source-only publication does not make a serving collection unready. Actual
+partition/field/index/replica changes still allocate a fresh version, and full
+Release/reload never reuses the old identity. Source updates neither rebuild Up
+Views nor add a successor when an already admitted Preparing View completes.

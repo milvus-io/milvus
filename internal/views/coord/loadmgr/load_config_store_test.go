@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func newTestStore(t *testing.T) (*LoadConfigStore, *versionedTestHooks) {
@@ -180,4 +181,66 @@ func TestAutoLoadIntentPersistsAcrossPublicationAndRecovery(t *testing.T) {
 	recovered, err = RecoverLoadConfigStore(t.Context(), deps)
 	require.NoError(t, err)
 	require.Nil(t, recovered.GetConfig(100), "release removes the marker with the load intent")
+}
+
+func TestAutoLoadSourceUpdatePreservesRequirementsIdentity(t *testing.T) {
+	hooks := new(versionedTestHooks)
+	deps := versionedTestDependencies(t, hooks)
+	store, err := RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	cfg := sampleConfig()
+	cfg.AutoLoad = true
+	require.NoError(t, store.Put(t.Context(), cfg))
+	original := store.GetConfig(100)
+	snapshot := store.Snapshot()
+	before, err := store.GetLoadInfo(t.Context(), 100, original.Version)
+	require.NoError(t, err)
+	release, err := store.AcquireLoadInfo(t.Context(), 100, original.Version)
+	require.NoError(t, err)
+	defer release()
+	store.EnableGC()
+	var published []*LoadConfig
+	stop := store.RegisterLoadConfigListener(func(_ int64, cfg *LoadConfig, version uint64) {
+		require.Equal(t, original.Version, version)
+		published = append(published, cfg)
+	})
+	defer stop()
+	cfg.AutoLoad = false
+	hooks.beforeSave = func(*viewpb.CollectionLoadConfig) error { return merr.ErrServiceUnavailable }
+	require.ErrorIs(t, store.Put(t.Context(), cfg), merr.ErrServiceUnavailable)
+	require.Same(t, original, store.GetConfig(100), "failed writes must not publish")
+	require.Len(t, published, 1)
+	hooks.beforeSave = nil
+	require.NoError(t, store.Put(t.Context(), cfg))
+	current := store.GetConfig(100)
+	require.Equal(t, original.Version, current.Version)
+	require.NotSame(t, original, current)
+	require.False(t, current.AutoLoad)
+	require.True(t, original.AutoLoad)
+	require.True(t, snapshot.ConfigsMap()[100].AutoLoad, "old readers retain their snapshot")
+	require.False(t, store.Snapshot().ConfigsMap()[100].AutoLoad)
+	require.Len(t, published, 2)
+	require.Same(t, current, published[1])
+	require.Same(t, current, store.history[100][current.Version])
+	after, err := store.GetLoadInfo(t.Context(), 100, original.Version)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "QN/SN requirements do not change")
+	require.NoError(t, store.CollectLoadInfo(t.Context()))
+	require.Equal(t, 1, store.references[loadInfoKey{100, original.Version}])
+	require.NoError(t, store.Put(t.Context(), cfg))
+	require.Same(t, current, store.GetConfig(100), "callback replay is a no-op")
+	require.Len(t, published, 2)
+	recovered, err := RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	require.Equal(t, current, recovered.GetConfig(100))
+	stop()
+	cfg.PartitionIDs = append(cfg.PartitionIDs, 30)
+	require.NoError(t, store.Put(t.Context(), cfg))
+	require.Greater(t, store.GetConfigVersion(100), original.Version, "real requirements still advance identity")
+	require.Len(t, store.history[100], 2)
+	require.NoError(t, store.CollectLoadInfo(t.Context()))
+	require.Len(t, store.history[100], 2, "referenced requirements survive GC")
+	release()
+	require.NoError(t, store.CollectLoadInfo(t.Context()))
+	require.Len(t, store.history[100], 1)
 }

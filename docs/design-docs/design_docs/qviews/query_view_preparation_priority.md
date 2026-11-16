@@ -159,7 +159,9 @@ AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。需要创建加载配
 
 评分按顺序匹配：近期访问且没有健康 UpView 时，使用 +10 基准和最多 +8 的流量分；否则 `AutoLoad && !healthyUp` 使用 +10 基准，不要求访问历史为空。有健康 UpView 时 AutoLoad 不加分，按原有近期访问或冷 handoff 规则评分。因此 AutoLoad 的冷恢复也使用 +10，这是持久化加载策略，不是“当前存在等待请求”的推断。HIGH 的 +2 配置偏移保持不变。
 
-标识与当前加载配置同生命周期：完成 readiness、单个查询取消或请求超时不清除它；分区创建/部分释放、replica 调整和 Schema/Index 派生版本保留它。显式手动 LoadCollection/LoadPartitions 的新配置写入 false；Load 的 refresh 模式只刷新数据，不改加载来源。完整 Release 删除配置及标识，下次加载重新确定来源。来源本身变化也按既有版本化 LoadConfig 路径发布，不原地修改已发布对象。
+标识与当前加载配置同生命周期：完成 readiness、单个查询取消或请求超时不清除它；分区创建/部分释放、replica 调整和 Schema/Index 派生版本保留它。显式手动 LoadCollection/LoadPartitions 的新配置写入 false；Load 的 refresh 模式只刷新数据，不改加载来源。完整 Release 删除配置及标识，下次加载重新确定来源。仅来源变化时，在现有 collection 更新锁下覆盖当前持久化记录的调度元数据，保留 LoadInfoVersion；持久化成功后发布新的只读配置对象，不原地修改已发布对象。配置快照/监听通知仍更新，使后续正常创建的 View 使用新来源。资源要求变化才产生新 LoadInfoVersion。
+
+来源单独变化不触发 Up View 替换或 readiness 回退，也不在 Preparing View 完成后追加一轮低分 View。readiness 的并发校验使用资源要求版本，不能仅因配置对象指针更换就判定未就绪；真正的资源变更及 Release/reload 仍受版本约束。
 
 查询等待一个已有的手动 LoadConfig 时，不再登记临时 AutoLoad 加分。已接受的 Preparing View 不因查询到达或来源改变而重新打分；只有以后正常创建的 View 使用当时的配置、反馈和节点状态。
 
