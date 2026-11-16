@@ -83,12 +83,21 @@ type segmentManifestIndexRollback struct {
 // builds and dropped definitions whose catalog rows still need restoring.
 func (i *ManifestIndexRollbackInspector) scan(ctx context.Context) ([]segmentManifestIndexRollback, int) {
 	groups := make(map[int64]*segmentManifestIndexRollback)
+	classify := i.indexMeta.jsonFlatIndexMigrationFilter()
 	pendingRecords := 0
 	i.indexMeta.SegmentBuildInfo.buildID2SegmentIndex.Range(func(_ int64, record *model.SegmentIndex) bool {
 		if ctx.Err() != nil {
 			return false
 		}
 		if !record.ManifestPublished {
+			return true
+		}
+		retired, resolved := classify(record.CollectionID, record.IndexID)
+		if retired {
+			return true
+		}
+		if !resolved {
+			pendingRecords++ // Keep retrying until schema recovery or ordinary GC.
 			return true
 		}
 		// Count even records without a segment so inconsistent metadata cannot
@@ -131,7 +140,7 @@ func (i *ManifestIndexRollbackInspector) runOnce(ctx context.Context) bool {
 	if ready {
 		metrics.DataCoordManifestIndexRollbackReady.Set(1)
 		if !i.ready {
-			mlog.Info(ctx, "manifest index rollback complete: no manifest-resident index records remain")
+			mlog.Info(ctx, "manifest index rollback complete: no eligible manifest-resident index records remain")
 		}
 	}
 	i.ready = ready

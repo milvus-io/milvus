@@ -38,7 +38,6 @@ inline constexpr const char* kFmIndex = "fmindex";
 inline constexpr const char* kText = "text";
 inline constexpr const char* kNgram = "ngram";
 inline constexpr const char* kRTree = "rtree";
-inline constexpr const char* kJsonFlat = "json_flat";
 inline constexpr const char* kVectorMem = "vector_mem";
 inline constexpr const char* kVectorDisk = "vector_disk";
 

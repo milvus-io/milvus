@@ -374,13 +374,11 @@ TEST(JsonProjectedHybridIndexBuilderTest,
     }
 }
 
-TEST(JsonProjectedHybridIndexBuilderTest, FullJsonKeepsInvertedFamily) {
-    const auto adapted =
-        AdaptIndexType({.index_type = INVERTED_INDEX_TYPE,
-                        .field_type = DataType::JSON,
-                        .params = {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}}});
-    EXPECT_EQ(adapted.family, families::kJsonFlat);
-    for (const auto& index_type : {HYBRID_INDEX_TYPE, ASCENDING_SORT}) {
+TEST(JsonProjectedHybridIndexBuilderTest, FullJsonHasNoPhysicalIndex) {
+    for (const auto& index_type : {INVERTED_INDEX_TYPE,
+                                   NGRAM_INDEX_TYPE,
+                                   HYBRID_INDEX_TYPE,
+                                   ASCENDING_SORT}) {
         ExpectSegcoreError(ErrorCode::Unsupported, [&] {
             static_cast<void>(AdaptIndexType(
                 {.index_type = index_type,

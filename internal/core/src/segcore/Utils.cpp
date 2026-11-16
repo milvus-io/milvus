@@ -1534,13 +1534,12 @@ PrepareSealedIndexLoadConfig(const LoadIndexInfo& load_index_info) {
         // Persisted index_params never carry nullability, and an artifact
         // without a validity sidecar rebuilds validity from its postings only
         // when the field is nullable. Use the build boundary's rule: a typed
-        // JSON projection is nullable unless its cast is JSON or ARRAY_*.
+        // JSON projection is nullable unless its cast is ARRAY_*.
         bool nullable = load_index_info.schema.nullable();
         if (field_type == DataType::JSON) {
             const auto cast = JsonCastType::FromString(
                 config.at(JSON_CAST_TYPE).get<std::string>());
-            if (cast.data_type() != JsonCastType::DataType::JSON &&
-                cast.data_type() != JsonCastType::DataType::ARRAY) {
+            if (cast.data_type() != JsonCastType::DataType::ARRAY) {
                 nullable = true;
             }
         }
@@ -1618,9 +1617,6 @@ MakeSealedIndexRegistration(const LoadIndexInfo& info) {
             is_ngram = adapted.family == index::families::kNgram;
         }
         const auto cast_type = JsonCastType::FromString(cast->second);
-        // Full JSON uses the json_flat reader, including its NGRAM spelling.
-        is_ngram =
-            is_ngram && cast_type.data_type() != JsonCastType::DataType::JSON;
         registration.json_path = path->second;
         registration.json_cast_type = index::RuntimeJsonCastType(
             is_ngram ? index::NGRAM_INDEX_TYPE : "", cast_type);

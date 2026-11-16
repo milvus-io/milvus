@@ -48,7 +48,6 @@ enum class BackendInputShape {
     ArrayRows,
     NestedElements,
     SpatialWkb,
-    JsonDocument,
     JsonProjected,
 };
 

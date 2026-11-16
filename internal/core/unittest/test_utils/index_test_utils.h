@@ -143,8 +143,7 @@ LoadPublished(const std::string& family,
                                family == index::families::kVectorDisk ||
                                        family == index::families::kInverted ||
                                        family == index::families::kNgram ||
-                                       family == index::families::kText ||
-                                       family == index::families::kJsonFlat
+                                       family == index::families::kText
                                    ? storage::V1SourceLayout::DiskFiles
                                    : storage::V1SourceLayout::MemoryEntries}},
          std::move(options),

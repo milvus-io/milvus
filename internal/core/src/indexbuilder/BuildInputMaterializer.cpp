@@ -28,7 +28,6 @@
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/Json.h"
 #include "index/Families.h"
 #include "index/ParamUtils.h"
 #include "index/contracts/Registry.h"
@@ -340,52 +339,6 @@ class StringMaterializer final
     std::vector<std::unique_ptr<Batch>> batches_;
 };
 
-class JsonFlatMaterializer final
-    : public TypedMaterializerBase<std::string_view> {
- public:
-    struct Batch {
-        FieldDataPtr owner;
-        std::vector<std::string_view> views;
-        ValidityView validity;
-    };
-
-    using TypedMaterializerBase<std::string_view>::TypedMaterializerBase;
-
-    void
-    Add(const FieldDataPtr& input) override {
-        AssertInfo(input != nullptr && input->get_data_type() == DataType::JSON,
-                   "flat JSON source has incompatible field data");
-        auto batch = std::make_unique<Batch>();
-        batch->owner = input;
-        batch->validity = BatchValidity(input);
-        const auto* documents = static_cast<const Json*>(input->Data());
-        AssertInfo(documents != nullptr || input->Length() == 0,
-                   "JSON batch has null row data");
-        batch->views.reserve(input->Length());
-        for (size_t row = 0; row < input->Length(); ++row) {
-            batch->views.emplace_back(!batch->validity || batch->validity[row]
-                                          ? documents[row].data()
-                                          : std::string_view{});
-        }
-        this->AddRows(input->Length());
-        batches_.push_back(std::move(batch));
-    }
-
-    storage::ArtifactPtr
-        Build() &&
-        override {
-        std::vector<index::ScalarBuildBatch<std::string_view>> views;
-        views.reserve(batches_.size());
-        for (const auto& batch : batches_) {
-            views.push_back({batch->views, batch->validity});
-        }
-        return BuildBatches(views);
-    }
-
- private:
-    std::vector<std::unique_ptr<Batch>> batches_;
-};
-
 class ArrayViewMaterializer final : public TypedMaterializerBase<ArrayView> {
  public:
     struct Batch {
@@ -657,20 +610,6 @@ MakeScalarBuildInputMaterializer(DataType source_type,
     if (source_type == DataType::JSON) {
         AssertInfo(!ParseNested(params),
                    "JSON build input supports only the row coordinate domain");
-        if (family == index::families::kJsonFlat &&
-            value_type == DataType::JSON) {
-            const auto configured_value =
-                index::ReadNullableDataTypeParam(params, "value_type");
-            AssertInfo(
-                configured_value.has_value() &&
-                    *configured_value == DataType::JSON &&
-                    params.contains(JSON_CAST_TYPE) &&
-                    params.at(JSON_CAST_TYPE).is_string() &&
-                    params.at(JSON_CAST_TYPE).get<std::string>() == "JSON",
-                "flat JSON build requires JSON value_type and cast");
-            return std::make_unique<JsonFlatMaterializer>(
-                expected_rows, family, params);
-        }
         return MakeJsonBuildMaterializer(
             value_type, expected_rows, family, params);
     }

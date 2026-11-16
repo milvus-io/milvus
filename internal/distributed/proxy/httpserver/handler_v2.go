@@ -3131,6 +3131,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if err != nil {
 		return resp, err
 	}
+	var indexHints []string
 	if len(httpReq.Schema.Fields) == 0 {
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
@@ -3144,6 +3145,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		})
 		if err != nil {
 			return statusResponse, err
+		}
+		if status, ok := statusResponse.(*commonpb.Status); ok && status.GetReason() != "" {
+			indexHints = append(indexHints, fmt.Sprintf("field %q, index %q: %s", createIndexReq.FieldName, createIndexReq.IndexName, status.GetReason()))
 		}
 	} else {
 		if len(httpReq.IndexParams) == 0 {
@@ -3181,6 +3185,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if err != nil {
 				return statusResponse, err
 			}
+			if status, ok := statusResponse.(*commonpb.Status); ok && status.GetReason() != "" {
+				indexHints = append(indexHints, fmt.Sprintf("field %q, index %q: %s", indexParam.FieldName, indexParam.IndexName, status.GetReason()))
+			}
 		}
 	}
 	loadReq := &milvuspb.LoadCollectionRequest{
@@ -3191,7 +3198,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return h.proxy.LoadCollection(ctx, req.(*milvuspb.LoadCollectionRequest))
 	})
 	if err == nil {
-		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+		response := wrapperReturnDefault()
+		if len(indexHints) > 0 {
+			response[HTTPReturnMessage] = strings.Join(indexHints, "; ")
+		}
+		HTTPReturn(c, http.StatusOK, response)
 	}
 	return statusResponse, err
 }
@@ -3876,6 +3887,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 
 func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*IndexParamReq)
+	var indexHints []string
 	for _, indexParam := range httpReq.IndexParams {
 		req := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
@@ -3905,8 +3917,15 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 		if err != nil {
 			return resp, err
 		}
+		if status, ok := resp.(*commonpb.Status); ok && status.GetReason() != "" {
+			indexHints = append(indexHints, fmt.Sprintf("field %q, index %q: %s", indexParam.FieldName, indexParam.IndexName, status.GetReason()))
+		}
 	}
-	HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	response := wrapperReturnDefault()
+	if len(indexHints) > 0 {
+		response[HTTPReturnMessage] = strings.Join(indexHints, "; ")
+	}
+	HTTPReturn(c, http.StatusOK, response)
 	return httpReq.IndexParams, nil
 }
 

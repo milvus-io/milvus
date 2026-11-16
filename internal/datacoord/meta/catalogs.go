@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -27,6 +28,9 @@ import (
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
+	// SetCollectionSchemaGetter binds the local schema cache before recovery.
+	SetCollectionSchemaGetter(func(UniqueID) *schemapb.CollectionSchema)
+
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
@@ -82,9 +86,8 @@ type SegmentIndexCatalog interface {
 
 	// HasIndex reports whether the collection has an index.
 	HasIndex(collectionID int64) bool
-	// GetIndexesForCollection returns the indexes of the collection, filtered
-	// by indexName when it is not empty.
-	GetIndexesForCollection(collID UniqueID, indexName string) []*model.Index
+	// GetPhysicalIndexesForCollection excludes logical-only index definitions.
+	GetPhysicalIndexesForCollection(collID UniqueID) []*model.Index
 	// GetIndexedSegments returns the segments in segmentIDs whose indexes on
 	// fieldIDs are all finished.
 	GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs []UniqueID) []int64
