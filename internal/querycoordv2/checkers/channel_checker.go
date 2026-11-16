@@ -18,9 +18,6 @@ package checkers
 
 import (
 	"context"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -33,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -312,39 +308,11 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
-	// Group channels by their candidate node set and hand each group to the
-	// assign policy in one call. Assigning channel by channel lets every call
-	// observe the same node scores (the tasks of this round are not in the
-	// scheduler yet), so all channels of a replica end up on the same node.
-	type channelGroup struct {
-		nodes    []int64
-		channels []*meta.DmChannel
-	}
-	groups := make(map[string]*channelGroup)
-	groupKeys := make([]string, 0)
-	for _, ch := range channels {
-		var rwNodes []int64
-		if streamingutil.UseStreamingQueryNodeAsDelegator() {
-			rwNodes = replica.GetRWSQNodes()
-		} else {
-			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
-				rwNodes = replica.GetRWNodes()
-			}
-		}
-		key := nodesGroupKey(rwNodes)
-		group, ok := groups[key]
-		if !ok {
-			group = &channelGroup{nodes: rwNodes}
-			groups[key] = group
-			groupKeys = append(groupKeys, key)
-		}
-		group.channels = append(group.channels, ch)
-	}
-
+	// All channels in a replica share its SQNs. Assign the batch in one call
+	// so the policy accounts for earlier assignments when scoring later ones.
 	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
-	for _, key := range groupKeys {
-		group := groups[key]
-		plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
+	if len(channels) > 0 {
+		plans = c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channels, replica.GetRWSQNodes(), true)
 	}
 
 	for i := range plans {
@@ -356,19 +324,6 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	// consistently exceeds ChannelTaskTimeout never converges: killed and
 	// rebuilt with the same budget every check tick, no backoff or retry cap.
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
-}
-
-// nodesGroupKey returns an order-insensitive key of a node set.
-func nodesGroupKey(nodes []int64) string {
-	sorted := make([]int64, len(nodes))
-	copy(sorted, nodes)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	var sb strings.Builder
-	for _, node := range sorted {
-		sb.WriteString(strconv.FormatInt(node, 10))
-		sb.WriteByte(',')
-	}
-	return sb.String()
 }
 
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {

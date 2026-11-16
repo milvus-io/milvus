@@ -354,7 +354,6 @@ func (suite *MultiTargetBalancerTestSuite) TestPlanNoConflict() {
 }
 
 func TestMultiTargetBalancerTestSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	s := new(MultiTargetBalancerTestSuite)
 	suite.Run(t, s)
 }

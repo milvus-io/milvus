@@ -72,6 +72,7 @@ func (suite *StoppingBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeManager = session.NewNodeManager()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeManager, metacache.NewMetaStore(nil))
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 	suite.dist = meta.NewDistributionManager(suite.nodeManager)
@@ -105,7 +106,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRONodes() {
 		},
 	})
 
-	suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, collectionID, []int64{1, 2, 3}))
+	suite.meta.Put(ctx, createStreamingTestReplica(replicaID, collectionID, []int64{1, 2, 3}))
 
 	// Add nodes to node manager
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -152,6 +153,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 			ID:           replicaID,
 			CollectionID: collectionID,
 			Nodes:        []int64{1, 2}, // RW nodes
+			RwSqNodes:    []int64{1, 2}, // RW nodes
 			RoNodes:      []int64{3, 4}, // RO nodes (stopping)
 		},
 		typeutil.NewUniqueSet([]int64{1, 2, 3, 4}...),
@@ -289,6 +291,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 			ID:           replicaID,
 			CollectionID: collectionID,
 			Nodes:        []int64{},     // No RW nodes
+			RwSqNodes:    []int64{},     // No RW nodes
 			RoNodes:      []int64{1, 2}, // Only RO nodes
 		},
 		typeutil.NewUniqueSet([]int64{1, 2}...),
@@ -316,6 +319,5 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 }
 
 func TestStoppingBalancerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(StoppingBalancerTestSuite))
 }

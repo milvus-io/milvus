@@ -272,11 +272,11 @@ func TestRoundRobinAssignPolicy_AssignSegment_SingleNode(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution tests channel distribution
 func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
-	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 
 	// Add 3 nodes
 	for i := int64(1); i <= 3; i++ {
@@ -322,11 +322,11 @@ func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels tests with empty channel list
 func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
-	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -348,11 +348,11 @@ func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 
 // TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom tests that From field is correctly set
 func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
-	useRegularQueryNodes(t)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",

@@ -356,8 +356,8 @@ func TestScoreBasedAssignPolicy_ChannelOnlyCollectionRowsAndDelegatorOverhead(t 
 
 // TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality tests basic channel assignment
 func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
-	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -408,8 +408,8 @@ func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
 
 // TestScoreBasedAssignPolicy_AssignChannel_PrefersLowScoreNode tests channel assignment to low score nodes
 func TestScoreBasedAssignPolicy_AssignChannel_PrefersLowScoreNode(t *testing.T) {
-	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -566,8 +566,8 @@ func TestScoreBasedAssignPolicy_ConvertToNodeItemsByChannel(t *testing.T) {
 
 // TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels tests with no channels
 func TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
-	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -595,8 +595,8 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 
 // TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes tests with no nodes
 func TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes(t *testing.T) {
-	useRegularQueryNodes(t)
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()

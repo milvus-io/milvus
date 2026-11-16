@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 )
 
 // BalanceReplicaHelper provides shared helper methods for getting RW/RO nodes
@@ -30,22 +29,12 @@ type BalanceReplicaHelper struct {
 }
 
 // GetRWNodesForChannels returns the RW nodes for channel balancing.
-// When streaming service is enabled, it uses the compatibility helper;
-// otherwise it returns the replica's RW nodes directly.
 func (h *BalanceReplicaHelper) GetRWNodesForChannels(replica *meta.Replica) []int64 {
-	if streamingutil.UseStreamingQueryNodeAsDelegator() {
-		rwNodes, _ := utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
-		return rwNodes
-	}
-	return replica.GetRWNodes()
+	rwNodes, _ := utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
+	return rwNodes
 }
 
 // GetRWAndRONodesForChannels returns both RW and RO nodes for channel balancing.
-// When streaming service is enabled, it uses the compatibility helper;
-// otherwise it returns the replica's RW and RO nodes directly.
 func (h *BalanceReplicaHelper) GetRWAndRONodesForChannels(replica *meta.Replica) (rwNodes []int64, roNodes []int64) {
-	if streamingutil.UseStreamingQueryNodeAsDelegator() {
-		return utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
-	}
-	return replica.GetRWNodes(), replica.GetRONodes()
+	return utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
 }

@@ -75,6 +75,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(suite.T(), nodeManager)
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager, metacache.NewMetaStore(nil))
 	testTarget := meta.NewTargetManager(suite.broker, testMeta, metacache.NewMetaStore(nil))
 
@@ -401,7 +402,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
-			suite.meta.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
@@ -521,7 +522,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 		collection.LoadType = querypb.LoadType_LoadCollection
 		suite.meta.PutCollection(ctx, collection)
 		suite.meta.PutPartition(ctx, utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
-		suite.meta.Put(ctx, utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
+		suite.meta.Put(ctx, createStreamingTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
 		balancer.targetMgr.UpdateCollectionNextTarget(ctx, balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, balanceCase.collectionIDs[i])
@@ -638,7 +639,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
 			for replicaID, nodes := range c.replicaWithNodes {
-				suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+				suite.meta.Put(ctx, createStreamingTestReplica(replicaID, c.collectionID, nodes))
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
@@ -699,7 +700,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) getCollectionBalancePlans(balan
 	return segmentPlans, channelPlans
 }
 
-func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_ChannelOutBound() {
+func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_DoesNotMoveSQNForSealedNodeLayout() {
 	ctx := context.Background()
 	Params.Save(Params.QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	defer Params.Reset(Params.QueryCoordCfg.Balancer.Key)
@@ -758,6 +759,11 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	ch2Nodes := replica.GetChannelRWNodes("channel2")
 	suite.Len(ch1Nodes, 2)
 	suite.Len(ch2Nodes, 2)
+	// The channel is outside its sealed-node subset, but its delegator is
+	// already on the replica's SQN. Sealed-node layout must not move it.
+	mutable := replica.CopyForWrite()
+	mutable.AddRWSQNode(ch1Nodes[0])
+	replica = mutable.IntoReplica()
 
 	balancer.dist.ChannelDistManager.Update(ch1Nodes[0], []*meta.DmChannel{
 		{
@@ -772,7 +778,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 
 	sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 	suite.Len(sPlans, 0)
-	suite.Len(cPlans, 1)
+	suite.Empty(cPlans)
 }
 
 func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_SegmentOutbound() {
@@ -1007,6 +1013,5 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 }
 
 func TestChannelLevelScoreBalancerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(ChannelLevelScoreBalancerTestSuite))
 }

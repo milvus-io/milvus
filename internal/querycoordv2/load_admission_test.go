@@ -204,8 +204,8 @@ func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartiti
 }
 
 // theFormsOnlyStreamingNode is the streaming side of a form's instance: one
-// streaming node, for DDL and the write ahead log, in a group of its own that
-// holds no replica. Every query cluster is a group of regular query nodes.
+// streaming node in a separate group. Load admission checks the QueryNodes
+// in the requested resource groups independently of delegator placement.
 func theFormsOnlyStreamingNode() map[string]typeutil.UniqueSet {
 	return map[string]typeutil.UniqueSet{"internal": typeutil.NewUniqueSet(7)}
 }
@@ -361,8 +361,8 @@ func TestAScopedExpansionAskingMoreReplicasThanTheGroupHasQueryNodesIsRefused(t 
 
 // A group with enough query nodes admits the expansion, exactly as a first
 // load into it would be admitted - and with a form installed it is admitted
-// although the whole instance runs one streaming node: a form's delegators
-// go onto the replicas' own query nodes (UseStreamingQueryNodeAsDelegator).
+// although the whole instance runs one streaming node. This is an admission
+// policy independent of delegator placement.
 func TestAScopedExpansionIntoAGroupWithEnoughNodesIsAdmitted(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)

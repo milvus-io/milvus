@@ -77,6 +77,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(suite.T(), nodeManager)
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager, metacache.NewMetaStore(nil))
 	testTarget := meta.NewTargetManager(suite.broker, testMeta, metacache.NewMetaStore(nil))
 
@@ -438,7 +439,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
-			suite.meta.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
@@ -537,7 +538,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestDelegatorPreserveMemory() {
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
-			suite.meta.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
@@ -640,7 +641,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
-			suite.meta.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 
@@ -767,7 +768,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		collection.LoadType = querypb.LoadType_LoadCollection
 		suite.meta.PutCollection(ctx, collection)
 		suite.meta.PutPartition(ctx, utils.CreateTestPartition(balanceCase.collectionIDs[i], balanceCase.collectionIDs[i]))
-		suite.meta.Put(ctx, utils.CreateTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
+		suite.meta.Put(ctx, createStreamingTestReplica(balanceCase.replicaIDs[i], balanceCase.collectionIDs[i],
 			append(balanceCase.nodes, balanceCase.notExistedNodes...)))
 		balancer.targetMgr.UpdateCollectionNextTarget(ctx, balanceCase.collectionIDs[i])
 		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, balanceCase.collectionIDs[i])
@@ -884,7 +885,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
 			for replicaID, nodes := range c.replicaWithNodes {
-				suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+				suite.meta.Put(ctx, createStreamingTestReplica(replicaID, c.collectionID, nodes))
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
@@ -982,7 +983,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
-			suite.meta.Put(ctx, utils.CreateTestReplica(c.replicaID, c.collectionID, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(c.replicaID, c.collectionID, c.nodes))
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
@@ -1033,7 +1034,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
 }
 
 func TestScoreBasedBalancerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(ScoreBasedBalancerTestSuite))
 }
 
@@ -1070,7 +1070,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	collection.Status = querypb.LoadStatus_Loaded
 	suite.meta.PutCollection(ctx, collection)
 	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-	suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, collectionID, nodes))
+	suite.meta.Put(ctx, createStreamingTestReplica(replicaID, collectionID, nodes))
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1174,7 +1174,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections()
 	nodeInfo.SetState(session.NodeStateNormal)
 	suite.balancer.nodeManager.Add(nodeInfo)
 	suite.meta.HandleNodeUp(ctx, 1)
-	utils.RecoverAllCollection(suite.meta)
+	recoverStreamingTestReplicas(suite.T(), suite.meta)
 
 	// mock channel distribution
 	channelDist := make([]*meta.DmChannel, 0)
@@ -1208,7 +1208,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections()
 	})
 	suite.balancer.nodeManager.Add(nodeInfo2)
 	suite.meta.HandleNodeUp(ctx, 2)
-	utils.RecoverAllCollection(suite.meta)
+	recoverStreamingTestReplicas(suite.T(), suite.meta)
 
 	_, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 	suite.Len(channelPlans, 1)
@@ -1259,7 +1259,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
 	nodeInfo.UpdateStats(session.WithMemCapacity(1024))
 	suite.balancer.nodeManager.Add(nodeInfo)
 	suite.meta.HandleNodeUp(ctx, 1)
-	utils.RecoverAllCollection(suite.meta)
+	recoverStreamingTestReplicas(suite.T(), suite.meta)
 
 	// mock channel distribution
 	channelDist := make([]*meta.DmChannel, 0)
@@ -1285,7 +1285,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
 	})
 	suite.balancer.nodeManager.Add(nodeInfo2)
 	suite.meta.HandleNodeUp(ctx, 2)
-	utils.RecoverAllCollection(suite.meta)
+	recoverStreamingTestReplicas(suite.T(), suite.meta)
 
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.Key, "10")
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.Key)
@@ -1341,7 +1341,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive()
 		suite.meta.HandleNodeUp(ctx, nodeID)
 	}
 
-	utils.RecoverAllCollection(suite.meta)
+	recoverStreamingTestReplicas(suite.T(), suite.meta)
 
 	// mock channels on collection-a to node 1
 	collectionID := int64(1)

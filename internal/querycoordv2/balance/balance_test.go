@@ -179,6 +179,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 	for _, c := range cases {
 		suite.Run(c.name, func() {
 			suite.SetupTest()
+			useStreamingQueryNodes(suite.T(), suite.nodeManager)
 			suite.mockScheduler.ExpectedCalls = nil
 
 			// Setup mock scheduler to return the correct delta for each node
@@ -208,6 +209,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_LessThan2Nodes() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Create a replica with only 1 node
 	replica := meta.NewReplica(
@@ -216,6 +218,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_LessThan2Nodes() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1},
+			RwSqNodes:     []int64{1},
 		},
 		typeutil.NewUniqueSet(1),
 	)
@@ -227,6 +230,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_LessThan2Nodes() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_BalanceSegments() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Setup target manager mock
 	suite.targetMgr.EXPECT().CanSegmentBeMoved(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
@@ -259,6 +263,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_BalanceSegments() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1, 2},
+			RwSqNodes:     []int64{1, 2},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)
@@ -275,6 +280,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_BalanceSegments() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_BalanceChannels() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Enable auto balance channel
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "true")
@@ -311,6 +317,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_BalanceChannels() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1, 2},
+			RwSqNodes:     []int64{1, 2},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)
@@ -327,6 +334,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_BalanceChannels() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_AlreadyBalanced() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Setup target manager mock
 	suite.targetMgr.EXPECT().CanSegmentBeMoved(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
@@ -362,6 +370,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_AlreadyBalanced() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1, 2},
+			RwSqNodes:     []int64{1, 2},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)
@@ -375,6 +384,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_AlreadyBalanced() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_NoSegments() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Setup target manager mock
 	suite.targetMgr.EXPECT().CanSegmentBeMoved(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
@@ -402,6 +412,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_NoSegments() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1, 2},
+			RwSqNodes:     []int64{1, 2},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)
@@ -415,6 +426,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_NoSegments() {
 
 func (suite *BalanceTestSuite) TestBalanceReplica_SkipRedundantSegments() {
 	ctx := context.Background()
+	useStreamingQueryNodes(suite.T(), suite.nodeManager)
 
 	// Setup target manager mock
 	suite.targetMgr.EXPECT().CanSegmentBeMoved(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
@@ -450,6 +462,7 @@ func (suite *BalanceTestSuite) TestBalanceReplica_SkipRedundantSegments() {
 			CollectionID:  1,
 			ResourceGroup: meta.DefaultResourceGroupName,
 			Nodes:         []int64{1, 2},
+			RwSqNodes:     []int64{1, 2},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)
@@ -467,6 +480,5 @@ func (suite *BalanceTestSuite) TestBalanceReplica_SkipRedundantSegments() {
 }
 
 func TestBalanceSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(BalanceTestSuite))
 }

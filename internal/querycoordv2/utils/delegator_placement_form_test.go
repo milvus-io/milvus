@@ -118,12 +118,8 @@ func metaWithQueryClusters(t *testing.T, rgNames ...string) (context.Context, *m
 	return ctx, m
 }
 
-// A form's instance runs ONE streaming node, for DDL and the write ahead log,
-// and serves queries from resource groups of regular query nodes, several of
-// which load the same collection. Milvus's own bound - no more replicas than
-// streaming query nodes, because that is where a delegator goes - would refuse
-// the second one. Under a form the delegator goes onto the replica's regular
-// query nodes, so that bound does not apply and the regular one decides.
+// Form load admission allows independently loaded resource groups to outnumber
+// StreamingNodes. This policy does not select delegator placement.
 func TestAFormLoadsACollectionIntoMoreQueryClustersThanItHasStreamingNodes(t *testing.T) {
 	ctx, m := metaWithQueryClusters(t, "cluster_a", "cluster_b")
 	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{

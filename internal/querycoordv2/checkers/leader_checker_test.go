@@ -90,7 +90,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -189,7 +189,7 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -252,7 +252,7 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	replica := createStreamingTestReplica(1, 1, []int64{1, 2})
 	observer.meta.Put(ctx, replica)
 	segments := []*datapb.SegmentInfo{
 		{
@@ -288,6 +288,7 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 
 	mutableReplica := replica.CopyForWrite()
 	mutableReplica.AddRONode(2)
+	mutableReplica.AddROSQNode(2)
 	observer.meta.Put(ctx, mutableReplica.IntoReplica())
 
 	tasks := suite.checker.Check(context.TODO())
@@ -299,7 +300,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -359,8 +360,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 2))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	observer.meta.Put(ctx, utils.CreateTestReplica(2, 1, []int64{3, 4}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(2, 1, []int64{3, 4}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -437,7 +438,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -483,7 +484,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -535,7 +536,7 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	observer := suite.checker
 	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -599,6 +600,5 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 }
 
 func TestLeaderCheckerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(LeaderCheckerTestSuite))
 }

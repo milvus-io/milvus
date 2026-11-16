@@ -22,16 +22,23 @@ import (
 	"github.com/bytedance/mockey"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// useRegularQueryNodes models a Form replica whose WAL lives on a separate SN.
-// These tests exercise regular-QN placement and the fallback when the WAL owner
-// is outside the replica, without starting a StreamingCoord.
-func useRegularQueryNodes(t *testing.T) {
+// useStreamingQueryNodes exposes this fixture's registered nodes as SQNs.
+// Keep the WAL owner outside the replica to exercise candidate scoring.
+func useStreamingQueryNodes(t *testing.T, nodeManager *session.NodeManager) {
 	t.Helper()
-	extension.SetForm()
-	t.Cleanup(extension.ResetForTest)
+	nodes := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).To(
+		func(*snmanager.StreamingNodeManager) typeutil.UniqueSet {
+			ids := typeutil.NewUniqueSet()
+			for _, node := range nodeManager.GetAll() {
+				ids.Insert(node.ID())
+			}
+			return ids
+		}).Build()
+	t.Cleanup(func() { nodes.UnPatch() })
 	wal := mockey.Mock((*snmanager.StreamingNodeManager).GetWALLocated).Return(int64(10000)).Build()
 	t.Cleanup(func() { wal.UnPatch() })
 }

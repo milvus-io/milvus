@@ -77,6 +77,7 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(suite.T(), nodeManager)
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager, metacache.NewMetaStore(nil))
 	testTarget := meta.NewTargetManager(suite.broker, testMeta, metacache.NewMetaStore(nil))
 
@@ -282,7 +283,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			collection.LoadType = querypb.LoadType_LoadCollection
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-			suite.meta.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(1, 1, c.nodes))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -359,7 +360,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			collection.Status = querypb.LoadStatus_Loading
 			collection.LoadType = querypb.LoadType_LoadCollection
 			suite.meta.PutCollection(ctx, collection)
-			suite.meta.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
+			suite.meta.Put(ctx, createStreamingTestReplica(1, 1, c.nodes))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -532,7 +533,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			collection.LoadType = querypb.LoadType_LoadCollection
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-			suite.meta.Put(ctx, utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
+			suite.meta.Put(ctx, createStreamingTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -659,7 +660,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.meta.PutCollection(ctx, collection)
 			suite.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
 			for replicaID, nodes := range c.replicaWithNodes {
-				suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+				suite.meta.Put(ctx, createStreamingTestReplica(replicaID, c.collectionID, nodes))
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
@@ -723,7 +724,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 }
 
 func TestRowCountBasedBalancerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(RowCountBasedBalancerTestSuite))
 }
 

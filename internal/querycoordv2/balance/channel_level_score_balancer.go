@@ -18,7 +18,6 @@ package balance
 
 import (
 	"context"
-	"math"
 	"sort"
 
 	"github.com/samber/lo"
@@ -28,14 +27,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ChannelLevelScoreBalancer extends ScoreBasedBalancer to provide channel-level balance awareness.
-// It balances segments and channels at the channel level, ensuring that segments belonging to
+// It balances segments at the channel level, ensuring that segments belonging to
 // the same channel are balanced among the nodes assigned to that channel (exclusive mode).
 // When exclusive mode cannot be achieved (some channels have no assigned nodes), it falls back
 // to the ScoreBasedBalancer behavior.
@@ -60,10 +57,9 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 	}
 }
 
-// BalanceReplica balances segments and channels at the channel level within a replica.
-// It first checks if exclusive mode can be enabled (all channels have assigned RW nodes).
-// In exclusive mode, it balances segments and channels per channel among the channel's assigned nodes.
-// If exclusive mode cannot be achieved, it delegates to ScoreBasedBalancer.
+// BalanceReplica balances channels on SQNs first, then balances sealed segments
+// within each channel's assigned nodes. If a channel has no exclusive node set,
+// it delegates segment balancing to ScoreBasedBalancer.
 func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := mlog.With(
 		mlog.Int64("collection", replica.GetCollectionID()),
@@ -81,15 +77,10 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 	}()
 
-	streamingEnabled := streamingutil.UseStreamingQueryNodeAsDelegator()
-	if streamingEnabled {
-		// Make a plan to rebalance the channel first.
-		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
-		channelPlan := b.balanceChannels(ctx, br, replica)
-		// If the channelPlan is not empty, do it directly, don't do the segment balance.
-		if len(channelPlan) > 0 {
-			return nil, channelPlan
-		}
+	// SQN channel placement is independent of the sealed-segment node layout.
+	channelPlan := b.balanceChannels(ctx, br, replica)
+	if len(channelPlan) > 0 {
+		return nil, channelPlan
 	}
 
 	exclusiveMode := true
@@ -116,23 +107,9 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 
 		channelRwNodes := replica.GetChannelRWNodes(channelName)
 		channelRWNodeSet := typeutil.NewUniqueSet(channelRwNodes...)
-		channelOutboundNodes := typeutil.NewUniqueSet()
 		segmentOutboundNodes := typeutil.NewUniqueSet()
 
-		// Streaming channel placement is handled by score-based channel balance
-		// and stopping balance. Only derive channel outbound nodes from channel
-		// distribution in legacy mode.
-		if !streamingEnabled {
-			channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
-			for _, channel := range channelDist {
-				if !channelRWNodeSet.Contain(channel.Node) {
-					channelOutboundNodes.Insert(channel.Node)
-				}
-			}
-		}
-
-		// Sealed segments outside the channel's exclusive RW node set are true
-		// outbound workloads regardless of whether streaming service is enabled.
+		// Evacuate sealed segments outside this channel's exclusive node set.
 		segmentDist := b.dist.SegmentDistManager.GetByFilter(meta.WithChannel(channelName), meta.WithReplica(replica))
 		for _, segment := range segmentDist {
 			if !channelRWNodeSet.Contain(segment.Node) {
@@ -140,51 +117,19 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 			}
 		}
 
-		hasChannelOutbound := channelOutboundNodes.Len() != 0
-		hasSegmentOutbound := segmentOutboundNodes.Len() != 0
-		if channelOutboundNodes.Len() != 0 {
-			channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelOutboundNodes.Collect())...)
+		if segmentOutboundNodes.Len() > 0 {
+			outboundPlans := b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, segmentOutboundNodes.Collect())
+			segmentPlans = append(segmentPlans, outboundPlans...)
+			if len(outboundPlans) > 0 {
+				continue
+			}
 		}
 
-		outboundSegmentPlans := make([]assign.SegmentAssignPlan, 0)
-		if hasSegmentOutbound && len(channelPlans) == 0 {
-			outboundSegmentPlans = b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, segmentOutboundNodes.Collect())
-			segmentPlans = append(segmentPlans, outboundSegmentPlans...)
-		}
-
-		// Keep channel outbound evacuation and executable segment outbound plans
-		// ahead of normal balancing. If no segment outbound plan can be generated,
-		// continue with normal segment balancing for the channel.
-		if hasChannelOutbound || (hasSegmentOutbound && (len(channelPlans) != 0 || len(outboundSegmentPlans) != 0)) {
-			continue
-		}
-
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingEnabled {
-			channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
-		}
-
-		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
-		}
+		// If evacuation cannot produce a plan, continue normal segment balance.
+		segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
 	}
 
 	return segmentPlans, channelPlans
-}
-
-// genChannelPlanForOutboundNodes generates channel plans to move channels from outbound nodes
-// (nodes that are no longer in the channel's RW node list) to online nodes.
-func (b *ChannelLevelScoreBalancer) genChannelPlanForOutboundNodes(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []assign.ChannelAssignPlan {
-	channelPlans := make([]assign.ChannelAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
-		plans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
-		for i := range plans {
-			plans[i].From = nodeID
-			plans[i].Replica = replica
-		}
-		channelPlans = append(channelPlans, plans...)
-	}
-	return channelPlans
 }
 
 // genSegmentPlanForOutboundNodes generates segment plans to move segments from outbound nodes
@@ -269,46 +214,4 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	}
 
 	return segmentPlans
-}
-
-// genChannelPlan generates channel balance plans for a specific channel within a replica.
-// It distributes channels evenly across online nodes based on channel count.
-func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64) []assign.ChannelAssignPlan {
-	channelPlans := make([]assign.ChannelAssignPlan, 0)
-	if len(onlineNodes) > 1 {
-		// start to balance channels on all available nodes
-		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channelName))
-		if len(channelDist) == 0 {
-			return nil
-		}
-		average := int(math.Ceil(float64(len(channelDist)) / float64(len(onlineNodes))))
-
-		// find nodes with less channel count than average
-		nodeWithLessChannel := make([]int64, 0)
-		channelsToMove := make([]*meta.DmChannel, 0)
-		for _, node := range onlineNodes {
-			channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
-			channels = sortIfChannelAtWALLocated(channels)
-
-			if len(channels) <= average {
-				nodeWithLessChannel = append(nodeWithLessChannel, node)
-				continue
-			}
-
-			channelsToMove = append(channelsToMove, channels[average:]...)
-		}
-
-		if len(nodeWithLessChannel) == 0 || len(channelsToMove) == 0 {
-			return nil
-		}
-
-		channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
-		for i := range channelPlans {
-			channelPlans[i].From = channelPlans[i].Channel.Node
-			channelPlans[i].Replica = replica
-		}
-
-		return channelPlans
-	}
-	return channelPlans
 }

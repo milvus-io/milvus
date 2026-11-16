@@ -90,17 +90,13 @@ func (suite *ChannelCheckerTestSuite) channelOnAQueryCluster(regular, streamingQ
 	return action.Node()
 }
 
-// A form keeps its one streaming node for DDL and the write ahead log and
-// serves queries from regular query nodes, one replica per query cluster. The
-// delegator of a replica goes onto that replica's regular query node, which
-// watches the channel and reads the WAL remotely - never onto the streaming
-// query node the replica manager may still have handed the replica.
-func (suite *ChannelCheckerTestSuite) TestUnderAFormADelegatorGoesToARegularQueryNode() {
+// Form installation does not change delegator placement.
+func (suite *ChannelCheckerTestSuite) TestUnderAFormADelegatorGoesToTheStreamingQueryNode() {
 	ext.ResetForTest()
 	suite.T().Cleanup(ext.ResetForTest)
 	ext.SetForm()
 
-	suite.EqualValues(11, suite.channelOnAQueryCluster(11, 1051, 1007))
+	suite.EqualValues(1051, suite.channelOnAQueryCluster(11, 1051, 1007))
 }
 
 // A stock binary keeps milvus's placement: beside the WAL's readers, on the

@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -121,10 +121,9 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		return nil, err
 	}
 
-	// A replica needs a streaming query node of its own only when that is
-	// where its delegator goes; under an installed form it goes onto the
-	// replica's regular query nodes, and the regular bound below is the bound.
-	if streamingutil.UseStreamingQueryNodeAsDelegator() && checkNodeNum {
+	// Preserve the existing load admission policy independently of delegator
+	// placement. Form loads are bounded by resource-group QueryNodes below.
+	if !extension.FormInstalled() && checkNodeNum {
 		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
 		if replicaNumber > int32(streamingNodeCount) {
 			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))

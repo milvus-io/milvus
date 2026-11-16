@@ -80,6 +80,7 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
+	useStreamingQueryNodes(suite.T(), suite.nodeMgr)
 	suite.metaStore = metacache.NewMetaStore(nil)
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
@@ -107,7 +108,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	// set meta
 	suite.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	suite.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.meta.Put(ctx, createStreamingTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -212,6 +213,5 @@ func (suite *CheckerControllerSuite) TestBasic() {
 }
 
 func TestCheckControllerSuite(t *testing.T) {
-	useRegularQueryNodes(t)
 	suite.Run(t, new(CheckerControllerSuite))
 }

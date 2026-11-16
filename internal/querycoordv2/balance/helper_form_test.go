@@ -28,11 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
-// The nodes a channel is balanced across follow where delegators live. On a
-// stock binary with the streaming service on that is the replica's streaming
-// query nodes; under an installed form it is the replica's regular query
-// nodes, RO ones included, so a query node leaving its cluster is drained of
-// its delegator exactly as it was before the streaming service existed.
+// Form installation does not change the nodes used for channel balancing.
 func TestChannelBalanceNodesFollowWhereDelegatorsLive(t *testing.T) {
 
 	replica := meta.NewReplica(&querypb.Replica{
@@ -63,9 +59,9 @@ func TestChannelBalanceNodesFollowWhereDelegatorsLive(t *testing.T) {
 		ext.ResetForTest()
 		t.Cleanup(ext.ResetForTest)
 		ext.SetForm()
-		assert.Equal(t, []int64{11}, helper.GetRWNodesForChannels(replica))
+		assert.Equal(t, []int64{7}, helper.GetRWNodesForChannels(replica))
 		rw, ro := helper.GetRWAndRONodesForChannels(replica)
-		assert.Equal(t, []int64{11}, rw)
+		assert.Equal(t, []int64{7}, rw)
 		assert.Equal(t, []int64{12}, ro)
 	})
 }
