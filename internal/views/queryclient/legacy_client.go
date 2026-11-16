@@ -149,6 +149,7 @@ func newLegacyClient(
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
+	shardClient.selectionConfig = cfg.ReplicaSelection
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{
 		shardClient:   shardClient,

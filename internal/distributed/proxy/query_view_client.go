@@ -87,8 +87,9 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 	)
 	client := queryclient.NewLegacyViewQueryClient(
 		queryclient.ViewQueryClientConfig{
-			LoadInfoClient: loadInfoClient,
-			QueryHook:      hook,
+			LoadInfoClient:   loadInfoClient,
+			QueryHook:        hook,
+			ReplicaSelection: proxyReplicaSelectionConfig(),
 		},
 		queryPlanClient,
 		queryServiceClient,
@@ -101,4 +102,20 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 		queryNodeClient.Close()
 	}
 	return client, closeFunc, nil
+}
+
+// The policy name is restart-only. The provider samples live tunables once per
+// shard request, keeping outstanding attempts on their original accounting mode.
+func proxyReplicaSelectionConfig() func() queryclient.ReplicaSelectionConfig {
+	p := &paramtable.Get().ProxyCfg
+	if p.ReplicaSelectionPolicy.GetValue() != "latency_weighted" {
+		return nil
+	}
+	return func() queryclient.ReplicaSelectionConfig {
+		return queryclient.ReplicaSelectionConfig{
+			Enabled: p.LatencyWeightedEnabled.GetAsBool(), Decay: p.LatencyWeightedDecay.GetAsDurationByParse(),
+			MinShare: p.LatencyWeightedMinShare.GetAsFloat(), HedgeEnabled: p.LatencyWeightedHedgeEnabled.GetAsBool(),
+			HedgeMinDelay: p.LatencyWeightedHedgeMinDelay.GetAsDurationByParse(), HedgeMinWinRate: p.LatencyWeightedHedgeMinWinRate.GetAsFloat(),
+		}
+	}
 }

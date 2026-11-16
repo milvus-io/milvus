@@ -19,6 +19,7 @@ package grpcproxy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -134,4 +135,32 @@ func TestDefaultProxyViewQueryClientHookInitFailure(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Zero(t, watch.Times())
 	})
+}
+
+func TestProxyReplicaSelectionConfiguration(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	cfg := &params.ProxyCfg
+	for _, item := range []*paramtable.ParamItem{&cfg.ReplicaSelectionPolicy, &cfg.LatencyWeightedEnabled, &cfg.LatencyWeightedDecay, &cfg.LatencyWeightedMinShare, &cfg.LatencyWeightedHedgeEnabled, &cfg.LatencyWeightedHedgeMinDelay, &cfg.LatencyWeightedHedgeMinWinRate} {
+		key, value := item.Key, item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
+	}
+	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "look_aside"))
+	require.Nil(t, proxyReplicaSelectionConfig(), "default preserves the existing QueryView router")
+	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "latency_weighted"))
+	for key, value := range map[string]string{cfg.LatencyWeightedEnabled.Key: "true", cfg.LatencyWeightedDecay.Key: "10s", cfg.LatencyWeightedMinShare.Key: "0.001", cfg.LatencyWeightedHedgeEnabled.Key: "true", cfg.LatencyWeightedHedgeMinDelay.Key: "200ms", cfg.LatencyWeightedHedgeMinWinRate.Key: "0.3"} {
+		require.NoError(t, params.Save(key, value))
+	}
+	provider := proxyReplicaSelectionConfig()
+	require.NotNil(t, provider)
+	captured := provider()
+	require.True(t, captured.Enabled)
+	require.Equal(t, 10*time.Second, captured.Decay)
+	require.Equal(t, .001, captured.MinShare)
+	require.True(t, captured.HedgeEnabled)
+	require.Equal(t, 200*time.Millisecond, captured.HedgeMinDelay)
+	require.Equal(t, .3, captured.HedgeMinWinRate)
+	require.NoError(t, params.Save(cfg.LatencyWeightedEnabled.Key, "false"))
+	require.False(t, provider().Enabled)
+	require.True(t, captured.Enabled, "previous requests retain their captured mode")
 }
