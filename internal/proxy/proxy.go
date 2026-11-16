@@ -126,6 +126,8 @@ type Proxy struct {
 	// resource manager
 	resourceManager resource.Manager
 
+	targetCompactionEnabled bool
+
 	// materialized view
 	enableMaterializedView bool
 
@@ -166,6 +168,8 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
 		requests:        reqregistry.New(),
+		targetCompactionEnabled: Params.DataCoordCfg.EnableCompaction.GetAsBool() &&
+			Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool(),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	hookutil.SetHook(connection.GetManager())

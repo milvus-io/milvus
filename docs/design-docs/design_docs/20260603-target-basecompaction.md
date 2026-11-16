@@ -7,6 +7,157 @@
 - **Related Issues:** #49991, #50057
 - **Released:** N/A
 
+## Dedicated Target API
+
+The dedicated API gives a compaction request a durable resource ID while it
+waits for data or execution capacity. A Target can create several physical
+tasks over its lifetime. Each task has its own identity and is recovered by
+the compaction task scheduler. The original Base design is recorded below.
+
+### Create, observe, and stop
+
+`CreateCompactionTarget`, `DescribeCompactionTarget`, `ListCompactionTargets`,
+and `DropCompactionTarget` are available over gRPC and under
+`/v2/vectordb/compaction_targets` over HTTP. Create resolves the collection
+through RootCoord and authorizes `PrivilegeCompaction` on that resource.
+DataCoord revalidates the stable collection ID and metadata revision before
+committing the Target. Describe and List resolve current collection names
+from the stored ID. Cluster administrators can inspect history for a deleted
+collection and list cluster-wide Standing Targets with `includeSystem`.
+
+Create fixes a timestamp `T` and returns the Target ID and its initial matched
+row count. An uncertain persistence result is confirmed by reading the same
+candidate ID. If that read cannot establish the outcome, Create reports an
+unknown outcome. Proxy forwarding and SDK Create calls dispatch at most one
+application request. The operator can use List to inspect recent Targets
+before deciding whether to submit a new request.
+
+An active Target can report a fresh observation through Describe. A successful
+observation can report zero remaining rows while a terminal write is still
+pending. List returns persisted definitions and lifecycle fields. The first
+successful terminal write fixes the stop reason and timestamp. Repeating Drop
+preserves this result while the record exists.
+
+### Manual REWRITE
+
+The current scope is healthy, Flushed data in the collection outside L0 and
+L2, excluding imports that have not committed. A segment's effective data
+start must be strictly before `T`. This uses the import commit timestamp,
+segment statistics, and start position. Missing timestamp facts are included
+conservatively. If the caller supplies segment IDs, the Target stores those
+lineage roots and follows the current descendants recorded by compaction.
+
+REWRITE matches in-scope segments whose rewrite timestamp is zero or earlier
+than `T`. A full Mix, Sort, Clustering, or Schema replacement publishes its
+task's admission timestamp. Same-ID schema updates retain the existing
+timestamp. Snapshot protection, occupancy, and index readiness can defer work
+while the segment remains part of the observed match set.
+
+Before saving satisfaction, DataCoord rechecks the collection snapshot and
+relevant in-flight inputs while serializing new task admission. It also takes
+shared locks on the collection's DDL resources. DropCollection holds the
+exclusive collection lock through its acknowledgment, so early channel
+cleanup cannot turn pending work into a false `satisfied` outcome. The control
+channel callback persists the collection tombstone, then ends active Targets
+for that stable ID with `scope_dropped`. Startup recovery checks retained
+active Targets against collection metadata. The configurable
+`dataCoord.compaction.target.retentionSeconds` window defaults to seven days.
+After the Target record is collected, Describe and Drop return TargetNotFound.
+
+### Manual OPTIMIZE and Standing SIZE
+
+Create takes a positive byte size for OPTIMIZE. It computes one actual size
+using the existing Force Merge sizing rules and persists both values. Each
+physical group uses that size, including groups that first flush while the
+Target is active. A group is satisfied when it has no segments above the 5%
+tolerance and at most one small tail. DataCoord rechecks published segment
+sizes and related in-flight work before recording satisfaction.
+
+An active OPTIMIZE excludes new SIZE packages with overlapping inputs and
+overlapping Clustering work. The final check uses current segment facts under
+the collection admission lock. A collection has at most one active OPTIMIZE.
+Its active slot and Target record are written atomically, so a delayed write
+from a previous coordinator cannot admit a second Target.
+
+Standing SIZE keeps one cluster-wide ID. Describe, List, and reconciliation
+derive its settings from the current configuration. Reconciliation uses
+TwoTier with the existing normal and disk size profiles. Eligible segments
+with an independent rewrite requirement can share a size package. Any
+remaining independent rewrites can run individually.
+
+### Standing SORT and task admission
+
+Standing SORT keeps one cluster-wide ID and persists its enabled condition.
+It checks ordinary flushed data for the published sorted state and can plan
+Sort work while global auto compaction is disabled. Import owns its sorting
+stage. When a segment needs both SORT and REWRITE, a sufficiently recent
+published Sort replacement can satisfy the REWRITE condition.
+
+Reconciliation plans each complete input group, then selects full plans
+across collections, groups, and compatible work. In both startup modes, the
+Inspector uses one token bucket for new physical tasks from legacy compaction,
+TBC, Import, and Restore. A failed pre-queue submission returns its token.
+Recovery and requeue of previously accepted tasks use the original admission.
+`dataCoord.compaction.rateLimitTokens` and `dataCoord.compaction.rateLimitInterval`
+configure the shared bucket. The legacy `target.maxEventsPerReconcile` setting
+is deprecated.
+
+### Standing storage maintenance
+
+Storage Version and Storage Format keep separate cluster-wide identities and
+save their conditions independently. Both use global auto compaction and their
+own enable settings. Storage Version observes the published segment version
+against the V2 or V3 writer mode. Storage Format is enabled only for a valid
+V3 writer format and observes all insert group formats in the published
+manifest revision. DataCoord reuses successful reads of that revision.
+A missing manifest or a nonempty segment with no identifiable insert groups
+leaves the Format observation incomplete.
+
+Both sources can plan Mix tasks for healthy, flushed internal segments,
+including L2. The existing query node version requirement and TEXT downgrade
+restriction apply to execution. Each source reports its own remaining rows
+through Describe while compatible demands share physical work. Mix uses the
+writer settings read at dispatch and publishes its output version and
+manifest through the ordinary task path.
+
+### Standing Delete Cleanup and TTL
+
+Delete Cleanup and TTL each keep one cluster-wide ID. The coordinator confirms
+their independent conditions in the catalog before planning. Both follow global
+auto compaction and preserve their active IDs across disablement and restart.
+Describe reports matching rows even when a collection opt-out, snapshot,
+in-flight task, visibility, importing, or index readiness delays execution.
+
+Delete Cleanup uses the published deltalog count, byte size, and delete-to-row
+ratio. TTL uses the existing timestamp and expiration quantiles, and import
+commit time when available. Negative strict tolerance disables the strict
+comparison. Zero uses the collection TTL directly, and positive tolerance
+adds the configured hours. Describe and List expose the saved
+`strict_tolerance_hours`, with `-1` representing every disabled value.
+
+Compatible cleanup demands share a Mix task. L2 follows the Single policy's
+eligibility and a nonempty replacement is published as L1. L1 and older levels
+retain the automatic Mix sort and index requirements. The Mix task uses the
+collection TTL and schema captured during planning, and filters rows using the
+worker clock. Reconciliation checks published output again on the next round.
+
+### Compatibility and verification
+
+`dataCoord.compaction.enableTargetBasedCompaction` is a default-off startup
+setting. With it enabled, ordinary manual compaction and target-size requests
+use the dedicated Target API. Legacy L0 and Clustering still create physical
+tasks, and their existing task-state RPCs remain available. In legacy mode,
+ordinary manual compaction uses its task path. Stored Target history becomes
+accessible again when the setting is re-enabled.
+
+Verification exercises the four operations through Go SDK and REST, including
+the published replacement's lineage, snapshot protection and resumption, and
+collection deletion while a Target is active. Coordinator tests cover
+ambiguous writes, stale collection identity, late segment publication, and
+contention among task producers.
+
+## Original Base Slice
+
 ## Summary
 
 This slice adds the first target-based compaction path behind the default-off

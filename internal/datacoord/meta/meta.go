@@ -107,6 +107,7 @@ type Meta struct {
 	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
+	manifestFormats        manifestFormatReader
 	DataViewManager        DataViewManager
 	StreamingNodeCatalog   metastore.StreamingNodeCataLog
 
@@ -153,6 +154,11 @@ type dbInfo struct {
 	ID         int64
 	Name       string
 	Properties []*commonpb.KeyValuePair
+}
+
+func (m *Meta) CloseManifestExecutors() {
+	m.manifestFormats.close()
+	m.CloseManifestCommitExecutor()
 }
 
 func (m *Meta) CloseManifestCommitExecutor() {
@@ -601,6 +607,7 @@ func (m *Meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 	m.Segments.DropSegment(segmentID)
+	m.manifestFormats.cache.Delete(segmentID)
 	mlog.Info(ctx, "meta update: dropping segment - complete",
 		mlog.Int64("segmentID", segmentID))
 	return nil

@@ -127,7 +127,7 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 				continue
 			}
 		}
-		if err := c.Compactions.EnqueueCompaction(plan); err != nil {
+		if err := c.Compactions.EnqueueCompaction(c.Ctx, plan, meta.CompactionAdmissionOptions{Producer: meta.ProducerRestore}); err != nil {
 			return false, err
 		}
 	}

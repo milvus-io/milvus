@@ -76,17 +76,19 @@ func TestBroadcastLeavesGuardsWithTheTaskWhenTheAckWaitFails(t *testing.T) {
 
 	// So the caller's deferred Close() must leave the lock where it is.
 	api.Close()
-	_, err = bm.resourceKeyLocker.FastLock(collKey)
-	require.ErrorIs(t, err, errFastLockFailed)
+	readKey := message.NewSharedCollectionNameResourceKey("db1", "coll1")
+	guard, err := bm.TryLockResourceKeys(t.Context(), readKey)
+	require.NoError(t, err)
+	require.Nil(t, guard, "local collection work must wait for the pending broadcast")
 
 	// The task releases it once, when it finishes acking.
 	releaseAppends()
 	require.Eventually(t, func() bool {
-		g, err := bm.resourceKeyLocker.FastLock(collKey)
-		if err != nil {
+		release, err := bm.TryLockResourceKeys(t.Context(), readKey)
+		if err != nil || release == nil {
 			return false
 		}
-		g.Unlock()
+		release()
 		return true
 	}, 10*time.Second, 10*time.Millisecond)
 }

@@ -24,6 +24,7 @@ import (
 var (
 	buildIndexCh     chan UniqueID
 	statsTaskCh      chan UniqueID
+	clusteringSortCh = make(chan UniqueID, 1024)
 	statsBuildCh     chan UniqueID
 	buildIndexChOnce sync.Once
 	statsTaskChOnce  sync.Once
@@ -90,6 +91,12 @@ func GetStatsTaskChSingleton() chan UniqueID {
 		statsTaskCh = make(chan UniqueID, 1024)
 	})
 	return statsTaskCh
+}
+
+// GetClusteringSortCh carries dependency Sort work from an admitted
+// clustering task. Ordinary flush notifications use statsTaskCh.
+func GetClusteringSortCh() chan UniqueID {
+	return clusteringSortCh
 }
 
 // getStatsBuildChSingleton carries segments that may need text or JSON key

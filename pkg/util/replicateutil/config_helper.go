@@ -135,6 +135,12 @@ func (g *ConfigHelper) GetReplicateConfiguration() *commonpb.ReplicateConfigurat
 	return g.cfg
 }
 
+// HasReplicationTopology reports whether a cluster configuration includes multiple
+// clusters or cross-cluster edges.
+func HasReplicationTopology(config *commonpb.ReplicateConfiguration) bool {
+	return len(config.GetCrossClusterTopology()) > 0 || len(config.GetClusters()) > 1
+}
+
 // GetCurrentCluster returns the current cluster id.
 func (g *ConfigHelper) GetCurrentCluster() *MilvusCluster {
 	return g.vs[g.currentClusterID]

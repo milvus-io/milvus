@@ -28,6 +28,10 @@ var (
 	ErrCollectionNotFound       = merr.ErrCollectionNotFound
 	ErrCollectionSchemaMismatch = merr.ErrCollectionSchemaMismatch
 	ErrIndexNotFound            = merr.ErrIndexNotFound
+	// ErrCompactionTargetNotFound reports an unknown or expired target ID.
+	ErrCompactionTargetNotFound = merr.ErrCompactionTargetNotFound
+	// ErrCompactionTargetCreateOutcomeUnknown means the server may have accepted the request.
+	ErrCompactionTargetCreateOutcomeUnknown = merr.ErrCompactionTargetCreateOutcomeUnknown
 )
 
 // ErrorCode returns the Milvus numeric error code carried by err.

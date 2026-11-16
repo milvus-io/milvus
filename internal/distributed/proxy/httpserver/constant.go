@@ -36,6 +36,7 @@ const (
 	ImportJobCategory             = "/jobs/import/"
 	SnapshotJobCategory           = "/jobs/snapshot/"
 	SnapshotCategory              = "/snapshots/"
+	CompactionTargetCategory      = "/compaction_targets/"
 	ExternalCollectionJobCategory = "/jobs/external_collection/"
 	PrivilegeGroupCategory        = "/privilege_groups/"
 	CollectionFieldCategory       = "/collections/fields/"

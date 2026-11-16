@@ -28,7 +28,7 @@ import (
 func newMemoryMetaWithDomainMetas(t *testing.T) (*meta.Meta, *domainMetas, error) {
 	dm := &domainMetas{}
 	m, err := meta.NewMemoryMetaWithLoader(t, func(catalog metastore.DataCoordCatalog, cm storage.ChunkManager) meta.DomainMetaLoader {
-		return loadDomainMetas(catalog, cm, dm)
+		return loadDomainMetas(catalog, cm, dm, false)
 	})
 	return m, dm, err
 }

@@ -30,6 +30,13 @@ type BinlogsUpdateMask struct {
 	WithoutBm25Statslogs bool // if true, the bm25 statslogs will not be updated
 }
 
+// CompactionTargetCollectionVersion identifies the collection row authorized
+// for a Target creation. DatabaseID is the catalog ID, including legacy 0.
+type CompactionTargetCollectionVersion struct {
+	DatabaseID int64
+	Revision   uint64
+}
+
 func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
 	if m.UpdateMask.WithoutBinlogs {
 		return nil
@@ -130,10 +137,20 @@ type DataCoordCatalog interface {
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	// FenceCompactionTargetWrites advances the write epoch before the active
+	// coordinator loads its Target snapshot. Target writes require that epoch.
+	FenceCompactionTargetWrites(ctx context.Context) (uint64, error)
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
-	SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
-	UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error
-	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
+	LoadCompactionTarget(ctx context.Context, targetID int64) (*datapb.CompactionTarget, error)
+	CreateCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, collection *CompactionTargetCollectionVersion, epoch uint64) (mayHaveCommitted bool, err error)
+	// ResolveCompactionTargetCreate returns the record if the pending Create
+	// committed, or fences its transaction and returns nil.
+	ResolveCompactionTargetCreate(ctx context.Context, candidate *datapb.CompactionTarget, collection CompactionTargetCollectionVersion, epoch uint64) (*datapb.CompactionTarget, error)
+	UpdateStandingCompactionTarget(ctx context.Context, previous, next *datapb.CompactionTarget, epoch uint64) error
+	StopCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, epoch uint64) (current *datapb.CompactionTarget, changed bool, err error)
+	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget, epoch uint64) error
+	// DropCompactionTargetCreateFence runs after the durable collection tombstone.
+	DropCompactionTargetCreateFence(ctx context.Context, collectionID int64, epoch uint64) error
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error

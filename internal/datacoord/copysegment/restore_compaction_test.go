@@ -79,7 +79,8 @@ func TestRestoreL0MaterializationResumesFixedPlans(t *testing.T) {
 		allocations := mockey.Mock((*restoreAllocatorTarget).AllocN).Return(int64(1000), int64(1002), nil).Build()
 		mockey.Mock((*compaction.Inspector).HasCompactionTask).Return(true).Build()
 		submissions := 0
-		mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, plan *datapb.CompactionTask) error {
+		mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, _ context.Context, plan *datapb.CompactionTask, opts meta.CompactionAdmissionOptions) error {
+			require.Equal(t, meta.CompactionAdmissionOptions{Producer: meta.ProducerRestore}, opts)
 			submissions++
 			require.NotZero(t, copies.GetJob(ctx, 100).(*Job).GetRestoreCompactionPlans()["v1/-1"])
 			return taskMeta.SaveCompactionTask(ctx, proto.Clone(plan).(*datapb.CompactionTask))
@@ -196,7 +197,8 @@ func TestRestoreL0RequiresSuccessfulTerminalState(t *testing.T) {
 				m.Segments.SetSegment(1, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 200, InsertChannel: "v1", PartitionID: -1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, IsImporting: true}))
 				require.NoError(t, taskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, State: test.state, TerminalState: test.terminal}))
 				mockey.Mock(loadCopySnapshot).Return(&snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{}}, nil).Build()
-				submit := mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, plan *datapb.CompactionTask) error {
+				submit := mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, _ context.Context, plan *datapb.CompactionTask, opts meta.CompactionAdmissionOptions) error {
+					require.Equal(t, meta.CompactionAdmissionOptions{Producer: meta.ProducerRestore}, opts)
 					require.EqualValues(t, 77, plan.GetPlanID())
 					require.Equal(t, datapb.CompactionTaskState_unknown, plan.GetTerminalState())
 					return taskMeta.SaveCompactionTask(ctx, plan)
@@ -251,7 +253,8 @@ func TestRestoreL0AdmissionRetry(t *testing.T) {
 		tracked := mockey.Mock((*compaction.Inspector).HasCompactionTask).Return(false).Build()
 		rejected := true
 		submissions := 0
-		mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, plan *datapb.CompactionTask) error {
+		mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, _ context.Context, plan *datapb.CompactionTask, opts meta.CompactionAdmissionOptions) error {
+			require.Equal(t, meta.CompactionAdmissionOptions{Producer: meta.ProducerRestore}, opts)
 			submissions++
 			require.EqualValues(t, 1000, plan.PlanID)
 			require.NoError(t, taskMeta.SaveCompactionTask(ctx, proto.Clone(plan).(*datapb.CompactionTask)))

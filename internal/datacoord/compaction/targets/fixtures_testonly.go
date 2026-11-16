@@ -20,78 +20,96 @@ package targets
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type compactionTargetCatalogUpdate struct {
-	targetID        int64
-	state           datapb.TargetState
-	inactivatedAtTS uint64
+func NewCompactionTargetMetaForTest(ctx context.Context, catalog metastore.DataCoordCatalog) (*CompactionTargetMeta, error) {
+	return loadCompactionTargetMeta(ctx, catalog, 1)
 }
 
 func NewCompactionTargetTestCatalog(
 	t *testing.T,
 	records ...*datapb.CompactionTarget,
-) (*metastoremocks.DataCoordCatalog, map[int64]*datapb.CompactionTarget, *[]compactionTargetCatalogUpdate, *[]int64) {
+) (*metastoremocks.DataCoordCatalog, map[int64]*datapb.CompactionTarget) {
 	catalog := metastoremocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().DropCompactionTargetCreateFence(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	stored := make(map[int64]*datapb.CompactionTarget)
 	for _, record := range records {
-		stored[record.GetTargetID()] = proto.Clone(record).(*datapb.CompactionTarget)
+		stored[record.GetTargetID()] = proto.CloneOf(record)
 	}
-	updates := make([]compactionTargetCatalogUpdate, 0)
-	dropped := make([]int64, 0)
-
+	var mu sync.Mutex
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).RunAndReturn(
 		func(context.Context) ([]*datapb.CompactionTarget, error) {
-			return cloneCompactionTargetSlice(records), nil
+			mu.Lock()
+			defer mu.Unlock()
+			result := make([]*datapb.CompactionTarget, 0, len(stored))
+			for _, record := range stored {
+				result = append(result, proto.CloneOf(record))
+			}
+			return result, nil
 		}).Maybe()
-	catalog.EXPECT().SaveCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) error {
-			stored[record.GetTargetID()] = proto.Clone(record).(*datapb.CompactionTarget)
+	catalog.EXPECT().CreateCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ *metastore.CompactionTargetCollectionVersion, _ uint64) (bool, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if stored[record.GetTargetID()] != nil {
+				return false, merr.ErrCompactionPlanConflict
+			}
+			stored[record.GetTargetID()] = proto.CloneOf(record)
+			return false, nil
+		}).Maybe()
+	catalog.EXPECT().LoadCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) (*datapb.CompactionTarget, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return proto.CloneOf(stored[id]), nil
+		}).Maybe()
+	catalog.EXPECT().UpdateStandingCompactionTarget(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, previous, next *datapb.CompactionTarget, _ uint64) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if !proto.Equal(previous, stored[previous.GetTargetID()]) {
+				return merr.ErrCompactionPlanConflict
+			}
+			stored[next.GetTargetID()] = proto.CloneOf(next)
 			return nil
 		}).Maybe()
-	catalog.EXPECT().UpdateCompactionTargetState(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
-			updates = append(updates, compactionTargetCatalogUpdate{
-				targetID:        targetID,
-				state:           state,
-				inactivatedAtTS: inactivatedAtTS,
-			})
-			record := proto.Clone(stored[targetID]).(*datapb.CompactionTarget)
-			record.State = state
-			record.InactivatedAtTS = inactivatedAtTS
-			stored[targetID] = record
-			return nil
+	catalog.EXPECT().StopCompactionTarget(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, record *datapb.CompactionTarget, _ uint64) (*datapb.CompactionTarget, bool, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			current := stored[record.GetTargetID()]
+			if current == nil || current.GetState() == datapb.TargetState_TARGET_STATE_INACTIVE {
+				return proto.CloneOf(current), false, nil
+			}
+			stored[record.GetTargetID()] = proto.CloneOf(record)
+			return proto.CloneOf(record), true, nil
 		}).Maybe()
-	catalog.EXPECT().DropCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) error {
-			dropped = append(dropped, record.GetTargetID())
-			delete(stored, record.GetTargetID())
-			return nil
-		}).Maybe()
-
-	return catalog, stored, &updates, &dropped
-}
-
-func cloneCompactionTargetSlice(records []*datapb.CompactionTarget) []*datapb.CompactionTarget {
-	cloned := make([]*datapb.CompactionTarget, 0, len(records))
-	for _, record := range records {
-		cloned = append(cloned, proto.Clone(record).(*datapb.CompactionTarget))
-	}
-	return cloned
+	return catalog, stored
 }
 
 func NewLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ...*datapb.CompactionTarget) *CompactionTargetMeta {
 	t.Helper()
-	catalog, _, _, _ := NewCompactionTargetTestCatalog(t, records...)
-	targetMeta, err := NewCompactionTargetMeta(ctx, catalog)
+	for _, record := range records {
+		if record.GetIntent() == datapb.TargetIntent_INTENT_REWRITE {
+			if record.GetRewrite() == nil {
+				record.Rewrite = &datapb.CompactionTargetRewrite{}
+			}
+			record.ActivatedAtTS = record.GetExpectedTS()
+		}
+	}
+	catalog, _ := NewCompactionTargetTestCatalog(t, records...)
+	targetMeta, err := NewCompactionTargetMetaForTest(ctx, catalog)
 	require.NoError(t, err)
 	return targetMeta
 }

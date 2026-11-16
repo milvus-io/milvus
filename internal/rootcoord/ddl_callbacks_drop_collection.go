@@ -41,6 +41,10 @@ type collectionDataViewDropper interface {
 	DropCollectionDataView(ctx context.Context, collectionID int64) error
 }
 
+type collectionCompactionTargetDropper interface {
+	DropCollectionCompactionTargets(ctx context.Context, collectionID int64) error
+}
+
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
 	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -132,7 +136,14 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 				return merr.Wrap(err, "failed to drop collection")
 			}
 
-			// 4. delete all persisted DataView versions. The ack callback retries this
+			// 4. close active compaction targets for the deleted collection.
+			if dropper, ok := c.mixCoord.(collectionCompactionTargetDropper); ok {
+				if err := dropper.DropCollectionCompactionTargets(ctx, collectionID); err != nil {
+					return merr.Wrap(err, "failed to close compaction targets for dropped collection")
+				}
+			}
+
+			// 5. delete all persisted DataView versions. The ack callback retries this
 			// step, and recovery also removes any versions left behind after a crash.
 			dropper, ok := c.mixCoord.(collectionDataViewDropper)
 			if !ok {

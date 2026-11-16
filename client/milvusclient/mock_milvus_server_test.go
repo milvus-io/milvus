@@ -1443,6 +1443,65 @@ func (_c *MilvusServiceServer_CreateCollection_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// CreateCompactionTarget provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) CreateCompactionTarget(_a0 context.Context, _a1 *milvuspb.CreateCompactionTargetRequest) (*milvuspb.CreateCompactionTargetResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateCompactionTarget")
+	}
+
+	var r0 *milvuspb.CreateCompactionTargetResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCompactionTargetRequest) (*milvuspb.CreateCompactionTargetResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCompactionTargetRequest) *milvuspb.CreateCompactionTargetResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CreateCompactionTargetResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateCompactionTargetRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_CreateCompactionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateCompactionTarget'
+type MilvusServiceServer_CreateCompactionTarget_Call struct {
+	*mock.Call
+}
+
+// CreateCompactionTarget is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateCompactionTargetRequest
+func (_e *MilvusServiceServer_Expecter) CreateCompactionTarget(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_CreateCompactionTarget_Call {
+	return &MilvusServiceServer_CreateCompactionTarget_Call{Call: _e.mock.On("CreateCompactionTarget", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_CreateCompactionTarget_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateCompactionTargetRequest)) *MilvusServiceServer_CreateCompactionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateCompactionTargetRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateCompactionTarget_Call) Return(_a0 *milvuspb.CreateCompactionTargetResponse, _a1 error) *MilvusServiceServer_CreateCompactionTarget_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateCompactionTarget_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateCompactionTargetRequest) (*milvuspb.CreateCompactionTargetResponse, error)) *MilvusServiceServer_CreateCompactionTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateCredential provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) CreateCredential(_a0 context.Context, _a1 *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2433,6 +2492,65 @@ func (_c *MilvusServiceServer_DescribeCollection_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// DescribeCompactionTarget provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DescribeCompactionTarget(_a0 context.Context, _a1 *milvuspb.DescribeCompactionTargetRequest) (*milvuspb.DescribeCompactionTargetResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeCompactionTarget")
+	}
+
+	var r0 *milvuspb.DescribeCompactionTargetResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCompactionTargetRequest) (*milvuspb.DescribeCompactionTargetResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCompactionTargetRequest) *milvuspb.DescribeCompactionTargetResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeCompactionTargetResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeCompactionTargetRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DescribeCompactionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeCompactionTarget'
+type MilvusServiceServer_DescribeCompactionTarget_Call struct {
+	*mock.Call
+}
+
+// DescribeCompactionTarget is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeCompactionTargetRequest
+func (_e *MilvusServiceServer_Expecter) DescribeCompactionTarget(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DescribeCompactionTarget_Call {
+	return &MilvusServiceServer_DescribeCompactionTarget_Call{Call: _e.mock.On("DescribeCompactionTarget", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DescribeCompactionTarget_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeCompactionTargetRequest)) *MilvusServiceServer_DescribeCompactionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeCompactionTargetRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeCompactionTarget_Call) Return(_a0 *milvuspb.DescribeCompactionTargetResponse, _a1 error) *MilvusServiceServer_DescribeCompactionTarget_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeCompactionTarget_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeCompactionTargetRequest) (*milvuspb.DescribeCompactionTargetResponse, error)) *MilvusServiceServer_DescribeCompactionTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeDatabase provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) DescribeDatabase(_a0 context.Context, _a1 *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3019,6 +3137,65 @@ func (_c *MilvusServiceServer_DropCollectionFunction_Call) Return(_a0 *commonpb.
 }
 
 func (_c *MilvusServiceServer_DropCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)) *MilvusServiceServer_DropCollectionFunction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCompactionTarget provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DropCompactionTarget(_a0 context.Context, _a1 *milvuspb.DropCompactionTargetRequest) (*milvuspb.DropCompactionTargetResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCompactionTarget")
+	}
+
+	var r0 *milvuspb.DropCompactionTargetResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCompactionTargetRequest) (*milvuspb.DropCompactionTargetResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCompactionTargetRequest) *milvuspb.DropCompactionTargetResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DropCompactionTargetResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropCompactionTargetRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DropCompactionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionTarget'
+type MilvusServiceServer_DropCompactionTarget_Call struct {
+	*mock.Call
+}
+
+// DropCompactionTarget is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropCompactionTargetRequest
+func (_e *MilvusServiceServer_Expecter) DropCompactionTarget(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DropCompactionTarget_Call {
+	return &MilvusServiceServer_DropCompactionTarget_Call{Call: _e.mock.On("DropCompactionTarget", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DropCompactionTarget_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropCompactionTargetRequest)) *MilvusServiceServer_DropCompactionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropCompactionTargetRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropCompactionTarget_Call) Return(_a0 *milvuspb.DropCompactionTargetResponse, _a1 error) *MilvusServiceServer_DropCompactionTarget_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropCompactionTarget_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCompactionTargetRequest) (*milvuspb.DropCompactionTargetResponse, error)) *MilvusServiceServer_DropCompactionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5780,6 +5957,65 @@ func (_c *MilvusServiceServer_ListAliases_Call) Return(_a0 *milvuspb.ListAliases
 }
 
 func (_c *MilvusServiceServer_ListAliases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)) *MilvusServiceServer_ListAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCompactionTargets provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) ListCompactionTargets(_a0 context.Context, _a1 *milvuspb.ListCompactionTargetsRequest) (*milvuspb.ListCompactionTargetsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCompactionTargets")
+	}
+
+	var r0 *milvuspb.ListCompactionTargetsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCompactionTargetsRequest) (*milvuspb.ListCompactionTargetsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListCompactionTargetsRequest) *milvuspb.ListCompactionTargetsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListCompactionTargetsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListCompactionTargetsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_ListCompactionTargets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCompactionTargets'
+type MilvusServiceServer_ListCompactionTargets_Call struct {
+	*mock.Call
+}
+
+// ListCompactionTargets is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListCompactionTargetsRequest
+func (_e *MilvusServiceServer_Expecter) ListCompactionTargets(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_ListCompactionTargets_Call {
+	return &MilvusServiceServer_ListCompactionTargets_Call{Call: _e.mock.On("ListCompactionTargets", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_ListCompactionTargets_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListCompactionTargetsRequest)) *MilvusServiceServer_ListCompactionTargets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListCompactionTargetsRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListCompactionTargets_Call) Return(_a0 *milvuspb.ListCompactionTargetsResponse, _a1 error) *MilvusServiceServer_ListCompactionTargets_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListCompactionTargets_Call) RunAndReturn(run func(context.Context, *milvuspb.ListCompactionTargetsRequest) (*milvuspb.ListCompactionTargetsResponse, error)) *MilvusServiceServer_ListCompactionTargets_Call {
 	_c.Call.Return(run)
 	return _c
 }
