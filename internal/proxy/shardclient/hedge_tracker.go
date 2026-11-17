@@ -78,15 +78,48 @@ type hedgeTracker struct {
 	inflightPrimaries atomic.Int64
 	inflightHedges    atomic.Int64
 
-	now func() time.Time
+	now             func() time.Time
+	cleanupInterval time.Duration
+
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 func newHedgeTracker() *hedgeTracker {
 	return &hedgeTracker{
-		keys: make(map[string]*keyStats),
-		rng:  rand.New(rand.NewSource(time.Now().UnixNano())),
-		now:  time.Now,
+		keys:            make(map[string]*keyStats),
+		rng:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		now:             time.Now,
+		cleanupInterval: statsCleanupInterval,
+		closeCh:         make(chan struct{}),
 	}
+}
+
+func (t *hedgeTracker) Start(ctx context.Context) {
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		ticker := time.NewTicker(t.cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.closeCh:
+				return
+			case <-ticker.C:
+				t.cleanup()
+			}
+		}
+	}()
+}
+
+func (t *hedgeTracker) Close() {
+	t.closeOnce.Do(func() {
+		close(t.closeCh)
+	})
+	t.wg.Wait()
 }
 
 func (t *hedgeTracker) keyLocked(key string) *keyStats {
