@@ -290,6 +290,22 @@ class Expr : public std::enable_shared_from_this<Expr> {
         return true;
     }
 
+    // Opt-in for evaluating a sequential batch by explicit element offsets.
+    // The subtree must leave its sequential cursors untouched during Eval,
+    // then advance them exactly once through AdvanceSequentialBatch().
+    virtual bool
+    CanUseOffsetsForSequentialBatch() {
+        return false;
+    }
+
+    virtual void
+    AdvanceSequentialBatch() {
+        SetHasOffsetInput(false);
+        for (auto& input : inputs_) {
+            input->AdvanceSequentialBatch();
+        }
+    }
+
     virtual std::string
     ToString() const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
@@ -756,6 +772,12 @@ class SegmentExpr : public Expr {
     }
 
     void
+    AdvanceSequentialBatch() override {
+        SetHasOffsetInput(false);
+        MoveCursor();
+    }
+
+    void
     MoveCursor() override {
         if (!has_offset_input_) {
             if (execute_all_at_once_) {
@@ -1032,7 +1054,7 @@ class SegmentExpr : public Expr {
                                         OffsetVector* input,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res,
-                                        const TargetBitmap& candidate_mask,
+                                        const TargetBitmapView& candidate_mask,
                                         const ValTypes&... values) {
         return ProcessIndexLookupByOffsetsImpl<T>(
             evaluate_batch, input, res, valid_res, &candidate_mask, values...);
@@ -1049,7 +1071,7 @@ class SegmentExpr : public Expr {
                                          int64_t batch_size,
                                          TargetBitmapView res,
                                          TargetBitmapView valid_res,
-                                         const TargetBitmap& candidate_mask,
+                                         const TargetBitmapView& candidate_mask,
                                          const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
@@ -1114,7 +1136,7 @@ class SegmentExpr : public Expr {
                                     OffsetVector* input,
                                     TargetBitmapView res,
                                     TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
@@ -1213,7 +1235,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        const TargetBitmap& candidate_mask,
+        const TargetBitmapView& candidate_mask,
         const ValTypes&... values) {
         return ProcessDataByOffsetsImpl<T>(evaluate_batch,
                                            skip_func,
@@ -1232,7 +1254,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
+        const TargetBitmapView* candidate_mask,
         const ValTypes&... values) {
         int64_t processed_size = 0;
 

@@ -95,7 +95,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("is_and", is_and_);
 
-    TargetBitmap inherited_bitmap;
+    EvalCtx::BitmapInput inherited_bitmap;
     bool has_result = false;
     auto restore_bitmap =
         folly::makeGuard([&context, &inherited_bitmap, &has_result] {
@@ -203,12 +203,16 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
 
         auto active_rows = BuildActiveBitmap(all_flat_result);
-        // Results outside the parent's candidates are unspecified.
-        if (!inherited_bitmap.empty()) {
-            active_rows.inplace_and(inherited_bitmap, active_rows.size());
+        // Local results outside the parent's candidates are unspecified and
+        // must neither reactivate rows nor prevent a batch-level early exit.
+        const auto inherited_view = inherited_bitmap.view();
+        if (!inherited_view.empty()) {
+            active_rows.inplace_and(inherited_view, active_rows.size());
         }
         if (active_rows.none()) {
-            SkipFollowingExprs(i + 1);
+            if (!has_input_offset) {
+                SkipFollowingExprs(i + 1);
+            }
             return;
         }
         context.set_bitmap_input(std::move(active_rows));

@@ -297,7 +297,8 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 VectorPtr
-PhyGISFunctionFilterExpr::EvalForDataSegment(const TargetBitmap& bitmap_input) {
+PhyGISFunctionFilterExpr::EvalForDataSegment(
+    const TargetBitmapView& bitmap_input) {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -492,7 +493,7 @@ create_bounding_boxes_for_dwithin(GEOSContextHandle_t ctx,
 
 VectorPtr
 PhyGISFunctionFilterExpr::EvalForIndexSegment(
-    const TargetBitmap& bitmap_input) {
+    const TargetBitmapView& bitmap_input) {
     AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
