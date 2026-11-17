@@ -334,6 +334,38 @@ const (
 	JSONStatsDataFormatVersion = 3
 )
 
+const (
+	// TalonStageLoadOpen selects QueryNode format-reader open metadata.
+	TalonStageLoadOpen uint32 = 1 << 0
+	// TalonStageManifest selects QueryNode segment-manifest reads during load.
+	TalonStageManifest uint32 = 1 << 1
+	// TalonStagesAll enables every Talon read stage.
+	TalonStagesAll uint32 = math.MaxUint32
+)
+
+// ParseTalonEnabledStages parses comma-separated stage names into a mask.
+// Invalid names or combinations return zero and false, never a partial mask.
+func ParseTalonEnabledStages(value string) (uint32, bool) {
+	stages := strings.Split(value, ",")
+	var mask uint32
+	for _, stage := range stages {
+		switch strings.TrimSpace(stage) {
+		case "all":
+			if len(stages) != 1 {
+				return 0, false
+			}
+			mask = TalonStagesAll
+		case "load_open":
+			mask |= TalonStageLoadOpen
+		case "manifest":
+			mask |= TalonStageManifest
+		default:
+			return 0, false
+		}
+	}
+	return mask, true
+}
+
 // Search, Index parameter keys
 const (
 	TopKKey                             = "topk"
