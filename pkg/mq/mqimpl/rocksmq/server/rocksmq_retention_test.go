@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -620,14 +619,11 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	rmq.RegisterConsumer(consumer)
 
 	assert.NoError(t, err)
-	// Preserve the >1 MiB retention case while amortizing durable page-ack
-	// updates. Single-message consumption is covered by the basic tests.
-	cMsgs := make([]ConsumerMessage, 0, msgNum)
-	for len(cMsgs) < msgNum {
-		cMsg, err := rmq.Consume(topicName, groupName, 1000)
-		require.NoError(t, err)
-		require.NotEmpty(t, cMsg)
-		cMsgs = append(cMsgs, cMsg...)
+	cMsgs := make([]ConsumerMessage, 0)
+	for i := 0; i < msgNum; i++ {
+		cMsg, err := rmq.Consume(topicName, groupName, 1)
+		assert.NoError(t, err)
+		cMsgs = append(cMsgs, cMsg[0])
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
 	mlog.Debug(context.TODO(), "Already consumed, wait for message cleaned by retention")
