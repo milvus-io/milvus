@@ -45,9 +45,5 @@ func (m *IndexMeta) GetSegmentIndexSummary(segmentID, buildID int64) (*model.Seg
 	if record, ok := m.GetIndexJob(buildID); ok {
 		return model.SummarizeSegmentIndex(record), record.SegmentID == segmentID
 	}
-	record, ok := m.summaryRecord(segmentID, buildID)
-	if !ok {
-		return nil, false
-	}
-	return model.SummarizeSegmentIndex(record), true
+	return m.completedIndexSummary(segmentID, buildID)
 }
