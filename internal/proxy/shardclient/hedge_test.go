@@ -592,6 +592,7 @@ func TestHedgeInflightRatioLimitAndLoserOccupancy(t *testing.T) {
 	require.Equal(t, int64(4), hedgesDispatched.Load())
 
 	close(hedgeReleaseAll)
+	close(getPrimaryCh(32))
 	for i := int64(1); i <= totalPrimaries; i++ {
 		if i != hedgedReqID {
 			close(getPrimaryCh(i))
