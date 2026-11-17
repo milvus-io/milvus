@@ -124,11 +124,7 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	}
 	for _, segment := range entries {
 		ctx.segments[segment.SegmentID] = segment
-		ready := make(map[int64]bool)
-		for node := range reusableResources(p, id, segment, nodes) {
-			ready[node] = true
-		}
-		ctx.reusable[segment.SegmentID] = ready
+		ctx.reusable[segment.SegmentID] = reusableResources(p, id, segment, nodes)
 	}
 	return ctx
 }
@@ -274,16 +270,16 @@ func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
 }
 
 // reusableResources only credits confirmed, protected, exact-compatible loads.
-func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64) map[int64]coordview.SegmentState {
+func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64) map[int64]bool {
 	c := p.collectionForShard(id)
-	states := make(map[int64]coordview.SegmentState)
+	states := make(map[int64]bool)
 	if c == nil || c.DataView() == nil {
 		return states
 	}
 	key := coordview.ResourceKey{PartitionID: segment.PartitionID, SegmentID: segment.SegmentID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
 	for _, n := range nodes {
 		if resources := c.PlacementNode(n); resources != nil && resources.HasResource(key) {
-			states[n] = coordview.SegmentStateReady
+			states[n] = true
 		}
 	}
 	return states

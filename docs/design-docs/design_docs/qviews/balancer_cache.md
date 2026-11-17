@@ -508,3 +508,27 @@ Source publication, readiness gating, immutable Get, and copy-on-write remain
 required. Concrete sharing and reference handover still require the resource
 manager integration described in
 [QueryViewHandler](query_view_handler.md#7-partial-resource-handover).
+
+### Allocation ownership during planning and target refresh
+
+Planning initializes the batch's node-load map once. For each shard it subtracts
+that shard's contribution from the same pinned NodeEntry versions, allocates
+against the private map, and either adds the accepted candidate's contribution
+or restores the removed contribution on failure or optional rejection. Releases
+only subtract. No candidate retains the batch map after allocation, and no
+speculative update touches a published cache object.
+
+An allocation result contains the final assignments, row contributions and a
+private sorted slice of immutable Segment metadata. Only admitted candidates
+materialize the nested builder assignments and native Manifest/partition-stats
+metadata. Unchanged optional candidates keep their continuation cursor without
+constructing a builder or an intermediate DataView protobuf. Sorting and the
+optional search rollback still use their own private copies.
+
+Target refresh reuses one call-local contribution map while visiting resident
+shards. An unchanged target pointer and equal contribution map preserve the old
+ShardEntry and its immutable index path. Changed results copy the temporary map
+before publication. The temporary map is discarded when refresh returns; it is
+never pooled or retained by a published object. Eligibility, partition scope,
+unknown-stat fallback, node totals and collection-replica totals retain the same
+selection and replacement rules.

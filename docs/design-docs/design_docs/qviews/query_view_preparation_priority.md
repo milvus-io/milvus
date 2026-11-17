@@ -125,7 +125,9 @@ QN/SN 将固定值与当前 acquisition 一起保存。不能为重排而替换�
 
 Store 已将各 shard 的窗口 rate 按 collection 的全部 shard 数平均成 replica rate（未上报 shard 按 0）。Balancer 直接消费这个 rate，不重新换算为请求数。有效性由 Store 的 2 分钟窗口策略负责，不额外引入报告超时。
 
-每次规划/手工操作首次需要评分时，遍历当前配置的 replica，保存不可变 snapshot 指针并累计各 RG rate。初始化时间和临时空间为 O(replica 数 + RG 数)，随后每个 View 的统计项读取 O(1)，健康判断遍历该 UpView 的 QN 列表，不扫描反馈 shard 或窗口。各 replica 的读取并非跨 replica 原子事务，但一次操作内保留相同快照，分子与分母不会因后续反馈而变化。
+ReplicaFeedbackStore 在反馈发布、过期及拓扑变化时增量维护 RG 总 rate。规划/手工操作在首次确需评分时，获取一个不可变 PlanningSnapshot；它同时包含 replica 反馈和 RG 汇总，读取版本根不扫描 collection/replica、无分配。同一操作后续评分固定使用该版本，分子与分母不会因并发反馈而变化。索引按 replica ID 和 RG 名查找；健康判断仍遍历该 UpView 的 QN 列表。正常规划仅在候选确定需要创建新 View 后评分；无变化 optional 候选、失败分配和 release 不读取 feedback。
+
+Store 通过 LoadConfig listener 跟踪 replica 的 RG；迁移从旧组扣除、向新组加入当前贡献，释放撤销贡献。发布版本使用持久化 radix 索引，只复制变化路径，不全量 clone replica map。若规划固定的 LoadConfig RG 与反馈版本中的 membership 不同，该 replica 的反馈按不可用处理，避免使用不匹配的分子和分母；加载优先级、AutoLoad 与节点健康仍来自本次规划的既有输入。
 
 新 View 不需要自己的查询历史。同一 replica 在一次操作中创建的 View 共享统计输入；同一 collection 的不同 replica 使用各自的热度。没有 snapshot 时结合加载需求与 UpView 状态选择场景；分母为 0 时只取消流量加分。
 
