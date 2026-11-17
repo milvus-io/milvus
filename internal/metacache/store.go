@@ -640,8 +640,10 @@ func (s *metaStore) GcConfirm(ctx context.Context, collectionID, partitionID typ
 
 // SegmentNormalizer validates and rewrites a segment loaded from the catalog
 // before it enters the store. It returns the segment to install, which may be
-// the input itself. It runs concurrently across collections, so it must be
-// safe for concurrent use.
+// the input itself. The store then rewrites the returned segment and its
+// nested messages in place, so they must not be shared with anything else.
+// It runs concurrently across collections, so it must be safe for concurrent
+// use.
 type SegmentNormalizer func(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, error)
 
 // LoadFromCatalog loads segments and channel checkpoints. A non-nil normalize
@@ -679,10 +681,21 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 					}
 				}
 			}
-			// Normalize here, in parallel, so that LoadSegments below finds
-			// nothing left to copy.
+			// Normalize here, in parallel and in place: the catalog
+			// decodes fresh protos for this load, and normalize must not
+			// return shared ones, so no one else sees these segments or
+			// their nested messages yet. The collection is looked up once,
+			// and its prunable fields on its first segment with null
+			// counts.
+			coll, _ := s.GetCollection(collID)
+			vchannels := vchannelsOf(coll)
+			var prunable map[int64]struct{}
+			prunableLoaded := false
 			for _, segment := range segments {
-				s.normalizeSegment(segment)
+				if !prunableLoaded && len(segment.GetStats().GetNullCounts()) > 0 {
+					prunable, prunableLoaded = s.prunableFieldsOf(collID, coll), true
+				}
+				normalizeWith(segment, vchannels, prunable, false)
 			}
 			collectionSegments[i] = segments
 			return nil, nil
@@ -691,8 +704,9 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 	if err := conc.AwaitAll(futures...); err != nil {
 		return err
 	}
+	// Install without LoadSegments: the segments are normalized already.
 	for _, segments := range collectionSegments {
-		s.LoadSegments(segments)
+		s.segments.Load().apply(segments, nil, nil, false)
 	}
 
 	s.emitSegmentMetrics()

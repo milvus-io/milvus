@@ -240,7 +240,7 @@ func cloneColumnGroups(groups map[int64]*datapb.ColumnGroupStatistics) map[int64
 // batch's insert timestamp range. Every member field of a non-empty insert
 // FieldBinlog gets a NullCounts entry (zero included). The coord keeps only
 // the entries of nullable fields and VectorArray fields in memory (metacache
-// pruneNullCounts), so the presence contract holds for those fields only: the
+// normalizeStats), so the presence contract holds for those fields only: the
 // index task reads it for nullable fields, and digestValidElementCounts for
 // VectorArray fields once a collector is reseeded from coord stats.
 func (c *StatisticsCollector) Digest(

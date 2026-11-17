@@ -23,6 +23,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -3195,4 +3196,105 @@ func TestIndexMeta_MarkIndexAsDeletedSharesParams(t *testing.T) {
 			assert.Same(t, &tt.before[0], &tt.after[0])
 		})
 	}
+}
+
+func newInternTestIndex(collID, indexID int64, mmap string) *model.Index {
+	return &model.Index{
+		CollectionID: collID,
+		IndexID:      indexID,
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "c3-dim-128"}},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: "index_type", Value: "c3-HNSW"},
+			{Key: common.MmapEnabledKey, Value: mmap},
+		},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "c3-HNSW"}},
+	}
+}
+
+func TestUpdateCollectionIndex_SharesParams(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-share"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-share"))
+	a, b := m.Indexes[1][10], m.Indexes[2][20]
+	assert.Same(t, a.IndexParams[0], b.IndexParams[0])
+	assert.Same(t, a.IndexParams[1], b.IndexParams[1])
+	assert.Same(t, a.TypeParams[0], b.TypeParams[0])
+	assert.Same(t, a.UserIndexParams[0], b.UserIndexParams[0])
+	assert.Equal(t, "c3-share", a.IndexParams[1].Value)
+}
+
+func TestAlterIndex_DoesNotLeakAcrossCollections(t *testing.T) {
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
+	m := NewSegmentIndexMeta(catalog)
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-alter-old"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-alter-old"))
+
+	require.NoError(t, m.AlterIndex(ctx, newInternTestIndex(1, 10, "c3-alter-new")))
+
+	mmapOf := func(kvs []*commonpb.KeyValuePair) string {
+		for _, kv := range kvs {
+			if kv.Key == common.MmapEnabledKey {
+				return kv.Value
+			}
+		}
+		return ""
+	}
+	assert.Equal(t, "c3-alter-new", mmapOf(m.GetIndexParams(1, 10)))
+	assert.Equal(t, "c3-alter-old", mmapOf(m.GetIndexParams(2, 20)))
+}
+
+func TestGetIndexesForCollection_SharesCanonicalParams(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-private"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-private"))
+
+	a := m.GetIndexesForCollection(1, "")
+	b := m.GetIndexesForCollection(2, "")
+	require.Len(t, a, 1)
+	require.Len(t, b, 1)
+	// Equal params of different collections share one read-only list.
+	assert.Same(t, unsafe.SliceData(a[0].IndexParams), unsafe.SliceData(b[0].IndexParams))
+	assert.Same(t, unsafe.SliceData(a[0].TypeParams), unsafe.SliceData(b[0].TypeParams))
+	assert.Equal(t, len(a[0].IndexParams), cap(a[0].IndexParams))
+}
+
+// TestCanCreateIndex_AutoIndexRewriteDoesNotAlias pins that when checkParams
+// rewrites an auto-index request's IndexParams from the stored (shared,
+// read-only) list, the request gets its own elements: writing them leaves the
+// stored params untouched.
+func TestCanCreateIndex_AutoIndexRewriteDoesNotAlias(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(&model.Index{
+		CollectionID:    1,
+		FieldID:         100,
+		IndexID:         10,
+		IndexName:       "c3-rewrite",
+		IsAutoIndex:     true,
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.AutoIndexName}},
+	})
+	stored := m.Indexes[1][10]
+
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:    1,
+		FieldID:         100,
+		IndexName:       "c3-rewrite",
+		IsAutoIndex:     true,
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.AutoIndexName}},
+	}
+	// A request that matches the stored index is reported as ignored.
+	_, err := m.CanCreateIndex(req, false)
+	require.ErrorIs(t, err, ErrIndexOperationIgnored)
+	require.Len(t, req.GetIndexParams(), 1)
+	assert.Equal(t, "INVERTED", req.GetIndexParams()[0].GetValue(), "the request takes the stored params")
+	assert.NotSame(t, stored.IndexParams[0], req.GetIndexParams()[0])
+
+	for i := range req.IndexParams {
+		req.IndexParams[i].Value = "c3-mutated"
+	}
+	assert.Equal(t, "INVERTED", stored.IndexParams[0].GetValue())
+	assert.Equal(t, "INVERTED", m.GetIndexParams(1, 10)[0].GetValue())
 }

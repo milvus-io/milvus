@@ -18,15 +18,21 @@ package metacache
 
 import (
 	"maps"
+	"strings"
 	"testing"
+	"unique"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 )
 
-func TestPruneNullCounts(t *testing.T) {
+func TestNormalizeStats_NullCounts(t *testing.T) {
 	mixed := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, DataType: schemapb.DataType_FloatVector},
@@ -152,7 +158,7 @@ func TestPruneNullCounts(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := pruneNullCounts(test.stats, prunableFields(test.schema))
+			got := normalizeStats(test.stats, prunableFields(test.schema), true)
 			if test.wantNil {
 				assert.Nil(t, got)
 				return
@@ -194,6 +200,203 @@ func TestKeptNullCounts(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.wantChanged, changed)
 			assert.Equal(t, before, tt.in, "the input map is never written")
+		})
+	}
+}
+
+// interned returns the copy unique.Make currently holds for s.
+func interned(s string) string {
+	return unique.Make(s).Value()
+}
+
+// fresh returns a copy of s with its own backing data, as proto decoding
+// gives every decoded string.
+func fresh(s string) string {
+	return strings.Clone(s)
+}
+
+func TestOwnedString(t *testing.T) {
+	owner := fresh("ownedstring-ch")
+	owners := []string{fresh("ownedstring-other"), owner}
+	freshCopy := fresh(owner)
+	unlisted := fresh("ownedstring-unlisted")
+
+	tests := []struct {
+		name        string
+		owners      []string
+		in          string
+		want        string
+		wantChanged bool
+	}{
+		{name: "fresh copy of an owner", owners: owners, in: freshCopy, want: owner, wantChanged: true},
+		{name: "the owner itself", owners: owners, in: owner, want: owner},
+		{name: "unlisted", owners: owners, in: unlisted, want: unlisted},
+		{name: "no owners", owners: nil, in: freshCopy, want: freshCopy},
+		{name: "empty", owners: owners, in: "", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, changed := ownedString(test.owners, test.in)
+			assert.Equal(t, test.wantChanged, changed)
+			assert.True(t, sameStringData(test.want, got), "got %q", got)
+		})
+	}
+}
+
+func TestNormalizePosition(t *testing.T) {
+	ch := fresh("normpos-ch")
+	vchannels := []string{ch}
+	group := "normpos-group"
+	internedGroup := interned(group)
+
+	tests := []struct {
+		name        string
+		pos         *msgpb.MsgPosition
+		copyOnWrite bool
+		samePtr     bool
+		// wantChannel and wantGroup are the copies the result holds; empty
+		// means the input's own.
+		wantChannel string
+		wantGroup   string
+	}{
+		{name: "nil", pos: nil, copyOnWrite: true, samePtr: true},
+		{name: "nil in place", pos: nil, samePtr: true},
+		{
+			name:        "owned channel",
+			pos:         &msgpb.MsgPosition{ChannelName: ch, MsgGroup: fresh(group), Timestamp: 7},
+			copyOnWrite: true, samePtr: true,
+		},
+		{
+			name:        "fresh channel is cloned, group untouched",
+			pos:         &msgpb.MsgPosition{ChannelName: fresh(ch), MsgGroup: fresh(group), MsgID: []byte{1}, Timestamp: 7},
+			copyOnWrite: true, wantChannel: ch,
+		},
+		{
+			name:        "unlisted channel, fresh group",
+			pos:         &msgpb.MsgPosition{ChannelName: fresh("normpos-unlisted"), MsgGroup: fresh(group), Timestamp: 7},
+			copyOnWrite: true, samePtr: true,
+		},
+		{
+			name:    "in place: fresh channel and group",
+			pos:     &msgpb.MsgPosition{ChannelName: fresh(ch), MsgGroup: fresh(group), Timestamp: 7},
+			samePtr: true, wantChannel: ch, wantGroup: internedGroup,
+		},
+		{
+			name:    "in place: unlisted channel, fresh group",
+			pos:     &msgpb.MsgPosition{ChannelName: fresh("normpos-unlisted"), MsgGroup: fresh(group), Timestamp: 7},
+			samePtr: true, wantGroup: internedGroup,
+		},
+		{
+			name:    "in place: empty strings",
+			pos:     &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 7},
+			samePtr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var before *msgpb.MsgPosition
+			if test.pos != nil {
+				before = proto.Clone(test.pos).(*msgpb.MsgPosition)
+			}
+			inCh, inGroup := test.pos.GetChannelName(), test.pos.GetMsgGroup()
+
+			got := normalizePosition(test.pos, vchannels, test.copyOnWrite)
+			if test.samePtr {
+				require.Same(t, test.pos, got)
+			} else {
+				require.NotSame(t, test.pos, got)
+				// The input is not written.
+				assert.True(t, proto.Equal(before, test.pos))
+				assert.True(t, sameStringData(inCh, test.pos.GetChannelName()))
+				assert.True(t, sameStringData(inGroup, test.pos.GetMsgGroup()))
+			}
+			if got == nil {
+				return
+			}
+			assert.True(t, proto.Equal(before, got), "the result keeps every value")
+			wantCh, wantGroup := inCh, inGroup
+			if test.wantChannel != "" {
+				wantCh = test.wantChannel
+			}
+			if test.wantGroup != "" {
+				wantGroup = test.wantGroup
+			}
+			assert.True(t, sameStringData(wantCh, got.GetChannelName()), "channel copy")
+			assert.True(t, sameStringData(wantGroup, got.GetMsgGroup()), "group copy")
+		})
+	}
+}
+
+func TestNormalizeStats_Formats(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 102, DataType: schemapb.DataType_VarChar, Nullable: true},
+	}}
+	unknown := fresh("normstats-unknown-format")
+
+	tests := []struct {
+		name        string
+		stats       *datapb.Statistics
+		schema      *schemapb.CollectionSchema
+		samePtr     bool
+		wantFormats []string // the copies the result holds
+		wantCounts  map[int64]int64
+	}{
+		{
+			name:        "constant formats, nothing to prune",
+			stats:       &datapb.Statistics{Formats: []string{specutil.FormatParquet}, NullCounts: map[int64]int64{102: 1}},
+			schema:      schema,
+			samePtr:     true,
+			wantFormats: []string{specutil.FormatParquet}, wantCounts: map[int64]int64{102: 1},
+		},
+		{
+			name:        "unknown format only",
+			stats:       &datapb.Statistics{Formats: []string{unknown}},
+			samePtr:     true,
+			wantFormats: []string{unknown},
+		},
+		{
+			name:        "fresh formats, unknown schema",
+			stats:       &datapb.Statistics{Formats: []string{fresh("parquet"), fresh("vortex")}, NullCounts: map[int64]int64{100: 0}},
+			wantFormats: []string{specutil.FormatParquet, specutil.FormatVortex},
+			wantCounts:  map[int64]int64{100: 0},
+		},
+		{
+			name:        "fresh, unknown and empty formats with prune in one clone",
+			stats:       &datapb.Statistics{Formats: []string{unknown, fresh("lance-table"), ""}, NullCounts: map[int64]int64{100: 0, 102: 1}},
+			schema:      schema,
+			wantFormats: []string{unknown, specutil.FormatLanceTable, ""},
+			wantCounts:  map[int64]int64{102: 1},
+		},
+		{
+			name:        "constant formats, prune",
+			stats:       &datapb.Statistics{Formats: []string{specutil.FormatVortex}, NullCounts: map[int64]int64{100: 0, 102: 1}},
+			schema:      schema,
+			wantFormats: []string{specutil.FormatVortex},
+			wantCounts:  map[int64]int64{102: 1},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := proto.Clone(test.stats).(*datapb.Statistics)
+			inFormats := append([]string(nil), test.stats.GetFormats()...)
+
+			got := normalizeStats(test.stats, prunableFields(test.schema), true)
+			if test.samePtr {
+				assert.Same(t, test.stats, got)
+			} else {
+				assert.NotSame(t, test.stats, got)
+			}
+			assert.Equal(t, test.wantCounts, got.GetNullCounts())
+			assert.Equal(t, before.GetFormats(), got.GetFormats())
+			for i, f := range got.GetFormats() {
+				assert.True(t, sameStringData(test.wantFormats[i], f), "format %q", f)
+			}
+			// The input is not written.
+			assert.True(t, proto.Equal(before, test.stats))
+			for i, f := range test.stats.GetFormats() {
+				assert.True(t, sameStringData(inFormats[i], f))
+			}
 		})
 	}
 }
