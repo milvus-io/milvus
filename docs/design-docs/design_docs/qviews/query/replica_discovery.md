@@ -5,16 +5,18 @@
 Proxy resolves a collection to VChannels and sends GetQueryPlan with
 `vchannel` and request-local routing constraints to the current WAL owner.
 That owner already manages the VChannel's QueryView replicas. It selects a
-replica and the newest locally Up View matching the exact requested schema.
-Statistics uses the newest Up View without a read-schema selector.
+replica and an eligible locally Up View matching the exact requested schema.
+Statistics chooses the latest schema. The per-replica handoff policy then selects
+within the highest already-Up LoadInfoVersion.
 The planning RPC no longer accepts an explicit ReplicaID. Internal explicit-View
 execution continues to use its actual ShardID.
 
 The returned QueryPlan carries the actual ShardID, full QueryViewVersion, paired
 MVCC and work nodes. Proxy uses these identities for Phase 2, reduction and
 retained requery. Moving selection does not change schema, load/partition,
-DataVersion or MVCC semantics. It does not implement gradual handoff or allow
-arbitrary fallback to historical data/load generations.
+DataVersion or MVCC semantics. [Handoff planning](query_client.md#handoff-planning-policy)
+may sample an active source/target pair; it never permits arbitrary fallback to
+historical data/load generations.
 
 ## Local index and selection
 
@@ -35,8 +37,10 @@ and never acquires a shard mutex while holding the handler mutex.
 The rotation is shared across concurrent requests; it is not a per-request
 promise to visit every replica before the client's retry budget expires.
 Node/View exclusions are applied before acquiring a serving lease. Each replica
-still contributes only its normally selected newest eligible View; exclusions
-never authorize a fallback to an older data/load generation. A candidate touching
+contributes one plan from its newest eligible target or its active handoff source;
+exclusions filter both endpoints before sampling and never authorize a fallback
+to an older data/load generation. The bypass_handoff retry hint selects only the
+newest eligible target, still subject to all exclusions. A candidate touching
 an excluded QN is skipped as a whole, never returned with missing workers.
 See [client circuit breaker](query_view_circuit_breaker.md).
 

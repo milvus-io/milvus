@@ -35,6 +35,7 @@ func publishReplicaView(t *testing.T, h *SNQueryViewHandler, resources *mockReso
 }
 
 func TestReplicaSelectionRotatesWithinVChannelAndPinsActualView(t *testing.T) {
+	useImmediateHandoff(t)
 	resources := newMockResourceManager()
 	h := recoverSNQueryViewHandler(t.Context(), testPChannel, newMockCatalog(), resources, nil)
 	for _, replica := range []int64{11, 22} {
@@ -153,7 +154,7 @@ func TestReplicaRoutingExcludesBeforeLeaseAndNeverFallsBackToOldVersion(t *testi
 	publishReplicaView(t, h, resources, 11, testVChannel, 1, 0, 101)
 	latest := publishReplicaView(t, h, resources, 11, testVChannel, 2, 0, 101)
 	publishReplicaView(t, h, resources, 22, testVChannel, 3, 0, 102)
-	constraints := &viewpb.QueryRoutingConstraints{ExcludedQueryViews: []*viewpb.QueryViewIdentity{{ReplicaId: 11, Version: latest.QueryViewVersion.IntoProto()}}}
+	constraints := &viewpb.QueryRoutingConstraints{BypassHandoff: true, ExcludedQueryViews: []*viewpb.QueryViewIdentity{{ReplicaId: 11, Version: latest.QueryViewVersion.IntoProto()}}}
 	schema := int32(0)
 	for range 3 {
 		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)

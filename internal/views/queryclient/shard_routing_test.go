@@ -352,3 +352,76 @@ func TestCanceledExecutionReleasesSelectedProbe(t *testing.T) {
 	require.Equal(t, time.Second, b.nodes[11].backoff)
 	require.Zero(t, b.nodes[11].failures)
 }
+
+func TestShardRoutingRetriesHandoffWithConstraints(t *testing.T) {
+	for _, failure := range []error{picker.ErrSubConnNotExist, viewerror.NewNotPrimaryError("node replaced"), viewerror.NewViewInvalidated("source retired")} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			plans, calls := 0, 0
+			patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+				plans++
+				require.Equal(t, plans > 1, req.GetRoutingConstraints().GetBypassHandoff())
+				require.EqualValues(t, 123, req.GetBarrierMvcc())
+				plan := newTestSearchQueryPlan(qviews.ShardID{VChannel: channel, ReplicaID: 1}, &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 123})
+				plan.Version.QueryVersion = int64(plans)
+				plan.WorkNodes[0].GetQueryNode().NodeId = int64(10 + plans)
+				if plans == 2 {
+					if picker.IsErrSubConnNoExist(failure) {
+						require.Contains(t, req.RoutingConstraints.ExcludedQueryNodeIds, int64(11))
+					}
+					if viewerror.AsViewError(failure).IsViewInvalidated() {
+						require.Len(t, req.RoutingConstraints.ExcludedQueryViews, 1)
+					}
+				}
+				return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+			}).Build()
+			defer patch.UnPatch()
+			rpc := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+				calls++
+				if calls == 1 {
+					return nil, failure
+				}
+				require.EqualValues(t, 2, req.Version.QueryVersion)
+				return &viewpb.SearchOnViewResponse{}, nil
+			}).Build()
+			defer rpc.UnPatch()
+			client := newShardViewQueryClient(2, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
+			defer client.Close()
+			plan, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, BarrierMVCC: 123, Reducer: fakeSearchResultReducer{}})
+			require.NoError(t, err)
+			require.EqualValues(t, 2, plan.Version.QueryVersion)
+			require.Equal(t, 2, plans)
+			require.Equal(t, 2, calls)
+		})
+	}
+}
+
+func TestHandoffRetryHintSurvivesAdmissionWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		plans, calls := 0, 0
+		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			plans++
+			require.Equal(t, plans > 2, req.GetRoutingConstraints().GetBypassHandoff())
+			if plans == 1 || plans == 3 {
+				return nil, viewerror.NewAllCandidatesExcluded()
+			}
+			plan := newTestSearchQueryPlan(qviews.ShardID{VChannel: channel, ReplicaID: 1}, &viewpb.QueryPlanMVCC{})
+			plan.Version.QueryVersion = int64(plans)
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		}).Build()
+		defer patch.UnPatch()
+		rpc := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(*fakeViewQueryServiceClient, context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+			calls++
+			if calls == 1 {
+				return nil, viewerror.NewViewInvalidated("source retired")
+			}
+			return &viewpb.SearchOnViewResponse{}, nil
+		}).Build()
+		defer rpc.UnPatch()
+		client := newShardViewQueryClient(2, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
+		defer client.Close()
+		_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
+		require.NoError(t, err)
+		require.Equal(t, 4, plans, "admission waits do not consume execution attempts")
+		require.Equal(t, 2, calls)
+	})
+}

@@ -7,12 +7,14 @@ It may be injected through `ViewQueryClientConfig.CircuitBreaker` to share state
 across multiple clients. StreamingNode retains replica/View selection and stores
 no client health state. A planning attempt carries a fresh immutable
 `QueryRoutingConstraints`: excluded QN IDs and excluded `(replica_id, version)`
-identities scoped to the request's vchannel. Versions include DataVersion.
+identities scoped to the request's vchannel, plus the `bypass_handoff` retry hint.
+Versions include DataVersion.
 
 This unpublished protocol replaces GetQueryPlanRequest.shard_id with string
 vchannel at field 2. QueryPlan and execution RPCs retain actual ShardID.
 
-SN applies exclusions to each replica's normally selected exact-schema Up View,
+SN applies exclusions to each replica's eligible exact-schema Up View (or both
+endpoints of its active handoff when sampling is enabled),
 before granting/renewing a serving lease or executing inline statistics. It does
 not fall back to arbitrary historical versions or omit failed workers. Filtering
 all serving candidates yields ALL_CANDIDATES_EXCLUDED, distinct from absent or

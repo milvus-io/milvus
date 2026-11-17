@@ -558,4 +558,3 @@ func TestQueryPlanForwardsHandoffRetryAndExactSchema(t *testing.T) {
 		}
 	}
 }
-

@@ -32,7 +32,7 @@ the streaming transport; parent Proxy wiring must inject its MixCoord client.
 
 For each resolved VChannel, the client sends `GetQueryPlan` with
 `vchannel` and a fresh `QueryRoutingConstraints` snapshot. The WAL owner chooses a replica and its newest locally Up
-View matching the request's exact schema. The returned plan supplies the actual
+eligible View matching the request's exact schema, subject to the handoff policy. The returned plan supplies the actual
 ShardID and full View version; these are the identities used for execution and
 reduction. There is no client-side replica directory or per-VChannel subscription.
 See [server-side replica selection](replica_discovery.md).
@@ -111,6 +111,27 @@ and hybrid subqueries retain separate selections. Requery uses the original
 selection union. Successful empty shards still contribute an empty result and
 MVCC; fieldless aggregation results use the schema-aware identity (for example,
 count=0). Only the successful attempt's ExecutionSummary contributes feature usage.
+
+## Handoff planning policy
+
+SN chooses the highest already-Up LoadInfoVersion within the exact read schema
+(latest schema for statistics). `queryView.handoffPolicy.type` supports `immediate`
+and `linear` (default). Linear shifts the newest target's share from 10% to 100%
+over 30 seconds by default. Duration and initial ratio are configurable. Only the
+active source/target pair participates; a superseding target retains the original
+eligible source and starts a fresh window. Intermediate targets are not pinned.
+Existing serving leases may retire the source before the window ends. Recovery
+does not restore a window. Policy changes to immediate end an active window.
+
+`QueryRoutingConstraints.bypass_handoff` requests the newest eligible target on
+execution retries. The client sets it after a counted failed attempt; readiness
+and all-excluded admission waits retain that attempt's policy. This hint does not
+relax exclusions, schema/load fences or MVCC, or terminate other requests' windows.
+Without bypass, exclusions filter both active endpoints before sampling. If only
+one survives it receives the request; if neither survives the replica is excluded.
+There is no fallback to arbitrary historical Views. SN filters before issuing a
+lease or executing inline statistics. Exact-version Phase 2 and retained requery
+keep their original View and snapshot.
 
 ## Public error boundary
 

@@ -85,7 +85,7 @@ func (s *snShardView) startHandoffLocked(version qviews.QueryViewVersion, target
 
 // Caller has advanced all pending Down entries under shard.mu. Each planning
 // attempt samples once; explicit-version execution bypasses this selector.
-func (s *snShardView) selectHandoffLocked(version qviews.QueryViewVersion, target *snViewEntry) (qviews.QueryViewVersion, *snViewEntry) {
+func (s *snShardView) selectHandoffLocked(version qviews.QueryViewVersion, target *snViewEntry, exclusions *qviews.QueryRoutingExclusions) (qviews.QueryViewVersion, *snViewEntry) {
 	w := target.handoff
 	if w == nil {
 		return version, target
@@ -107,10 +107,30 @@ func (s *snShardView) selectHandoffLocked(version qviews.QueryViewVersion, targe
 		target.handoff = nil
 		return version, target
 	}
-	if rand.Float64() >= weight {
+	// Filter both endpoints before sampling. Request-local failures must not
+	// terminate the shared window or admit arbitrary historical versions.
+	targetExcluded := excludesHandoffEntry(exclusions, target)
+	if !excludesHandoffEntry(exclusions, source) && (targetExcluded || rand.Float64() >= weight) {
 		metrics.QVHandoffPlans.WithLabelValues("source").Inc()
 		return w.source, source
 	}
-	metrics.QVHandoffPlans.WithLabelValues("target").Inc()
+	if !targetExcluded {
+		metrics.QVHandoffPlans.WithLabelValues("target").Inc()
+	}
 	return version, target
+}
+
+func excludesHandoffEntry(exclusions *qviews.QueryRoutingExclusions, entry *snViewEntry) bool {
+	if exclusions == nil {
+		return false
+	}
+	if exclusions.ExcludesView(entry.View.QueryViewKey()) {
+		return true
+	}
+	for _, node := range entry.sm.queryNodes {
+		if exclusions.ExcludesNode(node.GetNodeId()) {
+			return true
+		}
+	}
+	return false
 }

@@ -39,7 +39,7 @@ For node-side Phase 1 planning and Phase 2 execution, see
 [Query Plan Node-Side Design](query/query_plan.md) and
 [Query Execution Node-Side Design](query/query_execution.md).
 
-1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
+1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using an eligible Up QueryView matching the request schema and handoff policy:
    - Includes MVCC
    - Query optimization (BM25, Segment filtering, etc.)
    - Query view version
@@ -50,8 +50,9 @@ For node-side Phase 1 planning and Phase 2 execution, see
 
 ### Current SN implementation
 
-- **Phase 1:** `GetQueryPlan` acquires the highest available Up view at the exact request
-  SchemaVersion, resolves
+- **Phase 1:** `GetQueryPlan` selects within the highest already-Up LoadInfoVersion at the exact
+  request SchemaVersion, applying the configured handoff policy and routing
+  constraints before acquiring a serving lease. It resolves
   query MVCC, performs request/BM25 optimization and selects the plan's workers.
   `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
   [consistency-level discussion](#13-consistency-implementation-consistency-level)

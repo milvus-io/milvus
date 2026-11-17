@@ -1,6 +1,7 @@
 package snview
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -160,7 +162,7 @@ func TestHandoffTermination(t *testing.T) {
 			case "source down":
 				old.sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
 			}
-			version, selected := shard.selectHandoffLocked(target.View.QueryViewKey().QueryViewVersion, target)
+			version, selected := shard.selectHandoffLocked(target.View.QueryViewKey().QueryViewVersion, target, nil)
 			require.Same(t, target, selected)
 			require.Equal(t, int64(2), version.QueryVersion)
 			require.Nil(t, target.handoff)
@@ -244,7 +246,7 @@ func TestHandoffRecoveryNeverFallsBackToOlderLoadInfo(t *testing.T) {
 	lease, changed, err = shard.tryAcquireUpViewForSchema(t.Context(), nil)
 	require.Error(t, err)
 	require.Nil(t, lease)
-	require.Nil(t, changed, "failed recovery cannot roll back the load boundary")
+	require.NotNil(t, changed, "other replicas becoming ready must still wake the routing waiter")
 }
 
 // Tests that specifically require the latest version use immediate explicitly.
@@ -415,4 +417,102 @@ func TestHandoffPolicyHotUpdate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(2), planned.Version.QueryVersion)
 	planned.Release()
+}
+
+func TestHandoffRoutingConstraintsFilterBothEndpoints(t *testing.T) {
+	for _, byNode := range []bool{false, true} {
+		for _, tc := range []struct {
+			name                                   string
+			sourceExcluded, targetExcluded, bypass bool
+			want                                   int64
+		}{
+			{name: "source", want: 1},
+			{name: "exclude source", sourceExcluded: true, want: 2},
+			{name: "exclude target", targetExcluded: true, want: 1},
+			{name: "exclude both", sourceExcluded: true, targetExcluded: true},
+			{name: "bypass", bypass: true, want: 2},
+			{name: "bypass excluded source", bypass: true, sourceExcluded: true, want: 2},
+			{name: "bypass excluded target", bypass: true, targetExcluded: true},
+		} {
+			t.Run(fmt.Sprintf("%s/node=%v", tc.name, byNode), func(t *testing.T) {
+				useLinearHandoff(t)
+				h, shard, source, _, _ := leasedUpView(t, time.Minute)
+				schema := source.sm.meta.GetSchemaVersion()
+				target := addHandoffView(t, h, 2, schema, source.sm.meta.GetLoadInfoVersion())
+				source.sm.queryNodes = []*viewpb.QueryViewOfQueryNode{{NodeId: 11}}
+				target.sm.queryNodes = []*viewpb.QueryViewOfQueryNode{{NodeId: 12}}
+				// Even an initial zero-share target takes over an excluded source.
+				if tc.sourceExcluded {
+					target.handoff.initial = 0
+				}
+				draw := .99
+				if tc.targetExcluded {
+					draw = 0
+				}
+				patch := mockey.Mock(rand.Float64).Return(draw).Build()
+				defer patch.UnPatch()
+				constraints := &viewpb.QueryRoutingConstraints{BypassHandoff: tc.bypass}
+				for i, excluded := range []bool{tc.sourceExcluded, tc.targetExcluded} {
+					if !excluded {
+						continue
+					}
+					entry := []*snViewEntry{source, target}[i]
+					if byNode {
+						constraints.ExcludedQueryNodeIds = append(constraints.ExcludedQueryNodeIds, int64(11+i))
+					} else {
+						constraints.ExcludedQueryViews = append(constraints.ExcludedQueryViews, &viewpb.QueryViewIdentity{ReplicaId: shard.shardID.ReplicaID, Version: entry.View.QueryViewKey().QueryViewVersion.IntoProto()})
+					}
+				}
+				beforeSource, beforeTarget := source.leaseExpireAt, target.leaseExpireAt
+				lease, err := h.AcquireUpViewForRouting(t.Context(), shard.shardID.VChannel, &schema, constraints)
+				if tc.want == 0 {
+					require.Nil(t, lease)
+					require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded())
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, tc.want, lease.Version.QueryVersion)
+					lease.Release()
+				}
+				if tc.sourceExcluded {
+					require.Equal(t, beforeSource, source.leaseExpireAt)
+				}
+				if tc.targetExcluded {
+					require.Equal(t, beforeTarget, target.leaseExpireAt)
+				}
+				require.Zero(t, source.queryRefs)
+				require.Zero(t, target.queryRefs)
+				require.NotNil(t, target.handoff, "request constraints must not end the shared window")
+			})
+		}
+	}
+}
+
+func TestHandoffExclusionsCannotExpandEligibility(t *testing.T) {
+	for _, state := range []string{"expired", "immediate", "new load", "superseded"} {
+		t.Run(state, func(t *testing.T) {
+			useLinearHandoff(t)
+			h, shard, source, _, _ := leasedUpView(t, time.Minute)
+			schema, load := source.sm.meta.GetSchemaVersion(), source.sm.meta.GetLoadInfoVersion()
+			target := addHandoffView(t, h, 2, schema, load)
+			constraints := &viewpb.QueryRoutingConstraints{}
+			switch state {
+			case "expired":
+				target.handoff.started = time.Now().Add(-time.Minute)
+			case "immediate":
+				require.NoError(t, paramtable.Get().Save("queryView.handoffPolicy.type", "immediate"))
+			case "new load":
+				target = addHandoffView(t, h, 3, schema, load+1)
+			case "superseded":
+				target = addHandoffView(t, h, 3, schema, load)
+				constraints.ExcludedQueryViews = append(constraints.ExcludedQueryViews, &viewpb.QueryViewIdentity{ReplicaId: shard.shardID.ReplicaID, Version: source.View.QueryViewKey().QueryViewVersion.IntoProto()})
+			}
+			constraints.ExcludedQueryViews = append(constraints.ExcludedQueryViews, &viewpb.QueryViewIdentity{ReplicaId: shard.shardID.ReplicaID, Version: target.View.QueryViewKey().QueryViewVersion.IntoProto()})
+			for _, bypass := range []bool{false, true} {
+				constraints.BypassHandoff = bypass
+				lease, err := h.AcquireUpViewForRouting(t.Context(), shard.shardID.VChannel, &schema, constraints)
+				require.Nil(t, lease)
+				require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded(), "cannot select an old generation or an intermediate target")
+			}
+		})
+	}
 }

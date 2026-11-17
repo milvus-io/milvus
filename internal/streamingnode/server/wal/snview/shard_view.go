@@ -242,7 +242,7 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 		},
 	})
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
-	if before == qviews.QueryViewStateReady && entry.sm.State() == qviews.QueryViewStateUp && entry.advertisedUp {
+	if before == qviews.QueryViewStateReady && entry.sm.State() == qviews.QueryViewStateUp && s.ctx.Err() == nil {
 		s.startHandoffLocked(key.QueryViewVersion, entry)
 	}
 }
@@ -502,20 +502,11 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 	}
 	if selected != nil {
 		if !bypassHandoff {
-			selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected)
+			selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected, exclusions)
 		}
-		// Filter the normally selected version before granting/renewing a
-		// serving lease. Never bypass the constraints by choosing an older
-		// data/load generation or by removing workers from the plan.
-		if exclusions.ExcludesView(qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: selectedVersion}) {
+		// Exclusions never permit a fallback outside the active handoff pair.
+		if excludesHandoffEntry(exclusions, selected) {
 			return nil, nil, viewerror.NewAllCandidatesExcluded()
-		}
-		if exclusions != nil {
-			for _, node := range selected.sm.queryNodes {
-				if exclusions.ExcludesNode(node.GetNodeId()) {
-					return nil, nil, viewerror.NewAllCandidatesExcluded()
-				}
-			}
 		}
 		return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil, nil
 	}

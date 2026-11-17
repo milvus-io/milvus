@@ -140,7 +140,12 @@ lifetime management.
 
 `queryresource.ReadRuntime` borrows the resources owned by its QueryView. Read-only
 CCollections share `(CollectionID, SchemaVersion)` identity; the View retains its
-load scope independently. LoadInfoVersion is an identity, not an ordered revision.
+load scope independently. LoadInfoVersion identifies an immutable configuration and
+is monotonically allocated. Within an exact read schema, new planning uses the
+highest already-Up LoadInfoVersion, including a persisted Up still recovering.
+This admission fence prevents selecting older load/data visibility after a config
+transition. Exact-version execution and retained requery keep their original View;
+they do not rerun this selector.
 Existing View Acquire/Release controls schema, function and field-IDF guards.
 Withdrawal cancels work and waits for in-flight preparation/planning before releasing
 the guards. A serving lease protects the enclosing QueryRuntime; growing

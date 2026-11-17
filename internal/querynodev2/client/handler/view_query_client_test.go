@@ -135,7 +135,7 @@ func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
 	}
 }
 
-func TestQueryNodeReplacementIsSessionUnavailable(t *testing.T) {
+func TestQueryNodeFailurePreservesSessionEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		failure     error
