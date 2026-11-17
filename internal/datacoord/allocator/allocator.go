@@ -37,6 +37,22 @@ type Allocator interface {
 	AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error)
 }
 
+// ContextBatchAllocator extends Allocator with context-aware batch ID allocation.
+type ContextBatchAllocator interface {
+	AllocNWithContext(ctx context.Context, n int64) (typeutil.UniqueID, typeutil.UniqueID, error)
+}
+
+// AllocNWithContext allocates n UniqueIDs while honoring ctx cancellation/deadlines.
+func AllocNWithContext(ctx context.Context, alloc Allocator, n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+	if ca, ok := alloc.(ContextBatchAllocator); ok {
+		return ca.AllocNWithContext(ctx, n)
+	}
+	return alloc.AllocN(n)
+}
+
 // make sure rootCoordAllocator implements allocator interface
 var _ Allocator = (*rootCoordAllocator)(nil)
 
@@ -87,6 +103,11 @@ func (alloc *rootCoordAllocator) AllocID(ctx context.Context) (typeutil.UniqueID
 
 // AllocN allocates `n` UniqueIDs from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	return alloc.AllocNWithContext(context.Background(), n)
+}
+
+// AllocNWithContext allocates `n` UniqueIDs from RootCoord while honoring caller cancellation.
+func (alloc *rootCoordAllocator) AllocNWithContext(ctx context.Context, n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
 	if n <= 0 {
 		n = 1
 	}
@@ -98,7 +119,7 @@ func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.Un
 		)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(

@@ -120,6 +120,9 @@ func (policy *StorageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 	collections := policy.meta.CollectionsForPreparation(ctx)
 	views := make([]view.CompactionView, 0)
 	for _, collection := range collections {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if policy.currentCount >= maxCount {
 			break
 		}
@@ -130,6 +133,9 @@ func (policy *StorageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		}
 		collectionViews, err := policy.TriggerOneCollection(ctx, collection.ID, maxCount)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			// not throw this error because no need to fail because of one collection
 			mlog.Warn(ctx, "fail to trigger storage version compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 			continue
