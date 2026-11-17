@@ -1,80 +1,79 @@
-# QueryView 准备优先级与协作式资源调度
+# QueryView Preparation Priority and Cooperative Resource Scheduling
 
-关联需求：[milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284)。
+Related requirement: [milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284).
 
-状态：2026-11-11 已接通第一版待执行任务优先级。本文区分已实现的排队调度与后续更细粒度协作方案；访问统计的采集与聚合由 [ViewFeedback](view_feedback.md) 定义。
+Status: the first implementation of priority ordering for pending tasks was connected on 2026-11-11. This document distinguishes the implemented queue scheduling from the finer-grained cooperative scheduling proposed for later work. [ViewFeedback](view_feedback.md) defines access-statistics collection and aggregation.
 
-## 当前实现范围（2026-11-11）
+## Current Implementation Scope (2026-11-11)
 
-用户明确第一版只改变尚未执行任务的顺序，不抢占正在执行的任务。已实现：
+The first version explicitly changes only the order of tasks that have not started; it does not preempt running tasks. Implemented behavior:
 
-- `QueryViewControl.preparation_priority` 使用 `sint32` 字段 2，取值 [-20, 20]，0 缺省、越大越优先；创建后 immutable。Builder 拷贝 Control，Coord lease 控制只加强 lease 字段；SN 同 identity 重发保留首次接收的准备优先级，包括旧消息省略字段的情况。Coord/SN 恢复使用持久化值。
-- Coord 正常规划、published-schema 恢复规划和手工迁移创建新 View 时计算分值。既有 View 不因统计变化被重建或重排；同一操作保留当前配置下各 replica 的不可变反馈快照，并按 RG 汇总最近 6 个窗口的 rate，分子与分母使用同一组快照。
-- `nodeScheduler` 的 `WithPriority(int32)` 和 `PriorityTaskHandle.SetPriority(int32)` 使用同一执行器。通常按分值、同分 FIFO；每 8 次优先派发后给最老 runnable 一次机会。SetPriority 保留排队年龄，不提前 retry deadline，不取消或重新启动 Execute。Running 的新有效值仅用于后续 retry。
-- QN 保存每个 SegmentResource 的任务句柄，对具有已解析依赖、尚未准备、未失败、未处于 retry/catch-up 等待的 binding 取 max；所有分值为负时仍取负值。依赖加入、释放、失败时重排待执行任务。资源内先发布可复用 read，再按优先级选择 eligible binding，同分保持 cursor 顺序，每 8 次优先选择给轮转起点一次机会。一次 reconcile 至多执行一次物理准备后重新入队，沿用原重试 timer 与 cleanup。
-- SN 共享 build 取未完成依赖的最大值，依赖移除时可以降分；优先级不改变最老 View 的构建快照。逐 View ready task 使用其固定值。WAL scoped handle 透传 SetPriority，不改变任务追踪与关闭语义。
+- `QueryViewControl.preparation_priority` is `sint32` field 2, with a range of [-20, 20]. The default is 0, and larger values have higher priority. It is immutable after creation. The builder copies Control, and Coord lease control strengthens only the lease field. For retransmissions of the same identity, SN retains the preparation priority first received, including when an older message omits the field. Coord/SN recovery uses the persisted value.
+- Coord computes the score when creating a new View through normal planning, published-schema recovery planning, or manual migration. Statistics changes do not rebuild or reorder existing Views. An operation retains immutable feedback snapshots for replicas in the current configuration and aggregates rates from the last 6 windows by RG; numerator and denominator use the same snapshots.
+- `nodeScheduler.WithPriority(int32)` and `PriorityTaskHandle.SetPriority(int32)` use the same executor. Dispatch normally follows priority, with FIFO among equal scores; after every 8 priority dispatches, the oldest runnable task gets an opportunity. SetPriority preserves queue age, does not advance retry deadlines, and does not cancel or restart Execute. A new effective value for a running task applies only to subsequent retries.
+- QN retains the task handle for each SegmentResource and takes the maximum priority among bindings whose dependencies are resolved, which are not ready or failed, and which are not waiting for retry or catch-up. If all scores are negative, the result remains negative. Dependency addition, release, and failure reorder pending tasks. Within a resource, reusable reads are published first, then eligible bindings are selected by priority. Equal scores preserve cursor order; after every 8 priority selections, the round-robin starting point gets an opportunity. Each reconcile performs at most one physical preparation before re-enqueuing, retaining the existing retry timer and cleanup behavior.
+- SN shared builds take the maximum priority of unfinished dependencies; removing a dependency can lower the score. Priority does not change the build snapshot selected for the oldest View. Each per-View ready task uses its fixed value. WAL scoped handles forward SetPriority without changing task tracking or shutdown semantics.
 
-当前共享调度器完整引入 PR #55398（b36d566118），替换原本地实现。除优先出队外，它还按 ≤-10 / ≤-1 / ≤20 对运行任务设置 50% / 75% / 100% 的累计 worker 上限（向下取整、至少 1）。低档不能借用高档保留容量，公平派发也不能越过容量上限。分值变化因此同时影响出队顺序和后续 admission 的容量档位；已运行 attempt 仍按原档计费。
+The shared scheduler from PR #55398 (b36d566118) is now fully integrated, replacing the previous local implementation. In addition to priority dequeueing, it applies cumulative worker caps of 50% / 75% / 100% to running tasks in the <=-10 / <=-1 / <=20 bands, rounded down with a minimum of 1. Lower bands cannot borrow capacity reserved for higher bands, and fairness dispatch cannot exceed these caps. A score change therefore affects both dequeue order and the capacity band for subsequent admission; a running attempt remains charged to its original band.
 
-ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力目标内尚未执行的 data 任务可提高到 5。QueryView build/ready 的默认 0 由 View 分值或共享依赖最大值替代。达到 20 的 View 与 ACK 同档竞争，保留容量不再是 ACK 独占。
+ACK has a fixed priority of 20, release has 5, and data defaults to -5. Pending data tasks within the recovery-tail pressure target can be raised to 5. QueryView build/ready tasks replace the default 0 with the View score or the maximum of shared dependencies. Views that reach 20 compete in the ACK band, so reserved capacity is no longer exclusive to ACK.
 
-当前策略以用户需求选择场景，再叠加场景内流量分和配置偏移。此前 LOW=-10、独立活动时间加分和线性 rate 加分规则已替换。
+The current policy selects a scenario based on user demand, then adds a scenario-specific traffic score and configuration offset. It replaces the earlier LOW=-10 rule, separate activity-time bonus, and linear rate bonus.
 
-| 场景（按判断顺序） | 基础分 | 流量分上限 | 含配置后的范围 |
+| Scenario, evaluated in order | Base score | Traffic-score cap | Range including configuration |
 | --- | --- | --- | --- |
-| 近期访问，缺少存活 UpView | +10 | 8 | [10,20] |
-| LoadConfig.AutoLoad 且缺少存活 UpView | +10 | 0 | [10,12] |
-| 近期访问，已有存活 UpView | 0 | 2 | [0,4] |
-| 无近期访问，已有存活 UpView（冷 handoff） | -10 | 0 | [-10,-8] |
-| 非 AutoLoad，已知长期无访问，缺少存活 UpView（冷恢复） | -5 | 0 | [-5,-3] |
-| 无访问历史、无存活 UpView、非 AutoLoad（首次/手动加载） | 0 | 0 | [0,2] |
+| Recent access, no live UpView | +10 | 8 | [10,20] |
+| LoadConfig.AutoLoad, no live UpView | +10 | 0 | [10,12] |
+| Recent access, live UpView exists | 0 | 2 | [0,4] |
+| No recent access, live UpView exists (cold handoff) | -10 | 0 | [-10,-8] |
+| Not AutoLoad, known long-term inactivity, no live UpView (cold recovery) | -5 | 0 | [-5,-3] |
+| No access history, no live UpView, not AutoLoad (initial/manual load) | 0 | 0 | [0,2] |
 
-- 配置偏移：HIGH（含 proto 默认值）+2，LOW 0，未知 enum 0。不使用 enum 底层数值。
-- 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤2 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
-- 流量映射：`share=clamp(replica.Last6Windows / same_RG_total,0,1)`，`heat=log1p(100*share)/log1p(100)`，`traffic=round(limit*heat)`。分母 ≤0 时流量分为 0。
-- 总分为 `clamp(base + traffic + config, -20,20)`；当前策略实际产生 [-10,20]，wire/scheduler 合法范围仍是 [-20,20]，不要求用满。
-- 最紧急档中，1%/5%/10%/50%/100% 占比分别得到 1/3/4/7/8 流量分。AutoLoad 与近期缺 UpView 的恢复共用 +10 基准；同配置下零流量恢复与 AutoLoad 同分，恢复可再按流量加分。不同配置的 +2 偏移允许这两个场景在低流量时交错排序。
+- Configuration offset: HIGH, including the proto default, adds +2; LOW and unknown enum values add 0. The enum's underlying numeric value is not used.
+- Recent access: LastAccessTime is nonzero and no more than 2 minutes before this planning operation's time. Future timestamps count as recent. LastAccessTime selects the scenario and does not add a separate activity score.
+- Traffic mapping: `share=clamp(replica.Last6Windows / same_RG_total,0,1)`, `heat=log1p(100*share)/log1p(100)`, and `traffic=round(limit*heat)`. A denominator <=0 gives a traffic score of 0.
+- The total is `clamp(base + traffic + config, -20,20)`. The current policy actually produces [-10,20]; the wire/scheduler range remains [-20,20] and need not be fully used.
+- In the most urgent band, shares of 1%/5%/10%/50%/100% receive traffic scores of 1/3/4/7/8. AutoLoad and recovery with recent access but no UpView share a +10 base. With the same configuration, zero-traffic recovery ties with AutoLoad, while recovery can receive an additional traffic bonus. Different +2 configuration offsets allow these scenarios to interleave at low traffic.
 
-ViewFeedback 将超过 2 分钟的窗口清理，但保留 replica 的最后活动时间直到 replica 撤销。窗口归零不等于变冷：仍在 2 分钟内就保留该场景基准分。最近 6 窗口不假定固定 6 秒。缺失统计不能证明长期无人访问；没有历史的缺 UpView 场景使用首次/手动加载基准，不凭空创造访问记录。
+ViewFeedback removes windows older than 2 minutes but retains the replica's last activity time until the replica is removed. Zero window rates do not imply cold data: the scenario base remains while the access is still within 2 minutes. The last 6 windows are not assumed to mean exactly 6 seconds. Missing statistics do not establish long-term inactivity; a View without an UpView or access history uses the initial/manual-load base without inventing access records.
 
-**尚未实现的细分方案：** 下文第 6、12 节的独立 Yield/Wait/Event 接口、collection 分组公平，以及 Transform catch-up 独立 drain 池、IDF permit 和 live-event dispatcher 内部的优先级细分。第一版保持这些已有执行边界与预算；一旦 Execute 已开始，其中的 I/O/native/模块阶段不会因更高分到达而中断或重新 admission。因此当前实现证明主要准备任务的排队优先级，不表示所有下游队列都能按 View 优先级排序，也不承诺墙钟恢复延迟。
+**Finer-grained proposals not yet implemented:** the separate Yield/Wait/Event interfaces in Sections 6 and 12, fairness across collection groups, and priority handling within the separate Transform catch-up drain pool, IDF permits, and live-event dispatcher. The first version retains their existing execution boundaries and budgets. Once Execute starts, its I/O, native, and module stages are neither interrupted nor readmitted when a higher score arrives. The current implementation therefore establishes queue priority for the main preparation tasks; it does not imply that every downstream queue follows View priority or guarantee wall-clock recovery latency.
 
+## 1. Goals and Established Constraints
 
-## 1. 目标与已确定约束
+Under resource contention, Coord can assign preparation priority to a new QueryView based on user configuration and collection access activity. QN/SN propagate that value to actual resource tasks so cooperative scheduling can advance more urgent preparation first, with the aim of improving resource allocation during failure recovery.
 
-资源竞争时，Coord 能根据用户配置及 collection 的访问活跃度，为新 QueryView 指定准备优先级。QN/SN 将该值传递到真实资源任务，通过协作式调度优先推进更紧急的准备，预期改善故障恢复时的资源分配。
+Core constraints:
 
-核心约束：
+1. Priority is a signed integer in `[Pmin, Pmax]`, where `Pmin < 0 < Pmax`. The default baseline is 0; negative values are lower and positive values are higher.
+2. It is an absolute score, not an increment command. Receiving `+10` always means a value of 10.
+3. **Priority is immutable for a given QueryView identity.** It is computed at creation and retained through preparation, retries, retransmissions, and recovery.
+4. Coord uses the target replica's LastAccessTime and rate over the last 6 windows, computing its share against the total replica rate across all collections in the same RG. SN collects the inputs through GetQueryPlan, and ReplicaFeedbackStore provides replica snapshots with lifetimes independent of Views. Balancer does not scan shards/windows or restore the old Contribution/Registry path; QN adds no access-statistics collection.
+5. Policy is scoped to an RG, without introducing a single cross-RG recovery target or serialization barrier. Work proceeds in parallel when resources do not actually contend.
+6. Priority does not change placement, readiness, schema/MVCC, leases, reference counts, or WAL ordering.
 
-1. 优先级是范围 `[Pmin, Pmax]` 内的有符号整数，`Pmin < 0 < Pmax`。0 为默认基准，负数更低，正数更高。
-2. 它是绝对分值，不是增量命令；收到 `+10` 始终表示值为 10。
-3. **同一个 QueryView identity 的优先级 immutable**。创建时计算，此后准备、重试、重发与恢复均保留原值。
-4. Coord 使用目标 replica 的 LastAccessTime 和最近 6 个窗口的 rate，以同一 RG 内所有 collection 的所有 replica rate 总和计算占比。SN 通过 GetQueryPlan 采集，ReplicaFeedbackStore 提供 replica 快照，生命周期独立于 View；Balancer 不扫描 shard/window，不恢复旧 Contribution/Registry，QN 不新增访问统计。
-5. RG 内制定策略，不创建跨 RG 的唯一恢复目标或串行屏障。无实际资源竞争时并行推进。
-6. 优先级不改变 placement、readiness、schema/MVCC、lease、引用计数或 WAL 顺序。
+The issue's original proposal to raise or lower priority while an existing View is preparing is outside this design. Statistics keep changing, but are consumed only when normal processing creates a new View. Views are not replaced merely to rescore them.
 
-issue 最初提出的“已有 View 准备过程中调高/调低优先级”不属于本方案。统计持续更新，但只在正常流程创建新 View 时被消费，不为重新设置分值而替换 View。
+## 2. Original Integration Checklist (See the Opening Scope for Implementation Status)
 
-## 2. 原设计的接入点清单（完成情况以开头实现范围为准）
-
-| 位置 | 当前行为 | 需要实现 |
+| Location | Original behavior | Required work |
 | --- | --- | --- |
-| `pkg/proto/view.proto` | QueryViewControl 有 `preempt_serving_lease` | 追加 immutable 准备优先级字段，旧值缺省为 0 |
-| `internal/views/coord/balancer/` | 规划 View/placement，没有读取 replica Priority 进行准备排序 | 创建 View 时读取域统计、用户配置并计算固定值 |
-| `internal/views/coord/coordview/` | View 持久化后同步到节点 | 保持 priority 的创建、持久化、重发和恢复一致性 |
-| `pkg/util/nodescheduler/` | runnable FIFO，延迟任务按 nextRun 排序 | 数值优先级、公平选择与协作式继续/等待语义 |
-| `internal/querynodev2/qnview/` | Segment 资源任务与资源内 binding 轮转 | 将依赖 View 的优先级传入资源间、资源内选择 |
-| `internal/querynodev2/transformlogbuffer/` | 单独的 catch-up drain 队列 | registration 继承依赖优先级，保持批次让出和顺序 |
-| `internal/streamingnode/server/wal/vchannel/queryresource/` | 共享 runtime build 和逐 View readiness | 共享任务继承、可继续的阶段执行、依赖等待让出 |
-| SN IDF/事件应用等 admission | 有独立 permit/dispatcher | 在实际竞争点接入相同调度输入，保持各自预算 |
+| `pkg/proto/view.proto` | QueryViewControl contains `preempt_serving_lease` | Add an immutable preparation-priority field, defaulting to 0 for old data |
+| `internal/views/coord/balancer/` | Plans Views/placement without using replica Priority to order preparation | Read scoped statistics and user configuration when creating a View, and compute a fixed value |
+| `internal/views/coord/coordview/` | Persists Views before synchronizing them to nodes | Preserve priority consistency across creation, persistence, retransmission, and recovery |
+| `pkg/util/nodescheduler/` | Runnable FIFO; delayed tasks ordered by nextRun | Numeric priority, fair selection, and cooperative continuation/wait semantics |
+| `internal/querynodev2/qnview/` | Segment resource tasks and round-robin bindings within resources | Propagate dependent View priorities into selection between and within resources |
+| `internal/querynodev2/transformlogbuffer/` | Separate catch-up drain queue | Let registrations inherit dependency priorities while preserving batch yields and ordering |
+| `internal/streamingnode/server/wal/vchannel/queryresource/` | Shared runtime builds and per-View readiness | Shared-task inheritance, resumable stages, and yielding while waiting for dependencies |
+| SN IDF/event-application admission | Separate permits/dispatchers | Apply the same scheduling inputs at actual contention points while preserving each budget |
 
-`LoadReplicaConfig.priority` 当前被保存在 load 配置并投影到管理数据，但没有在 QueryView 准备调度中生效。DataCoord 的 `query_view_segment_load_info.go` 当前为 QV Segment 和索引加载填写固定 HIGH。本设计让 replica 配置成为 **Coord 计算新优先级的输入**，不是沿用现有 QV 排序行为。
+In the original integration baseline, `LoadReplicaConfig.priority` was stored in load configuration and projected into management data, but did not affect QueryView preparation scheduling. DataCoord's `query_view_segment_load_info.go` supplied a fixed HIGH for QV Segment and index loading. This design makes replica configuration **an input to Coord's new priority calculation**, rather than reusing an existing QV ordering policy.
 
-## 3. 优先级表达、持久化与兼容
+## 3. Priority Representation, Persistence, and Compatibility
 
-### 3.1 Control 字段
+### 3.1 Control Field
 
-建议字段形态如下；实现前核对 proto 编号：
+The proposed field layout is shown below; verify proto field numbers before implementation:
 
 ```protobuf
 message QueryViewControl {
@@ -83,57 +82,57 @@ message QueryViewControl {
 }
 ```
 
-业务数值范围不必占满 sint32。比较时数值越大越优先；差值不自动表示资源份额倍数。负值仍是可执行任务，不表示暂停或拒绝。
+The business range need not use all of sint32. Larger values compare as higher priority; a score difference does not automatically imply a multiple of resource share. Negative values still represent executable tasks, not suspension or rejection.
 
-Control 的字段有各自语义：lease 控制可按现有规则加强，准备优先级固定。现有将整个 Control 替换的路径必须改为保留 priority；Control 的注释也不能继续把所有字段描述为同一种单调控制。
+Control fields have distinct semantics: lease control can be strengthened under existing rules, while preparation priority is fixed. Paths that replace the entire Control must preserve priority. Control comments must no longer describe every field as the same kind of monotonic control.
 
-### 3.2 创建链路
+### 3.2 Creation Flow
 
 ```text
-Balancer 正常规划出新 QueryView
-  -> 读取目标 replica 的统计快照、同 RG 总 rate 及 replica 配置
-  -> 计算并固定 preparation_priority
-  -> View 持久化
-  -> SyncQueryView 下发同一 View
-  -> QN/SN 首次 Acquire 时保存固定优先级
-  -> 节点资源管理器计算实际任务有效优先级
+Balancer plans a new QueryView through normal processing
+  -> Read the target replica's statistics snapshot, same-RG total rate, and replica configuration
+  -> Compute and fix preparation_priority
+  -> Persist the View
+  -> Send the same View through SyncQueryView
+  -> QN/SN retain the fixed priority on first Acquire
+  -> Node resource managers compute effective priorities for actual tasks
 ```
 
-优先级在 View 发布前确定，先持久化后同步沿用既有 dirty flush 规则。一次已提交 View 的消息重试不重新运行评分函数；同 identity 的重复 apply 不覆盖资源注册保存的 priority。
+Priority is determined before publishing the View. Persist-before-sync follows the existing dirty-flush rules. Retrying a message for an already submitted View does not rerun scoring; duplicate applies of the same identity do not overwrite the priority held by the resource registration.
 
-QN/SN 将固定值与当前 acquisition 一起保存。不能为重排而替换需求 Meta 指针，尤其 SN `prepareViewRef` 用 Meta identity 与 runtime identity 识别注册代次；不能重新 Acquire/Release、重开订阅或丢弃准备进度。
+QN/SN retain the fixed value alongside the current acquisition. Reordering must not replace the requirement's Meta pointer: in particular, SN `prepareViewRef` uses Meta identity and runtime identity to identify registration generations. It must not reacquire/release resources, reopen subscriptions, or discard preparation progress.
 
-### 3.3 不可变性和升级
+### 3.3 Immutability and Upgrades
 
-- 不新增 UpdatePriority、priority control revision、applied-priority ACK 或更新专用重传。
-- 用户配置和统计变化只影响以后创建的 View。正常故障/版本演进确需新 View 时，使用当时输入重新计算。
-- Coord 和 SN 恢复同一 View 时使用持久化值。SN 本地 UpRecovering 不另加临时 View 优先级。
-- 旧数据或旧消息缺少字段时为 0；旧节点忽略新增字段。混合版本期间调度效果可能不完整，但不能阻断原有生命周期。
-- 同 identity 的非零值不会被旧格式重发中的缺省 0 静默重写。正常创建/恢复路径应保证一致值；不建立“最后一次消息获胜”的优先级协议。
+- Do not add UpdatePriority, priority control revisions, applied-priority ACKs, or retransmissions dedicated to priority updates.
+- User-configuration and statistics changes affect only subsequently created Views. When normal failure or version progression requires a new View, compute its score from the inputs available then.
+- Coord and SN use the persisted value when recovering the same View. SN's local UpRecovering does not add a temporary View priority.
+- Old data/messages without the field default to 0; older nodes ignore the new field. Scheduling effects may be incomplete during mixed-version operation, but the existing lifecycle must continue.
+- A nonzero value for an identity is not silently overwritten by the default 0 in an old-format retransmission. Normal creation/recovery paths must provide a consistent value; there is no last-message-wins priority protocol.
 
-在此约束下，故障发生后已有普通 Preparing View 不会就地升级，已有高分 View 也不会因环境变化自动降分。这是明确接受的简化，不用额外创建 View 绕过。
+Under this constraint, an existing ordinary Preparing View is not upgraded in place after a failure, and an existing high-score View is not automatically downgraded when conditions change. This is an accepted simplification, not something to bypass by creating extra Views.
 
-## 4. Coord 如何计算分值
+## 4. How Coord Computes the Score
 
-### 4.1 统计与策略范围
+### 4.1 Statistics and Policy Scope
 
-统计输入来自 ReplicaFeedbackStore 的不可变 replica snapshot：
+Statistics come from ReplicaFeedbackStore's immutable replica snapshots:
 
-- 最后活动时间：目标 replica 的 `LastAccessUnixNanos`。
-- 分子：目标 replica 的 `RequestRates.Last6Windows`。
-- 分母：当前配置中同一 RG 内所有 collection 的所有 replica 的 `Last6Windows` 之和；缺少 snapshot 的 replica 贡献为 0。不是 collection 内总和，也不是 Store 的集群级 `GetGlobalRequestRates()`。
+- Last activity time: the target replica's `LastAccessUnixNanos`.
+- Numerator: the target replica's `RequestRates.Last6Windows`.
+- Denominator: the sum of `Last6Windows` for every replica of every collection in the same RG under the current configuration. Replicas without snapshots contribute 0. This is neither the collection-local total nor the Store's cluster-wide `GetGlobalRequestRates()`.
 
-Store 已将各 shard 的窗口 rate 按 collection 的全部 shard 数平均成 replica rate（未上报 shard 按 0）。Balancer 直接消费这个 rate，不重新换算为请求数。有效性由 Store 的 2 分钟窗口策略负责，不额外引入报告超时。
+The Store already averages shard-window rates over the collection's total shard count to obtain a replica rate, treating unreported shards as 0. Balancer consumes this rate directly without converting it back into a request count. The Store's 2-minute window policy handles validity; no additional report timeout is introduced.
 
-ReplicaFeedbackStore 在反馈发布、过期及拓扑变化时增量维护 RG 总 rate。规划/手工操作在首次确需评分时，获取一个不可变 PlanningSnapshot；它同时包含 replica 反馈和 RG 汇总，读取版本根不扫描 collection/replica、无分配。同一操作后续评分固定使用该版本，分子与分母不会因并发反馈而变化。索引按 replica ID 和 RG 名查找；健康判断仍遍历该 UpView 的 QN 列表。正常规划仅在候选确定需要创建新 View 后评分；无变化 optional 候选、失败分配和 release 不读取 feedback。
+ReplicaFeedbackStore incrementally maintains RG total rates on feedback publication, expiry, and topology changes. A planning/manual operation acquires an immutable PlanningSnapshot when scoring is first needed. It contains both replica feedback and RG aggregates; reading the version root neither scans collections/replicas nor allocates memory. Subsequent scoring within the operation uses that fixed version, so concurrent feedback cannot change its numerator or denominator. Index lookups use replica ID and RG name; health checks still traverse the UpView's QN list. Normal planning scores a candidate only after deciding that a new View is required. Unchanged optional candidates, failed allocations, and releases do not read feedback.
 
-Store 通过 LoadConfig listener 跟踪 replica 的 RG；迁移从旧组扣除、向新组加入当前贡献，释放撤销贡献。发布版本使用持久化 radix 索引，只复制变化路径，不全量 clone replica map。若规划固定的 LoadConfig RG 与反馈版本中的 membership 不同，该 replica 的反馈按不可用处理，避免使用不匹配的分子和分母；加载优先级、AutoLoad 与节点健康仍来自本次规划的既有输入。
+The Store tracks each replica's RG through the LoadConfig listener. Migration subtracts its contribution from the old group and adds it to the new one; release removes the contribution. Published versions use persistent radix indexes, copying only changed paths rather than cloning the entire replica map. If the RG in the planning operation's pinned LoadConfig differs from membership in the feedback version, that replica's feedback is treated as unavailable to avoid pairing a mismatched numerator and denominator. Load priority, AutoLoad, and node health still come from the operation's existing inputs.
 
-新 View 不需要自己的查询历史。同一 replica 在一次操作中创建的 View 共享统计输入；同一 collection 的不同 replica 使用各自的热度。没有 snapshot 时结合加载需求与 UpView 状态选择场景；分母为 0 时只取消流量加分。
+A new View does not need its own query history. Views created for the same replica within an operation share statistics inputs; different replicas of the same collection use their own access activity. Without a snapshot, the scenario is selected from load demand and UpView state. A zero denominator only removes the traffic bonus.
 
-已有 QN placement 按 `(CollectionID, ResourceGroup)` 规划，同 collection 的 replica 目标节点集可互斥，不同 collection 可共享节点。因此 RG 是策略范围，实际优先级选择发生在有竞争的节点/资源队列上，不能因为 RG 内另一 View 未完成就闲置独立执行资源。
+Existing QN placement is planned by `(CollectionID, ResourceGroup)`. Replica target-node sets within one collection can be disjoint, while different collections can share nodes. RG is therefore the policy scope, while actual priority selection occurs in contending node/resource queues. Independent execution resources must not sit idle merely because another View in the RG is unfinished.
 
-### 4.2 场景评分
+### 4.2 Scenario Scoring
 
 ```text
 recent = LastAccessTime != 0 && now - LastAccessTime <= 2min
@@ -143,201 +142,201 @@ traffic = round(limit * log1p(100 * share) / log1p(100))
 P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
 ```
 
-具体场景与固定参数见开头映射表。总 rate ≤0 时 traffic=0；无 snapshot 或零 LastAccessTime 代表没有访问历史，不等同于已知长期无人访问。没有额外采集 NQ、执行成本或准备进度。
+The opening table defines the scenarios and fixed parameters. When the total rate is <=0, traffic=0. A missing snapshot or zero LastAccessTime means no access history, which is different from known long-term inactivity. No additional NQ, execution-cost, or preparation-progress statistics are collected.
 
-同一 replica 的多个 shard 共用访问反馈，但 UpView 健康状态按 `(ReplicaID,VChannel)` 分别判断，因此可获得不同分值。同一 RG 的其他 replica 即使存在 UpView，也不会抵消目标 shard 的恢复紧急程度。配置只提供 +2 偏移；AutoLoad 与近期缺 UpView 的恢复共享基准分，二者按最终分数排序。
+Shards of the same replica share access feedback, but UpView health is evaluated separately for each `(ReplicaID,VChannel)`, so they can receive different scores. An UpView on another replica in the same RG does not reduce the target shard's recovery urgency. Configuration provides only a +2 offset. AutoLoad and recovery with recent access but no UpView share a base score and are ordered by their final scores.
 
-### 4.3 UpView 与节点健康
+### 4.3 UpView and Node Health
 
-复用 Balancer 的 `healthyUp`：ShardStats 必须存在 UpVersion，UpNodes 中每个 QN 必须仍在节点快照中且 Alive。QN 已掉线但 Up 元数据尚未清理时，仍判定缺少健康 UpView；Stopping 仅禁止新 placement，不使仍存活的 UpView 失效。正常规划和手工迁移都捕获节点快照，不因手工路径缺少节点数据而误报掉线。
+Reuse Balancer's `healthyUp`: ShardStats must have an UpVersion, and every QN in UpNodes must still exist in the node snapshot and be Alive. If a QN has gone offline but its Up metadata has not yet been removed, the UpView is still considered unhealthy. Stopping only disallows new placement; it does not invalidate an UpView whose nodes remain alive. Normal planning and manual migration both capture node snapshots, preventing missing node data on the manual path from being misinterpreted as a node failure.
 
-这里消费既有状态和拓扑，不通过 ViewFeedback 再建立可服务状态。SN 故障由现有 PChannel assignment/恢复链路处理，不向 QN 节点表混入 SN。恢复同 identity 的 SN UpView 仍保留持久化 priority，不因故障重打分；此限制来自 immutable 约束。本次不改变 SN 故障恢复或 View 生命周期。
+This consumes existing state and topology rather than recreating serviceability through ViewFeedback. SN failures are handled by existing PChannel assignment/recovery paths; SNs are not mixed into the QN node table. Recovering an SN UpView with the same identity retains its persisted priority instead of rescoring after failure. This follows from immutability. SN failure recovery and the View lifecycle are unchanged.
 
-### 4.4 持久化 AutoLoad 来源
+### 4.4 Persisting the AutoLoad Origin
 
-AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。需要创建加载配置时，调用共享的内部 `loadCollection(ctx, req, true)`；公开 `LoadCollection` 入口传 false。来源通过内部显式参数传递，不修改 `LoadCollectionRequest` RPC。健康检查、资源准入、错误返回和指标仍共用同一加载流程。
+AutoLoad enters through QueryCoord `EnsureCollectionReady`. When a load configuration must be created, it calls the shared internal `loadCollection(ctx, req, true)`; the public `LoadCollection` entry point passes false. An explicit internal parameter carries the origin without changing the `LoadCollectionRequest` RPC. Health checks, resource admission, errors, and metrics continue to use the shared load flow.
 
-`AlterLoadConfigMessageHeader.auto_load` 随广播持久化和回放，并投影为版本化 `CollectionLoadConfig.auto_load` / `loadmgr.LoadConfig.AutoLoad`。Balancer 从已有不可变 LoadConfig 快照直接读取，不再维护 AutoLoadDemand、等待计数、额外锁或注入接口。Coord 重启直接从 LoadConfig 恢复标识，无需等待查询重试重建需求。
+`AlterLoadConfigMessageHeader.auto_load` is persisted and replayed with the broadcast, then projected into versioned `CollectionLoadConfig.auto_load` / `loadmgr.LoadConfig.AutoLoad`. Balancer reads it directly from the existing immutable LoadConfig snapshot, without maintaining AutoLoadDemand, waiter counts, extra locks, or injected interfaces. Coord restores the flag directly from LoadConfig after restart rather than waiting for query retries to reconstruct demand.
 
-评分按顺序匹配：近期访问且没有健康 UpView 时，使用 +10 基准和最多 +8 的流量分；否则 `AutoLoad && !healthyUp` 使用 +10 基准，不要求访问历史为空。有健康 UpView 时 AutoLoad 不加分，按原有近期访问或冷 handoff 规则评分。因此 AutoLoad 的冷恢复也使用 +10，这是持久化加载策略，不是“当前存在等待请求”的推断。HIGH 的 +2 配置偏移保持不变。
+Scoring evaluates scenarios in order. Recent access without a healthy UpView receives a +10 base and up to +8 traffic points. Otherwise, `AutoLoad && !healthyUp` receives a +10 base without requiring an empty access history. When a healthy UpView exists, AutoLoad adds no points; the normal recent-access or cold-handoff rules apply. AutoLoad cold recovery therefore also receives +10. This represents persisted loading policy, not an inference that requests are currently waiting. HIGH retains its +2 offset.
 
-标识与当前加载配置同生命周期：完成 readiness、单个查询取消或请求超时不清除它；分区创建/部分释放、replica 调整和 Schema/Index 派生版本保留它。显式手动 LoadCollection/LoadPartitions 的新配置写入 false；Load 的 refresh 模式只刷新数据，不改加载来源。完整 Release 删除配置及标识，下次加载重新确定来源。仅来源变化时，在现有 collection 更新锁下覆盖当前持久化记录的调度元数据，保留 LoadInfoVersion；持久化成功后发布新的只读配置对象，不原地修改已发布对象。配置快照/监听通知仍更新，使后续正常创建的 View 使用新来源。资源要求变化才产生新 LoadInfoVersion。
+The flag has the same lifetime as the current load configuration. Readiness completion, cancellation of an individual query, and request timeouts do not clear it. Partition creation/partial release, replica adjustments, and derived Schema/Index versions retain it. A new configuration from an explicit manual LoadCollection/LoadPartitions writes false. Load's refresh mode only refreshes data and does not change the origin. A full Release removes the configuration and flag; the next load determines the origin again. If only the origin changes, update the scheduling metadata in the current persisted record under the existing collection update lock, retaining LoadInfoVersion. After persistence succeeds, publish a new read-only configuration object instead of mutating a published object. Configuration snapshots and listener notifications still advance, so subsequently created Views use the new origin. Only resource-requirement changes produce a new LoadInfoVersion.
 
-来源单独变化不触发 Up View 替换或 readiness 回退，也不在 Preparing View 完成后追加一轮低分 View。readiness 的并发校验使用资源要求版本，不能仅因配置对象指针更换就判定未就绪；真正的资源变更及 Release/reload 仍受版本约束。
+An origin-only change does not replace an Up View, regress readiness, or add another round of low-score Views after a Preparing View completes. Concurrent readiness validation uses the resource-requirement version; replacing the configuration pointer alone must not make it unready. Actual resource changes and Release/reload remain subject to version checks.
 
-查询等待一个已有的手动 LoadConfig 时，不再登记临时 AutoLoad 加分。已接受的 Preparing View 不因查询到达或来源改变而重新打分；只有以后正常创建的 View 使用当时的配置、反馈和节点状态。
+A query waiting on an existing manual LoadConfig no longer registers a temporary AutoLoad bonus. Query arrival or an origin change does not rescore an accepted Preparing View. Only subsequently created Views use the configuration, feedback, and node state available at their creation.
 
-## 5. 固定 View 优先级与共享任务优先级
+## 5. Fixed View Priority and Shared-Task Priority
 
-资源管理器负责把 View 需求映射到实际资源工作。对可推进一组需求的共享任务 R：
+Resource managers map View requirements to actual resource work. For a shared task R that can advance a set of requirements:
 
 ```text
-effective_priority(R) = max(P(V) | V 仍需要 R 的当前工作阶段)
+effective_priority(R) = max(P(V) | V still needs R's current work stage)
 ```
 
-单个 View 的 P 不变，但依赖集合会因加入、满足、失败或释放而变化。因此共享任务有效优先级可以变化，这是节点内部的聚合，不是 View 控制更新。
+Each View's P remains fixed, but dependencies change as they are added, satisfied, failed, or released. A shared task's effective priority can therefore change. This is node-local aggregation, not a View control update.
 
-例：资源原本只服务 P=-10 的 View A，后来 View B（P=20）需要同一工作，任务变为 20。B 的该项需求满足或退出后，任务按剩余依赖重新计算。所有依赖都是负值时结果仍为负，不能以 0 初始化 max。
+For example, a resource initially serves only View A with P=-10. When View B with P=20 requires the same work, the task becomes priority 20. After B's requirement is satisfied or removed, the task recomputes its score from the remaining dependencies. If all dependencies are negative, the result must remain negative; do not initialize the maximum to 0.
 
-聚合必须按兼容物理资源和工作阶段判断：
+Aggregation must respect physical-resource compatibility and work stages:
 
-- QN 不能只因 SegmentID 相同，就提高另一种不兼容 manifest/schema/read requirement 的无关工作。
-- SN 一个 VChannel 的 runtime 可被多个 replica/RG 的 View 共享；只执行一次共享准备，满足多个依赖。逐 View 的 load scope 等独立工作使用各自需求。
-- 已 Ready/Up 的引用仍保护资源生命周期，但已满足的准备需求不能永久提升无关准备任务。
-- 没有剩余准备依赖时移除准备任务；如果还有服务/释放用途，转由对应既有职责管理，不能随意关闭被引用资源。
+- QN must not raise unrelated work with incompatible manifest/schema/read requirements merely because SegmentID matches.
+- An SN runtime for a VChannel can be shared by Views from multiple replicas/RGs. Shared preparation runs once to satisfy multiple dependencies. Independent per-View work, such as load scope, uses its own requirements.
+- Ready/Up references still protect resource lifetimes, but satisfied preparation requirements must not permanently boost unrelated preparation tasks.
+- Remove a preparation task when no preparation dependencies remain. Any remaining serving/release responsibilities belong to their existing owners; referenced resources must not be closed arbitrarily.
 
-队列内有效值改变时必须重新定位任务。仅让 heap comparator 读取可变原子值不能维护堆序。资源管理器在自身锁下更新依赖，向调度器提交已计算值；调度器不能持锁反向调用资源管理器。
+A queued task must be repositioned when its effective value changes. Having a heap comparator read a mutable atomic value does not maintain heap order. Resource managers update dependencies under their own locks and submit the computed value to the scheduler. The scheduler must not call back into resource managers while holding its lock.
 
-## 6. 协作式调度契约
+## 6. Cooperative Scheduling Contract
 
-### 6.1 执行单位
+### 6.1 Execution Unit
 
-QN/SN 共享调度语义与通用能力，各自实现资源任务。不是跨节点全局队列，也不要求把 CPU、I/O、Transform 和 live-event 的资源预算合并成一个池。
+QN/SN share scheduling semantics and common capabilities, while implementing their own resource tasks. This is not a global cross-node queue, nor does it require combining CPU, I/O, Transform, and live-event budgets into one pool.
 
-一次执行推进一段有界工作，并返回以下概念结果；Go 接口和错误/结果表示在实现时确定：
+Each execution advances a bounded amount of work and returns one of the following conceptual results. The Go interfaces and error/result representation are determined during implementation:
 
-| 结果 | 语义 |
+| Result | Semantics |
 | --- | --- |
-| Done | 本任务完成，释放执行槽并通知依赖者 |
-| Yield | 保留进度，释放执行槽，按当前有效优先级重新排队；不增加错误退避 |
-| Wait | 注册依赖通知后退出 runnable 队列，释放执行槽，依赖满足后唤醒 |
-| RetryAt | 暂时失败，按原有 backoff/deadline 延迟，到期后才参与排序 |
-| Terminal / Cancel | 遵循现有失败或 owner 退出处理，终止工作并清理所属引用/回调 |
+| Done | Complete the task, release the execution slot, and notify dependents |
+| Yield | Preserve progress, release the slot, and requeue at the current effective priority without increasing error backoff |
+| Wait | Register a dependency notification, leave the runnable queue, release the slot, and wake when the dependency is satisfied |
+| RetryAt | Delay a transient failure according to the existing backoff/deadline; participate in ordering only when due |
+| Terminal / Cancel | Follow existing failure or owner-shutdown handling, terminate work, and clean up owned references/callbacks |
 
-任务任一时刻最多运行一次，唤醒与重复 submit 合并。检查依赖与注册等待需要无丢失唤醒的契约，依赖先完成或后完成都能继续。
+A task runs at most once at any instant; wakeups and duplicate submissions are coalesced. Dependency checks and wait registration require a no-lost-wakeup contract so execution can continue whether the dependency completes before or after registration.
 
-Yield 不是成功完成，也不是失败重试；Wait 不是让一个 worker 阻塞在依赖 future 上。不能通过 Cancel+Submit 重排任务并重置 backoff、引用或 replay 游标。
+Yield is neither successful completion nor a failed retry. Wait does not mean blocking a worker on a dependency future. Cancel+Submit must not be used to reorder tasks while resetting backoff, references, or replay cursors.
 
-### 6.2 保留进度与依赖等待
+### 6.2 Preserving Progress and Waiting for Dependencies
 
-可继续的步骤将游标、已完成阶段和未发布的中间资源保存在任务/资源 owner 中。在一个步骤完成、下一段开始前参与调度。正在进行且暂不可切分的 native/load 调用允许完成本次调用，再让出；不承诺任意指令处抢占或固定毫秒内响应。
+Resumable steps store cursors, completed stages, and unpublished intermediate resources in the task/resource owner. Scheduling occurs between completing one step and starting the next. An ongoing native/load call that cannot yet be split may finish before yielding. Arbitrary-instruction preemption and responses within a fixed number of milliseconds are not promised.
 
-等待 I/O permit、共享加载结果、WAL coverage 或 barrier 时应退出通用 runnable 队列。实际 I/O 仍有自己的受限执行容量；不能通过无限 goroutine 规避并发和内存限制，也不能同步等待同一个耗尽执行池中的子任务。
+Waiting for an I/O permit, shared load result, WAL coverage, or barrier should remove the task from the general runnable queue. Actual I/O retains its own bounded execution capacity. Unbounded goroutines must not bypass concurrency and memory limits, and a task must not synchronously wait for a child task in the same exhausted executor pool.
 
-Yield/Wait 保留的资源继续计入内存预算，不将暂停等同于释放。已启动的一次 I/O 保留其 permit 到完成，下一次 admission 再接受优先级选择。释放/取消必须能唤醒等待并按既有 ownership 规则收尾。
+Resources retained across Yield/Wait still count against memory budgets; pausing is not release. An I/O operation that has started keeps its permit until completion, and priority selection applies at the next admission. Release/cancellation must wake waiters and finish cleanup under existing ownership rules.
 
-协作让出保留正确的中间状态；真正执行失败仍遵守原有重试契约。例如 SN build 的失败可能要求丢弃部分 runtime 并重新捕获快照，不能把错误恢复和正常 Yield 混为一谈。
+Cooperative yielding preserves valid intermediate state; real execution failures still follow the existing retry contract. For example, an SN build failure may require discarding part of the runtime and capturing a fresh snapshot. Error recovery must not be confused with a normal Yield.
 
-### 6.3 公平性
+### 6.3 Fairness
 
-优先级表达顺序，不直接充当权重。推荐第一版采用“优先选择 + 有界连续优先派发”的规则：
+Priority defines order rather than directly acting as a weight. The proposed initial rule combines priority selection with a bounded run of priority dispatches:
 
-1. 通常选择有效优先级最大的 runnable 任务。
-2. 相同优先级在逻辑需求组之间轮转，组内维持稳定顺序；同一 View 的大量 Segment 不应获得无限额外份额。
-3. 每连续 K 次优先派发，给等待最久的可运行组一次机会，防止普通/负优先级任务长期没有进展。
+1. Normally select the runnable task with the highest effective priority.
+2. Round-robin between logical demand groups at the same priority, maintaining stable order within each group. A View with many Segments must not receive unlimited extra share.
+3. After K consecutive priority dispatches, give the longest-waiting runnable group an opportunity so ordinary/negative-priority work continues to make progress.
 
-K 与组内执行 quantum 是待定参数。资源管理器提供稳定的 fairness key；共享工作只占一个任务位置，不能按依赖 View 数量重复入队。可按 collection/vchannel 形成需求组，具体 key 与已有 owner 结构一起确定。
+K and the within-group execution quantum are parameters to determine. Resource managers provide stable fairness keys. Shared work occupies one task slot and must not be enqueued once per dependent View. Groups can use collection/vchannel identity; choose the exact key alongside existing owner structures.
 
-这是派发机会保证，不是墙钟延迟或 CPU 份额保证；长时间不可切分调用仍限制响应速度。处于 Wait/RetryAt 的任务不因等待年龄跳过依赖或 backoff。
+This guarantees dispatch opportunities, not wall-clock latency or CPU shares. Long indivisible calls still limit responsiveness. Tasks in Wait/RetryAt do not bypass dependencies or backoff because of their age.
 
-SN 的 WAL 推进、持久化与释放同样需要执行机会。[TransformLog 设计](../wal/transform_log.md) 已记录 bootstrap 等待占满 NodeScheduler 的风险。协作等待是必要机制；多 worker 场景可另限制 preparation 同时占用数量，不能只排序队列。并发为 1 时也不能让任务同步等同池子任务，不能用零准备配额处理保留容量问题。
+SN WAL progression, persistence, and release also need execution opportunities. The [TransformLog design](../wal/transform_log.md) documents the risk of bootstrap waits occupying all NodeScheduler workers. Cooperative waiting is necessary. With multiple workers, preparation concurrency can also be capped; queue ordering alone is insufficient. Even with one worker, a task must not synchronously wait on another task in the same pool. Reserved capacity must not be implemented by setting the preparation quota to zero.
 
-## 7. QueryNode 接入
+## 7. QueryNode Integration
 
-参考 [QN 资源准备](qnview/querynode_queryview_resource_preparation.md)。
+See [QN resource preparation](qnview/querynode_queryview_resource_preparation.md).
 
-| 调度位置 | 实现要求 |
+| Scheduling point | Implementation requirement |
 | --- | --- |
-| `SegmentResourceManager.Acquire` | 在注册 View 需求时读取固定 priority，保留原有同步注册/引用保护 |
-| `segmentResource` runnable 任务 | 汇总可由本资源推进的依赖，选择节点内下一项工作；共享集合变化时更新队列有效值 |
-| `nextBindingLocked` | 先发布已有兼容 ready read，再在 eligible binding 中按优先级与公平规则选择；blocked 的高分需求不能堵住其他可执行需求 |
-| Segment load/read/index 操作 | 保留原有准备结果，在可继续的安全阶段之间让出；逐步细分粗粒度调用 |
-| Transform buffer drain queue | 将实际 registration 的依赖优先级带入批次选择，每次有界推进；单 registration 的 Delete/SyncUp 应用顺序不变 |
-| collection/schema/metadata 前置依赖 | 作为依赖等待，不占着通用 worker；若有实际排队 admission，传递对应需求优先级 |
+| `SegmentResourceManager.Acquire` | Read the fixed priority when registering View requirements, preserving synchronous registration/reference protection |
+| `segmentResource` runnable task | Aggregate dependencies this resource can advance, select the next node-local work item, and update the queued effective value when the shared set changes |
+| `nextBindingLocked` | Publish existing compatible ready reads first, then select eligible bindings by priority and fairness; a blocked high-score requirement must not block other executable work |
+| Segment load/read/index operations | Preserve preparation results and yield between safe resumable stages; progressively split coarse calls |
+| Transform buffer drain queue | Propagate actual registration dependency priorities into bounded batch selection; preserve Delete/SyncUp application order within a registration |
+| Collection/schema/metadata prerequisites | Wait as dependencies without occupying general workers; propagate demand priority into any actual admission queue |
 
-同资源准备与不同资源准备都需要选择规则。只改变节点任务队列而保留任意 binding 选择，会让高分 View 得到一个执行槽后仍推进无关低分工作。
+Selection rules are required both within and between resources. Changing only the node task queue while retaining arbitrary binding selection can give a high-score View a slot that still advances unrelated low-score work.
 
-底层 native/对象存储执行器不一定已经支持新的数值优先级。第一步需控制新工作的 admission 和自然协作边界；不能因为传入 Control 就宣称运行中的 CGO 或已提交底层 I/O 可被抢占。无需将新有符号分值强制塞入旧 HIGH/LOW 枚举。
+Underlying native/object-storage executors may not support the new numeric priorities. The first step controls admission of new work and natural cooperative boundaries. Passing Control does not establish preemption of running CGO calls or already submitted lower-level I/O. The new signed score need not be forced into the old HIGH/LOW enum.
 
-## 8. StreamingNode 接入
+## 8. StreamingNode Integration
 
-参考 [SN 资源管理](snview/streamingnode_resource_manager.md)、[Growing Runtime](snview/growing_segment_runtime.md) 和 [IDF Runtime](snview/idf_oracle_runtime.md)。
+See [SN resource management](snview/streamingnode_resource_manager.md), [Growing Runtime](snview/growing_segment_runtime.md), and [IDF Runtime](snview/idf_oracle_runtime.md).
 
-### 8.1 共享 runtime 与逐 View 任务
+### 8.1 Shared Runtimes and Per-View Tasks
 
-`PChannelRecoveryManager` 按 VChannel 路由到资源 module；一个 runtime 服务多个 View。共享 build 使用依赖 View 的最大固定优先级，逐 View readiness 使用本 View 的需求及共享子任务继承。
+`PChannelRecoveryManager` routes by VChannel to resource modules; one runtime serves multiple Views. A shared build uses the maximum fixed priority of its dependent Views. Per-View readiness uses that View's requirements and inheritance by shared subtasks.
 
-优先级不改变共享 build 的最老需求基线、DataVersion admission 或历史保留条件。不能直接用分值最高的更新 View 替换构建快照，导致较老依赖失去所需资源。
+Priority does not change the oldest-requirement baseline, DataVersion admission, or historical retention conditions for a shared build. A newer, highest-score View must not directly replace the build snapshot and cause older dependencies to lose required resources.
 
-### 8.2 协作边界
+### 8.2 Cooperative Boundaries
 
-- runtime 初始化按可继续的模块/资源阶段推进；历史 replay 在有界批次后可以让出，保持接收游标和未发布资源。
-- 逐 View readiness 的 partition stats、load scope、schema/IDF/index 准备需要识别共享等待，避免等其他任务时占据 worker。
-- IDF 文件加载在申请 permit 时考虑依赖优先级；正在运行的低分任务不能不经重新选择就连续申请后续所有文件。保持 permit 覆盖加载/解码/合并的现有内存约束。
-- live-event dispatcher 若承担准备所需的应用 barrier，应在有界事件批次之间重新选择 runtime。保持每个 VChannel 内事件串行，不能重排 Delete/DDL/barrier，也不能饿死已经服务的 runtime。
-- 本地 UpRecovering 读取持久化 View 的固定值，不重新计算或追加临时分值。
+- Runtime initialization advances through resumable module/resource stages. Historical replay may yield after bounded batches while retaining its receive cursor and unpublished resources.
+- Per-View readiness work for partition stats, load scope, schema/IDF/index preparation must identify shared waits so it does not occupy a worker while waiting on other tasks.
+- IDF file loading considers dependency priority when acquiring a permit. A running low-score task must not acquire permits for all subsequent files without another selection. Preserve the existing memory constraint in which permits cover loading, decoding, and merging.
+- If a live-event dispatcher applies barriers needed for preparation, it should reselect runtimes between bounded event batches. Events remain serial within each VChannel: do not reorder Delete/DDL/barrier events or starve runtimes already serving queries.
+- Local UpRecovering reads the persisted View's fixed value without recomputing or adding a temporary score.
 
-SN 仍共享物理执行器，不按 RG 复制 runtime 或引入新 RG 配额。不同 RG 的业务统计独立，一个共享 runtime 的准备完成可以同时帮助多个 RG。
+SN still shares physical executors; it does not duplicate runtimes by RG or add RG quotas. Business statistics remain independent between RGs, while preparing one shared runtime can help multiple RGs at once.
 
-`recovery/scopedTaskScheduler` 会包装任务。优先级/等待句柄的设计必须穿透该包装并保留 owner 取消、追踪与 Close 等语义，不能只给内层任务加接口而在包装后失效。
+`recovery/scopedTaskScheduler` wraps tasks. Priority/wait handles must pass through that wrapper while preserving owner cancellation, tracking, and Close semantics. Adding interfaces only to inner tasks is insufficient if wrapping hides them.
 
-## 9. 实施顺序
+## 9. Implementation Sequence
 
-1. 完成独立的 [SN 访问统计与 Coord 聚合](view_feedback.md)，验证采样和统计未知的回退行为。
-2. 增加固定 priority 字段及创建评分入口，打通持久化、恢复与首次 Acquire；处理 lease Control 更新保留字段。
-3. 扩展通用调度与必要等待/继续机制，先验证去重、取消、retry、公平和共享继承。
-4. 接入 QN 资源任务、binding、Transform catch-up，以及 SN build/readiness、关键 permit/dispatcher。
-5. 对粗粒度 native 调用及下游队列记录实际限制，在故障实验中验证哪些竞争点已经受控。
+1. Complete the separate [SN access statistics and Coord aggregation](view_feedback.md), validating sampling and fallback for unknown statistics.
+2. Add the fixed priority field and creation-time scoring entry points, connecting persistence, recovery, and first Acquire. Preserve the field across lease Control updates.
+3. Extend common scheduling and the necessary wait/continuation mechanisms, first validating deduplication, cancellation, retry, fairness, and shared inheritance.
+4. Integrate QN resource tasks, bindings, Transform catch-up, SN build/readiness, and critical permits/dispatchers.
+5. Record actual limitations of coarse native calls and downstream queues, and use failure experiments to determine which contention points are controlled.
 
-实现可分批提交，但不能将只改变发送顺序或只有主队列排序描述为完整的协作式准备优先级。具体已实现范围与限制见开头；验证证据记录在 docs/plans。
+Implementation may be split across commits, but changing only send order or sorting the main queue must not be described as complete cooperative preparation priority. The opening section defines the implemented scope and limitations; validation evidence belongs in docs/plans.
 
-## 10. 验证要求
+## 10. Validation Requirements
 
-### 10.1 功能与并发
+### 10.1 Functionality and Concurrency
 
-- 默认 0、正负边界、分项截断和溢出；相同输入得到相同分值。
-- 创建后统计/配置变化不修改已有 View；重发、retry、Coord/SN 恢复保留原值；lease 更新不覆盖 priority。
-- 共享依赖加入、满足、失败、释放后正确继承/撤销；全负依赖、兼容性不匹配和无人等待均有覆盖。
-- 高分任务在协作边界获得机会；低分任务有保底进展；同分轮转、大 View 不垄断；高分 blocked 不阻塞 eligible 低分任务。
-- Yield/Wait 不完成 handle、不丢进度、不重置 backoff；无丢失唤醒、重复执行或取消后迟到回调污染。
-- 单 worker、动态并发变更和 owner Close；SN 多 bootstrap 等待时 WAL/持久化/释放仍能推进。
-- QN ordered Transform 和 SN ordered live-event/retention/schema/readiness 契约不变。
-- 新旧消息与旧节点的缺省行为，不因不支持优先级而阻断生命周期。
+- Default 0, positive/negative boundaries, component clamping, and overflow; identical inputs produce identical scores.
+- Statistics/configuration changes after creation do not modify existing Views. Retransmission, retry, and Coord/SN recovery retain the original value; lease updates preserve priority.
+- Correct inheritance/removal when shared dependencies are added, satisfied, failed, or released, including all-negative dependencies, incompatible requirements, and no remaining waiters.
+- High-score tasks get opportunities at cooperative boundaries; low-score tasks retain guaranteed progress. Equal scores rotate, large Views do not monopolize execution, and blocked high-score work does not block eligible low-score work.
+- Yield/Wait do not complete handles, lose progress, or reset backoff. No lost wakeups, duplicate execution, or state corruption from late callbacks after cancellation.
+- Single-worker execution, dynamic concurrency changes, and owner Close. WAL/persistence/release keep progressing while multiple SN bootstrap tasks wait.
+- QN ordered Transform and SN ordered live-event/retention/schema/readiness contracts remain unchanged.
+- Defaults for old/new messages and old nodes do not block the lifecycle when priority is unsupported.
 
-### 10.2 故障恢复收益
+### 10.2 Failure-Recovery Benefits
 
-在相同 placement、数据规模、并发和冷/热缓存条件下，对照关闭/开启准备优先级：
+Compare preparation priority disabled/enabled under the same placement, data size, concurrency, and cold/warm cache conditions:
 
-- 同 RG 中活跃与冷 collection 同时需要准备；检查活跃 collection 的恢复等待和持续查询成功时间。
-- 不同 RG 各自恢复，确认没有跨 RG 人为串行化；同 RG 独立 QN 资源也可并行。
-- 同 VChannel 多 View 共享 SN runtime；验证只做一次共享准备且固定分值继承正确。
-- QN 丢失、SN/WAL owner 更换、慢存储、Transform 积压、大 Segment 和 BM25 文件竞争；同时观察普通任务及 WAL 进展。
+- Active and cold collections in one RG require preparation together. Measure recovery waiting time and time to sustained query success for active collections.
+- Different RGs recover independently, without artificial cross-RG serialization. Independent QN resources within one RG can also proceed concurrently.
+- Multiple Views of one VChannel share an SN runtime. Verify that shared preparation runs once and inherits fixed scores correctly.
+- QN loss, SN/WAL owner replacement, slow storage, Transform backlog, large Segments, and BM25 file contention. Observe ordinary work and WAL progress as well.
 
-最终以故障到持续查询成功的时间衡量收益，区分检测、资源排队、实际准备和原有路由恢复成本。不把任务先出队、Ready 回调更早或构建成功当作恢复收益证明。已有 View 不变分值和不可切分调用造成的限制应一并记录。
+Measure benefit as time from failure to sustained query success, separating detection, resource queueing, actual preparation, and existing routing recovery costs. Earlier dequeueing, earlier Ready callbacks, or a successful build are not proof of recovery benefit. Record the limitations caused by fixed scores on existing Views and indivisible calls.
 
-后续按仓库 build/cluster/test/feature-verify skills 执行验证，新增/修改生产函数 statement coverage 至少 90%；本文没有运行结果或性能提升结论。
+Follow the repository build/cluster/test/feature-verify skills for subsequent validation. New/modified production functions require at least 90% statement coverage. This document reports no execution results or performance gains.
 
-## 11. 已定参数与后续讨论
+## 11. Settled Parameters and Further Discussion
 
-- 第一版范围、+2 配置偏移、需求场景、2 分钟近期阈值、最近 6 窗口 RG 内 rate 占比的对数映射与未知统计策略已确定，见第 4 节及开头映射表。
-- 当前 scheduler 每 8 次优先派发后进行一次年龄公平派发；collection fairness key 和细分资源阶段的协作 quantum 留待后续。
-- 第 12 节接口命名与兼容适配的实现细节，以及各 native/I/O 阶段的可继续边界。
+- The initial scope, +2 configuration offset, demand scenarios, 2-minute recency threshold, logarithmic mapping of same-RG rate share over the last 6 windows, and unknown-statistics policy are settled; see Section 4 and the opening table.
+- The current scheduler performs an age-based fairness dispatch after every 8 priority dispatches. Collection fairness keys and cooperative quanta for finer resource stages remain future work.
+- Further details include the interface names and compatibility adapters in Section 12, and resumable boundaries for individual native/I/O stages.
 
-这些参数与实现接口可以继续评审；已固定的架构边界是：SN 两项访问统计、Coord replica 反馈与 RG 内 rate 占比、创建时固定数值、节点协作执行及共享依赖继承。
+These parameters and implementation interfaces remain open to review. The fixed architectural boundaries are SN's two access statistics, Coord replica feedback and same-RG rate shares, numeric values fixed at creation, cooperative node execution, and shared-dependency inheritance.
 
-## 12. 资源准备调度器接口与实现方案
+## 12. Resource-Preparation Scheduler Interfaces and Implementation Plan
 
-本节给出可直接据以拆分实现的接口契约，符号是拟新增 API。优先扩展 `pkg/util/nodescheduler` 的同一个执行器，不再新增一套无关联的 preparation worker pool。
+This section specifies interface contracts that can guide implementation breakdown. The symbols are proposed APIs. Extend the same executor in `pkg/util/nodescheduler` rather than adding an unrelated preparation worker pool.
 
-### 12.1 提交与任务句柄
+### 12.1 Submission and Task Handles
 
-保留现有 `Scheduler.Submit(Task, ...Option) TaskHandle` 和 `Task.Execute(context.Context) error`。新增显式协作接口，避免仅靠类型断言发现新方法而被 WAL scoped wrapper 遮蔽：
+Retain `Scheduler.Submit(Task, ...Option) TaskHandle` and `Task.Execute(context.Context) error`. Add explicit cooperative interfaces so new methods are not discovered only through type assertions that the WAL scoped wrapper can hide:
 
 ```go
 type Priority int32
-type FairnessKey string // 资源 owner 提供稳定分组；调度器不理解 View/RG
+type FairnessKey string // Resource owners provide stable groups; the scheduler does not interpret View/RG.
 
 type CooperativeScheduler interface {
     Scheduler
-    // 非阻塞 admission；closed 时拒绝，不取得 task ownership。
+    // Nonblocking admission; reject when closed without taking task ownership.
     SubmitCooperative(task CooperativeTask, opts ...Option) (CooperativeHandle, error)
 }
 
 type CooperativeHandle interface {
     TaskHandle // Cancel(), Wait(context.Context) error
 
-    // 仅更新此资源任务的有效值，不更新 View Control。
-    // 入队/等待/执行期间均可调用；已终止返回 false。
+    // Update only this resource task's effective value, not View Control.
+    // Callable while queued, waiting, or running; return false after termination.
     SetPriority(priority Priority) bool
 }
 
@@ -346,13 +345,13 @@ func WithFairnessKey(key FairnessKey) Option
 func GetCooperative() CooperativeScheduler
 ```
 
-`GetCooperative()` 与现有 `Get()` 返回同一 nodeScheduler 实例，共用并发配置和 worker。现有任务默认 priority=0，原有 WithBackoff 继续有效。准备资源 owner 保存成功提交的句柄；不能像当前部分 Submit 调用一样丢弃句柄，否则无法更新共享任务的有效值或正确取消。
+`GetCooperative()` and the existing `Get()` return the same nodeScheduler instance, sharing concurrency configuration and workers. Existing tasks default to priority=0, and WithBackoff remains effective. Preparation resource owners retain handles from successful submissions. Discarding handles, as some current Submit callers do, would prevent effective-priority updates and correct cancellation of shared tasks.
 
-同一资源 owner 序列化 SetPriority 调用，例如在资源锁下计算并提交；调度器只接受数值，不在自身锁内调用 owner。旧 acquisition 的句柄不能修改后来注册的新任务。对于尚未到期的 retry 或等待依赖的任务，SetPriority 只更新数值，不将其提前变成 runnable。
+Each resource owner serializes SetPriority calls, for example by computing and submitting under the resource lock. The scheduler accepts only the numeric value and does not call the owner under its own lock. A handle from an old acquisition cannot modify a later registration's task. For a retry not yet due or a task waiting on dependencies, SetPriority updates only the value; it does not make the task runnable early.
 
-SubmitCooperative 成功后调度器取得任务执行 ownership；拒绝时不调用 OnFinished，提交者负责撤销此次 admission/引用。现有 Submit 的接口和关闭返回行为保留，通过内部 adapter 进入同一执行状态机。
+On successful SubmitCooperative, the scheduler takes execution ownership of the task. Rejection does not call OnFinished; the submitter rolls back the admission/references. Existing Submit signatures and closed-scheduler return behavior remain, using an internal adapter into the same execution state machine.
 
-### 12.2 协作步骤与完成回调
+### 12.2 Cooperative Steps and Completion Callbacks
 
 ```go
 type StepState uint8
@@ -367,38 +366,38 @@ const (
 type StepResult struct {
     State      StepState
     Dependency WaitToken // StepWait
-    NextRun    time.Time // StepRetry；zero 使用既有指数退避
+    NextRun    time.Time // StepRetry; zero uses the existing exponential backoff.
     Err        error    // StepRetry / StepFailed
 }
 
 type CooperativeTask interface {
     RunStep(ctx context.Context) StepResult
 
-    // 成功提交的任务恰好调用一次，包括首次执行前被取消的任务。
-    // 在 scheduler/event 锁外执行，用于发布结果、通知 owner。
+    // Called exactly once for a successfully submitted task, even if canceled before its first execution.
+    // Runs outside scheduler/event locks to publish results and notify the owner.
     OnFinished(err error)
 }
 ```
 
-可提供 Done/Yield/Await/Retry/Fail 构造函数，避免调用者构造互相矛盾的结果。RunStep 的 context 属于整个任务，Yield/Wait 不取消它，也不创建新任务 identity。
+Done/Yield/Await/Retry/Fail constructors may prevent callers from creating contradictory results. RunStep's context belongs to the entire task. Yield/Wait neither cancel it nor create a new task identity.
 
-| 结果 | scheduler 行为 | 句柄是否完成 |
+| Result | Scheduler behavior | Handle completion |
 | --- | --- | --- |
-| Done | 标记终态，OnFinished(nil) | 回调返回后完成 |
-| Yield | 保存同一 entry，重新参与公平队列，不推进 backoff | 否 |
-| Wait | 安装一次等待订阅，退出 runnable | 否 |
-| Retry | 保留 entry/backoff，进入 deadline heap | 否 |
-| Failed | OnFinished(Err)，不隐式重试 | 回调返回后完成 |
-| Cancel | 取消任务 ctx，撤销等待；运行中步骤退出后 OnFinished(ctx.Err()) | 回调返回后完成 |
+| Done | Mark terminal; OnFinished(nil) | After the callback returns |
+| Yield | Keep the same entry and rejoin the fair queue without advancing backoff | No |
+| Wait | Install one wait subscription and leave runnable state | No |
+| Retry | Retain entry/backoff and enter the deadline heap | No |
+| Failed | OnFinished(Err), without implicit retry | After the callback returns |
+| Cancel | Cancel task ctx and revoke the wait; call OnFinished(ctx.Err()) after a running step exits | After the callback returns |
 
-OnFinished 只做短时结果发布/内存通知，不执行 I/O、不等待本执行池的其他任务，不自行遍历释放大量资源。复杂资源清理由 owner 的独立 drain/释放流程负责。该回调不与同任务 RunStep 并发。
+OnFinished performs only short result publication/in-memory notification. It does not perform I/O, wait for other tasks in the same pool, or traverse and release large resource sets. The owner's separate drain/release flow handles complex cleanup. The callback does not run concurrently with RunStep for the same task.
 
-TaskHandle.Wait 保留既有“等待任务结束”的含义，返回调用者的等待错误，不把业务执行错误改成既有接口的新语义。业务结果由 OnFinished 发布到资源 owner；需要 Result 的 resourceBuildTask 在该处保存结果并关闭自己的完成通知。
+TaskHandle.Wait retains its existing meaning of waiting for task termination and returning errors from the caller's wait; it does not acquire new semantics for business execution errors. OnFinished publishes business results to the resource owner. A resourceBuildTask that needs Result stores it there and closes its own completion notification.
 
-### 12.3 无丢失唤醒的依赖接口
+### 12.3 Dependency Interface Without Lost Wakeups
 
 ```go
-// Event 属于 dependency owner，只保存变化代次和等待订阅。
+// Event belongs to the dependency owner and stores only a change generation and wait subscriptions.
 type Event struct { /* private */ }
 type WaitToken struct { /* event identity + observed generation */ }
 
@@ -407,11 +406,11 @@ func (e *Event) Observe() WaitToken
 func (e *Event) Signal()
 ```
 
-典型步骤先取 token，再检查依赖：
+A typical step observes a token before checking the dependency:
 
 ```go
 token := dependency.Changed.Observe()
-value, ready, err := dependency.TryResult() // 不阻塞
+value, ready, err := dependency.TryResult() // Nonblocking.
 if !ready {
     return StepResult{State: StepWait, Dependency: token}
 }
@@ -421,13 +420,13 @@ if err != nil {
 return task.advanceOneStep(value)
 ```
 
-Event 由依赖 owner 在状态改变后 Signal。Observe 必须发生在检查条件之前；反向顺序可能错过变化。通知不承诺依赖成功，唤醒后 RunStep 重新检查，失败由原有业务分类处理。
+The dependency owner calls Signal after changing state. Observe must precede the condition check; reversing the order can miss a change. Notification does not guarantee dependency success. RunStep rechecks after waking, and failures follow existing business classifications.
 
-调度器内部注册等待时，Event 在自己的短锁内比较代次：已经变化则返回“立即可重试”，尚未变化才登记唤醒函数。注册函数不内联调用唤醒回调；Signal 在 Event 锁外调用已摘下的回调。这样无需为每个等待项创建 goroutine，也不需要轮询。
+When the scheduler registers a wait, Event compares generations under its short lock. If the generation has already changed, it reports that the task can retry immediately; otherwise, it registers the wakeup function. Registration does not invoke the callback inline. Signal invokes detached callbacks outside the Event lock. This avoids both a goroutine per waiter and polling.
 
-entry 带 wait generation，唤醒只在 entry 仍为 Waiting 且 generation 匹配时入队一次。取消/重新等待后旧 callback 即使迟到也无效。取消撤销订阅；Event/任务/handle 终止后不得互相持有引用。多个前置条件可以由资源 owner 用自己的一个变化 Event 汇总，不为首期增加通用 DAG 调度系统。
+Each entry carries a wait generation. A wakeup enqueues it once only if it is still Waiting and the generation matches. Old callbacks arriving after cancellation or another wait have no effect. Cancellation removes subscriptions; Events, tasks, and handles must not retain one another after termination. Resource owners can combine multiple prerequisites through one change Event; the first version does not add a general DAG scheduler.
 
-### 12.4 内部状态、队列与公平选择
+### 12.4 Internal States, Queues, and Fair Selection
 
 ```text
 Queued -> Running -> Done / Failed -> Completing -> Finished
@@ -439,57 +438,57 @@ Cancel: Queued / Waiting / Delayed -> Completing
         Running -> canceled context -> step returns -> Completing
 ```
 
-每个成功提交的 entry 保存：task/context、handle、effective priority、fairness key、状态、ready sequence、队列索引、retry backoff/deadline，以及等待 token/generation/退订句柄。不会复制 task 以创建另一条继续执行任务。
+Each successfully submitted entry stores its task/context, handle, effective priority, fairness key, state, ready sequence, queue indexes, retry backoff/deadline, and wait token/generation/unsubscribe handle. Continuations do not copy the task into a separate entry.
 
-建议数据结构：
+Suggested data structures:
 
-- `groups[(priority, fairnessKey)]`：本组 runnable entries 按 ready sequence 排序；可用带索引的 min-heap，便于 priority 改变后保留原等待顺序。
-- 非空 priority bucket 的 max-heap；每个 bucket 内的 group 做 round-robin。
-- group 最老 runnable entry 的 age min-heap，支持每 K 次优先派发后选择最老 group。
-- deadline min-heap 和一个 timer，沿用当前延迟重试设计。
-- Waiting 表及 Event 订阅；不进入 runnable/deadline 队列，不消耗 worker。
+- `groups[(priority, fairnessKey)]`: runnable entries ordered by ready sequence. An indexed min-heap can preserve waiting order after priority changes.
+- A max-heap of nonempty priority buckets, with round-robin groups inside each bucket.
+- An age min-heap of each group's oldest runnable entry, allowing selection of the oldest group after every K priority dispatches.
+- A deadline min-heap and one timer, following the existing delayed-retry design.
+- A Waiting table and Event subscriptions. These entries occupy neither runnable/deadline queues nor workers.
 
-普通派发选最高 priority bucket 的下一个 group，再取该组最早 ready entry；公平派发选 age heap 的最老 group。出队和 SetPriority 都在 scheduler 锁内维护所有受影响索引，不通过全队列扫描找任务。
+Normal dispatch selects the next group in the highest-priority bucket and then its earliest ready entry. Fairness dispatch selects the oldest group from the age heap. Dequeue and SetPriority maintain all affected indexes under the scheduler lock without scanning the entire queue.
 
-SetPriority 对 Queued entry 做 remove/reinsert，保留本轮等待起点，防止重排洗掉等待年龄。Running/Waiting/Delayed 仅记录新数值，在下一次真正 ready 时使用。Yield 表示用过一次执行机会，重新排队时分配新的 ready sequence；持续被新任务挤压的旧 runnable entry 保留其等待年龄。
+SetPriority removes/reinserts a Queued entry while preserving the start of its current wait, so reordering does not erase queue age. Running/Waiting/Delayed entries only record the new value and use it when they next become ready. Yield means an execution opportunity has been consumed and assigns a new ready sequence on requeue. An old runnable entry repeatedly displaced by new work retains its waiting age.
 
-每个资源只提交一个活跃 task；FairnessKey 可由资源 owner 采用稳定的 collection/vchannel 分组。共享依赖增加不增加任务数量或重复调度份额。其他 legacy 任务缺省 key 使用其通用默认组，保留组内稳定次序。
+Each resource submits only one active task. Resource owners may use stable collection/vchannel groups as FairnessKey. Adding shared dependencies does not increase task count or duplicate scheduling share. Other legacy tasks without explicit keys use a common default group with stable internal order.
 
-入队、有效值调整、到期转移通常为 O(log N)，选择不扫描全部 View；各 heap/list 的准确常数成本在实现时测量。并发配置调整沿用 worker resize，缩容只在步骤边界退出，不丢失 Queued/Waiting/Delayed 项。
+Enqueueing, effective-value updates, and deadline transitions are typically O(log N); selection does not scan all Views. Measure the actual constant costs of individual heaps/lists during implementation. Dynamic concurrency changes retain worker resizing; shrinking takes effect only at step boundaries and does not lose Queued/Waiting/Delayed entries.
 
-### 12.5 完成、取消和锁规则
+### 12.5 Completion, Cancellation, and Locking Rules
 
-- worker 不持 scheduler 锁执行 RunStep 或 OnFinished。
-- Cancel 非阻塞，只取消 context、撤销 runnable/delayed/wait 注册并安排终态处理；不能在调用 Cancel 的资源锁内同步回调 OnFinished。
-- 终态 entry 进入内部完成队列，worker 在锁外执行一次 OnFinished；Close 也必须排空此队列，不能直接关闭 queued 任务的 handle 而漏掉结果通知。回调完成后再关闭 handle。
-- running entry 被取消时不提前释放 task，等待本次 RunStep 返回后终止，不再接受其 Yield/Wait/Retry 结果。
-- 等待注册不内联回调；Event.Signal 在自身锁外调用短小的 scheduler wake，scheduler 不反向调用 dependency 的业务方法。
-- resource owner 不持资源锁调用 handle.Wait，避免完成回调需要同锁而相互等待。
+- Workers execute RunStep and OnFinished outside the scheduler lock.
+- Cancel is nonblocking: it cancels the context, removes runnable/delayed/wait registrations, and schedules terminal handling. It must not synchronously invoke OnFinished under the resource lock held by its caller.
+- Terminal entries enter an internal completion queue. Workers invoke OnFinished once outside locks. Close must drain this queue rather than closing queued-task handles without result notification. Handles close only after callbacks finish.
+- Canceling a running entry does not release its task early. Terminate after the current RunStep returns and reject its Yield/Wait/Retry result.
+- Wait registration does not invoke callbacks inline. Event.Signal invokes the short scheduler wakeup outside its lock; the scheduler does not call back into the dependency's business methods.
+- Resource owners do not call handle.Wait while holding resource locks that completion callbacks may need.
 
-任务句柄完成只证明 RunStep 与 OnFinished 不再运行。如果任务启动了受限异步 I/O，owner 还要取消并 join 这些操作、等待 operation refs 清零后才能释放底层资源；不能把 Wait 当作全部资源生命周期已结束。
+Task-handle completion establishes only that RunStep and OnFinished are no longer running. If a task started bounded asynchronous I/O, its owner must also cancel and join those operations and wait for operation references to reach zero before releasing underlying resources. Wait does not imply that the entire resource lifecycle has ended.
 
-若全局 scheduler 已关闭，后续复杂清理由 owner 现有关闭流程完成，不能依赖向已关闭执行池提交一个 release 任务。单 worker 同样遵守“不同步等待同池子任务”规则。
+After the global scheduler closes, owners use their existing shutdown flows for subsequent complex cleanup rather than relying on submitting release tasks to the closed pool. The rule against synchronously waiting for a task in the same pool also applies with a single worker.
 
-### 12.6 兼容接入与资源任务实现
+### 12.6 Compatibility Adapters and Resource Tasks
 
-**Legacy 适配。** 内部 adapter 将 Execute 的 nil 映射 Done、ErrDelay/DelayUntil 映射 Retry，其余错误映射 Failed；不改变现有重试期限和默认 backoff。旧任务在 Execute 返回前仍不可协作抢占，此限制应保留在验证报告中。
+**Legacy adapter.** Map Execute returning nil to Done, ErrDelay/DelayUntil to Retry, and other errors to Failed. Preserve existing retry deadlines and default backoff. Legacy tasks remain nonpreemptible until Execute returns; retain that limitation in validation reports.
 
-**SN scoped wrapper。** `scopedTaskScheduler` 同时实现 CooperativeScheduler，并持有同一全局执行器。新增 trackedCooperativeTask 转发 RunStep，仅在 OnFinished 中完成 scoped entry；转发 CooperativeHandle.SetPriority。不能像旧 trackedTask.Execute 那样把 Yield/Wait 当作非 ErrDelay 的结束。owner 关闭取消其 handles，等待完成，不关闭全局调度器。
+**SN scoped wrapper.** `scopedTaskScheduler` also implements CooperativeScheduler and uses the same global executor. A new trackedCooperativeTask forwards RunStep and completes its scoped entry only in OnFinished; it also forwards CooperativeHandle.SetPriority. Unlike the old trackedTask.Execute path, it must not treat Yield/Wait as completion merely because they are not ErrDelay. Owner shutdown cancels its handles and waits for completion without closing the global scheduler.
 
-**资源优先级聚合。** QN/SN resource manager 保存不可变 View priority 和依赖集合，以及单个 resource task handle。依赖加入/满足/退出后在资源锁内计算 max 并 SetPriority；无准备依赖时取消任务。普通独占任务只在提交时设置 WithPriority。没有 View 级 UpdatePriority API。
+**Resource-priority aggregation.** QN/SN resource managers retain immutable View priorities, the dependency set, and one resource task handle. After dependencies join, complete, or leave, compute the maximum and call SetPriority under the resource lock. Cancel when no preparation dependencies remain. Ordinary exclusive tasks set WithPriority only on submission. There is no View-level UpdatePriority API.
 
-**QN Segment task。** 把当前 reconcile 拆为可继续的“选择 eligible binding -> 取 metadata/前置依赖 -> 一次物理准备阶段 -> 发布兼容 read/安排 catch-up”状态。短时选取/发布在资源锁内，I/O/native 步骤在锁外；本阶段无法推进则 Await，完成一段仍有工作则 Yield。已经满足的兼容绑定先发布，不重新加载。绑定选择同样使用固定优先级和公平次序。
+**QN Segment task.** Split reconcile into resumable states: select an eligible binding, obtain metadata/prerequisites, perform one physical preparation stage, then publish a compatible read or arrange catch-up. Short selection/publication runs under the resource lock; I/O/native stages run outside it. Await if the stage cannot progress, or Yield after a portion completes if work remains. Publish already satisfied compatible bindings first without reloading them. Binding selection uses the same fixed priorities and fairness ordering.
 
-**QN catch-up。** registration 继续保持唯一执行与按批次推进的语义，其现有 drain pool 可复用相同的优先级队列和有效值来源，而不改成第二份无预算的全局任务。页完成后 Yield/重新入队，等待 coverage 则停放并由 buffer arrival 唤醒。若迁入统一执行器，必须保留原有 catch-up 并发预算，不能只移队列而放大并行度。
+**QN catch-up.** Registrations retain unique execution and batch progression semantics. Their existing drain pool can reuse the same priority queue and effective-value source, rather than becoming another unbudgeted global task stream. Yield/requeue after a page; park while waiting for coverage and wake on buffer arrival. Moving into the common executor must preserve the existing catch-up concurrency budget, not increase parallelism merely by moving the queue.
 
-**SN build/ready task。** task 保存 stage、当前构建快照、未发布 runtime、replay cursor 和已有模块结果。阶段之间 Yield，shared future/barrier 未满足时 Await；真正 build 失败遵循原有 fresh-build 重试，不在 Yield 时丢弃 runtime。Ready 仍要求全部既有条件满足。
+**SN build/ready task.** Retain the stage, current build snapshot, unpublished runtime, replay cursor, and completed module results in the task. Yield between stages and Await unfinished shared futures/barriers. Real build failures follow the existing fresh-build retry contract; Yield does not discard the runtime. Ready still requires every existing condition to be satisfied.
 
-**I/O 与 permit。** 任务先尝试有预算的 admission；拿不到 permit 则 Await 容量 Event，拿到后发起一次受限操作，等待完成 Event，之后推进阶段。异步操作本身持有 permit 与 operation ref，完成/取消路径负责恰好释放一次。不能只将阻塞调用移进无限 goroutine。对暂不可拆的 native 调用，承认本次 RunStep 粗粒度，在返回后再让出。
+**I/O and permits.** First attempt budgeted admission. If a permit is unavailable, Await a capacity Event. Once admitted, start one bounded operation, wait for its completion Event, then advance the stage. The asynchronous operation itself holds the permit and operation reference, with completion/cancellation releasing them exactly once. Moving blocking calls into unbounded goroutines is insufficient. For native calls that cannot yet be split, acknowledge the coarse RunStep and yield after it returns.
 
-**SN live-event。** 保留单 runtime 串行应用，将一个 drain 改为有界 batch；更多工作回到队列参与选择。准备依赖可以提升该 runtime 的有效优先级，但已经服务的 runtime 继续享有公平进展；事件内部顺序不变。
+**SN live events.** Preserve serial application within each runtime and make each drain a bounded batch. Remaining work returns to the queue for selection. Preparation dependencies can raise that runtime's effective priority, but runtimes already serving queries retain fair progress. Internal event order remains unchanged.
 
-### 12.7 必需的接口级验证
+### 12.7 Required Interface-Level Validation
 
-除第 10 节场景外，新增：提交拒绝不转移 ownership；执行前取消仍恰好一次 OnFinished；Wait 在 Yield/Wait/Retry 后不提前返回；通知发生在依赖检查前、检查后、等待安装中和取消后均不丢失或重复执行；SetPriority 在四种非终态及终态中的行为；优先级变化保留排队年龄；单 worker 下依赖与完成通知推进；scoped wrapper 不提前移除 task；Close 排空完成队列；旧 Execute/ErrDelay 调用方兼容。
+In addition to Section 10, verify: rejected submissions do not transfer ownership; cancellation before execution still invokes OnFinished exactly once; Wait does not return early after Yield/Wait/Retry; notifications before the dependency check, after the check, during wait installation, and after cancellation neither lose wakeups nor duplicate execution; SetPriority behaves correctly in the four nonterminal states and terminal state; priority changes preserve queue age; dependencies and completion notifications progress with one worker; scoped wrappers do not remove tasks early; Close drains the completion queue; and existing Execute/ErrDelay callers remain compatible.
 
-实现提交时需对具体步骤的继续状态、取消与资源 drain 分别测量验证；以上接口不表示可以只增加一个优先级 heap 就完成整个功能。
+Implementation submissions must separately measure and validate step continuation state, cancellation, and resource draining. These interfaces do not imply that adding a priority heap alone completes the feature.
