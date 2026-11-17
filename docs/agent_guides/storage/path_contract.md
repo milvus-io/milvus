@@ -45,6 +45,16 @@ Explore is a separate layout: local temporary manifests live under
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
 
+## Ordinary import source overrides
+
+Ordinary imports with `storage.*` options use an independent S3-compatible
+source bucket and credentials. Their file paths are complete bucket-relative
+keys: no scheme or leading slash, and no root prefix or path normalization.
+The cluster's internal-layout denylist applies only to imports using cluster
+storage; explicitly authenticated external sources use their own object
+permissions. All output writes retain the cluster chunk manager and layout.
+See [source storage design](../../design-docs/design_docs/20261110-external-import-storage.md).
+
 ## Manifest index artifacts
 
 When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3
@@ -61,6 +71,17 @@ Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. Snapshot generation uses its selected segment metadata.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
+
+## Expression cache files
+
+Sealed expression caches are disposable local files under
+`<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>.cache`.
+The process-local generation belongs to a published sealed snapshot. Retirement
+uses the file object's original path and unlinks after publication/cache locks
+are released; it must never reconstruct a path from only the segment ID.
+Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
+The cache manager removes `.cache` files on rebuild and does not restore them
+across restarts. These files are not manifests or DataCoord GC objects.
 
 ## Local upgrade compatibility
 

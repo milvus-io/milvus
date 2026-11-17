@@ -277,6 +277,11 @@ func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+	return s.loadCollection(ctx, req, false)
+}
+
+// loadCollection shares load admission and metrics between manual and automatic loads.
+func (s *Server) loadCollection(ctx context.Context, req *querypb.LoadCollectionRequest, autoLoad bool) (*commonpb.Status, error) {
 	logger := mlog.With(
 		mlog.Int64("dbID", req.GetDbID()),
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -309,7 +314,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Success(), nil
 	}
 
-	version, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req)
+	version, err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, autoLoad, req)
 	if err != nil {
 		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()

@@ -259,3 +259,92 @@ func TestCancelHeldToOwner(t *testing.T) {
 	assert.ErrorIs(t, aliceCtx.Err(), context.Canceled)
 	assert.NoError(t, bobCtx.Err())
 }
+
+// A cancel that reaches a request before it finished must be the one the
+// client sees; a cancel that comes after must change nothing and say so.
+func TestFinishDecidesBetweenCancelAndResult(t *testing.T) {
+	t.Run("cancel before finish", func(t *testing.T) {
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		canceled, _, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "heavy", time.Now())
+		require.Len(t, canceled, 1)
+		require.Empty(t, notFound)
+
+		e.Finish()
+		assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled, "the RPC method answers with the cancel")
+		// until it leaves, the request is still listed and a second cancel still names it
+		listed := r.List(Filter{}, time.Now())
+		require.Len(t, listed, 1)
+		assert.Equal(t, StateCanceling, listed[0].State)
+		_, repeated, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "again", time.Now())
+		assert.Len(t, repeated, 1)
+		assert.Empty(t, notFound)
+	})
+
+	t.Run("cancel after finish", func(t *testing.T) {
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		e.Finish()
+
+		// The entry is still registered: the RPC method has not returned yet.
+		require.Equal(t, 1, r.Len())
+		canceled, repeated, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "late", time.Now())
+		assert.Empty(t, canceled)
+		assert.Empty(t, repeated)
+		assert.Equal(t, []string{e.RequestID()}, notFound)
+		assert.NoError(t, ctx.Err(), "a late cancel leaves the ctx alone")
+		assert.Nil(t, CancelCause(ctx))
+		_, canceledAt := e.CanceledAt()
+		assert.False(t, canceledAt)
+		assert.Empty(t, r.List(Filter{}, time.Now()), "a finished request is no longer listed")
+	})
+
+	t.Run("cancel on an entry that already left", func(t *testing.T) {
+		// Registry.Cancel looks the entry up and then cancels it. A request
+		// that finishes and unregisters in between must not be reported as
+		// canceled.
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		e.Finish()
+		r.Unregister(e)
+		_, first, held := e.Cancel("root", "late", time.Now())
+		assert.False(t, first)
+		assert.False(t, held)
+		assert.Nil(t, CancelCause(ctx))
+	})
+
+	t.Run("nil entry", func(t *testing.T) {
+		var e *Entry
+		e.Finish()
+	})
+}
+
+// Whichever of Cancel and Finish runs first, the operator's answer and the
+// request's ctx agree: canceled if and only if the ctx carries the cancel.
+func TestCancelAndFinishNeverDisagree(t *testing.T) {
+	r := New()
+	for i := 0; i < 2000; i++ {
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		id := e.RequestID()
+		var canceled []Info
+		var notFound []string
+		var clientSeesCancel bool
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			canceled, _, notFound = r.Cancel([]string{id}, "", "root", "race", time.Now())
+		}()
+		go func() {
+			defer wg.Done()
+			// what the RPC method does on its way out
+			e.Finish()
+			clientSeesCancel = CancelCause(ctx) != nil
+			r.Unregister(e)
+		}()
+		wg.Wait()
+		require.Equal(t, 1, len(canceled)+len(notFound))
+		require.Equal(t, len(canceled) == 1, clientSeesCancel,
+			"canceled=%d notFound=%d clientSeesCancel=%v", len(canceled), len(notFound), clientSeesCancel)
+	}
+}

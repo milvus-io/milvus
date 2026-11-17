@@ -37,7 +37,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 std::once_flag traceFlag;
 std::once_flag cpuNumFlag;

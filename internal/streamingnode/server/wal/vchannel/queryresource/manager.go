@@ -112,6 +112,7 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 			m.submitReadyLocked(req.Key, ref)
 		}
 	}
+	m.updateBuildPriorityLocked()
 	m.mu.Unlock()
 }
 
@@ -164,6 +165,8 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	if len(m.refs) == 0 {
 		runtime, task = m.takeRuntimeLocked()
+	} else {
+		m.updateBuildPriorityLocked()
 	}
 	if m.runtime != nil && m.task == nil {
 		m.runtime.mu.Lock()
@@ -371,7 +374,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		mlog.Warn(ctx, "retry query runtime preparation", mlog.FieldVChannel(view.VChannel), mlog.Err(err))
 		return nil, errors.Mark(merr.Wrap(err, "initialize query runtime"), nodescheduler.ErrDelay)
 	})
-	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild)
+	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild, nodescheduler.WithPriority(m.buildPriorityLocked()))
 	m.err = nil
 	return true
 }
@@ -476,7 +479,7 @@ func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
 		manager: m,
 		key:     key,
 		onReady: ref.onReady,
-	}, nodescheduler.WithPriority(0))
+	}, nodescheduler.WithPriority(ref.meta.GetControl().GetPreparationPriority()))
 }
 
 func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {
@@ -603,4 +606,27 @@ func (m *Manager) Prewarm(ctx context.Context, key qviews.QueryViewKey) error {
 	resources := ref.resources
 	m.mu.Unlock()
 	return resources.prewarm(ctx)
+}
+
+// A build serves all retained acquisitions without changing its oldest-view
+// snapshot. The score may fall as well as rise when a dependency leaves.
+func (m *Manager) buildPriorityLocked() int32 {
+	var priority int32
+	found := false
+	for _, ref := range m.refs {
+		if ref.prepared {
+			continue
+		}
+		value := ref.meta.GetControl().GetPreparationPriority()
+		if !found || value > priority {
+			priority, found = value, true
+		}
+	}
+	return priority
+}
+
+func (m *Manager) updateBuildPriorityLocked() {
+	if m.task != nil {
+		m.task.SetPriority(m.buildPriorityLocked())
+	}
 }

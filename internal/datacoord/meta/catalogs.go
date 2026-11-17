@@ -21,8 +21,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
+
+// PartitionStatsPublication guards cache updates that accompany group publication.
+type PartitionStatsPublication interface {
+	Lock()
+	Unlock()
+	ApplySavedPartitionStatsLocked(*datapb.PartitionStatsInfo, int64)
+}
 
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.

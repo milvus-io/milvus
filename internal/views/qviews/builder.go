@@ -21,6 +21,9 @@ func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryVie
 		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
 		streamingNode: proto.Clone(view.GetStreamingNode()).(*viewpb.QueryViewOfStreamingNode),
 	}
+	if m.Control != nil {
+		b.control = proto.Clone(m.Control).(*viewpb.QueryViewControl)
+	}
 	for _, node := range view.GetQueryNode() {
 		partitions := make(map[int64][]int64)
 		for _, p := range node.GetPartitions() {
@@ -44,6 +47,7 @@ func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
 
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {
+	control                     *viewpb.QueryViewControl
 	collectionID                int64
 	replicaID                   int64
 	vchannel                    string
@@ -112,6 +116,18 @@ func (b *QueryViewAtCoordBuilder) SetSchemaVersion(version int32) *QueryViewAtCo
 	return b
 }
 
+// SetPreparationPriority fixes the priority of the new view before publication.
+// Replaying or recovering an existing view never calls this setter.
+func (b *QueryViewAtCoordBuilder) SetPreparationPriority(priority int32) *QueryViewAtCoordBuilder {
+	if b.control != nil || priority != 0 {
+		if b.control == nil {
+			b.control = &viewpb.QueryViewControl{}
+		}
+		b.control.PreparationPriority = priority
+	}
+	return b
+}
+
 func (b *QueryViewAtCoordBuilder) SetAssignments(assignments map[int64]map[int64][]int64) *QueryViewAtCoordBuilder {
 	b.assignments = assignments
 	return b
@@ -130,6 +146,9 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
 		LoadInfoVersion:             b.loadInfoVersion,
 		SchemaVersion:               b.schemaVersion,
+	}
+	if b.control != nil {
+		meta.Control = proto.Clone(b.control).(*viewpb.QueryViewControl)
 	}
 
 	nodeIDs := make([]int64, 0, len(b.assignments))

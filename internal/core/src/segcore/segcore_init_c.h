@@ -169,7 +169,6 @@ ConfigureTieredStorage(
     const float overloaded_memory_threshold_percentage,
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
-    const char* disk_path,
     const int64_t loading_timeout_ms,
     const int64_t warmup_loading_timeout_ms,
     const bool reject_remote_vector_output,

@@ -186,8 +186,8 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsActiveMode) {
     using namespace cachinglayer;
     using segcore::storagev2translator::SetStorageV2AsyncLoadEnabled;
     SetStorageV2AsyncLoadEnabled(false);
-    const auto high = ThreadPools::GetThreadPool(HIGH).GetMaxThreadNum();
-    const auto low = ThreadPools::GetThreadPool(LOW).GetMaxThreadNum();
+    const auto high = ThreadPools::GetExecutor(HIGH).numThreads();
+    const auto low = ThreadPools::GetExecutor(LOW).numThreads();
     auto restore = folly::makeGuard([&] {
         ThreadPools::ResizeThreadPool(HIGH, static_cast<float>(high) / CPU_NUM);
         ThreadPools::ResizeThreadPool(LOW, static_cast<float>(low) / CPU_NUM);

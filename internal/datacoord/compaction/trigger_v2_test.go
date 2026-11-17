@@ -419,6 +419,40 @@ func (s *CompactionTriggerManagerSuite) TestHandleSortSignal() {
 	})
 }
 
+func (s *CompactionTriggerManagerSuite) TestRequiredGroupSortBypassesTaskBudget() {
+	for _, auto := range []bool{false, true} {
+		s.Run(strconv.FormatBool(auto), func() {
+			s.SetupTest()
+			pt := paramtable.Get()
+			s.Require().NoError(pt.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, strconv.FormatBool(auto)))
+			s.T().Cleanup(func() { pt.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key) })
+			s.Require().NoError(pt.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true"))
+			s.T().Cleanup(func() { pt.Reset(Params.DataCoordCfg.EnableSortCompaction.Key) })
+			m, err := meta.NewMemoryMeta(s.T())
+			s.Require().NoError(err)
+			segment := policy.GenTestSegmentInfo(s.testLabel, 900, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+			segment.IsInvisible = true
+			segment.NumOfRows = 10
+			s.Require().NoError(m.AddSegment(context.Background(), segment))
+			group := meta.NewTestGroup()
+			group.CollectionID, group.NewSegmentIDs, group.SupersededSegmentIDs = s.testLabel.CollectionID, []int64{900}, nil
+			s.Require().NoError(m.AddSegmentChangeGroup(context.Background(), group))
+			s.handler.(*meta.NMockHandler).EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+				Return(&meta.CollectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{}}, nil)
+			s.triggerManager = NewCompactionTriggerManager(meta.NewMockAllocator(s.T()), s.handler, s.inspector, m, nil, nil, nil, nil, s.versionManager)
+			s.setIndexMeta(&index.IndexMeta{Indexes: make(map[UniqueID]map[UniqueID]*model.Index)})
+			s.inspector.EXPECT().getCompactionTasksNum(mock.Anything).Return(0).Once()
+			s.inspector.EXPECT().EnqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+				return task.GetType() == datapb.CompactionType_SortCompaction && len(task.GetInputSegments()) == 1 && task.GetInputSegments()[0] == 900
+			})).Return(nil).Once()
+			if auto {
+				s.inspector.EXPECT().isFull().Return(true).Once()
+			}
+			s.triggerManager.handleTicker(context.Background(), SingleTicker)
+		})
+	}
+}
+
 // Manual compaction is not capped: it never checks whether the inspector is full.
 func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
 	// One L0 segment per view, so the request yields three views.

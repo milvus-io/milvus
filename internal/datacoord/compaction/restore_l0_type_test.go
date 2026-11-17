@@ -105,7 +105,9 @@ func TestRestoreL0SharesChannelExclusion(t *testing.T) {
 			if restoreExecuting {
 				running, queued = restore, mix
 			}
-			inspector := NewCompactionInspector(nil, nil, nil, nil, nil, nil, nil, nil, nil, dctask.NewGlobalTaskScheduler(t.Context(), nil), nil, nil)
+			m, err := meta.NewMemoryMeta(t)
+			require.NoError(t, err)
+			inspector := NewCompactionInspector(m, nil, nil, nil, nil, nil, nil, nil, nil, dctask.NewGlobalTaskScheduler(t.Context(), nil), nil, nil)
 			inspector.executingTasks[running.GetTaskID()] = running
 			require.NoError(t, inspector.queueTasks.Enqueue(queued))
 			require.Empty(t, inspector.schedule())

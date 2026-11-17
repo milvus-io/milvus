@@ -93,7 +93,7 @@ INSTALL_PREFIX="${CPP_SRC_DIR}/output"
 BUILD_COVERAGE="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=${CUDACXX:-/usr/local/cuda/bin/nvcc}
-WITH_GPU=""
+WITH_GPU="OFF"
 CUDA_ARCH="DEFAULT"
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
@@ -181,7 +181,7 @@ parameter:
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
 -x: index engine: knowhere/cardinal(default: knowhere)
--G: build with GPU support: ON/OFF(default: ON for cardinal, OFF for knowhere)
+-G: build with GPU support: ON/OFF(default: OFF)
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
@@ -208,14 +208,6 @@ usage:
     ;;
   esac
 done
-
-if [[ -z "${WITH_GPU}" ]]; then
-  if [[ "${INDEX_ENGINE}" == "cardinal" ]]; then
-    WITH_GPU="ON"
-  else
-    WITH_GPU="OFF"
-  fi
-fi
 
 case "${USE_TSAN}" in
   ON|OFF) ;;

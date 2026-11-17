@@ -271,21 +271,26 @@ func (sm *CoordQueryViewStateMachine) EnterDown() {
 
 // EnterDownWithControl can strengthen an already-published Down command. A
 // control-only update must be persisted and resent while SN still reports Up.
-func (sm *CoordQueryViewStateMachine) EnterDownWithControl(control *viewpb.QueryViewControl) {
+// It reports whether the state or control changed, preserving pending effects on a no-op.
+func (sm *CoordQueryViewStateMachine) EnterDownWithControl(control *viewpb.QueryViewControl) bool {
 	if sm.state != qviews.QueryViewStateUp && sm.state != qviews.QueryViewStateDown {
-		return
+		return false
 	}
 	disableLease := control.GetPreemptServingLease() && !sm.view.Meta.GetControl().GetPreemptServingLease()
 	if sm.state == qviews.QueryViewStateDown && !disableLease {
-		return
+		return false
 	}
 	if disableLease {
 		sm.view = proto.Clone(sm.view).(*viewpb.QueryViewOfShard)
-		sm.view.Meta.Control = proto.Clone(control).(*viewpb.QueryViewControl)
+		if sm.view.Meta.Control == nil {
+			sm.view.Meta.Control = &viewpb.QueryViewControl{}
+		}
+		sm.view.Meta.Control.PreemptServingLease = true
 	}
 	sm.state = qviews.QueryViewStateDown
 	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDown)
 	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
+	return true
 }
 
 // EnterDropping is called by the Manager to transition this view from

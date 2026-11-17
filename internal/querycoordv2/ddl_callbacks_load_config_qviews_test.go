@@ -58,7 +58,7 @@ func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 		captured = msg
 	})
 
-	_, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
+	_, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, false, &querypb.LoadCollectionRequest{
 		CollectionID: collectionID,
 	})
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestLoadCollectionUnchangedAdmissionKeepsItsVersion(t *testing.T) {
 		require.NoError(t, server.qviewsRuntime.loadManager.ApplyLoadConfig(t.Context(), message.MustAsMutableAlterLoadConfigMessageV2(msg).Header()))
 	})
 	req := &querypb.LoadCollectionRequest{CollectionID: 100}
-	version, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req)
+	version, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), false, req)
 	require.NoError(t, err)
 	require.NotZero(t, version)
 
@@ -114,7 +114,7 @@ func TestLoadCollectionUnchangedAdmissionKeepsItsVersion(t *testing.T) {
 	mb.EXPECT().Close().Return().Maybe()
 	broadcast.ResetBroadcaster()
 	broadcast.Register(mb)
-	unchanged, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req)
+	unchanged, err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), false, req)
 	require.NoError(t, err)
 	require.Equal(t, version, unchanged)
 	require.Equal(t, version, server.qviewsRuntime.loadConfigStore.GetConfigVersion(100))

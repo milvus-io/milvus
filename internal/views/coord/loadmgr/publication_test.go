@@ -89,3 +89,27 @@ func TestLoadConfigAdmissionIgnoresFailedAndUnrelatedCommits(t *testing.T) {
 	require.NoError(t, store.Put(t.Context(), sampleConfig()))
 	require.Empty(t, abandoned)
 }
+
+func TestLoadConfigAdmissionKeepsSourceOnlyCommitAcrossReload(t *testing.T) {
+	store, hooks := newTestStore(t)
+	cfg := sampleConfig()
+	cfg.AutoLoad = true
+	require.NoError(t, store.Put(t.Context(), cfg))
+	admitted := store.GetConfigVersion(100)
+	committed, unsubscribe := store.WatchNextLoadConfig(100)
+	defer unsubscribe()
+	cfg.AutoLoad = false
+	hooks.beforeSave = func(*viewpb.CollectionLoadConfig) error { return merr.ErrServiceUnavailable }
+	require.ErrorIs(t, store.Put(t.Context(), cfg), merr.ErrServiceUnavailable)
+	require.Empty(t, committed, "failed source update cannot complete admission")
+	hooks.beforeSave = nil
+	require.NoError(t, store.Put(t.Context(), cfg))
+	require.Equal(t, admitted, store.GetConfigVersion(100))
+	require.False(t, store.GetConfig(100).AutoLoad)
+	store.StopPlanning(100)
+	require.NoError(t, store.Remove(t.Context(), 100))
+	require.NoError(t, store.Put(t.Context(), cfg))
+	require.Greater(t, store.GetConfigVersion(100), admitted)
+	require.Len(t, committed, 1)
+	require.Equal(t, admitted, <-committed, "prewarm must retain the admitted load after a later reload")
+}
