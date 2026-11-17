@@ -38,6 +38,7 @@
 #include "boost/filesystem/operations.hpp"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
+#include "common/PrefetchExecutor.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -190,6 +191,70 @@ JsonKeyStats::CreateShreddingReader(const std::string& pointer,
             new ShreddingReader(column->second, type));
     }
     return nullptr;
+}
+
+namespace {
+
+bool
+PrefetchCanceled(OpContext* ctx) {
+    return PrefetchExecutor::IsStopped() ||
+           (ctx && ctx->cancellation_token.isCancellationRequested());
+}
+
+void
+PrefetchStatsColumn(OpContext* ctx,
+                    const std::shared_ptr<ChunkedColumnInterface>& column,
+                    JsonStatsPrefetchBatch* batch) {
+    if (PrefetchCanceled(ctx) || (batch && !batch->Claim(column))) {
+        return;
+    }
+    // Release each pin before requesting the next cell so a projection need
+    // not fit in cache as a unit.
+    const auto count = column->num_chunks();
+    for (int64_t cell = 0; cell < count && !PrefetchCanceled(ctx); ++cell) {
+        column->PrefetchChunks(ctx, {cell});
+    }
+}
+
+}  // namespace
+
+void
+JsonKeyStats::PrefetchBsonIndex(OpContext* ctx,
+                                JsonStatsPrefetchBatch* batch) const {
+    if (bson_index_cache_slot_ && !PrefetchCanceled(ctx) &&
+        (!batch || batch->Claim(bson_index_cache_slot_))) {
+        // Posting lists select the shared BSON rows during evaluation.
+        GetBsonIndex(ctx);
+    }
+}
+
+void
+JsonKeyStats::PrefetchTypedColumns(OpContext* ctx,
+                                   const std::string& pointer,
+                                   std::initializer_list<JSONType> types,
+                                   JsonStatsPrefetchBatch* batch) const {
+    bool uses_shared = false;
+    for (const auto type : types) {
+        const auto field = GetShreddingField(pointer, type);
+        if (field.empty()) {
+            uses_shared = true;
+        } else {
+            PrefetchStatsColumn(ctx, shredding_columns_.at(field), batch);
+        }
+    }
+    if (uses_shared) {
+        PrefetchBsonIndex(ctx, batch);
+    }
+}
+
+void
+JsonKeyStats::PrefetchExistsColumns(OpContext* ctx,
+                                    const std::string& pointer,
+                                    JsonStatsPrefetchBatch* batch) const {
+    for (const auto& field : GetShreddingFieldsWithPrefix(pointer)) {
+        PrefetchStatsColumn(ctx, shredding_columns_.at(field), batch);
+    }
+    PrefetchBsonIndex(ctx, batch);
 }
 
 struct JsonStatsParquetMetadata {

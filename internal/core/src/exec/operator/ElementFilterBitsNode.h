@@ -72,14 +72,13 @@ class PhyElementFilterBitsNode : public Operator {
     }
 
     void
-    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
-                      prefetch_pool) override {
+    PrefetchAsync(const milvus::PrefetchExecutor& prefetch_pool) override {
         element_exprs_->PrefetchAsync(prefetch_pool);
     }
 
     void
     WaitPrefetch() override {
-        element_exprs_->WaitPrefetch();
+        element_exprs_->WaitPrefetch(PrefetchWait::Cleanup);
     }
 
     std::string

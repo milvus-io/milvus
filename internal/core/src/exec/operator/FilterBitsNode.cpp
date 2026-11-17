@@ -160,6 +160,7 @@ PhyFilterBitsNode::GetOutput() {
             span.SetAttribute("segment_id", segment->get_segment_id());
         }
     }
+    PrefetchWaitStats prefetch_wait;
     const auto record_result = [&](TargetBitmapView filtered,
                                    double scalar_work_us) {
         if (recording) {
@@ -170,6 +171,8 @@ PhyFilterBitsNode::GetOutput() {
                 "passed_rows",
                 static_cast<int64_t>(filtered.size() - filtered.count()));
             span.SetAttribute("filter_scalar_work_us", scalar_work_us);
+            span.SetAttribute("prefetch_wait_us",
+                              prefetch_wait.ElapsedMicros());
         }
     };
 
@@ -224,17 +227,6 @@ PhyFilterBitsNode::GetOutput() {
         }
     }
 
-    const auto prefetch_start = recording
-                                    ? std::chrono::steady_clock::now()
-                                    : std::chrono::steady_clock::time_point{};
-    exprs_->WaitPrefetch();
-    if (recording) {
-        span.SetAttribute("prefetch_wait_us",
-                          std::chrono::duration<double, std::micro>(
-                              std::chrono::steady_clock::now() - prefetch_start)
-                              .count());
-    }
-
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
 
@@ -245,9 +237,8 @@ PhyFilterBitsNode::GetOutput() {
 
     // optimization: if all expressions can be executed at once,
     // execute in a single pass and flip in-place to avoid bitmap copies.
-    if (exprs_->CanExecuteAllAtOnce()) {
+    if (exprs_->expr(0)->TrySetExecuteAllAtOnce()) {
         tracer::AddEvent("expr_execute_all_at_once");
-        exprs_->SetExecuteAllAtOnce();
 
         exprs_->Eval(0, 1, true, eval_ctx, results_);
         AssertInfo(results_.size() == 1 && results_[0] != nullptr,
@@ -290,6 +281,8 @@ PhyFilterBitsNode::GetOutput() {
         double scalar_cost =
             std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
                 .count();
+        scalar_cost =
+            std::max(0.0, scalar_cost - prefetch_wait.ElapsedMicros());
         milvus::monitor::internal_core_search_latency_scalar.Observe(
             scalar_cost / 1000);
         record_result(view, scalar_cost);
@@ -361,6 +354,7 @@ PhyFilterBitsNode::GetOutput() {
     double scalar_cost =
         std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
             .count();
+    scalar_cost = std::max(0.0, scalar_cost - prefetch_wait.ElapsedMicros());
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
     record_result(bitset_view, scalar_cost);

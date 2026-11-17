@@ -70,11 +70,18 @@ class RawExprCacheAdapter final : public Expr {
     GetColumnInfo() const override;
 
     void
-    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
-                      prefetch_pool) override;
+    PrefetchAsync(const milvus::PrefetchExecutor& prefetch_pool,
+                  std::shared_ptr<index::JsonStatsPrefetchBatch> batch =
+                      nullptr) override;
 
     void
-    WaitPrefetch() override;
+    WaitPrefetch(PrefetchWait mode = PrefetchWait::Demand) override;
+
+    bool
+    PrefetchReady() const override {
+        return (!prefetch_future_ || prefetch_future_->isReady()) &&
+               input_->PrefetchReady();
+    }
 
     const std::shared_ptr<SegmentExpr>&
     wrapped_expr() const {

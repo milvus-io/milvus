@@ -25,6 +25,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -67,8 +68,11 @@ class PhyConjunctFilterExpr : public Expr {
     void
     MoveCursor() override {
         if (!has_offset_input_) {
-            for (auto& input : inputs_) {
-                input->MoveCursor();
+            if (HasPendingLikeBatch()) {
+                UseIndividualLikes();
+            }
+            for (size_t i = 0; i < inputs_.size(); ++i) {
+                SkipInput(i);
             }
         }
     }
@@ -206,8 +210,28 @@ class PhyConjunctFilterExpr : public Expr {
     static DataType
     ResolveType(const std::vector<DataType>& inputs);
 
+    bool
+    HasPendingLikeBatch() const {
+        return !like_batch_initialized_ && is_and_ && like_indices_.size() > 1;
+    }
+
+    void
+    UseIndividualLikes();
+
+    void
+    PrepareLikeBatch(bool has_offsets);
+
     void
     SkipFollowingExprs(int start);
+
+    void
+    SkipInput(size_t index);
+
+    void
+    ApplyPendingSkips(size_t index);
+
+    // Only populated when an entire batch short-circuits a cold input.
+    std::unordered_map<size_t, size_t> pending_skips_;
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
     // true if the consumer of this expression's output treats UNKNOWN like

@@ -83,10 +83,76 @@ PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
 }
 
 void
+PhyConjunctFilterExpr::ApplyPendingSkips(size_t index) {
+    auto it = pending_skips_.find(index);
+    if (it != pending_skips_.end()) {
+        auto& input = inputs_[index];
+        input->WaitPrefetch();
+        for (size_t i = 0; i < it->second; ++i) {
+            input->MoveCursor();
+        }
+        pending_skips_.erase(it);
+    }
+}
+
+void
+PhyConjunctFilterExpr::SkipInput(size_t index) {
+    if (!inputs_[index]->PrefetchReady()) {
+        ++pending_skips_[index];
+        return;
+    }
+    ApplyPendingSkips(index);
+    inputs_[index]->MoveCursor();
+}
+
+void
 PhyConjunctFilterExpr::SkipFollowingExprs(int start) {
     for (int i = start; i < input_order_.size(); ++i) {
-        inputs_[input_order_[i]]->MoveCursor();
+        SkipInput(input_order_[i]);
     }
+}
+
+void
+PhyConjunctFilterExpr::UseIndividualLikes() {
+    like_batch_initialized_ = true;
+    batch_ngram_indices_.clear();
+    // A skipped batch advances the original predicates. Keep their cursors
+    // if a later batch reaches LIKE for the first time.
+    std::erase(input_order_, inputs_.size());
+}
+
+void
+PhyConjunctFilterExpr::PrepareLikeBatch(bool has_offsets) {
+    if (has_offsets) {
+        UseIndividualLikes();
+        return;
+    }
+    std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngrams;
+    for (auto idx : like_indices_) {
+        auto input = inputs_[idx];
+        input->WaitPrefetch();
+        if (auto adapter =
+                std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
+            input = adapter->wrapped_expr();
+        }
+        auto unary = std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+        if (unary) {
+            unary->EnsureExecPathDetermined();
+        }
+        if (unary && unary->CanUseNgramIndex()) {
+            ngrams.push_back(unary);
+            batch_ngram_indices_.insert(idx);
+        }
+    }
+    if (ngrams.size() < 2) {
+        UseIndividualLikes();
+        return;
+    }
+    like_batch_initialized_ = true;
+    const auto rows = ngrams[0]->GetActiveCount();
+    const auto batch = ngrams[0]->GetNextBatchSize();
+    inputs_.push_back(std::make_shared<PhyLikeConjunctExpr>(
+        std::move(ngrams), op_ctx_, rows, batch));
 }
 
 void
@@ -111,75 +177,27 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    auto has_input_offset = context.get_offset_input() != nullptr;
-    if (!like_batch_initialized_ && is_and_ && like_indices_.size() > 1) {
-        like_batch_initialized_ = true;
-        // Collect LIKE expressions that can use ngram index at runtime.
-        // The batch-ngram path evaluates whole batches, so it cannot be
-        // used with an offset input; ngram_exprs then stays empty and the
-        // else branch below erases the input_order_ slot reserved at
-        // compile time. Deciding here — once, in every mode — keeps the
-        // invariant that each input_order_ entry has a backing expression
-        // in inputs_ before anything indexes inputs_ with it. (An
-        // instance's offset mode is fixed for its lifetime, so no later
-        // call could have used the batch path anyway.)
-        std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
-        if (!has_input_offset) {
-            for (size_t idx : like_indices_) {
-                auto input = inputs_[idx];
-                if (auto cached =
-                        std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
-                    input = cached->wrapped_expr();
-                }
-                auto unary_expr =
-                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
-                if (unary_expr) {
-                    unary_expr->EnsureExecPathDetermined();
-                }
-                if (unary_expr && unary_expr->CanUseNgramIndex()) {
-                    ngram_exprs.push_back(unary_expr);
-                    batch_ngram_indices_.insert(idx);
-                }
+    auto last_evaluated = [&] {
+        size_t i = input_order_.size();
+        while (i > 0 && batch_ngram_indices_.count(input_order_[i - 1])) {
+            --i;
+        }
+        return i;
+    };
+    size_t eval_end = last_evaluated();
+    for (size_t i = 0; i < input_order_.size(); ++i) {
+        if (HasPendingLikeBatch() &&
+            (input_order_[i] >= inputs_.size() ||
+             std::find(like_indices_.begin(),
+                       like_indices_.end(),
+                       input_order_[i]) != like_indices_.end())) {
+            PrepareLikeBatch(context.get_offset_input() != nullptr);
+            eval_end = last_evaluated();
+            if (i >= eval_end) {
+                break;
             }
         }
-
-        // Create PhyLikeConjunctExpr and add to inputs_ if we have >= 2 eligible
-        if (ngram_exprs.size() >= 2) {
-            auto active_count = ngram_exprs[0]->GetActiveCount();
-            // The driver may have selected all-at-once execution before this
-            // runtime node exists. Inherit its inputs' effective batch size.
-            auto batch_size = ngram_exprs[0]->GetNextBatchSize();
-            auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
-                std::move(ngram_exprs), op_ctx_, active_count, batch_size);
-            inputs_.push_back(like_conjunct);
-        } else {
-            batch_ngram_indices_.clear();
-            // Remove the like_conjunct index from input_order_ since we're not
-            // creating the batch expression. The index was reserved at compile
-            // time but the PhyLikeConjunctExpr is not being created at runtime.
-            auto original_size = inputs_.size();
-            input_order_.erase(std::remove_if(input_order_.begin(),
-                                              input_order_.end(),
-                                              [original_size](size_t idx) {
-                                                  return idx >= original_size;
-                                              }),
-                               input_order_.end());
-        }
-    }
-
-    // Position of the last entry that will actually be evaluated: trailing
-    // batch-ngram entries are skipped in the loop and must not force a
-    // useless active-bitmap build after the real last input.
-    size_t last_eval_pos = input_order_.size();
-    for (size_t i = input_order_.size(); i-- > 0;) {
-        if (batch_ngram_indices_.count(input_order_[i]) == 0) {
-            last_eval_pos = i;
-            break;
-        }
-    }
-
-    for (size_t i = 0; i < input_order_.size(); ++i) {
-        size_t idx = input_order_[i];
+        const size_t idx = input_order_[i];
 
         // Skip expressions already executed via batch ngram
         if (batch_ngram_indices_.count(idx)) {
@@ -187,6 +205,9 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
 
         VectorPtr input_result;
+        if (!pending_skips_.empty()) {
+            ApplyPendingSkips(idx);
+        }
         inputs_[idx]->Eval(context, input_result);
 
         ColumnVectorPtr all_flat_result;
@@ -211,7 +232,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
         // The last evaluated expression needs neither a skip decision nor a
         // bitmap input for a successor.
-        if (i == last_eval_pos) {
+        if (i + 1 == eval_end) {
             break;
         }
 
@@ -225,6 +246,9 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             active_rows.inplace_and(inherited_bitmap, active_rows.size());
         }
         if (active_rows.none()) {
+            if (HasPendingLikeBatch()) {
+                UseIndividualLikes();
+            }
             SkipFollowingExprs(i + 1);
             return;
         }

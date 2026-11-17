@@ -16,7 +16,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstring>
+#include <functional>
+#include <future>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -33,7 +36,20 @@ class JsonStatsScanTestAccessor {
     static void
     SetColumn(milvus::index::JsonKeyStats& stats,
               std::shared_ptr<milvus::ChunkedColumnInterface> column) {
+        stats.num_rows_ = column->NumRows();
         stats.shredding_columns_["test_path"] = std::move(column);
+    }
+
+    static void
+    AddProjection(
+        milvus::index::JsonKeyStats& stats,
+        const std::string& pointer,
+        milvus::index::JSONType type,
+        const std::string& field,
+        const std::shared_ptr<milvus::ChunkedColumnInterface>& column) {
+        stats.key_field_map_[pointer].insert(field);
+        stats.shred_field_data_type_map_[field] = type;
+        stats.shredding_columns_[field] = column;
     }
 };
 
@@ -60,6 +76,8 @@ class JsonKeyStatsScanTest : public ::testing::TestWithParam<bool> {
 };
 
 struct ScanTrace {
+    std::atomic<size_t> prefetched_cells{0};
+    std::atomic<size_t> loaded_cells{0};
     std::vector<int64_t> pinned_chunks;
     std::optional<ScanPinPolicy> pin_policy;
     int64_t scans = 0;
@@ -68,6 +86,26 @@ struct ScanTrace {
     int64_t largest_batch = 0;
     const void* last_values = nullptr;
     bool fail_pin = false;
+    std::function<void()> after_prefetch;
+};
+
+class CountingChunkTranslator : public TestChunkTranslator {
+ public:
+    CountingChunkTranslator(const std::vector<int64_t>& rows,
+                            std::vector<std::unique_ptr<Chunk>> chunks,
+                            std::shared_ptr<ScanTrace> trace)
+        : TestChunkTranslator(rows, "json_stats_scan", std::move(chunks)),
+          trace_(std::move(trace)) {
+    }
+
+    std::vector<std::pair<cid_t, std::unique_ptr<Chunk>>>
+    get_cells(OpContext* ctx, const std::vector<cid_t>& cells) override {
+        trace_->loaded_cells.fetch_add(cells.size());
+        return TestChunkTranslator::get_cells(ctx, cells);
+    }
+
+ private:
+    std::shared_ptr<ScanTrace> trace_;
 };
 
 // Delegate to the production RawScanCursor. Record its output pointer so the
@@ -111,6 +149,16 @@ class RecordingColumn : public Base {
                     const FieldMeta& meta,
                     std::shared_ptr<ScanTrace> trace)
         : Base(std::move(slot), meta), trace_(std::move(trace)) {
+    }
+
+    void
+    PrefetchChunks(OpContext* ctx,
+                   const std::vector<int64_t>& cells) const override {
+        trace_->prefetched_cells.fetch_add(cells.size());
+        Base::PrefetchChunks(ctx, cells);
+        if (trace_->after_prefetch) {
+            trace_->after_prefetch();
+        }
     }
 
     PinWrapper<Chunk*>
@@ -214,8 +262,8 @@ MakeColumn(const std::vector<int64_t>& chunk_rows,
         }
         row += rows;
     }
-    auto translator = std::make_unique<TestChunkTranslator>(
-        chunk_rows, "json_stats_scan", std::move(chunks));
+    auto translator = std::make_unique<CountingChunkTranslator>(
+        chunk_rows, std::move(chunks), fixture.trace);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
     FieldMeta meta(
@@ -237,6 +285,116 @@ MakeStats(const std::shared_ptr<ChunkedColumnInterface>& column) {
     auto stats = std::make_unique<JsonKeyStats>(ctx, /*is_load=*/true);
     JsonStatsScanTestAccessor::SetColumn(*stats, column);
     return stats;
+}
+
+TEST(JsonStatsPrefetchTest, RepeatedStringPathSharesPhysicalReads) {
+    auto kind = MakeColumn<std::string>(
+        {1, 2}, {"commit", "issue", "commit"}, DataType::STRING, false);
+    auto operation = MakeColumn<std::string>(
+        {3}, {"create", "close", "push"}, DataType::STRING, false);
+    auto stats = MakeStats(kind.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/kind", JSONType::STRING, "kind_s", kind.column);
+    JsonStatsScanTestAccessor::AddProjection(*stats,
+                                             "/commit/operation",
+                                             JSONType::STRING,
+                                             "op_s",
+                                             operation.column);
+
+    JsonStatsPrefetchBatch batch;
+    auto fetch_kind = [&] {
+        stats->PrefetchTypedColumns(
+            nullptr, "/kind", {JSONType::STRING}, &batch);
+    };
+    auto first = std::async(std::launch::async, fetch_kind);
+    fetch_kind();
+    first.get();
+    EXPECT_EQ(kind.trace->prefetched_cells.load(), 2);
+    EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
+    EXPECT_EQ(operation.trace->loaded_cells.load(), 0);
+
+    auto reader = stats->CreateShreddingReader("/kind", JSONType::STRING, 3);
+    ASSERT_NE(reader, nullptr);
+    // A demand read of the same projected cells reuses the warmed slot.
+    const std::vector<std::string> expected{"commit", "issue", "commit"};
+    for (int64_t i = 0; i < expected.size(); ++i) {
+        auto value = reader->Get(nullptr, i);
+        ASSERT_TRUE(value.has_value());
+        EXPECT_EQ(std::get<std::string>(*value), expected[i]);
+    }
+    EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
+    stats->PrefetchTypedColumns(
+        nullptr, "/commit/operation", {JSONType::STRING});
+    EXPECT_EQ(operation.trace->loaded_cells.load(), 1);
+}
+
+TEST(JsonStatsPrefetchTest, StoppedWorkerLeavesRemainingCellsForDemand) {
+    auto kind = MakeColumn<std::string>(
+        {1, 1, 1}, {"a", "b", "c"}, DataType::STRING, false);
+    auto stats = MakeStats(kind.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/kind", JSONType::STRING, "kind_s", kind.column);
+    folly::CancellationSource stop;
+    folly::CancellationSource request;
+    OpContext ctx(request.getToken());
+    // Stop after the first shared fill has published its cell.
+    kind.trace->after_prefetch = [&] { stop.requestCancellation(); };
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    PrefetchExecutor executor(pool, stop.getToken());
+    executor
+        .Submit([&] {
+            stats->PrefetchTypedColumns(&ctx, "/kind", {JSONType::STRING});
+        })
+        .get();
+    EXPECT_EQ(kind.trace->loaded_cells.load(), 1);
+    EXPECT_FALSE(ctx.cancellation_token.isCancellationRequested());
+    auto reader = stats->CreateShreddingReader("/kind", JSONType::STRING, 3);
+    ASSERT_NE(reader, nullptr);
+    auto last = reader->Get(&ctx, 2);
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(std::get<std::string>(*last), "c");
+    EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
+}
+
+TEST(JsonStatsPrefetchTest, MixedNumberTypesAndMissingProjection) {
+    auto ints = MakeColumn<int64_t>({2}, {1, 2}, DataType::INT64, false);
+    auto doubles =
+        MakeColumn<double>({1, 1}, {1.5, 2.5}, DataType::DOUBLE, false);
+    auto strings =
+        MakeColumn<std::string>({2}, {"one", "two"}, DataType::STRING, false);
+    auto stats = MakeStats(ints.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/n", JSONType::INT64, "n_i", ints.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/n", JSONType::DOUBLE, "n_d", doubles.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/n", JSONType::STRING, "n_s", strings.column);
+    stats->PrefetchTypedColumns(nullptr, "/n", {JSONType::BOOL});
+    EXPECT_EQ(ints.trace->loaded_cells.load(), 0);
+    EXPECT_EQ(doubles.trace->loaded_cells.load(), 0);
+    stats->PrefetchTypedColumns(
+        nullptr, "/n", {JSONType::INT64, JSONType::DOUBLE});
+    EXPECT_EQ(ints.trace->loaded_cells.load(), 1);
+    EXPECT_EQ(doubles.trace->loaded_cells.load(), 2);
+    EXPECT_EQ(strings.trace->loaded_cells.load(), 0);
+}
+
+TEST(JsonStatsPrefetchTest, ExistsMatchesPathComponentsAndHonorsCancellation) {
+    auto child = MakeColumn<int64_t>({1}, {1}, DataType::INT64, false);
+    auto other = MakeColumn<int64_t>({1}, {2}, DataType::INT64, false);
+    auto stats = MakeStats(child.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/a/b", JSONType::INT64, "ab_i", child.column);
+    JsonStatsScanTestAccessor::AddProjection(
+        *stats, "/aa/b", JSONType::INT64, "aab_i", other.column);
+    folly::CancellationSource source;
+    OpContext canceled(source.getToken());
+    source.requestCancellation();
+    stats->PrefetchExistsColumns(&canceled, "/a");
+    EXPECT_EQ(child.trace->loaded_cells.load(), 0);
+    stats->PrefetchExistsColumns(nullptr, "/a");
+    EXPECT_EQ(child.trace->loaded_cells.load(), 1);
+    EXPECT_EQ(other.trace->loaded_cells.load(), 0);
 }
 
 TEST_P(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndHonorPinPolicy) {

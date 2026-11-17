@@ -158,6 +158,7 @@ class CountingRawExpr final : public SegmentExpr {
 
     void
     DetermineExecPath() override {
+        ++path_resolutions;
         exec_path_ = ExprExecPath::RawData;
     }
 
@@ -199,6 +200,7 @@ class CountingRawExpr final : public SegmentExpr {
         return cursor_pos_;
     }
 
+    int path_resolutions{0};
     int eval_count{0};
     int move_count{0};
     int prefetch_count{0};
@@ -807,6 +809,17 @@ TEST_F(RawExprCacheAdapterTest, CacheHitSkipsWrappedRawPrefetch) {
     EXPECT_EQ(new_miss_input->prefetch_count, 1);
 }
 
+TEST_F(RawExprCacheAdapterTest, CleanupDoesNotStartSkippedLookup) {
+    auto [input, adapter] = MakeAdapter("skipped");
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    folly::CancellationSource stop;
+    stop.requestCancellation();
+    adapter->PrefetchAsync(PrefetchExecutor(pool, stop.getToken()));
+    adapter->WaitPrefetch(PrefetchWait::Cleanup);
+    EXPECT_EQ(input->path_resolutions, 0);
+    EXPECT_EQ(input->prefetch_count, 0);
+}
+
 TEST_F(RawExprCacheAdapterTest, CacheMissPrefetchUsesSinglePoolTask) {
     auto pool = std::make_shared<CountingCPUThreadPoolExecutor>(1);
     auto [input, adapter] = MakeAdapter("raw:prefetch-single-task");
@@ -816,6 +829,49 @@ TEST_F(RawExprCacheAdapterTest, CacheMissPrefetchUsesSinglePoolTask) {
 
     EXPECT_EQ(input->prefetch_count, 1);
     EXPECT_EQ(pool->submitted_tasks(), 1);
+}
+
+TEST_F(RawExprCacheAdapterTest, ConsumerWaitTracksWrappedPrefetchOnce) {
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    auto [input, adapter] = MakeAdapter("raw:consumer-wait");
+    input->prefetch_delay = std::chrono::milliseconds(20);
+    PrefetchWaitStats waits;
+    adapter->PrefetchAsync(pool);
+    // The producer runs on another thread and cannot charge this consumer.
+    pool->join();
+    EXPECT_EQ(waits.ElapsedMicros(), 0.0);
+
+    const auto start = std::chrono::steady_clock::now();
+    adapter->WaitPrefetch();
+    const auto elapsed = std::chrono::duration<double, std::micro>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+    EXPECT_GT(waits.ElapsedMicros(), 0.0);
+    EXPECT_LE(waits.ElapsedMicros(), elapsed);
+    EXPECT_EQ(input->prefetch_count, 1);
+}
+
+TEST_F(RawExprCacheAdapterTest, NestedWaitsAndFailuresRestoreConsumerScope) {
+    auto [input, adapter] = MakeAdapter("raw:nested-wait");
+    PrefetchWaitStats waits;
+    const auto start = std::chrono::steady_clock::now();
+    try {
+        PrefetchWaitTimer outer;
+        adapter->WaitPrefetch();
+        // Nested timing must not count this interval twice.
+        PrefetchWaitTimer inner;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        throw std::runtime_error("injected wait failure");
+    } catch (const std::runtime_error&) {
+    }
+    const auto elapsed = std::chrono::duration<double, std::micro>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+    const auto first_wait = waits.ElapsedMicros();
+    EXPECT_GT(first_wait, 0.0);
+    EXPECT_LE(first_wait, elapsed);
+    adapter->WaitPrefetch();
+    EXPECT_GT(waits.ElapsedMicros(), first_wait);
 }
 
 TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {
