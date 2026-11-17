@@ -4982,8 +4982,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
                                   {"extfs",
                                    {{"cloud_provider", "gcp"},
                                     {"use_iam", "true"},
+                                    {"anonymous", "false"},
                                     {"credential_endpoint", endpoint}}}};
     milvus_storage::api::Properties props;
+    props["extfs.42.anonymous"] = std::string("true");
     InjectExternalSpecProperties(props, 42, "gs://bucket/path", valid.dump());
     auto config = milvus_storage::FilesystemCache::resolve_config(
         std::make_shared<const milvus_storage::api::Properties>(props),
@@ -5067,6 +5069,8 @@ TEST(InjectExtfsAllowlist, AzureBrokerIamAndTargetModes) {
                                 {"extfs",
                                  {{"cloud_provider", "azure"},
                                   {"region", "westus3"},
+                                  {"bucket_name", "container"},
+                                  {"anonymous", "false"},
                                   {"access_key_id", "account"},
                                   {"credential_endpoint", endpoint}}}};
         if (use_iam[0] != '\0') {
@@ -5102,6 +5106,21 @@ TEST(InjectExtfsAllowlist, AzureBrokerIamAndTargetModes) {
                 spec.dump());
             return result;
         };
+        auto conflicting = valid;
+        conflicting["extfs"]["bucket_name"] = "other";
+        EXPECT_ANY_THROW(inject(conflicting));
+        // Region-derived target mode keeps ignoring an old bucket override.
+        milvus_storage::api::Properties regional;
+        if (iam) {
+            EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                regional, 42, "azure://container/path", conflicting.dump()));
+        } else {
+            InjectExternalSpecProperties(
+                regional, 42, "azure://container/path", conflicting.dump());
+            EXPECT_EQ(
+                std::get<std::string>(regional.at("extfs.42.bucket_name")),
+                "container");
+        }
         for (const auto* key : {"access_key_id", "region"}) {
             auto spec = valid;
             spec["extfs"].erase(key);
