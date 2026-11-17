@@ -733,7 +733,9 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
     auto base = LoaderRegistry::Instance()
                     .Lookup(adapted.family)
                     .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
-                           options});
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
+                    ->CreateReader(nullptr);
     ASSERT_NE(base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(base.get());
     ASSERT_NE(reader, nullptr);
@@ -749,7 +751,6 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
     reader->Search(GenDataset(1, kDim, values.data() + kDim),
                    search,
                    BitsetView{},
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 2);
     EXPECT_EQ(result.seg_offsets_[0], 1);
@@ -771,7 +772,6 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
         reader->Search(GenDataset(1, kDim, values.data() + kDim),
                        search,
                        BitsetView{},
-                       nullptr,
                        result);
         EXPECT_EQ(result.seg_offsets_.size(), 1);
         if (result.seg_offsets_.size() == 1) {

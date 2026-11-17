@@ -1305,17 +1305,17 @@ TEST(SealedLazyIndexSlot, MRLRefinementRetainsViewAcrossDeferredLoading) {
             folly::CancellationSource cancelled;
             cancelled.requestCancellation();
             OpContext ctx(cancelled.getToken());
-            EXPECT_THROW(inventory.PinIndex(&ctx, registration.key),
+            EXPECT_THROW(inventory.CreateIndexReader(&ctx, registration.key),
                          std::exception);
-            EXPECT_TRUE(inventory.Slots().empty());
+            EXPECT_TRUE(ResolvedIndexes(inventory).empty());
         } else {
             milvus::tracer::TraceContext trace{};
             LoadIndexData(trace, &info, nullptr, view);
             inventory.Register(std::make_shared<IndexInventory::Entry>(
-                MakeSealedIndexCapability(info), std::move(info.cache_index)));
+                MakeSealedIndexCapability(info), std::move(info.index)));
         }
         view = {};
-        auto pin = inventory.PinIndex(nullptr, registration.key);
+        auto pin = inventory.CreateIndexReader(nullptr, registration.key);
         ASSERT_TRUE(pin);
         EXPECT_EQ(searches, 0);
         const auto* reader =
@@ -1327,7 +1327,6 @@ TEST(SealedLazyIndexSlot, MRLRefinementRetainsViewAcrossDeferredLoading) {
             SearchResult result;
             reader->Search(knowhere::GenDataSet(1, dim, query.data()),
                            params,
-                           nullptr,
                            nullptr,
                            result);
             ASSERT_EQ(result.seg_offsets_.size(), 2);

@@ -1086,7 +1086,6 @@ TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
     reader->Search(GenDataset(1, kDim, values.data() + kDim),
                    params,
                    BitsetView{},
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 2);
     EXPECT_EQ(result.seg_offsets_[0], 1);
