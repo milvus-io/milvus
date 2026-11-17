@@ -45,23 +45,15 @@ const (
 
 // latencyConfig holds the tunables of the latency_weighted policy.
 type latencyConfig struct {
-	enabled         bool
-	decay           time.Duration
-	minShare        float64
-	hedgeEnabled    bool
-	hedgeMinDelay   time.Duration
-	hedgeMinWinRate float64
+	decay    time.Duration
+	minShare float64
 }
 
 func loadLatencyConfig() latencyConfig {
 	p := &paramtable.Get().ProxyCfg
 	c := latencyConfig{
-		enabled:         p.LatencyWeightedEnabled.GetAsBool(),
-		decay:           p.LatencyWeightedDecay.GetAsDurationByParse(),
-		minShare:        p.LatencyWeightedMinShare.GetAsFloat(),
-		hedgeEnabled:    p.LatencyWeightedHedgeEnabled.GetAsBool(),
-		hedgeMinDelay:   p.LatencyWeightedHedgeMinDelay.GetAsDurationByParse(),
-		hedgeMinWinRate: p.LatencyWeightedHedgeMinWinRate.GetAsFloat(),
+		decay:    p.LatencyWeightedDecay.GetAsDurationByParse(),
+		minShare: p.LatencyWeightedMinShare.GetAsFloat(),
 	}
 	if c.decay <= 0 {
 		c.decay = 10 * time.Second
@@ -69,26 +61,12 @@ func loadLatencyConfig() latencyConfig {
 	if c.minShare < 0 || c.minShare >= 1 {
 		c.minShare = 0.001
 	}
-	if c.hedgeMinDelay < 0 {
-		c.hedgeMinDelay = 200 * time.Millisecond
-	}
-	if c.hedgeMinWinRate <= 0 || c.hedgeMinWinRate > 1 {
-		c.hedgeMinWinRate = 0.3
-	}
 	return c
 }
 
 type replicaKey struct {
 	key  string
 	node int64
-}
-
-// keyStats is what is known about a statistics key over all its replicas.
-type keyStats struct {
-	// latency of its requests, for the hedge delay
-	requests latencySamples
-	// outcomes of its hedges, for the hedge win rate
-	hedges hedgeOutcomes
 }
 
 // LatencyWeightedBalancer spreads the attempts of a statistics key (see
@@ -108,7 +86,6 @@ type LatencyWeightedBalancer struct {
 
 	mu       sync.Mutex
 	replicas map[replicaKey]*replicaStats
-	keys     map[string]*keyStats
 	rng      *rand.Rand
 
 	closeCh   chan struct{}
@@ -123,7 +100,6 @@ func NewLatencyWeightedBalancer(clientMgr ShardClientMgr) *LatencyWeightedBalanc
 	return &LatencyWeightedBalancer{
 		LookAsideBalancer: NewLookAsideBalancer(clientMgr),
 		replicas:          make(map[replicaKey]*replicaStats),
-		keys:              make(map[string]*keyStats),
 		rng:               rand.New(rand.NewSource(time.Now().UnixNano())),
 		closeCh:           make(chan struct{}),
 		now:               time.Now,
@@ -166,34 +142,16 @@ func (b *LatencyWeightedBalancer) cleanup() {
 			delete(b.replicas, k)
 		}
 	}
-	for k, s := range b.keys {
-		if now.Sub(s.requests.lastUsed()) > statsIdleTimeout && now.Sub(s.hedges.lastUsed()) > statsIdleTimeout {
-			delete(b.keys, k)
-		}
-	}
 }
 
-// Enabled reports the switch.
-func (b *LatencyWeightedBalancer) Enabled() bool {
-	return loadLatencyConfig().enabled
-}
-
-// SelectNode serves callers that do not know the channel, and look_aside when
-// the switch is off.
+// SelectNode serves callers that do not know the channel.
 func (b *LatencyWeightedBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-	if !b.Enabled() {
-		return b.LookAsideBalancer.SelectNode(ctx, availableNodes, nq)
-	}
 	return b.SelectNodeForKey(ctx, "", availableNodes)
 }
 
-// CancelWorkload releases the look_aside workload when the switch is off. With
-// the switch on, selections are released by ObserveAttempt.
-func (b *LatencyWeightedBalancer) CancelWorkload(node int64, nq int64) {
-	if !b.Enabled() {
-		b.LookAsideBalancer.CancelWorkload(node, nq)
-	}
-}
+// CancelWorkload is a no-op because LatencyWeightedBalancer releases selections
+// in ObserveAttempt / ReleaseSelection.
+func (b *LatencyWeightedBalancer) CancelWorkload(node int64, nq int64) {}
 
 func (b *LatencyWeightedBalancer) replicaLocked(key string, node int64) *replicaStats {
 	k := replicaKey{key, node}
@@ -201,15 +159,6 @@ func (b *LatencyWeightedBalancer) replicaLocked(key string, node int64) *replica
 	if !ok {
 		s = &replicaStats{}
 		b.replicas[k] = s
-	}
-	return s
-}
-
-func (b *LatencyWeightedBalancer) keyLocked(key string) *keyStats {
-	s, ok := b.keys[key]
-	if !ok {
-		s = &keyStats{}
-		b.keys[key] = s
 	}
 	return s
 }
@@ -368,67 +317,4 @@ func (b *LatencyWeightedBalancer) ObserveOvertaken(ctx context.Context, key stri
 	s := b.replicaLocked(key, node)
 	s.lastUsed = now
 	s.fail(now, attemptTimeout(ctx, start, now.Sub(start)), cfg.decay)
-}
-
-// ObserveRequest reports how long a successful channel request of key took
-// until its first result.
-func (b *LatencyWeightedBalancer) ObserveRequest(key string, latency time.Duration) {
-	now := b.now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.keyLocked(key).requests.add(now, latency)
-}
-
-// HedgeDelay returns how long to wait for an attempt of key before hedging:
-// the p99 of the requests of key (see latencySamples.quantile), at least
-// hedge.minDelay. It returns false when hedging is off.
-func (b *LatencyWeightedBalancer) HedgeDelay(key string) (time.Duration, bool) {
-	cfg := loadLatencyConfig()
-	if !cfg.hedgeEnabled {
-		return 0, false
-	}
-	now := b.now()
-	b.mu.Lock()
-	var samples []time.Duration
-	if s, ok := b.keys[key]; ok {
-		samples = s.requests.snapshot(now)
-	}
-	b.mu.Unlock()
-	delay := cfg.hedgeMinDelay
-	if q, ok := latencyQuantile(samples, hedgeQuantile); ok && q > delay {
-		delay = q
-	}
-	return delay, true
-}
-
-// AllowHedge holds back the hedges of key when they do not pay off: when
-// fewer than hedge.minWinRate of its recent hedges won (see hedgeOutcomes),
-// only one hedge in 1/hedgeProbeRate is sent. A hedge that loses only added
-// load: when every replica is slow, as under overall overload, hedges stop
-// winning and are cut to the probe rate, while after a replica fault they win
-// and keep going. The probes let the win rate recover, and outcomes older than
-// the window do not count, so hedging is never switched off for good. With too
-// few recent hedges to tell, a hedge is always sent.
-func (b *LatencyWeightedBalancer) AllowHedge(key string) bool {
-	cfg := loadLatencyConfig()
-	now := b.now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	s, ok := b.keys[key]
-	if !ok {
-		return true
-	}
-	rate, ok := s.hedges.winRate(now)
-	if !ok || rate >= cfg.hedgeMinWinRate {
-		return true
-	}
-	return b.rng.Float64() < hedgeProbeRate
-}
-
-// ObserveHedge reports whether a hedge of key that was sent won.
-func (b *LatencyWeightedBalancer) ObserveHedge(key string, won bool) {
-	now := b.now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.keyLocked(key).hedges.add(now, won)
 }

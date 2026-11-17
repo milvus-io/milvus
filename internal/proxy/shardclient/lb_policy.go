@@ -88,6 +88,7 @@ type LBPolicyImpl struct {
 	getBalancer    func() LBBalancer
 	clientMgr      ShardClientMgr
 	balancerMap    map[string]LBBalancer
+	hedging        *hedgeTracker
 	retryOnReplica int
 }
 
@@ -97,8 +98,8 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
@@ -111,6 +112,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
+		hedging:        newHedgeTracker(),
 		retryOnReplica: retryOnReplica,
 	}
 }
@@ -180,17 +182,10 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	return nodeID
 }
 
-// snapshotBalancer captures the accounting owner for this request. In particular,
-// disabled latency weighting uses the underlying look-aside balancer directly,
-// so a later configuration change cannot change how its workload is released.
+// snapshotBalancer captures the accounting owner for this request.
 func snapshotBalancer(balancer LBBalancer) (LBBalancer, *LatencyWeightedBalancer) {
-	if lw, ok := balancer.(*LatencyWeightedBalancer); ok {
-		if lw.Enabled() {
-			return lw, lw
-		}
-		return lw.LookAsideBalancer, nil
-	}
-	return balancer, nil
+	lw, _ := balancer.(*LatencyWeightedBalancer)
+	return balancer, lw
 }
 
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
@@ -304,6 +299,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var lastErr error
 	balancer, lw := snapshotBalancer(lb.getBalancer())
 	excludeNodes := typeutil.NewUniqueSet()
+	hedgedOnce := false
 	tryExecute := func() (bool, error) {
 		targetNode, selectedByBalancer, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
 		if err != nil {
@@ -317,20 +313,25 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			return true, err
 		}
-		// cancel work load which assign to the target node
-		if selectedByBalancer && lw == nil {
-			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
-		}
-
 		attemptStart := time.Now()
-		if lw != nil && workload.Hedgeable {
-			if delay, ok := lw.HedgeDelay(statsKey(workload)); ok {
-				shouldRetry, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+		if workload.Hedgeable && !hedgedOnce {
+			if delay, ok := lb.hedging.HedgeDelay(statsKey(workload)); ok {
+				shouldRetry, hedged, err := lb.executeHedged(ctx, workload, balancer, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+				if hedged {
+					hedgedOnce = true
+				}
 				if err != nil {
 					lastErr = err
 				}
 				return shouldRetry, err
 			}
+		}
+		if workload.Hedgeable {
+			defer lb.hedging.EnterPrimary()()
+		}
+		// cancel work load which assign to the target node
+		if selectedByBalancer && lw == nil {
+			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
 		}
 		observe := func(err error) {
 			if lw != nil {
@@ -367,8 +368,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, lastErr
 		}
 
-		if lw != nil {
-			lw.ObserveRequest(statsKey(workload), time.Since(attemptStart))
+		if workload.Hedgeable {
+			lb.hedging.ObserveRequest(statsKey(workload), time.Since(attemptStart))
 		}
 		return true, nil
 	}

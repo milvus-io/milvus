@@ -288,40 +288,43 @@ func TestLatencyWeightedUnreachable(t *testing.T) {
 }
 
 func TestLatencyWeightedHedgeDelay(t *testing.T) {
-	b, clock := newTestBalancer(t)
-	d, ok := b.HedgeDelay(testKey)
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	defer pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+
+	h := newHedgeTracker()
+	d, ok := h.HedgeDelay(testKey)
 	require.True(t, ok)
 	assert.Equal(t, 200*time.Millisecond, d, "the minimum delay without requests")
 	// a few requests are enough: the p99 of a handful is their maximum
 	for i := 0; i < 5; i++ {
-		b.ObserveRequest(testKey, 300*time.Millisecond)
+		h.ObserveRequest(testKey, 300*time.Millisecond)
 	}
-	d, _ = b.HedgeDelay(testKey)
+	d, _ = h.HedgeDelay(testKey)
 	assert.Equal(t, 300*time.Millisecond, d)
 	// never below the minimum delay
-	b.ObserveRequest("fast", time.Millisecond)
-	d, _ = b.HedgeDelay("fast")
-	assert.Equal(t, 200*time.Millisecond, d)
-	// attempts do not feed the hedge delay, requests do
-	observe(b, clock, "other", 1, 5*time.Second, nil)
-	d, _ = b.HedgeDelay("other")
+	h.ObserveRequest("fast", time.Millisecond)
+	d, _ = h.HedgeDelay("fast")
 	assert.Equal(t, 200*time.Millisecond, d)
 
-	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key, "false")
-	defer pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key)
-	_, ok = b.HedgeDelay(testKey)
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "false")
+	_, ok = h.HedgeDelay(testKey)
 	assert.False(t, ok)
 }
 
 // Hedges are cut to the probe rate when too few of the recent ones won.
 func TestLatencyWeightedAllowHedge(t *testing.T) {
-	b, clock := newTestBalancer(t)
-	assert.True(t, b.AllowHedge(testKey), "no hedge seen")
+	paramtable.Init()
+	clock := &testClock{t: testEpoch}
+	h := newHedgeTracker()
+	h.now = clock.now
+	h.rng = rand.New(rand.NewSource(1))
+	assert.True(t, h.AllowHedge(testKey), "no hedge seen")
 	allowed := func(key string) int {
 		n := 0
 		for i := 0; i < 4000; i++ {
-			if b.AllowHedge(key) {
+			if h.AllowHedge(key) {
 				n++
 			}
 		}
@@ -329,73 +332,61 @@ func TestLatencyWeightedAllowHedge(t *testing.T) {
 	}
 	// fewer than ten hedges: always
 	for i := 0; i < 9; i++ {
-		b.ObserveHedge(testKey, false)
+		h.ObserveHedge(testKey, false)
 	}
 	assert.Equal(t, 4000, allowed(testKey))
 	// ten losses: the probe rate
-	b.ObserveHedge(testKey, false)
+	h.ObserveHedge(testKey, false)
 	assert.InDelta(t, 4000*hedgeProbeRate, allowed(testKey), 80)
 	// 4 of 14 won: still below 30%
 	for i := 0; i < 4; i++ {
-		b.ObserveHedge(testKey, true)
+		h.ObserveHedge(testKey, true)
 	}
 	assert.InDelta(t, 4000*hedgeProbeRate, allowed(testKey), 80)
 	// 5 of 15 won: always
-	b.ObserveHedge(testKey, true)
+	h.ObserveHedge(testKey, true)
 	assert.Equal(t, 4000, allowed(testKey))
 	// outcomes older than the hedge window do not hold hedges back
 	for i := 0; i < 100; i++ {
-		b.ObserveHedge("lost", false)
+		h.ObserveHedge("lost", false)
 	}
 	assert.Less(t, allowed("lost"), 600)
 	clock.advance(hedgeWindow + time.Second)
 	assert.Equal(t, 4000, allowed("lost"))
 	// per key
-	assert.True(t, b.AllowHedge("other"))
-
-	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeMinWinRate.Key, "0.1")
-	defer pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeMinWinRate.Key)
-	for i := 0; i < 9; i++ {
-		b.ObserveHedge("rare", false)
-	}
-	b.ObserveHedge("rare", true)
-	assert.Equal(t, 4000, allowed("rare"), "1 of 10 meets a 10% minimum")
+	assert.True(t, h.AllowHedge("other"))
 }
 
 func TestLatencyWeightedSwitch(t *testing.T) {
 	b, _ := newTestBalancer(t)
-	assert.True(t, b.Enabled())
-	assert.NotNil(t, latencyWeighted(b))
-	assert.Nil(t, latencyWeighted(NewRoundRobinBalancer()))
-	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedEnabled.Key, "false")
-	defer pt.Reset(pt.ProxyCfg.LatencyWeightedEnabled.Key)
-	assert.False(t, b.Enabled())
-	assert.Nil(t, latencyWeighted(b))
-	// behaves as look_aside
 	node, err := b.SelectNode(context.Background(), []int64{1, 2}, 1)
 	require.NoError(t, err)
-	b.CancelWorkload(node, 1)
+	b.ReleaseSelection("", node)
 }
 
 func TestLatencyWeightedCleanup(t *testing.T) {
 	b, clock := newTestBalancer(t)
+	h := newHedgeTracker()
+	h.now = clock.now
 	observe(b, clock, testKey, 1, 10*time.Millisecond, nil)
-	b.ObserveRequest(testKey, 10*time.Millisecond)
-	b.ObserveHedge("hedged", true)
+	h.ObserveRequest(testKey, 10*time.Millisecond)
+	h.ObserveHedge("hedged", true)
 	count := func() (int, int) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		return len(b.replicas), len(b.keys)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(b.replicas), len(h.keys)
 	}
 	clock.advance(statsIdleTimeout / 2)
 	b.cleanup()
+	h.cleanup()
 	r, k := count()
 	assert.Equal(t, 1, r)
 	assert.Equal(t, 2, k)
 	clock.advance(statsIdleTimeout)
 	b.cleanup()
+	h.cleanup()
 	r, k = count()
 	assert.Equal(t, 0, r)
 	assert.Equal(t, 0, k)
@@ -404,13 +395,14 @@ func TestLatencyWeightedCleanup(t *testing.T) {
 func TestLatencyWeightedConfigDefaults(t *testing.T) {
 	paramtable.Init()
 	assert.Equal(t, latencyConfig{
-		enabled:         true,
-		decay:           10 * time.Second,
-		minShare:        0.001,
-		hedgeEnabled:    true,
-		hedgeMinDelay:   200 * time.Millisecond,
-		hedgeMinWinRate: 0.3,
+		decay:    10 * time.Second,
+		minShare: 0.001,
 	}, loadLatencyConfig())
+	assert.Equal(t, hedgeConfig{
+		enabled:          false,
+		minDelay:         200 * time.Millisecond,
+		maxInflightRatio: 0.1,
+	}, loadHedgeConfig())
 }
 
 func TestStatsKey(t *testing.T) {
