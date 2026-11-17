@@ -228,7 +228,7 @@ func (s *shardViewQueryClient) executeShard(
 		}
 		attemptCtx, permit := s.breaker.begin(ctx, vchannel, failedNodes, failedViews)
 		plan, err := s.executeRoutingAttempt(attemptCtx, vchannel, params, permit)
-		permit.releaseUnused(nil)
+		permit.release()
 		if err == nil {
 			return plan, nil
 		}
@@ -243,7 +243,7 @@ func (s *shardViewQueryClient) executeShard(
 				return nil, err
 			}
 			waitCtx, waitCancel := context.WithTimeout(ctx, remaining)
-			waitErr := s.breaker.wait(waitCtx)
+			waitErr := permit.wait(waitCtx)
 			waitCancel()
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -291,7 +291,9 @@ func (s *shardViewQueryClient) executeRoutingAttempt(ctx context.Context, vchann
 	if qviews.NewQueryRoutingExclusions(vchannel, permit.constraints).ExcludesPlan(plan) {
 		return nil, viewerror.NewAllCandidatesExcluded()
 	}
-	permit.releaseUnused(plan)
+	if !permit.acquireProbes(plan) {
+		return nil, viewerror.NewAllCandidatesExcluded()
+	}
 	if params.consumeResponse != nil {
 		if err := params.consumeResponse(response); err != nil {
 			return nil, err

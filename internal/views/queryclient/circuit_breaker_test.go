@@ -28,6 +28,14 @@ func beginBreakerTest(t *testing.T, b *QueryViewCircuitBreaker, channel string) 
 	return b.begin(t.Context(), channel, make(map[int64]time.Time), make(map[qviews.QueryViewKey]time.Time))
 }
 
+func breakerTestPlan(key qviews.QueryViewKey, nodes ...int64) *viewpb.QueryPlan {
+	plan := &viewpb.QueryPlan{ShardId: key.ShardID.IntoProto(), Version: key.QueryViewVersion.IntoProto()}
+	for _, id := range nodes {
+		plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: id}}})
+	}
+	return plan
+}
+
 func TestViewExclusionIsExactScopedAndExpiresWithoutProbe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{ViewExclusionTTL: 10 * time.Second})
@@ -53,7 +61,7 @@ func TestViewExclusionIsExactScopedAndExpiresWithoutProbe(t *testing.T) {
 		require.Empty(t, expired.constraints.ExcludedQueryViews)
 		b.observe(ctx, node, key, token, viewerror.NewViewNotFound("late"))
 		require.Empty(t, b.views)
-		first.releaseUnused(nil)
+		first.release()
 	})
 }
 
@@ -78,6 +86,8 @@ func TestNodeConnectionProbeIsSharedAndFencesLateResults(t *testing.T) {
 		time.Sleep(1300 * time.Millisecond)
 		probeCtx, probe := beginBreakerTest(t, b, "a")
 		require.Empty(t, probe.constraints.ExcludedQueryNodeIds)
+		require.Empty(t, probe.probes, "planning must not reserve probes")
+		require.True(t, probe.acquireProbes(breakerTestPlan(key, 11)))
 		require.Len(t, probe.probes, 1)
 		_, concurrent := beginBreakerTest(t, b, "other-channel")
 		require.Equal(t, []int64{11}, concurrent.constraints.ExcludedQueryNodeIds)
@@ -86,7 +96,7 @@ func TestNodeConnectionProbeIsSharedAndFencesLateResults(t *testing.T) {
 		require.True(t, b.nodes[11].retryAt.IsZero())
 		b.observe(probeCtx, node, key, probeToken, io.EOF)
 		require.Zero(t, b.nodes[11].failures, "late callback cannot reopen recovered generation")
-		probe.releaseUnused(nil)
+		probe.release()
 		_, recovered := beginBreakerTest(t, b, "a")
 		require.Empty(t, recovered.constraints.ExcludedQueryNodeIds)
 		require.Len(t, recovered.constraints.ExcludedQueryViews, 1)
@@ -102,14 +112,15 @@ func TestNodeProbeFailureBackoffAndUnusedPermitRelease(t *testing.T) {
 		b.observe(ctx, node, key, b.observeStart(ctx, node), io.EOF)
 		time.Sleep(1300 * time.Millisecond)
 		probeCtx, probe := beginBreakerTest(t, b, "a")
-		probe.releaseUnused(&viewpb.QueryPlan{WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}}}}})
+		require.True(t, probe.acquireProbes(breakerTestPlan(key, 11)))
 		require.Same(t, probe, b.nodes[11].probe)
 		b.observe(probeCtx, node, key, b.observeStart(probeCtx, node), io.EOF)
 		require.Equal(t, 2*time.Second, b.nodes[11].backoff)
 		time.Sleep(2500 * time.Millisecond)
 		_, unused := beginBreakerTest(t, b, "a")
+		require.True(t, unused.acquireProbes(breakerTestPlan(key, 11)))
 		require.Len(t, unused.probes, 1)
-		unused.releaseUnused(nil)
+		unused.release()
 		require.Nil(t, b.nodes[11].probe)
 		require.Equal(t, 2*time.Second, b.nodes[11].backoff)
 	})
@@ -171,31 +182,112 @@ func TestCircuitBreakerIgnoresNonAttributedFailuresAndBoundsMemory(t *testing.T)
 
 func TestCircuitBreakerWaitCancellation(t *testing.T) {
 	b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
+	_, attempt := beginBreakerTest(t, b, "a")
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.ErrorIs(t, b.wait(canceled), context.Canceled)
+	require.ErrorIs(t, attempt.wait(canceled), context.Canceled)
 }
 
-func TestConcurrentPlanningReservesOnlyOneProbe(t *testing.T) {
+func TestConcurrentPlanAdmissionReservesOnlyOneProbe(t *testing.T) {
 	b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
 	b.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute), generation: 1}
 	var wg sync.WaitGroup
 	attempts := make([]*routingAttempt, 32)
+	admitted := make([]bool, len(attempts))
+	plan := breakerTestPlan(breakerTestKey("a", 1, 1, 1), 11)
+	for i := range attempts {
+		_, attempts[i] = beginBreakerTest(t, b, "a")
+		require.Empty(t, attempts[i].constraints.ExcludedQueryNodeIds)
+	}
 	for i := range attempts {
 		wg.Go(func() {
-			_, attempts[i] = b.begin(t.Context(), "a", make(map[int64]time.Time), make(map[qviews.QueryViewKey]time.Time))
+			admitted[i] = attempts[i].acquireProbes(plan)
 		})
 	}
 	wg.Wait()
 	probes := 0
-	for _, a := range attempts {
+	for i, a := range attempts {
 		probes += len(a.probes)
-		if len(a.probes) == 0 {
-			require.Equal(t, []int64{11}, a.constraints.ExcludedQueryNodeIds)
-		}
-		a.releaseUnused(nil)
+		require.Equal(t, len(a.probes) == 1, admitted[i])
+		a.release()
 	}
 	require.Equal(t, 1, probes)
+}
+
+func TestPlanAdmissionRechecksExclusionsWithoutPartialReservations(t *testing.T) {
+	for _, reason := range []string{"cooldown", "gone", "probe", "view"} {
+		t.Run(reason, func(t *testing.T) {
+			b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
+			key := breakerTestKey("a", 1, 1, 1)
+			b.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute)}
+			_, attempt := beginBreakerTest(t, b, "a")
+			entry := &nodeCircuit{expires: time.Now().Add(time.Minute)}
+			switch reason {
+			case "cooldown":
+				entry.retryAt = time.Now().Add(time.Second)
+			case "gone":
+				entry.gone = true
+			case "probe":
+				entry.probe = &routingAttempt{}
+			case "view":
+				b.excludeViewLocked(key, time.Now(), time.Now())
+			}
+			b.nodes[12] = entry
+			require.False(t, attempt.acquireProbes(breakerTestPlan(key, 11, 12)))
+			require.Empty(t, attempt.probes)
+			require.Nil(t, b.nodes[11].probe)
+			// The healthy sibling's plan is independent of the rejected plan.
+			other := breakerTestKey("b", 1, 1, 1)
+			_, sibling := beginBreakerTest(t, b, "b")
+			require.True(t, sibling.acquireProbes(breakerTestPlan(other, 11)))
+			sibling.release()
+		})
+	}
+}
+
+func TestProbeReleaseWakesWaitersAndPreservesBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
+		key := breakerTestKey("a", 1, 1, 1)
+		b.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute), backoff: 2 * time.Second}
+		_, owner := beginBreakerTest(t, b, "a")
+		require.True(t, owner.acquireProbes(breakerTestPlan(key, 11)))
+		_, waiter := beginBreakerTest(t, b, "a")
+		done := make(chan error, 1)
+		started := time.Now()
+		go func() { done <- waiter.wait(t.Context()) }()
+		synctest.Wait()
+		owner.release()
+		require.NoError(t, <-done)
+		require.Equal(t, started, time.Now(), "release must wake without the one-second poll")
+		require.Equal(t, 2*time.Second, b.nodes[11].backoff)
+		require.Nil(t, b.nodes[11].probe)
+		// Notification must also survive a release between planning and wait.
+		require.NoError(t, waiter.wait(t.Context()))
+		require.Equal(t, started, time.Now())
+		time.Sleep(shardRetryInterval)
+		_, next := beginBreakerTest(t, b, "a")
+		require.True(t, next.acquireProbes(breakerTestPlan(key, 11)))
+		next.release()
+	})
+}
+
+func TestAdmissionReservesOnlySelectedCoolingNodes(t *testing.T) {
+	b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
+	for _, id := range []int64{11, 12} {
+		b.nodes[id] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute)}
+	}
+	b.nodes[13] = &nodeCircuit{expires: time.Now().Add(time.Minute)}
+	_, attempt := beginBreakerTest(t, b, "a")
+	plan := breakerTestPlan(breakerTestKey("a", 1, 1, 1), 11, 11, 13, 14)
+	plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{}}})
+	require.True(t, attempt.acquireProbes(plan))
+	require.Len(t, attempt.probes, 1)
+	require.Same(t, attempt, b.nodes[11].probe)
+	require.Nil(t, b.nodes[12].probe)
+	require.Nil(t, b.nodes[13].probe)
+	require.NotContains(t, b.nodes, int64(14))
+	attempt.release()
 }
 
 func TestNodeFailureWindowAndHealthyResponseReset(t *testing.T) {
@@ -220,7 +312,7 @@ func BenchmarkQueryViewCircuitBreakerHealthy(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			_, permit := breaker.begin(b.Context(), "healthy", make(map[int64]time.Time), make(map[qviews.QueryViewKey]time.Time))
-			permit.releaseUnused(nil)
+			permit.release()
 		}
 	})
 }
