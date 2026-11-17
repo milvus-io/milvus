@@ -570,12 +570,20 @@ func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 		knowhere bool
 		auto     bool
 		want     float64
+		wantErr  string
 	}{
-		{"shipped defaults preserve common", "", true, false, 0.25},
-		{"SDK overrides both server settings", "0.0625", true, false, 0.0625},
-		{"SDK with generic config disabled", "0.0625", false, false, 0.0625},
-		{"common with generic config disabled", "", false, false, 0.25},
-		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875},
+		{"shipped defaults preserve common", "", true, false, 0.25, ""},
+		{"SDK overrides both server settings", "0.0625", true, false, 0.0625, ""},
+		{"SDK with generic config disabled", "0.0625", false, false, 0.0625, ""},
+		{"common with generic config disabled", "", false, false, 0.25, ""},
+		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875, ""},
+		{"numeric string remains valid", `"0.1"`, true, false, 0.1, ""},
+		{"positive ratio above 0.25 remains valid", "0.5", true, false, 0.5, ""},
+		{"zero ratio rejected", "0", true, false, 0, "PQ navigation requires positive"},
+		{"zero ratio rejected with generic config disabled", "0", false, false, 0, "PQ navigation requires positive"},
+		{"negative ratio rejected", "-0.1", true, false, 0, "should be in range"},
+		{"boolean ratio rejected", "true", true, false, 0, "invalid float value"},
+		{"null ratio rejected", "null", true, false, 0, "invalid float value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params := paramtable.Get()
@@ -615,7 +623,14 @@ func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 					{Key: common.ParamsKey, Value: requestParams},
 				}},
 			}
-			require.NoError(t, task.parseIndexParams(context.Background()))
+			err := task.parseIndexParams(context.Background())
+			if tc.wantErr != "" {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), indexparams.PQCodeBudgetRatioKey)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
 			built := funcutil.KeyValuePair2Map(task.newIndexParams)
 			ratio, err := strconv.ParseFloat(built[indexparams.PQCodeBudgetRatioKey], 64)
 			require.NoError(t, err)
