@@ -49,6 +49,13 @@ In-memory completed records are removed after publication. Stale completion and
 removal must not replace or erase a newer build. Data replacement invalidates
 summaries under the same segment lock as the manifest change.
 
+`GetAllSegmentIndexSummaries` returns a separate in-memory inventory type for
+both legacy and summary modes. It contains collection/partition/segment/index/build
+identity, task state, deletion state and artifact presence, including active and
+pending-cleanup tasks. It has no file metadata and performs no manifest I/O.
+Consumers that need files resolve task records or the owning manifest explicitly;
+a task record takes precedence when the same BuildID also has a persisted summary.
+
 Readiness, build deduplication, progress and compaction decisions use summaries
 plus active tasks. Load responses resolve artifact details from the exact manifest
 revision paired with the segment snapshot. Manifest read failures propagate;

@@ -85,8 +85,8 @@ type SegmentIndexCatalog interface {
 	// collection whose field ID, formatted as a manifest column name, is in
 	// columns. The caller must hold RLockFieldIndexes.
 	LiveIndexIDsOnColumnsLocked(collectionID int64, columns map[string]struct{}) map[int64]struct{}
-	// GetAllSegmentIndexes returns the SegmentIndex records of the segment.
-	GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex
+	// GetAllSegmentIndexSummaries returns inventory and task state without file metadata.
+	GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary
 
 	// HasIndex reports whether the collection has an index.
 	HasIndex(collectionID int64) bool

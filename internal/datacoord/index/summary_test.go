@@ -149,3 +149,61 @@ func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {
 	require.False(t, dm.IndexMeta.HasBuildInfo(21))
 	require.False(t, mt.GetSegment(t.Context(), 3).GetManifestHasIndex())
 }
+
+func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) {
+	for _, summaryMode := range []bool{false, true} {
+		name := "legacy"
+		if summaryMode {
+			name = "summaries"
+		}
+		t.Run(name, func(t *testing.T) {
+			mt, dm, err := NewMemoryMetaWithIndex(t)
+			require.NoError(t, err)
+			if summaryMode {
+				require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+			}
+			mt.MetaStore.PutSegment(&datapb.SegmentInfo{
+				ID: 3, CollectionID: 1, PartitionID: 2,
+				IndexSummaries: []*datapb.SegmentIndexSummary{
+					{IndexId: 10, BuildId: 19, HasArtifact: true},
+					{IndexId: 11, BuildId: 21, HasArtifact: true},
+					{IndexId: 12, BuildId: 22},
+				},
+			})
+			for _, record := range []*model.SegmentIndex{
+				{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20,
+					IndexState: commonpb.IndexState_Retry, IsDeleted: true, IndexFileKeys: []string{"task-file"}},
+				{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 11, BuildID: 21,
+					IndexState: commonpb.IndexState_Finished, IsDeleted: true, IndexFileKeys: []string{"finished-file"}},
+			} {
+				require.NoError(t, dm.IndexMeta.AddSegmentIndex(t.Context(), record))
+			}
+			summaries := dm.IndexMeta.GetAllSegmentIndexSummaries(3)
+			byBuild := make(map[int64]*model.SegmentIndexSummary)
+			for _, summary := range summaries {
+				require.EqualValues(t, 1, summary.CollectionID)
+				require.EqualValues(t, 2, summary.PartitionID)
+				require.EqualValues(t, 3, summary.SegmentID)
+				require.NotContains(t, byBuild, summary.BuildID)
+				byBuild[summary.BuildID] = summary
+			}
+			require.Equal(t, commonpb.IndexState_Retry, byBuild[20].IndexState)
+			require.True(t, byBuild[20].IsDeleted)
+			require.True(t, byBuild[20].HasArtifact)
+			require.True(t, byBuild[21].IsDeleted, "task deletion marker wins over the same completed build")
+			if summaryMode {
+				require.Len(t, summaries, 4)
+				require.Equal(t, commonpb.IndexState_Finished, byBuild[19].IndexState)
+				require.True(t, byBuild[19].HasArtifact)
+				require.False(t, byBuild[22].HasArtifact)
+			} else {
+				require.Len(t, summaries, 2)
+			}
+			byBuild[20].IsDeleted = false
+			record, exists := dm.IndexMeta.GetIndexJob(20)
+			require.True(t, exists)
+			require.True(t, record.IsDeleted, "returned summaries are detached from resident task state")
+			require.Equal(t, []string{"task-file"}, record.IndexFileKeys)
+		})
+	}
+}

@@ -1069,45 +1069,34 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.GetSegmentIndexesUnsafe(collectionID, segID)
 }
 
-// GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
-// for segID, including deleted tasks and records whose parent field index has
-// been deleted. GC needs their file keys until cleanup completes.
-//
-// It only reads the self-synchronized segmentIndexes map and does not acquire
-// fieldIndexLock or consult field-index definitions.
-func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
-	if m.UsesSegmentSummaries() {
-		var records []*model.SegmentIndex
-		activeBuilds := make(map[int64]struct{})
+// GetAllSegmentIndexSummaries returns detached inventory for active, completed and
+// deleted builds, including builds whose index definition has been deleted.
+// It performs no I/O and exposes no file metadata.
+func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary {
+	var summaries []*model.SegmentIndexSummary
+	activeBuilds := make(map[int64]struct{})
+	if m.SegmentIndexes != nil {
 		if active, ok := m.SegmentIndexes.Get(segID); ok {
 			for _, record := range active.Values() {
-				records = append(records, model.CloneSegmentIndex(record))
+				summaries = append(summaries, model.SummarizeSegmentIndex(record))
 				activeBuilds[record.BuildID] = struct{}{}
 			}
 		}
+	}
+	if m.UsesSegmentSummaries() {
 		if segment, ok := m.summarySource.GetSegment(segID); ok {
 			for _, summary := range segment.GetIndexSummaries() {
 				if _, exists := activeBuilds[summary.GetBuildId()]; !exists {
-					records = append(records, meta.SegmentIndexFromSummary(segment, summary))
+					summaries = append(summaries, &model.SegmentIndexSummary{
+						CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
+						SegmentID: segID, IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(),
+						IndexState: commonpb.IndexState_Finished, HasArtifact: summary.GetHasArtifact(),
+					})
 				}
 			}
 		}
-		return records
 	}
-	if m.SegmentIndexes == nil {
-		return nil
-	}
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
-		return nil
-	}
-
-	segIndexes := segIndexInfos.Values()
-	ret := make([]*model.SegmentIndex, 0, len(segIndexes))
-	for _, segIdx := range segIndexes {
-		ret = append(ret, model.CloneSegmentIndex(segIdx))
-	}
-	return ret
+	return summaries
 }
 
 // Note: thread-unsafe, don't call it outside indexMeta

@@ -1315,8 +1315,8 @@ const (
 	gcBlockedByManifest
 )
 
-func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, GcBlockReason) {
-	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
+func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, GcBlockReason) {
+	segIndexes := gc.getAllSegmentIndexSummariesForDroppedSegment(segmentID)
 	if snapshotMeta := gc.Option.SnapshotMeta; snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
 			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
@@ -1325,9 +1325,11 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 		}
 	}
 	indexFiles := make(map[string]struct{}, len(segIndexes))
-	for _, segIdx := range segIndexes {
-		for key := range gc.getRetainedIndexFilesOfIndex(segIdx) {
-			indexFiles[key] = struct{}{}
+	for _, summary := range segIndexes {
+		if record, ok := gc.Option.IndexMeta.GetIndexJob(summary.BuildID); ok {
+			for key := range gc.getRetainedIndexFilesOfIndex(record) {
+				indexFiles[key] = struct{}{}
+			}
 		}
 	}
 
@@ -1435,7 +1437,7 @@ func (gc *GarbageCollector) getManifestIndexFiles(ctx context.Context, io *packe
 // markSegmentIndexesDeleted persists every task's deletion marker before any
 // segment artifacts are removed. A failure leaves all files for the next GC
 // cycle; markers already persisted remain authoritative and are idempotent.
-func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndexSummary) error {
 	for _, segIdx := range segIndexes {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1449,16 +1451,16 @@ func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIn
 	return nil
 }
 
-// getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
+// getAllSegmentIndexSummariesForDroppedSegment wraps indexMeta.GetAllSegmentIndexSummaries
 // with a defensive nil guard. Production initGarbageCollection always wires indexMeta, but
 // the guard is cheap and turns any unexpected nil into "no index records"
 // instead of a panic during a GC sweep — keeping a single misbuilt gc
 // instance from taking the whole datacoord down.
-func (gc *GarbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
+func (gc *GarbageCollector) getAllSegmentIndexSummariesForDroppedSegment(segmentID int64) []*model.SegmentIndexSummary {
 	if gc.Option.IndexMeta == nil {
 		return nil
 	}
-	return gc.Option.IndexMeta.GetAllSegmentIndexes(segmentID)
+	return gc.Option.IndexMeta.GetAllSegmentIndexSummaries(segmentID)
 }
 
 // v3SegmentGCPrefix accepts canonical and legacy namespaces beneath the root,
@@ -1568,7 +1570,7 @@ func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, clone
 	return nil
 }
 
-func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndexSummary) error {
 	if len(segIndexes) == 0 {
 		return nil
 	}

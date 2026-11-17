@@ -920,7 +920,7 @@ func (m *Meta) retractReplacedColumnIndexRecords(commit SegmentManifestCommit, r
 	for _, mut := range commit.CatalogMutation.SegmentIndexes {
 		byBuild[mut.BuildID] = mut
 	}
-	for _, segIdx := range m.IndexCatalog.GetAllSegmentIndexes(commit.SegmentID) {
+	for _, segIdx := range m.IndexCatalog.GetAllSegmentIndexSummaries(commit.SegmentID) {
 		if segIdx.IsDeleted {
 			continue
 		}
@@ -953,7 +953,7 @@ func (m *Meta) verifyNoUnexpectedIndexRecords(indexIDs map[int64]struct{}, commi
 	if len(indexIDs) == 0 {
 		return nil
 	}
-	for _, segIdx := range m.IndexCatalog.GetAllSegmentIndexes(commit.SegmentID) {
+	for _, segIdx := range m.IndexCatalog.GetAllSegmentIndexSummaries(commit.SegmentID) {
 		if segIdx.IsDeleted {
 			continue
 		}
