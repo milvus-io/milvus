@@ -244,6 +244,7 @@ class FilterBitsTraceTest : public testing::Test {
                                                       0,
                                                       query::PlanOptions{},
                                                       config);
+        context->set_read_snapshot(segment_->CaptureReadSnapshot());
         context->set_enable_expr_cache(true);
         auto task = Task::Create(
             "filter-trace", plan::PlanFragment(logical), 0, context);

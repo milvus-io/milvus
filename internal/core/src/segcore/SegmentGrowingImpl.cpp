@@ -16,7 +16,8 @@
 #include <algorithm>
 #include <cstring>
 #include <exception>
-#include <future>
+#include <functional>
+#include <folly/futures/Future.h>
 #include <iosfwd>
 #include <iterator>
 #include <map>
@@ -26,6 +27,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -83,15 +85,11 @@
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
 #include "milvus-storage/lob_column/lob_column_reader.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/StatusToErrorCode.h"
@@ -245,7 +243,7 @@ WithLoadedVectorValues(const FieldDataPtr& data,
 
 int64_t
 GetLoadedFieldRows(
-    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+    std::span<const std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
         column_group_results,
     FieldId field_id) {
     int64_t rows = 0;
@@ -265,7 +263,7 @@ GetLoadedFieldRows(
 
 void
 AssertLoadedFieldRows(
-    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+    std::span<const std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
         column_group_results,
     FieldId field_id,
     int64_t expected_rows,
@@ -276,8 +274,8 @@ AssertLoadedFieldRows(
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
     if (!(rows == expected_rows)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
-                  "growing segment StorageV3 manifest loads {} rows for {} "
-                  "field {}, but SegmentLoadInfo expects {} rows",
+                  "growing segment loads {} rows for {} field {}, "
+                  "but load info expects {} rows",
                   rows,
                   field_name,
                   field_id.get(),
@@ -626,6 +624,29 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
             field_ids.size(),
             representative_field.get());
     }
+}
+
+void
+SegmentGrowingImpl::InitializeFunctionOutputIndexes(
+    const Schema& schema,
+    const std::function<bool(FieldId)>& has_field_in_input) {
+    // Select function-output owners from the first nonempty input.
+    // Schema changes flush and fence existing growing segments via
+    // AlterCollection -> flushAndFenceSegmentAllocUntil, preventing
+    // pre- and post-schema-change rows from mixing in one segment.
+    std::call_once(function_output_indexes_once_, [&] {
+        growing_indexes_.Initialize(
+            schema,
+            index_meta_,
+            segcore_config_,
+            id_,
+            insert_record_,
+            [&](FieldId id) {
+                return schema.is_function_output(id) &&
+                       insert_record_.is_data_exist(id) &&
+                       has_field_in_input(id);
+            });
+    });
 }
 
 int64_t
@@ -1680,6 +1701,12 @@ SegmentGrowingImpl::Insert(
             num_rows);
     }
 
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return field_id_to_offset.contains(id);
+        });
+    }
+
     // Retain the typed input before any growing owner can observe this range.
     // Once an interim reader owns raw data, the column may stay reclaimed and
     // retries must still replay the exact immutable payload.
@@ -1855,6 +1882,11 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                "primary field data should be included");
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return infos.field_infos.contains(id.get());
+        });
+    }
     auto reserved_offset = PreInsert(num_rows);
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
@@ -1884,7 +1916,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         auto channel = std::make_shared<FieldDataChannel>();
         auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+            ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
 
         int total = 0;
         for (int num : info.entries_nums) {
@@ -1925,11 +1957,13 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                 array_type = field_meta.get_array_type_schema();
             }
         }
-        auto load_future = pool.Submit(LoadFieldDatasFromRemote,
-                                       insert_files,
-                                       channel,
-                                       infos.load_priority,
-                                       std::move(array_type));
+        auto load_future = folly::via(&pool,
+                                      std::bind(LoadFieldDatasFromRemote,
+                                                insert_files,
+                                                channel,
+                                                infos.load_priority,
+                                                std::move(array_type)))
+                               .semi();
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -2137,6 +2171,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
 
+    std::unordered_set<FieldId> loaded_function_outputs;
     for (auto& [id, info] : infos.field_infos) {
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
@@ -2153,7 +2188,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
             num_rows);
 
         auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+            ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
 
         // Get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
@@ -2182,17 +2217,18 @@ SegmentGrowingImpl::load_column_group_data_internal(
         auto strategy =
             std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
-        auto load_future = pool.Submit([&]() {
-            return LoadWithStrategy(insert_files,
-                                    column_group_info.arrow_reader_channel,
-                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                    std::move(strategy),
-                                    row_group_lists,
-                                    fs,
-                                    nullptr,
-                                    infos.load_priority,
-                                    prepared_files);
-        });
+        auto load_future =
+            folly::via(&pool, [&]() {
+                return LoadWithStrategy(insert_files,
+                                        column_group_info.arrow_reader_channel,
+                                        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                        std::move(strategy),
+                                        row_group_lists,
+                                        fs,
+                                        nullptr,
+                                        infos.load_priority,
+                                        prepared_files);
+            }).semi();
 
         LOG_INFO(
             "[StorageV2] segment {} submits load column group {} task to "
@@ -2278,10 +2314,17 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // The loop consumed the close marker, even if the producer failed.
         channel_exhausted = true;
         // access underlying feature to get exception if any
-        load_future.get();
+        std::move(load_future).get();
         drain_on_unwind.dismiss();
 
         for (auto& [field_id, field_data] : field_data_map) {
+            if (schema->is_function_output(field_id)) {
+                AssertLoadedFieldRows(std::span(&field_data_map, 1),
+                                      field_id,
+                                      num_rows,
+                                      "function output");
+                loaded_function_outputs.insert(field_id);
+            }
             load_field_data_common(field_id,
                                    reserved_offset,
                                    field_data,
@@ -2298,6 +2341,13 @@ SegmentGrowingImpl::load_column_group_data_internal(
         }
     }
 
+    if (num_rows > 0) {
+        // Packed groups expose their field IDs in the decoded Arrow schema.
+        // Owners added here consume the complete raw columns on first publish.
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return loaded_function_outputs.contains(id);
+        });
+    }
     FillAbsentFieldsThrough(reserved_offset + num_rows);
     CompleteGrowingRawRange(reserved_offset,
                             reserved_offset + num_rows,
@@ -4206,9 +4256,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         return false;
     };
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<
-        std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<
+        std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
         if (!group_has_live_field(i)) {
@@ -4220,9 +4270,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
             continue;
         }
         auto future =
-            pool.Submit([this, column_groups, properties, i, num_rows] {
+            folly::via(&pool, [this, column_groups, properties, i, num_rows] {
                 return LoadColumnGroup(column_groups, properties, i, num_rows);
-            });
+            }).semi();
         load_group_futures.emplace_back(std::move(future));
     }
 
@@ -4231,7 +4281,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     std::vector<std::exception_ptr> load_exceptions;
     for (auto& future : load_group_futures) {
         try {
-            column_group_results.emplace_back(future.get());
+            column_group_results.emplace_back(std::move(future).get());
         } catch (...) {
             load_exceptions.push_back(std::current_exception());
         }
@@ -4252,6 +4302,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     AssertLoadedFieldRows(
         column_group_results, primary_field_id, num_rows, "primary");
     AssertAllLoadedFieldRows(column_group_results, num_rows);
+    if (num_rows > 0) {
+        InitializeFunctionOutputIndexes(*schema, [&](FieldId id) {
+            return GetLoadedFieldRows(column_group_results, id) >= 0;
+        });
+    }
     auto timestamp_rows =
         GetLoadedFieldRows(column_group_results, TimestampFieldID);
     auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
@@ -4361,26 +4416,29 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto split_result = strategy->split(row_groups_to_load);
 
     auto& thread_pool =
-        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
 
     auto part_futures = std::vector<
-        std::future<std::vector<std::shared_ptr<arrow::RecordBatch>>>>();
+        folly::SemiFuture<std::vector<std::shared_ptr<arrow::RecordBatch>>>>();
     for (const auto& part : split_result) {
         part_futures.emplace_back(
-            thread_pool.Submit([chunk_reader = chunk_reader.get(), part]() {
-                std::vector<int64_t> chunk_ids(part.count);
-                std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
+            folly::via(
+                &thread_pool,
+                [chunk_reader = chunk_reader.get(), part]() {
+                    std::vector<int64_t> chunk_ids(part.count);
+                    std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
 
-                auto result = chunk_reader->get_chunks(chunk_ids, 1);
-                if (!result.ok()) {
-                    auto error =
-                        milvus_storage::ToSegcoreError(result.status());
-                    ThrowInfo(error.get_error_code(),
-                              "get chunks failed: {}",
-                              error.what());
-                }
-                return result.ValueOrDie();
-            }));
+                    auto result = chunk_reader->get_chunks(chunk_ids, 1);
+                    if (!result.ok()) {
+                        auto error =
+                            milvus_storage::ToSegcoreError(result.status());
+                        ThrowInfo(error.get_error_code(),
+                                  "get chunks failed: {}",
+                                  error.what());
+                    }
+                    return result.ValueOrDie();
+                })
+                .semi());
     }
 
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;

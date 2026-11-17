@@ -35,7 +35,7 @@
 #include "segcore/storagev2translator/AsyncLoadException.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 #include "storage/LoadAdmissionController.h"
 
 namespace milvus::segcore::storagev2translator {

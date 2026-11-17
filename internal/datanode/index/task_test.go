@@ -228,10 +228,9 @@ func (suite *IndexBuildTaskSuite) TestBuildLatencyExcludesAdmissionWait() {
 	}
 	before := readMetric()
 	var elapsed atomic.Int64
-	clock := mockey.Mock(time.Now).To(func() time.Time {
+	task.now = func() time.Time {
 		return time.Unix(1000, elapsed.Load())
-	}).Build()
-	defer clock.UnPatch()
+	}
 	prepare := mockey.Mock(getCurrentIndexVersion).To(func(version int32) int32 {
 		elapsed.Add(int64(2 * time.Second))
 		return version

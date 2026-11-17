@@ -142,11 +142,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel meta.RWChannel, partition
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
-	// R10: staged (invisible) members of ALIVE groups are excluded from the
+	// R10: staged (invisible) members of uncommitted groups are excluded from the
 	// query view by construction. They must not fall into growingIDs — a staged
 	// import/copy segment has CreatedByCompaction=false, so the
 	// `IsInvisible && CreatedByCompaction` skip below would miss it.
-	aliveStaged := h.s.meta.AliveStagedMembers(h.s.ctx, channel.GetCollectionID())
+	unpublished := h.s.meta.UnpublishedSegmentMembers(h.s.ctx, channel.GetCollectionID())
 
 	validSegmentInfos := make(map[int64]*meta.SegmentInfo)
 	indexedSegments := index.FilterInIndexedSegments(context.Background(), h, h.s.indexMeta, false, segments...)
@@ -155,7 +155,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel meta.RWChannel, partition
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if aliveStaged.Contain(s.GetID()) {
+		if unpublished.Contain(s.GetID()) {
 			continue
 		}
 		recoverable, err := isQueryRecoverableSegment(s)
@@ -281,10 +281,10 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel meta
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
-	// R10: staged (invisible) members of ALIVE groups are excluded from the
+	// R10: staged (invisible) members of uncommitted groups are excluded from the
 	// segments view — they are unpublished by construction and must not leak
 	// into growingIDs.
-	aliveStaged := h.s.meta.AliveStagedMembers(ctx, channel.GetCollectionID())
+	unpublished := h.s.meta.UnpublishedSegmentMembers(ctx, channel.GetCollectionID())
 
 	validSegmentInfos := make(map[int64]*meta.SegmentInfo)
 	for _, s := range segments {
@@ -305,7 +305,7 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel meta
 		if !committed && s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
-		if aliveStaged.Contain(s.GetID()) {
+		if unpublished.Contain(s.GetID()) {
 			continue
 		}
 
@@ -368,10 +368,10 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 
 	// R10: a staged (invisible) segment's DML position must not pollute the
 	// channel-seek fallback — the seek would otherwise start before data the
-	// queries never see. Filter members of ALIVE groups, not all IsInvisible
+	// queries never see. Filter unpublished group members, not all IsInvisible
 	// segments: sort-enabled flush segments use IsInvisible=true as the
 	// awaiting-sort marker and legitimately contribute their DML position.
-	aliveStaged := h.s.meta.AliveStagedMembers(context.TODO(), firstCollectionIDOfSegments(segments))
+	unpublished := h.s.meta.UnpublishedSegmentMembers(context.TODO(), firstCollectionIDOfSegments(segments))
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
@@ -384,7 +384,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 			// Skip bulk insert segments.
 			continue
 		}
-		if aliveStaged.Contain(s.GetID()) {
+		if unpublished.Contain(s.GetID()) {
 			continue
 		}
 		if s.GetState() == commonpb.SegmentState_Dropped {
@@ -606,9 +606,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 	})
 
 	// get segment info
-	candidateSegments := h.s.meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
-		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
-	}))
+	candidateSegments := h.s.meta.SnapshotCandidateSegments(collectionID)
 	segments := make([]*meta.SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0

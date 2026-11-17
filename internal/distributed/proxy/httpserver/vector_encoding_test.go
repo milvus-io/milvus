@@ -49,13 +49,21 @@ func TestBase64FloatVectorAllocationBudget(t *testing.T) {
 	values := make([]float32, 768)
 	var vectorEncodingBuffer []byte
 	vector := floatVectorEncoding("base64").floatVector(values, &vectorEncodingBuffer).(encoding.TextMarshaler)
-	allocs := testing.AllocsPerRun(100, func() {
+	encode := func() {
 		text, err := vector.MarshalText()
 		if err != nil || len(text) != 4096 {
 			t.Fatal("invalid encoded vector", err)
 		}
+	}
+	encode() // Allocate the response buffer before measuring its reuse.
+	// Background config refreshes allocate in this process too. Sampling the
+	// minimum excludes those bursts while retaining any per-vector allocation.
+	allocatedBytes := minAllocBytesPerCall(func() {
+		for range 100 {
+			encode()
+		}
 	})
-	require.Zero(t, allocs, "encoding another vector must not allocate another temporary byte buffer")
+	require.Zero(t, allocatedBytes, "encoding another vector must not allocate another temporary byte buffer")
 }
 
 func TestBase64FloatVectorWireFormat(t *testing.T) {

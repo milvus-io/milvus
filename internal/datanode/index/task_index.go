@@ -61,6 +61,7 @@ type indexBuildTask struct {
 	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
 
+	now           func() time.Time // Injectable clock; defaults to time.Now, tests override it.
 	pluginContext *indexcgopb.StoragePluginContext
 }
 
@@ -79,6 +80,7 @@ func NewIndexBuildTask(ctx context.Context,
 		req:           req,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
+		now:           time.Now,
 		pluginContext: pluginContext,
 	}
 
@@ -163,7 +165,7 @@ func (it *indexBuildTask) IsVectorIndex() bool {
 }
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
-	started := time.Now()
+	started := it.now()
 	it.queueDur = it.tr.RecordSpan()
 	mlog.Info(ctx, "Begin to prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.Int64("Collection", it.req.GetCollectionID()), mlog.Int64("SegmentID", it.req.GetSegmentID()))
@@ -237,7 +239,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		mlog.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		mlog.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
 	)
-	it.prepareDur = time.Since(started)
+	it.prepareDur = it.now().Sub(started)
 	return nil
 }
 
@@ -261,7 +263,7 @@ func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb
 }
 
 func (it *indexBuildTask) LoadData(ctx context.Context) error {
-	started := time.Now()
+	started := it.now()
 	if it.index == nil {
 		if err := it.createBuilder(ctx); err != nil {
 			return err
@@ -270,7 +272,7 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	if err := it.index.LoadData(); err != nil {
 		return err
 	}
-	it.prepareDur += time.Since(started)
+	it.prepareDur += it.now().Sub(started)
 	it.tr.RecordSpan()
 	return nil
 }
@@ -404,11 +406,11 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	if it.index == nil {
 		return merr.WrapErrServiceInternalMsg("index input has not been prepared")
 	}
-	started := time.Now()
+	started := it.now()
 	if err := it.index.Build(); err != nil {
 		return err
 	}
-	buildIndexLatency := it.prepareDur + time.Since(started)
+	buildIndexLatency := it.prepareDur + it.now().Sub(started)
 	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 	it.tr.RecordSpan()
 	return nil

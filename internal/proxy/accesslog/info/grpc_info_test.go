@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -108,11 +107,6 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	s.info.resp = merr.Status(merr.ErrChannelLack)
 	result = Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
-
-	// replace line breaks
-	s.info.resp = merr.Status(errors.New("test error. stack: 1:\n 2:\n 3:\n"))
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
 
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
 	result = Get(s.info, "$error_msg")

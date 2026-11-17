@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -1138,15 +1139,20 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	for _, test := range []struct {
 		name         string
 		source       string
+		staging      string
 		wantNotified []UniqueID
 	}{
 		// Refreshed segments are ready for stats only once the collection
 		// carries the job's source; until then its publish notifies them.
-		{name: "source published", source: "s3://refreshed", wantNotified: []UniqueID{10, 20}},
-		{name: "source not yet published", source: "s3://previous"},
+		{name: "source published legacy", source: "s3://refreshed", staging: "false", wantNotified: []UniqueID{10, 20}},
+		{name: "source not yet published legacy", source: "s3://previous", staging: "false"},
+		{name: "source published staged", source: "s3://refreshed", staging: "true", wantNotified: []UniqueID{10, 20}},
+		{name: "source not yet published staged", source: "s3://previous", staging: "true"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
+			previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(test.staging)
+			t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 			catalog := &StubCatalog{}
 			refreshMeta, err := NewExternalCollectionRefreshMeta(ctx, catalog)
 			assert.NoError(t, err)
@@ -1175,7 +1181,10 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 				ID:            100,
 				VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
 				Partitions:    []int64{1},
-				Schema:        &schemapb.CollectionSchema{ExternalSource: test.source},
+				Schema: &schemapb.CollectionSchema{
+					ExternalSource: test.source,
+					Fields:         []*schemapb.FieldSchema{{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"}},
+				},
 			})
 			segments := meta.NewSegmentsInfo(ms)
 			segments.SetSegment(1, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -1197,6 +1206,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 				NumOfRows:    9,
 			}})
 			mt := &meta.Meta{
+				Ctx:       ctx,
 				Catalog:   catalog,
 				Segments:  segments,
 				MetaStore: ms,
@@ -1213,7 +1223,21 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 				CollectionId:   100,
 				ExternalSource: "s3://refreshed",
 			})
-			assert.NoError(t, err)
+			require.NoError(t, err)
+			if test.staging == "true" {
+				group := mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, "")
+				require.NotNil(t, group)
+				require.Equal(t, model.SegmentChangeStateStaged, group.State)
+				require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(2).GetState())
+				require.True(t, mt.Segments.GetSegment(10).GetIsInvisible())
+				require.True(t, mt.Segments.GetSegment(20).GetIsInvisible())
+				group.State = model.SegmentChangeStateReady
+				require.NoError(t, mt.UpdateSegmentChangeGroup(ctx, group))
+				require.NoError(t, mt.PublishGroup(ctx, group, meta.NewMockAllocator(t)))
+				require.Equal(t, model.SegmentChangeStateCommitted, mt.GetSegmentChangeGroup(ctx, 100, 1).State)
+			} else {
+				require.Nil(t, mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, ""))
+			}
 
 			assert.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(1).GetState())
 			assert.Equal(t, commonpb.SegmentState_Dropped, mt.Segments.GetSegment(2).GetState())
@@ -1389,6 +1413,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 		Partitions:    []int64{1},
 	})
 	mt := &meta.Meta{
+		Ctx:       ctx,
 		Catalog:   catalog,
 		Segments:  meta.NewSegmentsInfo(ms),
 		MetaStore: ms,
@@ -1400,6 +1425,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(10).GetState())
+	assert.Equal(t, Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool(), mt.Segments.GetSegment(10).GetIsInvisible())
 }
 
 // Applying a refresh must not enqueue index builds by itself: a refresh that
@@ -1434,6 +1460,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsDoesNotNotifyI
 		NumOfRows:    5,
 	}})
 	mt := &meta.Meta{
+		Ctx:       ctx,
 		Catalog:   catalog,
 		Segments:  segments,
 		MetaStore: ms,

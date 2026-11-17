@@ -1549,6 +1549,9 @@ message ImportJob {
   // Per-vchannel CommitImport fences registered before SN releases the WAL
   // message. These constrain unpublished data until Segment coverage is visible.
   map<string, uint64> transform_commit_timeticks = 25;
+  // Persisted immediately before attempting the CommitImport broadcast.
+  // A timeout or rollback must not reclaim a job whose WAL append may have begun.
+  bool commit_broadcast_started = 26;
 }
 
 enum ImportTaskStateV2 {

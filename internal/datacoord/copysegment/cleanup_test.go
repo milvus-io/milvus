@@ -19,6 +19,7 @@ package copysegment
 import (
 	"context"
 	"io/fs"
+	"path"
 	"sync"
 	"testing"
 	"time"
@@ -26,11 +27,94 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
+	meta.MockManifestIndexSubmissions(t)
+	ctx := context.Background()
+	task := CreateTestCopyTask(100, 2001).(*Task)
+	copies, m := NewCopySegmentTaskTestMeta(t, task)
+	task.Meta, task.CopyMeta = m, copies
+	root := t.TempDir()
+	m.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	segment := NewTestCopySegment(2001)
+	segment.StorageVersion = storage.StorageV3
+	segment.IsImporting = true
+	require.NoError(t, m.AddSegment(ctx, segment))
+	req := &datapb.CopySegmentRequest{
+		StorageConfig: &indexpb.StorageConfig{RootPath: root},
+		Sources:       []*datapb.CopySegmentSource{{StorageVersion: storage.StorageV3}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 100, PartitionId: 10, SegmentId: 2001}},
+	}
+	require.NoError(t, task.PrepareCopyCleanup(ctx, req))
+	for _, prefix := range task.GetCleanupPrefixes() {
+		require.NoError(t, m.ChunkManager.Write(ctx, prefix+"owned", []byte("owned")))
+	}
+	base := path.Join(root, "insert_log/100/10/2001")
+	dataFile := path.Join(base, "_data/data.parquet")
+	require.NoError(t, m.ChunkManager.Write(ctx, dataFile, []byte("completed worker output")))
+	originalManifest := m.GetSegment(ctx, 2001).GetManifestPath()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		close(entered)
+		<-release
+		return nil, nil
+	}).Build()
+	defer patch.UnPatch()
+	finished := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		finished <- SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
+			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
+		}, copies, m, nil)
+	}()
+	defer func() { unblock(); <-done }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("verification did not start")
+	}
+	require.True(t, task.GetCleanupRequired())
+	checker := &Checker{Ctx: ctx, Meta: m, CopyMeta: copies}
+	checker.CheckFailedJob(NewTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed))
+	inspector := &Inspector{Ctx: ctx, Meta: m, CopyMeta: copies}
+	inspector.ProcessFailed(task)
+	require.NoError(t, CleanupRejectedCopy(ctx, task, m, copies))
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
+	exists, err := m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.True(t, exists, "cleanup must skip an in-flight publication")
+	unblock()
+	require.ErrorIs(t, <-finished, merr.ErrSegmentNotFound)
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
+	require.Equal(t, originalManifest, m.GetSegment(ctx, 2001).GetManifestPath())
+	require.NoError(t, CleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.True(t, task.GetCleanupRequired())
+	// Ordinary segment GC's metadata retirement authorizes leftover-prefix cleanup.
+	require.NoError(t, m.DropSegment(ctx, 2001))
+	require.NoError(t, CleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.False(t, task.GetCleanupRequired())
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+}
 
 func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +153,7 @@ func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	// A late result must not make the scheduler wait for the cleanup worker.
 	lateResult := make(chan error, 1)
 	go func() {
-		lateResult <- SyncCopySegmentTask(failed, &datapb.QueryCopySegmentResponse{
+		lateResult <- SyncCopySegmentTask(context.TODO(), failed, &datapb.QueryCopySegmentResponse{
 			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		}, copies, m, nil)
 	}()

@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/futures/Future.h>
 #include <arrow/api.h>
 #include <arrow/c/abi.h>
 #include <arrow/c/bridge.h>
@@ -3085,28 +3086,28 @@ TEST(SearchResultExport,
         reinterpret_cast<CSearchResult>(&result)};
     int32_t segment_indices[] = {0, 0};
     int64_t segment_offsets[] = {3, 1};
-    auto& middle = ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
-    const auto original_middle_size = middle.GetMaxThreadNum();
-    middle.Resize(2);
+    auto& middle = ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
+    const auto original_middle_size = middle.numThreads();
+    middle.setNumThreads(2);
     auto restore_middle =
-        folly::makeGuard([&] { middle.Resize(original_middle_size); });
+        folly::makeGuard([&] { middle.setNumThreads(original_middle_size); });
     std::promise<void> release_middle;
     auto middle_released = release_middle.get_future().share();
     std::vector<std::promise<void>> middle_started(2);
-    std::vector<std::future<void>> middle_tasks;
+    std::vector<folly::SemiFuture<folly::Unit>> middle_tasks;
     auto unblock_middle = folly::makeGuard([&] {
         release_middle.set_value();
         for (auto& task : middle_tasks) {
-            task.get();
+            std::move(task).get();
         }
     });
     for (auto& started : middle_started) {
         auto ready = started.get_future();
         middle_tasks.emplace_back(
-            middle.Submit([started = &started, middle_released] {
+            folly::via(&middle, [started = &started, middle_released] {
                 started->set_value();
                 middle_released.wait_for(std::chrono::seconds(10));
-            }));
+            }).semi());
         ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
                   std::future_status::ready);
     }
@@ -3133,7 +3134,7 @@ TEST(SearchResultExport,
     release_middle.set_value();
     unblock_middle.dismiss();
     for (auto& task : middle_tasks) {
-        task.get();
+        std::move(task).get();
     }
     auto status = pending.get();
     EXPECT_EQ(completion, std::future_status::ready);
