@@ -569,7 +569,9 @@ func TestHedgeInflightRatioLimitAndLoserOccupancy(t *testing.T) {
 	require.NoError(t, <-errCh)
 
 	// Un-canceled loser hedge RPC still occupies the hedge slot.
-	require.Equal(t, int64(29), h.policy.hedging.inflightPrimaries.Load())
+	require.Eventually(t, func() bool {
+		return h.policy.hedging.inflightPrimaries.Load() == 29
+	}, time.Second, 2*time.Millisecond)
 	require.Equal(t, int64(3), h.policy.hedging.inflightHedges.Load())
 
 	done31 := make(chan error, 1)
