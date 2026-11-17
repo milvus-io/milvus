@@ -34,6 +34,21 @@ func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
 	require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetMVCCTimestamp", wire)).IsRetryable())
 }
 
+func TestPlanningAllExcludedDoesNotExecuteInlineStatistics(t *testing.T) {
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).To(func(_ *snview.SNQueryViewHandler, _ context.Context, channel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*snview.QueryViewLease, error) {
+		require.Equal(t, "p_1v0", channel)
+		require.Nil(t, schema)
+		require.Equal(t, []int64{11}, constraints.ExcludedQueryNodeIds)
+		return nil, viewerror.NewAllCandidatesExcluded()
+	}).Build()
+	defer patch.UnPatch()
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+	// No runtime, MVCC manager or inline executor is installed: exclusion
+	// must stop before any of these dependencies are accessed.
+	_, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{Vchannel: "p_1v0", RoutingConstraints: &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{11}}, Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{}}})
+	require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded())
+}
+
 func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 	patchQueryReadRuntime(t)
 	mockey.PatchConvey("statistics samples the latest View without a logical schema request", t, func() {
@@ -47,7 +62,7 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 		}
 		counted, released := false, false
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.True(t, counted); require.False(t, released) }, Release: func() { released = true }}
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{10}, nil).Build()
 		mockey.Mock((*snview.SNQueryViewHandler).Statistics).To(func(_ *snview.SNQueryViewHandler, _ context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
 			require.Equal(t, lease.Version.IntoProto(), req.GetVersion())
@@ -63,7 +78,7 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
 		w := &walAdaptorImpl{param: &interceptors.InterceptorBuildParam{MVCCManager: manager}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		plan, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
-			CollectionId: 1, ShardId: &viewpb.ShardID{Vchannel: "p_1v0"},
+			CollectionId: 1, Vchannel: "p_1v0",
 			Mvcc:    &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 99},
 			Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{10}}},
 		})
@@ -101,9 +116,9 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 	for _, valid := range []bool{false, true} {
 		renewed, released := false, false
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.False(t, released); renewed = true }, Release: func() { released = true }}
-		patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
-		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+		req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		if valid {
 			req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1}}
 		}
@@ -124,10 +139,10 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
 	view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}}
 	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("incompatible view must not renew a serving lease") }, Release: func() {}}
-	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 	defer patch.UnPatch()
 	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
-	req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+	req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 2}}
 	_, err := w.GetQueryPlan(t.Context(), req)
 	require.True(t, viewerror.AsViewError(err).IsRetryable())
@@ -145,14 +160,14 @@ func TestQueryPlanRejectsUnloadedPartitionBeforePruning(t *testing.T) {
 	mockey.PatchConvey("even an empty shard must validate the leased scope", t, func() {
 		view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, LoadInfoVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}}
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("invalid partition must not renew lease") }, Release: func() {}}
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, version uint64, partitions []int64) ([]int64, error) {
 			require.Equal(t, uint64(2), version)
 			require.Equal(t, []int64{20}, partitions)
 			return nil, merr.WrapErrPartitionNotLoaded(20)
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
-		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+		req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{PartitionIDs: []int64{20}}}
 		_, err := w.GetQueryPlan(t.Context(), req)
 		require.ErrorIs(t, err, merr.ErrPartitionNotLoaded)
@@ -189,13 +204,13 @@ func TestQueryPlanWaitsForFixedMVCCBeforePlanning(t *testing.T) {
 	view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}}
 	released := false
 	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("waiting for WAL coverage cannot issue a plan") }, Release: func() { released = true }}
-	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 	defer patch.UnPatch()
 	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 	request := &viewpb.GetQueryPlanRequest{
-		ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
-		Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122}},
-		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{}},
+		Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel,
+		Mvcc:     &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122}},
+		Request:  &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{}},
 	}
 	plan, err := w.GetQueryPlan(t.Context(), request)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -210,15 +225,15 @@ func TestQueryPlanRequiresServingViewBeforeResolvingMVCC(t *testing.T) {
 		viewerror.NewViewInvalidated("view is down"),
 	} {
 		mockey.PatchConvey("MVCC cannot grant access without a serving View", t, func() {
-			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(nil, unavailable).Build()
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(nil, unavailable).Build()
 			resolve := mockey.Mock((*walAdaptorImpl).resolveQueryPlanMVCC).Return(&viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 120}, nil).Build()
 			w := &walAdaptorImpl{
 				roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()},
 				queryViewHandler: &snview.SNQueryViewHandler{},
 			}
 			req := &viewpb.GetQueryPlanRequest{
-				ShardId: &viewpb.ShardID{Vchannel: "v", ReplicaId: 1},
-				Mvcc:    &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+				Vchannel: "v",
+				Mvcc:     &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
 			}
 			req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 1}}
 			plan, err := w.GetQueryPlan(t.Context(), req)
@@ -243,7 +258,7 @@ func TestQueryPlanReturnsOptimizerSummarySeparately(t *testing.T) {
 		},
 	}
 	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() {}, Release: func() {}}
-	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 	defer patch.UnPatch()
 	partitions := mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, _ uint64, ids []int64) ([]int64, error) {
 		return ids, nil
@@ -252,9 +267,9 @@ func TestQueryPlanReturnsOptimizerSummarySeparately(t *testing.T) {
 	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 	for _, ids := range [][]int64{{10}, {10, 20}} {
 		response, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
-			ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
-			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}},
-			Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1, PartitionIDs: ids}},
+			Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel,
+			Mvcc:     &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}},
+			Request:  &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1, PartitionIDs: ids}},
 		})
 		require.NoError(t, err)
 		require.Len(t, response.GetPlan().GetWorkNodes(), len(ids))
@@ -349,14 +364,14 @@ func TestQueryPlanMergesOptimizerAndPartitionSummary(t *testing.T) {
 					},
 				}
 				lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() {}, Release: func() {}}
-				mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+				mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 				mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, _ uint64, ids []int64) ([]int64, error) { return ids, nil }).Build()
 				mockey.Mock(mockey.GetMethod(global, "OptimizePlan")).To(func(context.Context, *viewpb.QueryPlan, *viewpb.QueryViewOfShard) (*viewpb.GlobalOptimizerExecutionSummary, error) {
 					return &viewpb.GlobalOptimizerExecutionSummary{Flags: flags}, nil
 				}).Build()
 				w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 				for _, search := range []bool{false, true} {
-					req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}}}
+					req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}}}
 					if search {
 						req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{10}}}
 					} else {
@@ -384,7 +399,7 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 		}
 		renewed, released := false, false
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.False(t, released); renewed = true }, Release: func() { released = true }}
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{10}, nil).Build()
 		mockey.Mock(mockey.GetMethod(optimizer.NewNoopGlobalOptimizer(), "OptimizeSearch")).To(func(_ context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
 			for _, sub := range req.SubReqs {
@@ -394,9 +409,9 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		req := &viewpb.GetQueryPlanRequest{
-			ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
-			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}},
-			Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{Nq: 2, Topk: 3}, {Nq: 2, Topk: 4}}}},
+			Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel,
+			Mvcc:     &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}},
+			Request:  &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{Nq: 2, Topk: 3}, {Nq: 2, Topk: 4}}}},
 		}
 		before := proto.Clone(req)
 		response, err := w.GetQueryPlan(t.Context(), req)
@@ -406,7 +421,7 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 		require.Empty(t, response.Plan.WorkNodes)
 		require.True(t, proto.Equal(req.GetQueryPlanMvcc(), response.Plan.Mvcc))
 		require.True(t, proto.Equal(view.Meta.Version, response.Plan.Version))
-		require.True(t, proto.Equal(req.ShardId, response.Plan.ShardId))
+		require.True(t, proto.Equal(qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), response.Plan.ShardId))
 		require.Nil(t, response.ExecutionSummary, "skipping is not evidence of partition/statistics pruning")
 		require.NoError(t, qviews.RestoreQueryPlanPayloads(response, req))
 		subs := response.Plan.GetLegacySearchRequest().GetSubReqs()
@@ -486,7 +501,7 @@ func TestQueryPlanFeedbackAdmissionBoundary(t *testing.T) {
 	mockey.PatchConvey("only admitted shard planning attempts are counted", t, func() {
 		h := &snview.SNQueryViewHandler{}
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: h}
-		req := &viewpb.GetQueryPlanRequest{CollectionId: 1, ShardId: &viewpb.ShardID{Vchannel: "p_1v0"}, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+		req := &viewpb.GetQueryPlanRequest{CollectionId: 1, Vchannel: "p_1v0", Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err := w.GetQueryPlan(t.Context(), req)
 		require.True(t, viewerror.AsViewError(err).IsOnShutdown())
@@ -499,7 +514,7 @@ func TestQueryPlanFeedbackAdmissionBoundary(t *testing.T) {
 		w.queryViewHandler = h
 		meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 7}
 		lease := &snview.QueryViewLease{Meta: meta, Release: func() {}}
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 		req.CollectionId = 2
 		_, err = w.GetQueryPlan(t.Context(), req)
 		require.Error(t, err)

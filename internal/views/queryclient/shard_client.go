@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -12,7 +11,6 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -33,6 +31,7 @@ type shardViewQueryClient struct {
 	queryHook          optimizers.QueryHook
 	maxRetries         int
 	loadChecks         *collectionLoadChecks
+	breaker            *QueryViewCircuitBreaker
 	ctx                context.Context
 	cancel             context.CancelFunc
 	queryPlanClient    QueryPlanClient
@@ -45,14 +44,17 @@ func newShardViewQueryClient(
 	queryServiceClient ViewQueryServiceClient,
 ) *shardViewQueryClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &shardViewQueryClient{
+	s := &shardViewQueryClient{
 		maxRetries:         maxRetries,
 		loadChecks:         newCollectionLoadChecks(nil),
+		breaker:            NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{}),
 		ctx:                ctx,
 		cancel:             cancel,
 		queryPlanClient:    queryPlanClient,
 		queryServiceClient: queryServiceClient,
 	}
+	s.queryServiceClient = &circuitBreakingViewClient{owner: s, inner: queryServiceClient}
+	return s
 }
 
 func (s *shardViewQueryClient) Close() { s.cancel() }
@@ -88,10 +90,10 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
-		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+		buildPlanReq: func(vchannel string) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
-				ShardId:      targetShardID.IntoProto(),
+				Vchannel:     vchannel,
 				PartitionIds: req.Req.PartitionIDs,
 				Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
 					LegacySearchRequest: req.Req,
@@ -131,10 +133,10 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
-		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+		buildPlanReq: func(vchannel string) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
-				ShardId:      targetShardID.IntoProto(),
+				Vchannel:     vchannel,
 				PartitionIds: req.Req.PartitionIDs,
 				Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
 					LegacyRetrieveRequest: req.Req,
@@ -173,7 +175,7 @@ type shardExecParams struct {
 	mvcc             *viewpb.QueryPlanMVCC
 	barrierMVCC      uint64
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
-	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
+	buildPlanReq func(vchannel string) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
 	consumeResponse func(*viewpb.GetQueryPlanResponse) error
 	// beforeDispatch runs attempt-local preparatory execution before ANN fanout.
@@ -191,31 +193,23 @@ type shardExecParams struct {
 // Shard-level retry handles ViewErrors (view invalidated, not found, etc.).
 // Transport unavailability also asks the WAL owner to replan the shard.
 func (s *shardViewQueryClient) executeShard(
-	ctx context.Context,
-	vchannel string,
-	params *shardExecParams,
+	ctx context.Context, vchannel string, params *shardExecParams,
 ) (*ShardPlan, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
 	ctx, cancel := contextutil.MergeContext(ctx, s.ctx)
 	defer cancel()
-	var lastErr error
 	var loadCheck *collectionLoadCheck
 	defer func() {
 		if loadCheck != nil {
 			loadCheck.release()
 		}
 	}()
-	checkLoad := func(ctx context.Context) (time.Time, error) {
-		if loadCheck == nil {
-			loadCheck = s.loadChecks.acquire(params.collectionID)
-		}
-		return loadCheck.check(ctx)
-	}
-	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
-	deadNodes := make(map[int64]struct{})
-	var sessionChanged <-chan struct{}
+	failedNodes := make(map[int64]time.Time)
+	failedViews := make(map[qviews.QueryViewKey]time.Time)
+	var lastErr error
+	var exclusionStarted time.Time
 	for attempt := 0; ; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -223,109 +217,99 @@ func (s *shardViewQueryClient) executeShard(
 		if s.maxRetries > 0 && attempt >= s.maxRetries {
 			return nil, lastErr
 		}
-		if lastErr != nil {
+		if lastErr != nil && !viewerror.AsViewError(lastErr).IsAllCandidatesExcluded() {
 			timer := time.NewTimer(shardRetryInterval)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return nil, ctx.Err()
-			case <-sessionChanged:
 			case <-timer.C:
 			}
-			timer.Stop()
 		}
-		select {
-		case <-sessionChanged:
-			clear(deadNodes)
-			sessionChanged = nil
-		default:
+		attemptCtx, permit := s.breaker.begin(ctx, vchannel, failedNodes, failedViews)
+		plan, err := s.executeRoutingAttempt(attemptCtx, vchannel, params, permit)
+		permit.releaseUnused(nil)
+		if err == nil {
+			return plan, nil
 		}
-
-		// Phase 1: GetQueryPlan with consistency routing.
-		planReq := params.buildPlanReq(targetShardID)
-		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
-		if err != nil {
-			if viewerror.AsViewError(err).IsViewNotFound() {
-				// Absence of a usable View does not prove the collection is
-				// unloaded. Confirm current load intent with Coordinator.
-				if _, checkErr := checkLoad(ctx); checkErr != nil {
-					return nil, checkErr
-				}
-				// Loaded collections may still be preparing/recovering. Keep
-				// waiting under the caller deadline, with bounded polling.
-				lastErr = err
-				attempt--
-				continue
+		lastErr = err
+		ve := viewerror.AsViewError(err)
+		if ve.IsAllCandidatesExcluded() {
+			if exclusionStarted.IsZero() {
+				exclusionStarted = time.Now()
 			}
-			if retryableQueryError(err) {
-				lastErr = err
-				continue
-			}
-			return nil, err
-		}
-
-		plan := response.GetPlan()
-		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
-			return nil, err
-		}
-		// Replanning does not certify removal of a dead QN. Recheck the
-		// actual plan before accepting inline results or dispatching workers.
-		blocked := false
-		for _, worker := range plan.GetWorkNodes() {
-			if qn := worker.GetQueryNode(); qn != nil {
-				if _, dead := deadNodes[qn.GetNodeId()]; dead {
-					blocked = true
-					break
-				}
-			}
-		}
-		if blocked {
-			continue
-		}
-		if params.consumeResponse != nil {
-			if err := params.consumeResponse(response); err != nil {
+			remaining := s.breaker.cfg.MaxRoutingWait - time.Since(exclusionStarted)
+			if remaining <= 0 {
 				return nil, err
 			}
-		}
-		shardID := qviews.FromProtoShardID(plan.ShardId)
-		workNodes := workNodesFromPlan(plan)
-
-		// Phase 2: Fan out to all work nodes concurrently.
-		if params.beforeDispatch != nil {
-			err = params.beforeDispatch(ctx, response, shardID)
-		}
-		if err == nil {
-			err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
-		}
-		if err != nil {
-			if retryableQueryError(err) {
-				lastErr = err
-				var failed *workNodeFailure
-				var sessionError *viewerror.NodeSessionUnavailable
-				missingSession := errors.As(err, &sessionError)
-				if errors.As(err, &failed) && (missingSession || picker.IsErrSubConnNoExist(failed.err)) {
-					if node, ok := failed.node.(qviews.QueryNode); ok {
-						deadNodes[node.ID] = struct{}{}
-						if missingSession && sessionChanged == nil {
-							sessionChanged = sessionError.Changed
-						}
-					}
-				}
-				params.resetShard(shardID)
-				continue
+			waitCtx, waitCancel := context.WithTimeout(ctx, remaining)
+			waitErr := s.breaker.wait(waitCtx)
+			waitCancel()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
+			if waitErr != nil {
+				return nil, err
+			}
+			attempt-- // Admission waits are separate from failed execution attempts.
+			continue
+		}
+		// Only Phase 1 absence checks load intent. Phase 2 failures are
+		// attributed to the executed View and replan with its exclusion.
+		if ve.IsViewNotFound() && plan == nil {
+			if loadCheck == nil {
+				loadCheck = s.loadChecks.acquire(params.collectionID)
+			}
+			if _, loadErr := loadCheck.check(ctx); loadErr != nil {
+				return nil, loadErr
+			}
+			attempt--
+			continue
+		}
+		if !retryableQueryError(err) {
 			return nil, err
 		}
-
-		return &ShardPlan{
-			ShardID:          shardID,
-			Version:          plan.Version,
-			Mvcc:             plan.GetMvcc(),
-			WorkNodes:        workNodes,
-			Selections:       plan.GetWorkNodes(),
-			ExecutionSummary: response.GetExecutionSummary(),
-		}, nil
 	}
+}
+
+// A non-nil result on failure distinguishes an executed View from a Phase 1
+// failure. All worker goroutines have joined before this function returns.
+func (s *shardViewQueryClient) executeRoutingAttempt(ctx context.Context, vchannel string, params *shardExecParams, permit *routingAttempt) (*ShardPlan, error) {
+	target := qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}
+	planReq := params.buildPlanReq(vchannel)
+	planReq.RoutingConstraints = permit.constraints
+	response, err := s.executeGetQueryPlan(ctx, target, planReq, params)
+	if err != nil {
+		return nil, err
+	}
+	if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
+		return nil, err
+	}
+	plan := response.GetPlan()
+	// Defensive against a stale/local provider: never dispatch a known excluded
+	// worker. SN itself filters before executing any inline growing work.
+	if qviews.NewQueryRoutingExclusions(vchannel, permit.constraints).ExcludesPlan(plan) {
+		return nil, viewerror.NewAllCandidatesExcluded()
+	}
+	permit.releaseUnused(plan)
+	if params.consumeResponse != nil {
+		if err := params.consumeResponse(response); err != nil {
+			return nil, err
+		}
+	}
+	shardID := qviews.FromProtoShardID(plan.ShardId)
+	workNodes := workNodesFromPlan(plan)
+	result := &ShardPlan{ShardID: shardID, Version: plan.Version, Mvcc: plan.GetMvcc(), WorkNodes: workNodes, Selections: plan.GetWorkNodes(), ExecutionSummary: response.GetExecutionSummary()}
+	if params.beforeDispatch != nil {
+		err = params.beforeDispatch(ctx, response, shardID)
+	}
+	if err == nil {
+		err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
+	}
+	if err != nil {
+		params.resetShard(shardID)
+	}
+	return result, err
 }
 
 // executeGetQueryPlan handles consistency-level routing and dispatches Phase 1.
@@ -359,7 +343,7 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 			}
 		}
 	}
-	return s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)
+	return s.queryPlanClient.GetQueryPlan(ctx, targetShardID.VChannel, planReq)
 }
 
 // fanOutToWorkNodes dispatches Phase 2 to all work nodes concurrently.
@@ -444,6 +428,9 @@ type workNodeFailure struct {
 func (e *workNodeFailure) Error() string { return e.err.Error() }
 func (e *workNodeFailure) Unwrap() error { return e.err }
 func retryableQueryError(err error) bool {
+	if merr.GetErrorType(err) == merr.InputError {
+		return false
+	}
 	if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
 		return true
 	}

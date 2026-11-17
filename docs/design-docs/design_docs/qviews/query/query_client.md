@@ -31,13 +31,13 @@ the streaming transport; parent Proxy wiring must inject its MixCoord client.
 ## Planning, dispatch and retries
 
 For each resolved VChannel, the client sends `GetQueryPlan` with
-`UnknownReplicaID`. The WAL owner chooses a replica and its newest locally Up
+`vchannel` and a fresh `QueryRoutingConstraints` snapshot. The WAL owner chooses a replica and its newest locally Up
 View matching the request's exact schema. The returned plan supplies the actual
 ShardID and full View version; these are the identities used for execution and
 reduction. There is no client-side replica directory or per-VChannel subscription.
 See [server-side replica selection](replica_discovery.md).
 
-A Phase 1 ViewNotFound triggers `GetQueryViewLoadInfo(CollectionID, version=0)`
+An unbound Phase 1 ViewNotFound triggers `GetQueryViewLoadInfo(CollectionID, version=0)`
 to check current Coordinator load intent. Confirmed CollectionNotLoaded is
 returned to the caller, including Proxy's AutoLoad retry when enabled. A loaded
 collection may still be preparing; keep retrying planning under the caller's
@@ -88,15 +88,18 @@ The attempt budget defaults to three. Without a replica directory the client
 cannot extend the budget to guarantee one visit to every replica; server-side
 selection is shared by concurrent requests. Exhausting the budget preserves the
 last failure for Proxy's outer recovery. Waiting for a loaded collection with no
-usable plan does not consume attempts. Replanning waits 100 ms, or wakes early
-on a captured QN session change. Request cancellation bounds all waits.
+usable plan does not consume attempts. Replanning after an execution failure waits 100 ms. Request cancellation bounds all waits.
 
-A QN missing from the session resolver is recorded for the current request.
-A new plan containing that node is rejected before accepting inline SN results
-or dispatching workers. A session revision clears these local exclusions, so a
-racing reconnect can be reconsidered. Missing nodes fail promptly at the QN
-picker. The server does not yet receive exclusions: request-level Node/View
-circuit-breaker constraints are a separate follow-up protocol.
+QueryViewCircuitBreaker observes raw worker RPC results before reduction.
+Connection failures accumulate per QN across VChannels and recover with exclusive
+probes. Confirmed session deletion and exact ViewNotFound/ViewInvalidated failures
+are TTL exclusions, without probes. Local picker absence alone does not confirm
+session deletion. Every retry carries a fresh bounded exclusion snapshot to SN;
+retained requery observes results but never substitutes a new plan.
+ALL_CANDIDATES_EXCLUDED does not trigger load-info/AutoLoad: admission retries
+poll at most once per second, wake on breaker transitions, and have a separate
+five-second total wait budget in addition to the caller deadline.
+See [circuit breaker](query_view_circuit_breaker.md).
 
 Retries clear partial results only after canceled workers have joined. Statistics
 also clears its inline SN count. Explicit paired MVCC and BarrierMVCC remain

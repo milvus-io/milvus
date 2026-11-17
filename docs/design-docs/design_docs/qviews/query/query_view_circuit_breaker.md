@@ -1,0 +1,89 @@
+# QueryView client circuit breaker
+
+## Ownership and protocol
+
+`queryclient.QueryViewCircuitBreaker` owns bounded cross-request observations.
+It may be injected through `ViewQueryClientConfig.CircuitBreaker` to share state
+across multiple clients. StreamingNode retains replica/View selection and stores
+no client health state. A planning attempt carries a fresh immutable
+`QueryRoutingConstraints`: excluded QN IDs and excluded `(replica_id, version)`
+identities scoped to the request's vchannel. Versions include DataVersion.
+
+This unpublished protocol replaces GetQueryPlanRequest.shard_id with string
+vchannel at field 2. QueryPlan and execution RPCs retain actual ShardID.
+
+SN applies exclusions to each replica's normally selected exact-schema Up View,
+before granting/renewing a serving lease or executing inline statistics. It does
+not fall back to arbitrary historical versions or omit failed workers. Filtering
+all serving candidates yields ALL_CANDIDATES_EXCLUDED, distinct from absent or
+not-yet-ready Views. No schema/data/load/MVCC or serving-lease rule is relaxed.
+
+## Failure classes
+
+| Class | Evidence | Removal |
+| --- | --- | --- |
+| QN connection | Three consecutive connection failures within ten seconds | One probe per key per client; successful RPC restores connection eligibility |
+| QN session gone | Previously observed node disappears from session discovery and the RPC picker cannot find it | Five-minute TTL; no probe |
+| View unavailable | Any selected worker returns ViewNotFound or ViewInvalidated | One-minute TTL; no probe; a new version is independent |
+
+Picker absence alone is a discovery/connection observation, not authoritative
+session deletion. The existing session observer retains at most 4096 recent
+deletion records; it does not create a watch or perform etcd IO per query.
+
+Input errors, caller deadlines/cancellation, derived fanout cancellation, local
+client shutdown and unclassified/shared failures do not trip a local circuit.
+Node failure does not also poison the View. View errors prove node reachability
+but do not make the failed View healthy. Successful planning alone is not worker
+success. Raw RPC observation precedes reduction and includes filter-first and
+retained execution; retained execution never replans.
+
+Phase 1 errors never create Proxy Node/View exclusions and carry no failed View
+identity. SN owns selection and local resource lifetime; ordinary handoff cannot
+release a View while planning holds its call reference. Planning failures keep
+their existing retry/load-intent handling. Only Phase 2 worker responses create
+View exclusions, using the actual execution request's full identity; this also
+applies to filter-first and retained execution. Inline growing statistics remains
+part of Phase 1 and does not contribute to View exclusions.
+
+## Recovery, concurrency and bounds
+
+Connection cooldown begins at one second and doubles to a 30-second base, with
+20% jitter. A planning attempt reserves eligible probe keys; unused permits are
+released when the actual plan arrives, and all remaining permits are released
+after execution joins. Cancellation/unused permits do not grow failure backoff.
+Entry identity and generation fence late results. Recovered node entries retain
+a bounded generation fence until their idle TTL; View and gone-session tombstones
+cannot be cleared by a late success.
+
+The client allocates entries only after failures. Defaults bound the Node table
+to 1024 entries and the View table to 16384. Views are indexed by VChannel and
+maintained in expiration order; constraint construction never scans unrelated
+View entries. Reads do not refresh expiration. Cleanup is opportunistic during
+activity and memory remains bounded while idle; there is no per-entry goroutine.
+Capacity pressure evicts the oldest View or declines a new Node entry, with a
+metric. Request-local exclusions preserve immediate retry protection independently
+of the shared cache. TTL/capacity eviction forgets evidence; it is not proof of
+health, and a subsequent failure may reinsert an identity.
+
+All-excluded admission waits poll at most once per second to notice newly
+published Views, and wake early on breaker changes. A five-second per-call total
+wait budget and the caller context bound these waits; they do not consume the
+normal execution-attempt budget. No load-info request is issued for this error.
+
+Configuration is immutable on the breaker. The metric
+`milvus_proxy_query_view_circuit_breaker_events_total{scope,reason}` uses only
+fixed labels for transitions, expiration and capacity pressure.
+
+## Key packages and validation
+
+- `internal/views/queryclient/circuit_breaker*.go`: state, snapshots and RPC observations.
+- `internal/querynodev2/client/handler/session_changes.go`: confirmed session removal.
+- `internal/streamingnode/server/wal/snview`: pre-lease candidate filtering.
+- `internal/streamingnode/server/wal/adaptor/query_plan.go`: selected plan identity and inline boundary.
+- `internal/views/viewerror`: all-candidates-excluded planning status.
+
+Tests cover TTL and exact identity, cross-shard node sharing, exclusive probes,
+late callbacks, non-attributed planning failures, bounds, retained execution, wire status,
+and SN exclusion before lease/inline execution. Unit, integration, race, coverage
+and live failure/recovery runs must be reported separately; source tests alone do
+not establish runtime correctness or performance.

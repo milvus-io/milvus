@@ -34,8 +34,8 @@ func TestStatisticsRetriesEntireShardAndJoinsLateResults(t *testing.T) {
 		plans := 0
 		lateFinished := false
 		started := make(chan struct{})
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-			require.Equal(t, qviews.UnknownReplicaID, shard.ReplicaID)
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			require.Equal(t, "p_1v0", shard)
 			require.IsType(t, &viewpb.GetQueryPlanRequest_BarrierMvcc{}, req.GetMvcc())
 			require.EqualValues(t, 99, req.GetBarrierMvcc())
 			plans++

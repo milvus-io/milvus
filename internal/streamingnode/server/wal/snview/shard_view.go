@@ -449,6 +449,10 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 // across replicas must watch every candidate. Taking the notification under the
 // same mutex as the state inspection prevents lost wakeups.
 func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
+	return s.tryAcquireUpViewWithExclusions(ctx, schema, nil)
+}
+
+func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema *int32, exclusions *qviews.QueryRoutingExclusions) (*QueryViewLease, <-chan struct{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -475,6 +479,19 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 		}
 	}
 	if selected != nil {
+		// Filter the normally selected version before granting/renewing a
+		// serving lease. Never bypass the constraints by choosing an older
+		// data/load generation or by removing workers from the plan.
+		if exclusions.ExcludesView(qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: selectedVersion}) {
+			return nil, nil, viewerror.NewAllCandidatesExcluded()
+		}
+		if exclusions != nil {
+			for _, node := range selected.sm.queryNodes {
+				if exclusions.ExcludesNode(node.GetNodeId()) {
+					return nil, nil, viewerror.NewAllCandidatesExcluded()
+				}
+			}
+		}
 		return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil, nil
 	}
 	if recovering {

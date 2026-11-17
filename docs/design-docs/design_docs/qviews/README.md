@@ -33,6 +33,8 @@ For the detailed query-path flow, service boundary, client orchestration, and
 shard discovery design, see [Query Client Design](query/query_client.md).
 For VChannel-scoped replica selection on StreamingNode, see
 [Replica Selection](query/replica_discovery.md).
+For Proxy-owned node and View exclusions, see
+[QueryView Circuit Breaker](query/query_view_circuit_breaker.md).
 For node-side Phase 1 planning and Phase 2 execution, see
 [Query Plan Node-Side Design](query/query_plan.md) and
 [Query Execution Node-Side Design](query/query_execution.md).
@@ -460,7 +462,7 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ### Current primary routing
 
-The query client requests a plan by VChannel with UnknownReplicaID. The primary
+The query client requests a plan by VChannel with request-local routing constraints. The primary
 WAL owner performs [replica selection](query/replica_discovery.md) and returns
 the actual ShardID and View version. Strong and Session
 are sent as Strong; Bounded and Eventually preserve the requested enum.

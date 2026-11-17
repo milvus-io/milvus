@@ -478,7 +478,7 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 		return nil, err
 	}
 	plan := &viewpb.QueryPlan{
-		ShardId: &viewpb.ShardID{Vchannel: req.GetShardId().GetVchannel(), ReplicaId: 1},
+		ShardId: &viewpb.ShardID{Vchannel: req.GetVchannel(), ReplicaId: 1},
 		Version: &viewpb.QueryViewVersion{},
 		Mvcc:    &viewpb.QueryPlanMVCC{},
 		WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{
@@ -514,7 +514,7 @@ type dqlRetryPlanClient struct {
 	client viewpb.QueryPlanServiceClient
 }
 
-func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	resp, err := c.client.GetQueryPlan(ctx, req)
 	return resp, viewerror.ConvertViewError("GetQueryPlan", err)
 }

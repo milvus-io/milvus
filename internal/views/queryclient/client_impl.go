@@ -20,9 +20,11 @@ const defaultMaxRetries = 3
 type ViewQueryClientConfig struct {
 	// QueryHook is initialized and owned by the hosting process.
 	QueryHook optimizers.QueryHook
-	// LoadInfoClient confirms current load state when an initialized directory is empty.
+	// LoadInfoClient confirms current load intent when no usable View exists.
 	LoadInfoClient LoadInfoClient
-	MaxRetries     int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
+	MaxRetries     int // Maximum per-shard execution attempts; zero defaults to 3.
+	// CircuitBreaker can be shared by multiple clients in the same Proxy.
+	CircuitBreaker *QueryViewCircuitBreaker
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
@@ -62,6 +64,9 @@ func NewViewQueryClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
+	if cfg.CircuitBreaker != nil {
+		shardClient.breaker = cfg.CircuitBreaker
+	}
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &viewQueryClientImpl{

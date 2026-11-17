@@ -3,11 +3,12 @@
 ## Ownership
 
 Proxy resolves a collection to VChannels and sends GetQueryPlan with
-`ShardID{ReplicaID: UnknownReplicaID, VChannel: ...}` to the current WAL owner.
+`vchannel` and request-local routing constraints to the current WAL owner.
 That owner already manages the VChannel's QueryView replicas. It selects a
 replica and the newest locally Up View matching the exact requested schema.
 Statistics uses the newest Up View without a read-schema selector.
-An explicit ReplicaID remains supported and never silently falls back.
+The planning RPC no longer accepts an explicit ReplicaID. Internal explicit-View
+execution continues to use its actual ShardID.
 
 The returned QueryPlan carries the actual ShardID, full QueryViewVersion, paired
 MVCC and work nodes. Proxy uses these identities for Phase 2, reduction and
@@ -33,7 +34,11 @@ and never acquires a shard mutex while holding the handler mutex.
 
 The rotation is shared across concurrent requests; it is not a per-request
 promise to visit every replica before the client's retry budget expires.
-Node/View exclusion and half-open probe constraints are follow-up work.
+Node/View exclusions are applied before acquiring a serving lease. Each replica
+still contributes only its normally selected newest eligible View; exclusions
+never authorize a fallback to an older data/load generation. A candidate touching
+an excluded QN is skipped as a whole, never returned with missing workers.
+See [client circuit breaker](query_view_circuit_breaker.md).
 
 ## Retry and load intent
 
@@ -62,10 +67,9 @@ VChannelReplicas, domain watches, local/RPC adapters and resumable clients are
 removed. There is no replacement candidate-list protocol. Coordinator replica
 management and ViewFeedback remain independent and unchanged.
 
-A new client can use the existing UnknownReplicaID planning path on an older SN.
-An old client requiring SubscribeReplicas cannot use the removed RPC on a new
-SN. Deploy clients that no longer subscribe before removing server support;
-this change does not claim transparent compatibility in the reverse order.
+This feature is unpublished. GetQueryPlanRequest field 2 changes directly from
+ShardID to string vchannel; all callers must use the updated protocol. No old
+client/server compatibility path is provided.
 
 ## Key packages and verification
 
@@ -77,5 +81,5 @@ this change does not claim transparent compatibility in the reverse order.
 Tests cover replica rotation, VChannel/schema isolation, explicit-replica
 compatibility, recovery waits, membership changes, cancellation, shard-incarnation
 cleanup, actual-plan dispatch, missing-node suppression, session updates and
-load-info rechecks. Live failure/recovery and mixed-version validation must be
+load-info rechecks. Live failure/recovery validation must be
 reported separately from unit/static validation.
