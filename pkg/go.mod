@@ -37,7 +37,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.48-0.20261027025505-685bea18c19c
+	github.com/zilliztech/woodpecker v0.1.48-0.20261117195357-33e74c638f7b
 	go.etcd.io/etcd/api/v3 v3.7.1
 	go.etcd.io/etcd/client/v3 v3.7.1
 	go.etcd.io/etcd/server/v3 v3.7.1
@@ -259,3 +259,6 @@ replace (
 replace github.com/hamba/avro/v2 => github.com/iskorotkov/avro/v2 v2.33.0
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 // v0.61.0 removed the UnaryServerInterceptor used by etcd v3.5.x and woodpecker
+
+// Temporary until zilliztech/woodpecker#525 merges; replace with its upstream revision before merging.
+replace github.com/zilliztech/woodpecker => github.com/xiaofan-luan/woodpecker v0.1.48-0.20261117195357-33e74c638f7b

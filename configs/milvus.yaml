@@ -143,7 +143,12 @@ minio:
   # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
   # Changing this for an already running Milvus instance may result in failures to read legacy data.
   rootPath: files
-  # Whether to useIAM role to access S3/GCS instead of access/secret keys
+  # Whether to use IAM credentials to access S3/GCS instead of configured access/secret keys.
+  # AWS IAM mode ignores static environment/profile keys and selects configured IRSA
+  # (environment or AWS config profile), otherwise Container credentials (EKS Pod Identity/ECS),
+  # otherwise EC2 credentials unless AWS_EC2_METADATA_DISABLED=true (case-insensitive).
+  # A failed configured workload identity never falls back to the Node Role.
+  # This order is shared by Go object storage, C++ storage and Woodpecker.
   # For more information, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
   # gcp: https://cloud.google.com/storage/docs/access-control/iam

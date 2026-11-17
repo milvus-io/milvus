@@ -26,6 +26,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	awscredentials "github.com/zilliztech/woodpecker/common/credentials"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -102,7 +103,7 @@ func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath 
 func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	if cfg.useIAM {
-		creds = credentials.NewIAM(cfg.iamEndpoint)
+		creds = awscredentials.NewAWSIAMWithEndpoint(cfg.iamEndpoint)
 	} else {
 		creds = credentials.NewStaticV4(cfg.accessKeyID, cfg.secretAccessKeyID, "")
 	}
