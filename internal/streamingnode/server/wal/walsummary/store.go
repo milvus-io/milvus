@@ -150,64 +150,48 @@ func (s *Store) writeChunk(
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "failed to probe summary chunk %s", key)
 	}
-	if !exists {
-		if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-			return nil, nil, merr.Wrapf(err, "failed to write summary chunk %s", key)
+	if exists {
+		existingPayload, err := s.chunkManager.Read(ctx, key)
+		if err != nil {
+			return nil, nil, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
 		}
-		return footer, payload, nil
-	}
-	existingPayload, err := s.chunkManager.Read(ctx, key)
-	if err != nil {
-		return nil, nil, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
-	}
-	if bytes.Equal(existingPayload, payload) {
-		if err := s.rewriteExistingChunk(ctx, key, existingPayload); err != nil {
-			return nil, nil, err
-		}
-		return footer, payload, nil
-	}
-	// Same key, different bytes. The key carries this store's term and the
-	// footer is marshaled from that same term, so a split-brain owner writes a
-	// different key and cannot land here: the only writer of this object is
-	// this term, retrying. Byte inequality alone therefore does not prove a
-	// conflict, because the payload encoding is not guaranteed to be
-	// byte-stable across proto library versions. Compare what the chunk
-	// actually contains instead, so an identical rewrite stays idempotent and
-	// only genuinely different content is corruption.
-	if existingRecords, existingFooter, decodeErr := unmarshalChunk(existingPayload); decodeErr == nil {
-		if existingFooter.GetPchannel() == footer.GetPchannel() &&
-			existingFooter.GetGeneration() == footer.GetGeneration() &&
-			existingFooter.GetTerm() == footer.GetTerm() &&
-			existingFooter.GetStartTimeTick() == footer.GetStartTimeTick() &&
-			existingFooter.GetEndTimetick() == footer.GetEndTimetick() &&
-			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
-			// The STORED footer and size, not the ones just built. The records
-			// match but the encodings do not, and the manifest carries the
-			// footer's per-vchannel section offsets verbatim -- publishing the
-			// new encoding's offsets against the old object's bytes would make
-			// every later ranged read slice the wrong range. The stored bytes
-			// are kept, so what the manifest describes has to be the object
-			// that is there.
-			if err := s.rewriteExistingChunk(ctx, key, existingPayload); err != nil {
-				return nil, nil, err
+		if !bytes.Equal(existingPayload, payload) {
+			// Same key, different bytes. The key carries this store's term and the
+			// footer is marshaled from that same term, so a split-brain owner writes a
+			// different key and cannot land here: the only writer of this object is
+			// this term, retrying. Byte inequality alone therefore does not prove a
+			// conflict, because the payload encoding is not guaranteed to be
+			// byte-stable across proto library versions. Compare what the chunk
+			// actually contains instead, so an identical rewrite stays idempotent and
+			// only genuinely different content is corruption.
+			existingRecords, existingFooter, decodeErr := unmarshalChunk(existingPayload)
+			if decodeErr != nil ||
+				existingFooter.GetPchannel() != footer.GetPchannel() ||
+				existingFooter.GetGeneration() != footer.GetGeneration() ||
+				existingFooter.GetTerm() != footer.GetTerm() ||
+				existingFooter.GetStartTimeTick() != footer.GetStartTimeTick() ||
+				existingFooter.GetEndTimetick() != footer.GetEndTimetick() ||
+				!chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
+				return nil, nil, storeCorruptedf("summary chunk already exists with different payload: %s", key)
 			}
-			return existingFooter, existingPayload, nil
+			// Keep the STORED footer and bytes, not the ones just built. The records
+			// match but the encodings do not, and the manifest carries the footer's
+			// per-vchannel section offsets verbatim -- publishing the new encoding's
+			// offsets against the old object's bytes would make every later ranged
+			// read slice the wrong range.
+			footer, payload = existingFooter, existingPayload
 		}
 	}
-	return nil, nil, storeCorruptedf("summary chunk already exists with different payload: %s", key)
-}
-
-// rewriteExistingChunk rewrites a reused chunk with its stored bytes before the
-// manifest may reference it. Presence is not durability: an earlier attempt can
-// leave the complete payload at the key and still fail its durability step,
-// and after a failed fsync only a fresh write, not another fsync, makes the
-// bytes durable. The key is term-scoped and a chunk is recorded in the manifest
-// only after writeChunk succeeds, so no manifest references the object yet.
-func (s *Store) rewriteExistingChunk(ctx context.Context, key string, payload []byte) error {
+	// Write even when the object already exists. Presence is not durability: an
+	// earlier attempt can leave the complete payload at the key and still fail
+	// its durability step, and after a failed fsync only a fresh write, not
+	// another fsync, makes the bytes durable. The key is term-scoped and a chunk
+	// is recorded in the manifest only after writeChunk succeeds, so no manifest
+	// references the object yet.
 	if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-		return merr.Wrapf(err, "failed to rewrite summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to write summary chunk %s", key)
 	}
-	return nil
+	return footer, payload, nil
 }
 
 // ReadChunk reads and decodes one chunk object. The term of the chunk is

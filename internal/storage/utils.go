@@ -79,7 +79,7 @@ func ReadFile(filepath string) ([]byte, error) {
 
 // WriteFile durably publishes a complete local file and converts OS errors.
 func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
-	err := localstorage.WriteFile(filepath, data, perm)
+	err := localstorage.WriteFile(filepath, data, perm, "")
 	if err != nil {
 		return merr.WrapErrIoFailed(filepath, err)
 	}

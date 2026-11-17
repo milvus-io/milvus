@@ -41,7 +41,7 @@ func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
 	destination := filepath.Join(root, "new", "parents", "copy")
 	require.NoError(t, cm.Write(ctx, source, []byte("complete")))
 	require.NoError(t, cm.Copy(ctx, source, destination))
-	require.NoError(t, cm.Copy(ctx, source, source))
+	require.ErrorIs(t, cm.Copy(ctx, source, source), merr.ErrServiceInternal)
 	data, err := cm.Read(ctx, source)
 	require.NoError(t, err)
 	require.Equal(t, "complete", string(data))
@@ -56,22 +56,30 @@ func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
 	require.Error(t, cm.MultiWrite(ctx, map[string][]byte{source: []byte("batch")}))
 }
 
-func TestLocalChunkManagerRootPreparationFailureBlocksWritesUntilRecovered(t *testing.T) {
-	root := t.TempDir()
-	cm := NewLocalChunkManager(objectstorage.RootPath(root))
-	name := filepath.Join(root, "object")
+func TestLocalChunkManagerRootPreparationFailureFailsConstruction(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing", "root")
 	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
-	// A root that cannot be prepared never acknowledges a write.
-	require.ErrorIs(t, cm.Write(t.Context(), name, []byte("data")), merr.ErrIoFailed)
-	require.ErrorIs(t, cm.MultiWrite(t.Context(), map[string][]byte{name: []byte("data")}), merr.ErrIoFailed)
-	patch.UnPatch()
-	_, err := os.Stat(name)
-	require.True(t, os.IsNotExist(err))
-	// The failure is not sticky: once the root is available, writes succeed.
-	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
-	data, err := os.ReadFile(name)
+	defer patch.UnPatch()
+	// As in the C++ DurableLocalChunkManager, a root that cannot be prepared
+	// never yields a manager: the factory returns the failure, the
+	// convenience constructor panics.
+	factory := NewChunkManagerFactory("local", objectstorage.RootPath(root))
+	cm, err := factory.NewPersistentStorageChunkManager(t.Context())
+	require.ErrorIs(t, err, merr.ErrIoFailed)
+	require.Nil(t, cm)
+	require.Panics(t, func() { NewLocalChunkManager(objectstorage.RootPath(root)) })
+}
+
+func TestLocalChunkManagerPreparesRootAtConstruction(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "new", "root")
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	info, err := os.Stat(root)
 	require.NoError(t, err)
-	require.Equal(t, "data", string(data))
+	require.True(t, info.IsDir())
+	// Steady writes reuse the boundary prepared at construction.
+	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
+	defer patch.UnPatch()
+	require.NoError(t, cm.Write(t.Context(), filepath.Join(root, "object"), []byte("data")))
 }
 
 func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
@@ -87,8 +95,12 @@ func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
 	cm := NewLocalChunkManager(objectstorage.RootPath(root))
 	name := root + "/link/../source"
 	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
-	require.NoError(t, cm.Copy(t.Context(), name, name))
+	// "link/../source" aliases root/actual/source, not root/source.
+	require.ErrorIs(t, cm.Copy(t.Context(), name, root+"/actual/source"), merr.ErrServiceInternal)
 	require.NoError(t, cm.Copy(t.Context(), name, root+"/new/copy"))
+	data, err := os.ReadFile(root + "/actual/source")
+	require.NoError(t, err)
+	require.Equal(t, "data", string(data))
 }
 
 var localPath string

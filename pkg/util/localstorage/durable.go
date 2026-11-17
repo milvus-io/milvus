@@ -30,28 +30,27 @@ import (
 )
 
 // WriteFile writes directly to the target path, syncing the file and its
-// directory entries before returning success. See Write for root.
-func WriteFile(name string, data []byte, perm fs.FileMode, root ...string) error {
+// directory entries before returning success. See Write for boundary.
+func WriteFile(name string, data []byte, perm fs.FileMode, boundary string) error {
 	return Write(name, perm, func(w io.Writer) error {
 		_, err := w.Write(data)
 		return err
-	}, root...)
+	}, boundary)
 }
 
 // Write syncs once after all callback writes. An error can leave an incomplete
 // file; callers must not commit metadata referencing a failed write.
 //
-// root is the provisioned data root that bounds directory synchronization.
-// Omitted or empty, there is no provisioned root: the file's parent is its own
-// boundary, so only the parent and directories this write creates are synced.
-func Write(name string, perm fs.FileMode, write func(io.Writer) error, root ...string) error {
-	boundary := parentPath(name)
-	if len(root) > 0 && root[0] != "" {
-		boundary = root[0]
-	}
-	boundary, err := PrepareRoot(boundary)
-	if err != nil {
-		return err
+// boundary is the physical data root returned by PrepareRoot, prepared once by
+// its owner; directory synchronization stops there. Empty, there is no
+// provisioned root: the file's parent is prepared as its own boundary, so only
+// the parent and directories this write creates are synced.
+func Write(name string, perm fs.FileMode, write func(io.Writer) error, boundary string) error {
+	if boundary == "" {
+		var err error
+		if boundary, err = PrepareRoot(parentPath(name)); err != nil {
+			return err
+		}
 	}
 	if err := writeFile(name, perm, write); err != nil {
 		return err
@@ -74,11 +73,6 @@ func writeFile(name string, perm fs.FileMode, write func(io.Writer) error) (err 
 	return f.Sync()
 }
 
-// SyncFileDirectory syncs the physical parent without lexically cleaning name.
-func SyncFileDirectory(root, name string) error {
-	return SyncDirectories(root, parentPath(name))
-}
-
 // parentPath preserves symlink/.. semantics: filepath.Dir cleans the path
 // before the kernel has resolved symlinks, potentially selecting another parent.
 func parentPath(name string) string {
@@ -94,12 +88,8 @@ func parentPath(name string) string {
 
 // PrepareRoot returns the physical directory synchronization boundary for root.
 // Existing roots are caller-provisioned; a missing root is created and
-// synchronized through its nearest existing ancestor. An empty root means no
-// provisioned root and returns an empty boundary.
+// synchronized through its nearest existing ancestor.
 func PrepareRoot(root string) (string, error) {
-	if root == "" {
-		return "", nil
-	}
 	ancestor := root
 	for {
 		info, err := os.Stat(ancestor)
@@ -117,14 +107,22 @@ func PrepareRoot(root string) (string, error) {
 	if err := os.MkdirAll(root, 0o777); err != nil {
 		return "", err
 	}
+	boundary, err := physicalPath(root)
+	if err != nil {
+		return "", err
+	}
 	// Persist creation during initialization, including the link in the existing
 	// ancestor. Steady writes never walk outside the provisioned data root.
 	if ancestor != root {
-		if err := SyncDirectories(ancestor, root); err != nil {
+		top, err := physicalPath(ancestor)
+		if err != nil {
+			return "", err
+		}
+		if err := SyncDirectories(top, boundary); err != nil {
 			return "", err
 		}
 	}
-	return physicalPath(root)
+	return boundary, nil
 }
 
 // physicalPath resolves symlinks before '..', as the kernel does, and anchors a
@@ -142,21 +140,15 @@ func physicalPath(name string) (string, error) {
 	return filepath.EvalSymlinks(name)
 }
 
-// SyncDirectories persists dir and each ancestor up to root, deepest first, by
-// physical path. Existing directories are not skipped: another writer or GC may
-// have just created them. An empty root is no provisioned boundary: only dir is
-// synced. The root and external symlinks leading to it must be durable and
-// stable; GC may recreate descendants, but must not remove the root.
-func SyncDirectories(root, dir string) error {
+// SyncDirectories persists dir and each ancestor up to boundary, deepest
+// first, by physical path. boundary must already be physical (see PrepareRoot).
+// Existing directories are not skipped: another writer or GC may have just
+// created them. The root and external symlinks leading to it must be durable
+// and stable; GC may recreate descendants, but must not remove the root.
+func SyncDirectories(boundary, dir string) error {
 	current, err := physicalPath(dir)
 	if err != nil {
 		return err
-	}
-	boundary := current
-	if root != "" {
-		if boundary, err = physicalPath(root); err != nil {
-			return err
-		}
 	}
 	relative, err := filepath.Rel(boundary, current)
 	if err != nil {
@@ -164,7 +156,7 @@ func SyncDirectories(root, dir string) error {
 	}
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		// A Milvus path/configuration fault, not request content: System class.
-		return merr.WrapErrIoFailedMsg("directory %s is outside durability root %s", dir, root)
+		return merr.WrapErrIoFailedMsg("directory %s is outside durability root %s", dir, boundary)
 	}
 	for {
 		if err := syncDirectory(current); err != nil {

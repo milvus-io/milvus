@@ -28,15 +28,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// prepare returns the boundary an owner prepares once for its root.
+func prepare(t *testing.T, root string) string {
+	t.Helper()
+	boundary, err := PrepareRoot(root)
+	require.NoError(t, err)
+	return boundary
+}
+
 func TestDirectWriteAndRetry(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "parents", "data", "object")
-	require.NoError(t, WriteFile(name, []byte("old"), 0o640))
+	require.NoError(t, WriteFile(name, []byte("old"), 0o640, ""))
 	before, err := os.Stat(name)
 	require.NoError(t, err)
 	require.NoError(t, Write(name, 0o777, func(w io.Writer) error {
 		_, err := w.Write([]byte("new"))
 		return err
-	}))
+	}, ""))
 	data, err := os.ReadFile(name)
 	require.NoError(t, err)
 	require.Equal(t, "new", string(data))
@@ -48,10 +56,10 @@ func TestDirectWriteAndRetry(t *testing.T) {
 	err = Write(name, 0o640, func(w io.Writer) error {
 		_, _ = w.Write([]byte("partial"))
 		return syscall.EIO
-	})
+	}, "")
 	require.ErrorIs(t, err, syscall.EIO)
 	// Failed writes may remain. Callers must not commit their metadata.
-	require.NoError(t, WriteFile(name, []byte("retry"), 0o600))
+	require.NoError(t, WriteFile(name, []byte("retry"), 0o600, ""))
 	data, err = os.ReadFile(name)
 	require.NoError(t, err)
 	require.Equal(t, "retry", string(data))
@@ -61,17 +69,18 @@ func TestFileSyncFailureCannotReturnSuccess(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "object")
 	patch := mockey.Mock((*os.File).Sync).Return(syscall.EIO).Build()
 	defer patch.UnPatch()
-	require.ErrorIs(t, WriteFile(name, []byte("data"), 0o600), syscall.EIO)
+	require.ErrorIs(t, WriteFile(name, []byte("data"), 0o600, ""), syscall.EIO)
 }
 
 func TestDirectorySyncFailureIsNotAcknowledged(t *testing.T) {
 	root := t.TempDir()
+	boundary := prepare(t, root)
 	name := filepath.Join(root, "new", "parents", "object")
 	patch := mockey.Mock(syncDirectory).Return(syscall.EIO).Build()
-	err := WriteFile(name, []byte("complete"), 0o600, root)
+	err := WriteFile(name, []byte("complete"), 0o600, boundary)
 	patch.UnPatch()
 	require.ErrorIs(t, err, syscall.EIO)
-	require.NoError(t, WriteFile(name, []byte("retry"), 0o600, root))
+	require.NoError(t, WriteFile(name, []byte("retry"), 0o600, boundary))
 }
 
 func TestCloseAndOpenErrors(t *testing.T) {
@@ -81,12 +90,12 @@ func TestCloseAndOpenErrors(t *testing.T) {
 		patch := mockey.Mock((*os.File).Close).Origin(&original).To(func(f *os.File) error {
 			return errors.CombineErrors(original(f), syscall.EIO)
 		}).Build()
-		err := WriteFile(name, []byte("data"), 0o600)
+		err := WriteFile(name, []byte("data"), 0o600, "")
 		patch.UnPatch()
 		require.ErrorIs(t, err, syscall.EIO)
 	})
 	t.Run("directory", func(t *testing.T) {
-		require.Error(t, WriteFile(t.TempDir(), []byte("data"), 0o600))
+		require.Error(t, WriteFile(t.TempDir(), []byte("data"), 0o600, ""))
 	})
 }
 
@@ -95,8 +104,7 @@ func TestSymlinkThenDotDotSyncsPhysicalDirectories(t *testing.T) {
 	require.NoError(t, os.MkdirAll(root+"/actual/child", 0o700))
 	require.NoError(t, os.MkdirAll(root+"/actual/dataset", 0o700))
 	require.NoError(t, os.Symlink(root+"/actual/child", root+"/link"))
-	physicalRoot, err := filepath.EvalSymlinks(root)
-	require.NoError(t, err)
+	physicalRoot := prepare(t, root)
 	calls := make(map[string]int)
 	var original func(string) error
 	patch := mockey.Mock(syncDirectory).Origin(&original).To(func(name string) error {
@@ -105,7 +113,7 @@ func TestSymlinkThenDotDotSyncsPhysicalDirectories(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	name := root + "/link/../dataset/object"
-	require.NoError(t, WriteFile(name, []byte("data"), 0o600, root))
+	require.NoError(t, WriteFile(name, []byte("data"), 0o600, physicalRoot))
 	require.Contains(t, calls, physicalRoot+"/actual/dataset")
 	require.NotContains(t, calls, physicalRoot+"/dataset")
 	require.NotContains(t, calls, filepath.Dir(physicalRoot))
@@ -123,11 +131,12 @@ func TestSearchOnlyAncestorAndExistingDescendantRetry(t *testing.T) {
 	require.NoError(t, os.MkdirAll(root, 0o700))
 	require.NoError(t, os.Chmod(ancestor, 0o111))
 	defer func() { require.NoError(t, os.Chmod(ancestor, 0o700)) }()
-	require.NoError(t, WriteFile(root+"/new/parents/object", []byte("data"), 0o600, root))
-	require.NoError(t, WriteFile(root+"/new/parents/one", []byte("one"), 0o600, root))
-	require.NoError(t, WriteFile(root+"/other/two", []byte("two"), 0o600, root))
+	physical := prepare(t, root)
+	require.NoError(t, WriteFile(root+"/new/parents/object", []byte("data"), 0o600, physical))
+	require.NoError(t, WriteFile(root+"/new/parents/one", []byte("one"), 0o600, physical))
+	require.NoError(t, WriteFile(root+"/other/two", []byte("two"), 0o600, physical))
 	patch := mockey.Mock(syncDirectory).Return(syscall.EIO).Build()
-	err := WriteFile(root+"/failed/parents/object", []byte("data"), 0o600, root)
+	err := WriteFile(root+"/failed/parents/object", []byte("data"), 0o600, physical)
 	patch.UnPatch()
 	require.ErrorIs(t, err, syscall.EIO)
 	calls := make(map[string]int)
@@ -137,9 +146,7 @@ func TestSearchOnlyAncestorAndExistingDescendantRetry(t *testing.T) {
 		return original(name)
 	}).Build()
 	defer patch.UnPatch()
-	require.NoError(t, WriteFile(root+"/failed/parents/object", []byte("retry"), 0o600, root))
-	physical, err := filepath.EvalSymlinks(root)
-	require.NoError(t, err)
+	require.NoError(t, WriteFile(root+"/failed/parents/object", []byte("retry"), 0o600, physical))
 	require.Contains(t, calls, physical+"/failed/parents")
 	require.Contains(t, calls, physical+"/failed")
 	require.Contains(t, calls, physical)
@@ -147,8 +154,9 @@ func TestSearchOnlyAncestorAndExistingDescendantRetry(t *testing.T) {
 }
 
 func TestBoundaryRejectsOutsideDirectory(t *testing.T) {
-	root := t.TempDir()
-	err := SyncDirectories(root, filepath.Dir(root))
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	err = SyncDirectories(root, filepath.Dir(root))
 	// A path outside the data root is a Milvus fault, never request content.
 	require.ErrorIs(t, err, merr.ErrIoFailed)
 	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
@@ -157,9 +165,6 @@ func TestBoundaryRejectsOutsideDirectory(t *testing.T) {
 func TestEmptyRootBoundsEachFileByItsParent(t *testing.T) {
 	// The working directory is not a boundary: unrelated absolute paths succeed.
 	t.Chdir(t.TempDir())
-	boundary, err := PrepareRoot("")
-	require.NoError(t, err)
-	require.Empty(t, boundary)
 
 	existing := filepath.Join(t.TempDir(), "existing")
 	require.NoError(t, os.MkdirAll(existing, 0o700))
@@ -197,7 +202,7 @@ func TestRelativePathUnderSymlinkedWorkingDirectory(t *testing.T) {
 	require.NoError(t, os.Symlink(actual, link))
 	// t.Chdir publishes the unresolved name as PWD, which os.Getwd returns.
 	t.Chdir(link)
-	require.NoError(t, WriteFile("relative/object", []byte("data"), 0o600, link))
+	require.NoError(t, WriteFile("relative/object", []byte("data"), 0o600, prepare(t, link)))
 	data, err := os.ReadFile(filepath.Join(actual, "relative", "object"))
 	require.NoError(t, err)
 	require.Equal(t, "data", string(data))

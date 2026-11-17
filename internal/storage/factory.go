@@ -62,7 +62,11 @@ func NewChunkManagerFactory(persistentStorage string, opts ...objectstorage.Opti
 func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string) (ChunkManager, error) {
 	switch engine {
 	case "local":
-		return NewLocalChunkManager(objectstorage.RootPath(f.config.RootPath)), nil
+		lcm, err := newLocalChunkManager(objectstorage.RootPath(f.config.RootPath))
+		if err != nil {
+			return nil, err
+		}
+		return lcm, nil
 	case "remote", "minio", "opendal":
 		return NewRemoteChunkManager(ctx, f.config)
 	default:
