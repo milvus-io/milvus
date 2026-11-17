@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "Meta.h"
@@ -40,6 +41,7 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/SortedMembership.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "log/Log.h"
@@ -364,22 +366,19 @@ const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
-                LOG_ERROR(
-                    "error happens in ScalarIndexSort<T>::In, "
-                    "expected value is: {}, but real value is: {}",
-                    *(values + i),
-                    lb->a_);
-            }
-            bitset[lb->idx_] = true;
+
+    auto visit = [&](int32_t row) { bitset[row] = true; };
+    auto validate = [](const T target, const auto& entry) {
+        if (entry.a_ != target) {
+            LOG_ERROR(
+                "error happens in ScalarIndexSort<T>::In, "
+                "expected value is: {}, but real value is: {}",
+                target,
+                entry.a_);
         }
-    }
+    };
+
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
@@ -389,22 +388,19 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     // NotIn must keep null rows false, so start from the validity bitmap.
     auto bitset = valid_bitset_.clone();
-    for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
-                LOG_ERROR(
-                    "error happens in ScalarIndexSort<T>::NotIn, "
-                    "expected value is: {}, but real value is: {}",
-                    *(values + i),
-                    lb->a_);
-            }
-            bitset[lb->idx_] = false;
+
+    auto visit = [&](int32_t row) { bitset[row] = false; };
+    auto validate = [](const T target, const auto& entry) {
+        if (entry.a_ != target) {
+            LOG_ERROR(
+                "error happens in ScalarIndexSort<T>::NotIn, "
+                "expected value is: {}, but real value is: {}",
+                target,
+                entry.a_);
         }
-    }
+    };
+
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
