@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -32,10 +33,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type adaptiveTestPlanner struct {
@@ -58,7 +61,7 @@ func (s *adaptiveTestService) SearchOnView(ctx context.Context, node qviews.Work
 }
 
 func adaptiveTestConfig() ReplicaSelectionConfig {
-	return ReplicaSelectionConfig{Enabled: true, Decay: 10 * time.Second, MinShare: .001, HedgeEnabled: true, HedgeMinDelay: time.Millisecond, HedgeMinWinRate: .3}
+	return ReplicaSelectionConfig{LatencyWeighted: true, Decay: 10 * time.Second, MinShare: .001, HedgeEnabled: true, HedgeMinDelay: time.Millisecond, HedgeMaxInflightRatio: .1}
 }
 
 func adaptiveTestClient(planner QueryPlanClient, service ViewQueryServiceClient) *shardViewQueryClient {
@@ -267,7 +270,12 @@ func TestAdaptiveSearchHangingWorkerAndWinnerOwnership(t *testing.T) {
 				return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success(), NumQueries: req.GetShardId().GetReplicaId()}}, nil
 			}}
 			client := adaptiveTestClient(planner, service)
-			client.selectionConfig = func() ReplicaSelectionConfig { cfg := adaptiveTestConfig(); cfg.Enabled = enabled; return cfg }
+			client.selectionConfig = func() ReplicaSelectionConfig {
+				cfg := adaptiveTestConfig()
+				cfg.LatencyWeighted = enabled
+				cfg.HedgeEnabled = enabled
+				return cfg
+			}
 			collector := newLegacySearchCollector()
 			request := &internalpb.SearchRequest{CollectionID: 100, SerializedExprPlan: []byte{1, 2}}
 			original := proto.Clone(request)
@@ -599,13 +607,18 @@ func TestAdaptiveConfigIsCapturedForOutstandingRequest(t *testing.T) {
 		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
 	}}
 	client := adaptiveTestClient(planner, service)
-	client.selectionConfig = func() ReplicaSelectionConfig { result := cfg; result.Enabled = enabled.Load(); return result }
+	client.selectionConfig = func() ReplicaSelectionConfig {
+		result := cfg
+		result.LatencyWeighted = enabled.Load()
+		result.HedgeEnabled = enabled.Load()
+		return result
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
 	require.NoError(t, err)
 	require.Equal(t, int64(2), plan.ShardID.ReplicaID)
-	require.False(t, client.replicaSelectionConfig().Enabled)
+	require.False(t, client.replicaSelectionConfig().LatencyWeighted)
 	once.Do(func() { close(release) })
 	require.Eventually(t, func() bool {
 		client.selection.mu.Lock()
@@ -746,4 +759,261 @@ func TestAdaptiveSharedStallDoesNotPenalizeReplica(t *testing.T) {
 			}, time.Second, time.Millisecond)
 		})
 	}
+}
+
+func TestHedgingDecoupledFromReplicaSelectionPolicy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	defer close(release)
+
+	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		return adaptiveTestPlan(shard), nil
+	}}
+	service := &adaptiveTestService{search: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		if req.GetShardId().GetReplicaId() == 1 {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+	}}
+	client := adaptiveTestClient(planner, service)
+	client.replicas.channels["channel"] = &replicaRoute{
+		changed:  make(chan struct{}),
+		snapshot: qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 1}, {ReplicaID: 2}, {ReplicaID: 3}}},
+	}
+	client.selectionConfig = func() ReplicaSelectionConfig {
+		cfg := adaptiveTestConfig()
+		cfg.LatencyWeighted = false
+		cfg.HedgeEnabled = true
+		return cfg
+	}
+
+	// First request starts at round-robin index 0 -> replica 1 (stalls), hedges to round-robin index 1 -> replica 2.
+	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), plan.ShardID.ReplicaID)
+
+	// Next request advances round-robin to replica 3 without latency_weighted stats tracking.
+	plan2, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), plan2.ShardID.ReplicaID)
+
+	key := replicaPolicyKey{channel: "channel", class: "search/Strong"}
+	client.selection.mu.Lock()
+	defer client.selection.mu.Unlock()
+	require.Empty(t, client.selection.keys[key].replicas, "non-latency_weighted policies must not maintain per-replica EWMA entries")
+}
+
+func TestHedgeInflightRatioLimitAndLoserOccupancy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	callsPerReq := make(map[int64]int)
+	primaryCh := make(map[int64]chan struct{})
+	getPrimaryCh := func(reqID int64) chan struct{} {
+		mu.Lock()
+		defer mu.Unlock()
+		if primaryCh[reqID] == nil {
+			primaryCh[reqID] = make(chan struct{})
+		}
+		return primaryCh[reqID]
+	}
+
+	hedgeReleaseOne := make(chan struct{})
+	hedgeReleaseAll := make(chan struct{})
+	var fastHedge atomic.Bool
+	var hedgesDispatched atomic.Int64
+	var primariesStarted atomic.Int64
+
+	type reqIDKey struct{}
+	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		return adaptiveTestPlan(shard), nil
+	}}
+	service := &adaptiveTestService{search: func(ctx context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		reqID := ctx.Value(reqIDKey{}).(int64)
+		mu.Lock()
+		callsPerReq[reqID]++
+		callNum := callsPerReq[reqID]
+		mu.Unlock()
+
+		if callNum == 1 {
+			primariesStarted.Add(1)
+			select {
+			case <-getPrimaryCh(reqID):
+				return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		hedgesDispatched.Add(1)
+		if fastHedge.Load() {
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+		}
+		select {
+		case <-hedgeReleaseOne:
+		case <-hedgeReleaseAll:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+	}}
+
+	client := adaptiveTestClient(planner, service)
+	client.selectionConfig = func() ReplicaSelectionConfig {
+		cfg := adaptiveTestConfig()
+		cfg.HedgeMinDelay = 30 * time.Millisecond
+		cfg.HedgeMaxInflightRatio = 0.1
+		return cfg
+	}
+
+	nodeID := paramtable.GetStringNodeID()
+	skippedCounter := metrics.ProxyReplicaHedgeCount.WithLabelValues(nodeID, "skipped_inflight_limit")
+	baseSkipped := testutil.ToFloat64(skippedCounter)
+
+	// Launch 30 stalled primary requests -> ceil(0.1 * 30) = 3 (> floor 2) max concurrent hedges.
+	const totalPrimaries = 30
+	errCh := make(chan error, totalPrimaries+2)
+	for i := 1; i <= totalPrimaries; i++ {
+		reqID := int64(i)
+		go func() {
+			_, err := client.Search(context.WithValue(ctx, reqIDKey{}, reqID), &ShardSearchRequest{
+				VChannel: "channel",
+				Req:      &internalpb.SearchRequest{CollectionID: 100},
+				Reducer:  newLegacySearchCollector(),
+			})
+			errCh <- err
+		}()
+	}
+
+	require.Eventually(t, func() bool {
+		return primariesStarted.Load() == totalPrimaries
+	}, time.Second, time.Millisecond)
+
+	// Wait until all 30 hedge timers have fired: 3 hedges dispatched, 27 skipped by inflight ratio limit.
+	require.Eventually(t, func() bool {
+		return hedgesDispatched.Load() == 3 && testutil.ToFloat64(skippedCounter)-baseSkipped == 27
+	}, 2*time.Second, 2*time.Millisecond)
+	require.Equal(t, int64(3), client.selection.inflightHedges.Load())
+
+	// Find one request that launched a hedge, and let its PRIMARY finish early while its loser hedge RPC remains blocked.
+	var hedgedReqID int64
+	mu.Lock()
+	for id, count := range callsPerReq {
+		if count == 2 {
+			hedgedReqID = id
+			break
+		}
+	}
+	mu.Unlock()
+	require.NotZero(t, hedgedReqID)
+	close(getPrimaryCh(hedgedReqID))
+	require.NoError(t, <-errCh)
+
+	// Even though the caller received its primary response, the un-canceled loser hedge RPC still occupies the hedge slot.
+	require.Equal(t, int64(29), client.selection.inflightPrimaries.Load())
+	require.Equal(t, int64(3), client.selection.inflightHedges.Load())
+
+	// Request 31 brings inflightPrimaries to 30 (limit = 3), so its slow primary still gets throttled by the lingering loser.
+	done31 := make(chan error, 1)
+	go func() {
+		_, err := client.Search(context.WithValue(ctx, reqIDKey{}, int64(31)), &ShardSearchRequest{
+			VChannel: "channel",
+			Req:      &internalpb.SearchRequest{CollectionID: 100},
+			Reducer:  newLegacySearchCollector(),
+		})
+		done31 <- err
+	}()
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(skippedCounter)-baseSkipped == 28
+	}, time.Second, 2*time.Millisecond)
+	require.Equal(t, int64(3), hedgesDispatched.Load())
+	close(getPrimaryCh(31))
+	require.NoError(t, <-done31)
+
+	// Now let that lingering loser hedge RPC finish: inflightHedges drops from 3 to 2.
+	hedgeReleaseOne <- struct{}{}
+	require.Eventually(t, func() bool {
+		return client.selection.inflightHedges.Load() == 2
+	}, time.Second, time.Millisecond)
+
+	// Request 32 now has 1 free hedge slot (limit = ceil(0.1 * 30) = 3, inflightHedges = 2) and wins via hedge!
+	fastHedge.Store(true)
+	plan32, err := client.Search(context.WithValue(ctx, reqIDKey{}, int64(32)), &ShardSearchRequest{
+		VChannel: "channel",
+		Req:      &internalpb.SearchRequest{CollectionID: 100},
+		Reducer:  newLegacySearchCollector(),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, plan32)
+	require.Equal(t, int64(4), hedgesDispatched.Load())
+
+	// Release remaining blocked goroutines and verify all counters return to 0.
+	close(hedgeReleaseAll)
+	for i := 1; i <= 32; i++ {
+		if int64(i) != hedgedReqID && i != 31 {
+			close(getPrimaryCh(int64(i)))
+		}
+	}
+	require.Eventually(t, func() bool {
+		return client.selection.inflightPrimaries.Load() == 0 && client.selection.inflightHedges.Load() == 0
+	}, 2*time.Second, 2*time.Millisecond)
+}
+
+func TestAtMostOneHedgeAcrossRetries(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var totalCalls atomic.Int64
+	hedgeStarted := make(chan struct{})
+	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		return adaptiveTestPlan(shard), nil
+	}}
+	service := &adaptiveTestService{search: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		callNum := totalCalls.Add(1)
+		switch callNum {
+		case 1:
+			// Round 1 primary stalls until hedge starts, then fails with retryable Unavailable.
+			select {
+			case <-hedgeStarted:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return nil, status.Error(codes.Unavailable, "primary transient failure")
+		case 2:
+			// Round 1 hedge also fails with retryable Unavailable.
+			close(hedgeStarted)
+			return nil, status.Error(codes.Unavailable, "hedge transient failure")
+		default:
+			// Round 2 primary stalls well past HedgeMinDelay (1ms), but no second hedge may be launched.
+			time.Sleep(15 * time.Millisecond)
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success(), NumQueries: req.GetShardId().GetReplicaId()}}, nil
+		}
+	}}
+
+	client := adaptiveTestClient(planner, service)
+	client.maxRetries = 5
+	// Provide 4 replicas so Round 2 still has an untried replica (4) available;
+	// only hedgedOnce prevents dispatching a second hedge on Round 2.
+	client.replicas.channels["channel"] = &replicaRoute{
+		changed:  make(chan struct{}),
+		snapshot: qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 1}, {ReplicaID: 2}, {ReplicaID: 3}, {ReplicaID: 4}}},
+	}
+
+	nodeID := paramtable.GetStringNodeID()
+	sentCounter := metrics.ProxyReplicaHedgeCount.WithLabelValues(nodeID, "sent")
+	noReplicaCounter := metrics.ProxyReplicaHedgeCount.WithLabelValues(nodeID, "skipped_no_replica")
+	baseSent := testutil.ToFloat64(sentCounter)
+	baseNoReplica := testutil.ToFloat64(noReplicaCounter)
+
+	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Equal(t, int64(3), totalCalls.Load(), "only 1 hedge may be dispatched across all retry rounds")
+	require.Equal(t, 1.0, testutil.ToFloat64(sentCounter)-baseSent)
+	require.Zero(t, testutil.ToFloat64(noReplicaCounter)-baseNoReplica)
 }

@@ -104,18 +104,19 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 	return client, closeFunc, nil
 }
 
-// The policy name is restart-only. The provider samples live tunables once per
-// shard request, keeping outstanding attempts on their original accounting mode.
+// proxyReplicaSelectionConfig samples live replica-selection and hedging
+// settings once per shard request, keeping outstanding attempts on their
+// captured mode.
 func proxyReplicaSelectionConfig() func() queryclient.ReplicaSelectionConfig {
 	p := &paramtable.Get().ProxyCfg
-	if p.ReplicaSelectionPolicy.GetValue() != "latency_weighted" {
-		return nil
-	}
 	return func() queryclient.ReplicaSelectionConfig {
 		return queryclient.ReplicaSelectionConfig{
-			Enabled: p.LatencyWeightedEnabled.GetAsBool(), Decay: p.LatencyWeightedDecay.GetAsDurationByParse(),
-			MinShare: p.LatencyWeightedMinShare.GetAsFloat(), HedgeEnabled: p.LatencyWeightedHedgeEnabled.GetAsBool(),
-			HedgeMinDelay: p.LatencyWeightedHedgeMinDelay.GetAsDurationByParse(), HedgeMinWinRate: p.LatencyWeightedHedgeMinWinRate.GetAsFloat(),
+			LatencyWeighted:       p.ReplicaSelectionPolicy.GetValue() == "latency_weighted",
+			Decay:                 p.LatencyWeightedDecay.GetAsDurationByParse(),
+			MinShare:              p.LatencyWeightedMinShare.GetAsFloat(),
+			HedgeEnabled:          p.HedgingEnabled.GetAsBool(),
+			HedgeMinDelay:         p.HedgingMinDelay.GetAsDurationByParse(),
+			HedgeMaxInflightRatio: p.HedgingMaxInflightRatio.GetAsFloat(),
 		}
 	}
 }

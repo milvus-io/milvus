@@ -201,13 +201,17 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 		}
 		return loadCheck.check(ctx)
 	}
-	choose := func(candidates []qviews.Replica) qviews.Replica {
-		return s.selection.selectReplica(key, candidates, cfg)
+	var choose func([]qviews.Replica) qviews.Replica
+	if cfg.LatencyWeighted {
+		choose = func(candidates []qviews.Replica) qviews.Replica {
+			return s.selection.selectReplica(key, candidates, cfg)
+		}
 	}
 	tried := make(map[qviews.Replica]bool)
 	deadNodes := make(map[int64]struct{})
 	var sessionChanged <-chan struct{}
 	var lastErr error
+	hedgedOnce := false
 	for attempts := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -227,13 +231,17 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 		}
 		started := time.Now()
 		results := make(chan adaptiveReplicaResult, 2)
-		launch := func(candidate qviews.Replica) *replicaObservation {
+		launch := func(candidate qviews.Replica, release func()) *replicaObservation {
 			tried[candidate] = false
 			attempts++
-			observation := s.selection.begin(key, candidate.ReplicaID, cfg)
+			var observation *replicaObservation
+			if cfg.LatencyWeighted {
+				observation = s.selection.begin(key, candidate.ReplicaID, cfg)
+			}
 			attempt := newAttempt(observation)
 			knownDead := maps.Clone(deadNodes)
 			go func() {
+				defer release()
 				plan, blocked, err := s.executeReplica(ctx, qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: key.channel}, attempt.params, knownDead)
 				var failure *workNodeFailure
 				qnFailure := errors.As(err, &failure) && failure.node.NodeType() == qviews.NodeTypeQueryNode
@@ -242,13 +250,13 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 			}()
 			return observation
 		}
-		primaryObservation := launch(primary)
+		primaryObservation := launch(primary, s.selection.enterPrimary())
 		pending := 1
 		var terminalErr error
 		hedgeSent := false
 		var hedgeTimer *time.Timer
 		var hedgeReady <-chan time.Time
-		if cfg.HedgeEnabled {
+		if cfg.HedgeEnabled && !hedgedOnce {
 			hedgeTimer = time.NewTimer(s.selection.hedgeDelay(key, cfg))
 			hedgeReady = hedgeTimer.C
 		}
@@ -265,16 +273,24 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 				return nil, ctx.Err()
 			case <-hedgeReady:
 				hedgeReady = nil
-				if !s.selection.allowHedge(key, cfg) {
+				releaseHedge, ok := s.selection.tryAcquireHedge(cfg)
+				if !ok {
+					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_inflight_limit").Inc()
+					continue
+				}
+				if !s.selection.allowHedge(key) {
+					releaseHedge()
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_low_win_rate").Inc()
 					continue
 				}
 				if candidate, ok := route.alternative(primary.ReplicaID, tried, choose); ok {
-					launch(candidate)
+					launch(candidate, releaseHedge)
 					pending++
 					hedgeSent = true
+					hedgedOnce = true
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "sent").Inc()
 				} else {
+					releaseHedge()
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_no_replica").Inc()
 				}
 			case result := <-results:

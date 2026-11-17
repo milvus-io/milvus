@@ -486,15 +486,14 @@ proxy:
   enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
-  replicaSelectionPolicy: look_aside # Replica selection policy: round_robin, look_aside, refined_look_aside, or latency_weighted. QueryView uses its existing router unless latency_weighted is selected.
+  replicaSelectionPolicy: look_aside # Replica selection policy: round_robin, look_aside, refined_look_aside, or latency_weighted. Live changes apply to new shard requests. QueryView uses its existing round-robin router unless latency_weighted is selected.
   latencyWeighted:
-    enabled: true # Enable latency-weighted QueryView replica selection when proxy.replicaSelectionPolicy is latency_weighted. Live changes apply to new shard requests.
-    decay: 10s # Time constant for successful latency samples and failure penalties.
-    minShare: 0.001 # Minimum selection share of each eligible QueryView replica.
-    hedge:
-      enabled: true # Allow one speculative replica attempt per Search/Query retry round.
-      minDelay: 200ms # Minimum delay before attempting a second QueryView replica.
-      minWinRate: 0.3 # Below this recent hedge win rate, send only ten percent of eligible hedges as probes.
+    decay: 10s # Time constant of the exponential decay for replica latency samples and failure penalties.
+    minShare: 0.001 # Minimum selection share of each eligible replica so slow or recovering replicas keep being probed.
+  hedging:
+    enabled: false # Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per shard request across all retry rounds.
+    minDelay: 200ms # Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).
+    maxInflightRatio: 0.1 # Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row

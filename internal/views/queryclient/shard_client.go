@@ -190,7 +190,7 @@ type ShardQueryRequest struct {
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
-	if cfg := s.replicaSelectionConfig(); cfg.Enabled {
+	if cfg := s.replicaSelectionConfig(); cfg.LatencyWeighted || cfg.HedgeEnabled {
 		return s.searchWithReplicaSelection(ctx, req, cfg)
 	}
 	var stage twoStageSearch
@@ -443,7 +443,7 @@ func (s *shardViewQueryClient) SearchStreams(
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
-	if cfg := s.replicaSelectionConfig(); cfg.Enabled {
+	if cfg := s.replicaSelectionConfig(); cfg.LatencyWeighted || cfg.HedgeEnabled {
 		return s.queryWithReplicaSelection(ctx, req, cfg)
 	}
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{

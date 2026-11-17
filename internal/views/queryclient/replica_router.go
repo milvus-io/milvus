@@ -177,9 +177,15 @@ func (r *replicaRoute) nextReplicaWithSelector(ctx context.Context, tried map[qv
 func (r *replicaRoute) alternative(primary int64, tried map[qviews.Replica]bool, selectReplica func([]qviews.Replica) qviews.Replica) (qviews.Replica, bool) {
 	r.mu.Lock()
 	var eligible []qviews.Replica
-	if !r.closed && r.snapshot.Valid {
-		for _, candidate := range r.snapshot.Replicas {
+	if !r.closed && r.snapshot.Valid && len(r.snapshot.Replicas) > 0 {
+		for i := 0; i < len(r.snapshot.Replicas); i++ {
+			candidate := r.snapshot.Replicas[(r.next+uint64(i))%uint64(len(r.snapshot.Replicas))]
 			if _, attempted := tried[candidate]; !attempted && candidate.ReplicaID != primary {
+				if selectReplica == nil {
+					r.next += uint64(i) + 1
+					r.mu.Unlock()
+					return candidate, true
+				}
 				eligible = append(eligible, candidate)
 			}
 		}

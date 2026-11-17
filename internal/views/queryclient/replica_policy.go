@@ -20,6 +20,7 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -28,17 +29,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-const replicaMinLatency = 100 * time.Microsecond
+const (
+	replicaMinLatency = 100 * time.Microsecond
+	// hedgeMinInflight ensures low-QPS traffic can still dispatch hedges when
+	// ceil(inflightPrimaries * maxInflightRatio) rounds below 2.
+	hedgeMinInflight = 2
+)
 
 // ReplicaSelectionConfig is sampled once per shard request. Changing the live
 // configuration never changes which policy owns an outstanding selection.
 type ReplicaSelectionConfig struct {
-	Enabled         bool
-	Decay           time.Duration
-	MinShare        float64
-	HedgeEnabled    bool
-	HedgeMinDelay   time.Duration
-	HedgeMinWinRate float64
+	LatencyWeighted       bool
+	Decay                 time.Duration
+	MinShare              float64
+	HedgeEnabled          bool
+	HedgeMinDelay         time.Duration
+	HedgeMaxInflightRatio float64
 }
 
 func (c ReplicaSelectionConfig) normalized() ReplicaSelectionConfig {
@@ -51,8 +57,8 @@ func (c ReplicaSelectionConfig) normalized() ReplicaSelectionConfig {
 	if c.HedgeMinDelay < 0 {
 		c.HedgeMinDelay = 200 * time.Millisecond
 	}
-	if math.IsNaN(c.HedgeMinWinRate) || c.HedgeMinWinRate <= 0 || c.HedgeMinWinRate > 1 {
-		c.HedgeMinWinRate = 0.3
+	if math.IsNaN(c.HedgeMaxInflightRatio) || c.HedgeMaxInflightRatio <= 0 || c.HedgeMaxInflightRatio > 1 {
+		c.HedgeMaxInflightRatio = 0.1
 	}
 	return c
 }
@@ -70,10 +76,12 @@ type replicaPolicyStats struct {
 }
 
 type replicaPolicy struct {
-	mu      sync.Mutex
-	keys    map[replicaPolicyKey]*replicaPolicyStats
-	rng     *rand.Rand
-	cleaned time.Time
+	mu                sync.Mutex
+	keys              map[replicaPolicyKey]*replicaPolicyStats
+	rng               *rand.Rand
+	cleaned           time.Time
+	inflightPrimaries atomic.Int64
+	inflightHedges    atomic.Int64
 }
 
 func newReplicaPolicy() *replicaPolicy {
@@ -186,7 +194,7 @@ func (p *replicaPolicy) begin(key replicaPolicyKey, replicaID int64, cfg Replica
 }
 
 func (o *replicaObservation) workerStarted(node qviews.WorkNode) func() {
-	if node.NodeType() != qviews.NodeTypeQueryNode {
+	if o == nil || node.NodeType() != qviews.NodeTypeQueryNode {
 		return func() {}
 	}
 	o.mu.Lock()
@@ -200,6 +208,9 @@ func (o *replicaObservation) workerStarted(node qviews.WorkNode) func() {
 }
 
 func (o *replicaObservation) overtaken(ctx context.Context) {
+	if o == nil {
+		return
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	// Planning shares the primary WAL owner. Its stalls are not evidence
@@ -217,6 +228,9 @@ func (o *replicaObservation) overtaken(ctx context.Context) {
 }
 
 func (o *replicaObservation) finish(ctx context.Context, err error, workerFailure, success bool) {
+	if o == nil {
+		return
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.finished = true
@@ -242,6 +256,25 @@ func replicaAttemptPenalty(ctx context.Context, start, now time.Time) time.Durat
 	return min(max(penalty, now.Sub(start)), time.Hour)
 }
 
+func (p *replicaPolicy) enterPrimary() func() {
+	p.inflightPrimaries.Add(1)
+	return func() { p.inflightPrimaries.Add(-1) }
+}
+
+func (p *replicaPolicy) tryAcquireHedge(cfg ReplicaSelectionConfig) (func(), bool) {
+	for {
+		curHedges := p.inflightHedges.Load()
+		curPrimaries := p.inflightPrimaries.Load()
+		limit := max(int64(hedgeMinInflight), int64(math.Ceil(float64(curPrimaries)*cfg.HedgeMaxInflightRatio)))
+		if curHedges >= limit {
+			return nil, false
+		}
+		if p.inflightHedges.CompareAndSwap(curHedges, curHedges+1) {
+			return func() { p.inflightHedges.Add(-1) }, true
+		}
+	}
+}
+
 func (p *replicaPolicy) hedgeDelay(key replicaPolicyKey, cfg ReplicaSelectionConfig) time.Duration {
 	p.mu.Lock()
 	stats := p.keys[key]
@@ -258,7 +291,7 @@ func (p *replicaPolicy) hedgeDelay(key replicaPolicyKey, cfg ReplicaSelectionCon
 	return delay
 }
 
-func (p *replicaPolicy) allowHedge(key replicaPolicyKey, cfg ReplicaSelectionConfig) bool {
+func (p *replicaPolicy) allowHedge(key replicaPolicyKey) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	stats := p.keys[key]
@@ -266,7 +299,7 @@ func (p *replicaPolicy) allowHedge(key replicaPolicyKey, cfg ReplicaSelectionCon
 		return true
 	}
 	rate, enough := stats.hedges.winRate(time.Now())
-	return !enough || rate >= cfg.HedgeMinWinRate || p.rng.Float64() < hedgeProbeRate
+	return !enough || rate >= defaultHedgeMinWinRate || p.rng.Float64() < hedgeProbeRate
 }
 
 func (p *replicaPolicy) completed(key replicaPolicyKey, latency time.Duration, success, hedgeSent, hedgeWon bool) {

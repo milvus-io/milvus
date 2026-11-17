@@ -430,7 +430,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "replica_hedge_total",
-			Help:      "hedged attempts of the latency_weighted replica selection, by decision",
+			Help:      "hedged read attempts on proxy, by decision",
 		}, []string{nodeIDLabelName, "decision"})
 
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
