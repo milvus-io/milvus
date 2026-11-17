@@ -1684,7 +1684,11 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     // Each index owns the cache for its storage.
     auto loader = std::make_unique<milvus::segcore::SealedIndexLoader>(
-        load_index_info, ctx, file_manager_context, config, op_ctx,
+        load_index_info,
+        ctx,
+        file_manager_context,
+        config,
+        op_ctx,
         std::move(vector_data_view_scope));
     load_index_info->index_family = loader->Family();
     load_index_info->index_value_type = loader->ValueType();
