@@ -413,3 +413,88 @@ func TestTwoStageSearchStreamsMergeMultipleWorkerCosts(t *testing.T) {
 	bit, _ := featureusage.ExecBit(featureusage.FeatureTwoStageSearch)
 	require.NotZero(t, chunk.GetFeatureBits()&bit)
 }
+
+func TestLegacyTwoStageSearchChannelCountWithRetry(t *testing.T) {
+	enableTwoStageSearch(t)
+	setupTestReplicaRouting(t)
+	channels := []string{"p_1v0", "p_1v1"}
+	var mu sync.Mutex
+	var counts []int32
+	optimize := mockey.Mock(optimizers.OptimizeSearchParams).To(func(_ context.Context, req *querypb.SearchRequest, _ optimizers.QueryHook, _ int, _ bool, _ func(int64) int64, _ string) (*querypb.SearchRequest, error) {
+		mu.Lock()
+		counts = append(counts, req.GetTotalChannelNum())
+		mu.Unlock()
+		return req, nil
+	}).Build()
+	defer optimize.UnPatch()
+
+	for _, streaming := range []bool{false, true} {
+		name := "batch"
+		if streaming {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			counts = nil
+			plans := make(map[string]int)
+			failed := false
+			planClient := &legacyPlanClient{getQueryPlan: func(_ context.Context, id qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+				mu.Lock()
+				plans[id.VChannel]++
+				mu.Unlock()
+				response := twoStageResponse(id)
+				response.Plan.WorkNodes = response.Plan.WorkNodes[:1]
+				response.Plan.GetLegacySearchRequest().Nq = 1
+				response.Plan.GetLegacySearchRequest().MetricType = "IP"
+				return response, nil
+			}}
+			failOnce := func(channel string) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				if channel == channels[0] && !failed {
+					failed = true
+					return true
+				}
+				return false
+			}
+			service := &legacyServiceClient{
+				searchOnView: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+					if req.GetExecutionOptions().GetFilterOnly() {
+						return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success(), SealedSegmentIDsSearched: []int64{10, 20}, FilterValidCounts: []int64{2, 3}}}, nil
+					}
+					if failOnce(req.GetShardId().GetVchannel()) {
+						return nil, viewerror.NewViewNotFound("retry")
+					}
+					return &viewpb.SearchOnViewResponse{LegacyResults: newTestSearchChunk(5, []int64{1}, []float32{0.9})}, nil
+				},
+				searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					if failOnce(req.GetShardId().GetVchannel()) {
+						return &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: viewerror.NewViewNotFound("retry")}}}, nil
+					}
+					id := int64(1)
+					if req.GetShardId().GetVchannel() == channels[1] {
+						id = 2
+					}
+					return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(5, []int64{id}, []float32{0.9})}}}, nil
+				},
+			}
+			client := newLegacyClient(ViewQueryClientConfig{MaxRetries: 3}, planClient, service, &legacyResolver{vchannels: channels})
+			defer client.shardClient.replicas.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			result, err := client.Search(ctx, &LegacySearchRequest{Req: &internalpb.SearchRequest{Nq: 1, Topk: 5, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER}, AllowStreaming: streaming, ReduceStreamChunkBytes: 1024})
+			require.NoError(t, err)
+			if streaming {
+				defer result.Stream.Close()
+				for {
+					_, err := result.Stream.Recv()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+				}
+			}
+			require.Equal(t, map[string]int{channels[0]: 2, channels[1]: 1}, plans)
+			require.Equal(t, []int32{2, 2, 2}, counts)
+		})
+	}
+}

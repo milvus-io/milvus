@@ -270,13 +270,14 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 	vchannelStreams, shardPlans, streamPlans, err := openVchannelStreams(ctx, len(vchannels),
 		func(setupCtx context.Context, register func(context.CancelFunc), i int) ([]searchreducestream.ReduceStream, *ShardPlan, error) {
 			return c.shardClient.SearchStreams(ctx, &ShardSearchRequest{
-				VChannel:       vchannels[i],
-				Req:            req.Req,
-				MVCC:           req.MVCC,
-				BarrierMVCC:    req.BarrierMVCC,
-				retryErrors:    req.RetryErrors,
-				setupCtx:       setupCtx,
-				registerCancel: register,
+				TotalChannelNum: int32(len(vchannels)),
+				VChannel:        vchannels[i],
+				Req:             req.Req,
+				MVCC:            req.MVCC,
+				BarrierMVCC:     req.BarrierMVCC,
+				retryErrors:     req.RetryErrors,
+				setupCtx:        setupCtx,
+				registerCancel:  register,
 			}, chunkBytes)
 		}, func(streams []searchreducestream.ReduceStream) {
 			for _, stream := range streams {
