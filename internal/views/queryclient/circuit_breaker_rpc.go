@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Observe at the RPC boundary, before reduction, optimization or rendering.
+// Observe QueryNode RPCs before reduction, optimization or rendering.
 // Retained requery also uses this wrapper but never changes its pinned plan.
 type circuitBreakingViewClient struct {
 	owner *shardViewQueryClient
@@ -17,8 +17,14 @@ type circuitBreakingViewClient struct {
 }
 
 func observeViewRPC[T any](ctx context.Context, c *circuitBreakingViewClient, node qviews.WorkNode, shard *viewpb.ShardID, version *viewpb.QueryViewVersion, call func() (T, error)) (T, error) {
+	qn, ok := node.(qviews.QueryNode)
+	if !ok {
+		// StreamingNode ownership/readiness is handled by its WAL client. Its
+		// handoff errors do not invalidate a View on the new owner.
+		return call()
+	}
 	b := c.owner.breaker
-	token := b.observeStart(ctx, node)
+	token := b.observeStart(ctx, qn)
 	// Retained calls have no planning attempt, but must still fence stale TTL
 	// observations by the time execution actually began.
 	if token.attempt == nil {
@@ -39,7 +45,7 @@ func observeViewRPC[T any](ctx context.Context, c *circuitBreakingViewClient, no
 		}
 	}
 	key := qviews.QueryViewKey{ShardID: qviews.FromProtoShardID(shard), QueryViewVersion: qviews.FromProtoQueryViewVersion(version)}
-	b.observe(ctx, node, key, token, observed)
+	b.observe(ctx, qn, key, token, observed)
 	return resp, err
 }
 

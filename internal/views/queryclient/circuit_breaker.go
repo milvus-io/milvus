@@ -33,7 +33,7 @@ type QueryViewCircuitBreakerConfig struct {
 	MaxViews             int
 }
 
-// QueryViewCircuitBreaker shares observations across requests, never topology.
+// QueryViewCircuitBreaker shares QueryNode observations across requests, never topology.
 // Node connections recover through exclusive probes; gone sessions and invalid
 // View identities are bounded negative caches. All state is protected by mu.
 type QueryViewCircuitBreaker struct {
@@ -209,12 +209,8 @@ func (a *routingAttempt) releaseUnused(plan *viewpb.QueryPlan) {
 	}
 }
 
-func (b *QueryViewCircuitBreaker) observeStart(ctx context.Context, node qviews.WorkNode) nodeObservation {
+func (b *QueryViewCircuitBreaker) observeStart(ctx context.Context, qn qviews.QueryNode) nodeObservation {
 	a, _ := ctx.Value(routingAttemptKey{}).(*routingAttempt)
-	qn, ok := node.(qviews.QueryNode)
-	if !ok {
-		return nodeObservation{attempt: a, started: time.Now()}
-	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	token := nodeObservation{entry: b.nodes[qn.ID], attempt: a, started: time.Now()}
@@ -262,7 +258,7 @@ func (b *QueryViewCircuitBreaker) excludeViewLocked(key qviews.QueryViewKey, sta
 	b.notifyLocked()
 }
 
-func (b *QueryViewCircuitBreaker) observe(ctx context.Context, node qviews.WorkNode, key qviews.QueryViewKey, token nodeObservation, err error) {
+func (b *QueryViewCircuitBreaker) observe(ctx context.Context, qn qviews.QueryNode, key qviews.QueryViewKey, token nodeObservation, err error) {
 	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) || status.Code(err) == codes.Canceled || status.Code(err) == codes.DeadlineExceeded || (merr.GetErrorType(err) == merr.InputError) {
 		return
 	}
@@ -280,10 +276,6 @@ func (b *QueryViewCircuitBreaker) observe(ctx context.Context, node qviews.WorkN
 				token.attempt.failedViews[key] = now.Add(b.cfg.ViewExclusionTTL)
 			}
 		}
-	}
-	qn, isQN := node.(qviews.QueryNode)
-	if !isQN {
-		return
 	}
 	entry := b.nodes[qn.ID]
 	var session *viewerror.NodeSessionUnavailable

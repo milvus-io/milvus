@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -134,6 +135,27 @@ func TestQueryViewRPCDoesNotWaitForViewOrRequestErrors(t *testing.T) {
 	}
 }
 
+func TestQueryPlanExclusionReturnsToOrchestratorWithoutReadinessRetry(t *testing.T) {
+	for _, converted := range []bool{false, true} {
+		t.Run(fmt.Sprint(converted), func(t *testing.T) {
+			failure := viewerror.NewGRPCStatusFromError(viewerror.NewAllCandidatesExcluded()).Err()
+			if converted {
+				failure = viewerror.ConvertViewError(viewpb.QueryPlanService_GetQueryPlan_FullMethodName, failure)
+			}
+			call := mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).Return(nil, failure).Build()
+			defer call.UnPatch()
+			wait := mockey.Mock(fakeAssignmentWatcher.Watch).Return(context.Canceled).Build()
+			defer wait.UnPatch()
+			client := newTestHandlerClient(&fakeQueryPlanServiceClient{}, nil, nil)
+			_, err := client.QueryViewClient().GetQueryPlan(t.Context(), "p0_100v0", &viewpb.GetQueryPlanRequest{})
+			require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err)).IsAllCandidatesExcluded())
+			require.Equal(t, codes.Aborted, grpcstatus.Code(err))
+			require.Equal(t, 1, call.Times())
+			require.Zero(t, wait.Times())
+		})
+	}
+}
+
 func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 	for _, scenario := range []string{"deadline", "cancel", "already canceled", "closed client"} {
 		mockey.PatchConvey(scenario, t, func() {
@@ -194,6 +216,9 @@ func TestQueryViewRPCUsesWALWaitForReady(t *testing.T) {
 			require.NotNil(t, cfg.WaitForReady, method)
 			require.True(t, *cfg.WaitForReady, method)
 			require.Equal(t, walConfig.RetryPolicy, cfg.RetryPolicy, method)
+			// Exclusion requires fresh constraints from Proxy, never a transparent
+			// gRPC retry of the same request.
+			require.NotContains(t, cfg.RetryPolicy.RetryableStatusCodes, codes.Aborted, method)
 		}
 	})
 }
