@@ -66,6 +66,7 @@ func TestToMilvusErrorProtocolMapping(t *testing.T) {
 		{viewerror.NewViewNotFound("missing"), merr.ErrQueryViewNotReady},
 		{viewerror.NewOnShutdownError("stopping"), merr.ErrServiceUnavailable},
 		{viewerror.NewNotPrimaryError("moved"), merr.ErrServiceUnavailable},
+		{viewerror.NewAllCandidatesExcluded(), merr.ErrServiceUnavailable},
 		{viewerror.NewUnknownError("unexpected"), merr.ErrServiceInternal},
 	} {
 		for _, source := range []error{tc.source, viewerror.ConvertViewError("QueryOnView", viewerror.NewGRPCStatusFromViewError(tc.source).Err())} {

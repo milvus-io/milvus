@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -90,14 +89,14 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		}
 	}()
 
-	if req == nil || req.GetShardId() == nil {
-		return nil, viewerror.NewUnknownError("query plan request misses shard id")
+	if req.GetVchannel() == "" {
+		return nil, viewerror.NewUnknownError("query plan request misses vchannel")
 	}
 	if w.queryViewHandler == nil {
 		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
 	}
 
-	shardID := qviews.FromProtoShardID(req.GetShardId())
+	shardID := qviews.ShardID{VChannel: req.GetVchannel(), ReplicaID: qviews.UnknownReplicaID}
 	var schemaVersion int32
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
@@ -105,12 +104,11 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		schemaVersion = request.LegacyRetrieveRequest.GetSchemaVersion()
 	}
-	var lease *snview.QueryViewLease
-	if req.GetStatisticsRequest() != nil {
-		lease, err = w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
-	} else {
-		lease, err = w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
+	var schema *int32
+	if req.GetStatisticsRequest() == nil {
+		schema = &schemaVersion
 	}
+	lease, err := w.queryViewHandler.AcquireUpViewForRouting(ctx, req.GetVchannel(), schema, req.GetRoutingConstraints())
 	if err != nil {
 		return nil, err
 	}

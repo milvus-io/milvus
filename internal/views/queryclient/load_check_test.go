@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -91,8 +90,8 @@ func TestReplicaLoadCheckPreservesErrorsAndDoesNotCacheNotLoaded(t *testing.T) {
 
 func TestLoadCheckAllQueryEntrypoints(t *testing.T) {
 	plans := &fakeQueryPlanClient{}
-	patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-		require.Equal(t, qviews.UnknownReplicaID, shard.ReplicaID)
+	patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		require.Equal(t, "p_100v0", shard)
 		return nil, viewerror.NewViewNotFound("no serving view")
 	}).Build()
 	defer patch.UnPatch()

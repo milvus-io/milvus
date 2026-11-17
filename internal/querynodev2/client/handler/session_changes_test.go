@@ -7,7 +7,9 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 )
 
@@ -15,6 +17,24 @@ type sessionTestResolver struct{ resolver.Resolver }
 
 func (*sessionTestResolver) Watch(context.Context, func(resolver.VersionedState) error) error {
 	panic("mockey")
+}
+
+func TestSessionGoneRequiresObservedRemoval(t *testing.T) {
+	s := &sessionChanges{changed: make(chan struct{}), members: make(map[int64]struct{}), gone: make(map[int64]time.Time)}
+	empty := resolver.VersionedState{}
+	s.update(empty)
+	require.False(t, s.Gone(11), "initial absence is not confirmed deletion")
+	present := resolver.VersionedState{State: grpcresolver.State{Addresses: []grpcresolver.Address{{Attributes: attributes.WithServerID(new(attributes.Attributes), 11)}}}}
+	s.update(present)
+	require.False(t, s.Gone(11))
+	s.update(empty)
+	require.True(t, s.Gone(11))
+	s.update(present)
+	require.False(t, s.Gone(11), "a contradictory fresh membership must not keep an old tombstone")
+	s.gone[12] = time.Now().Add(-time.Second)
+	require.False(t, s.Gone(12))
+	s.update(present)
+	require.Empty(t, s.gone)
 }
 
 func TestSessionChangesBroadcastAndJoin(t *testing.T) {

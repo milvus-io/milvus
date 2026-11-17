@@ -288,6 +288,16 @@ func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID 
 }
 
 func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
+	return h.acquireUpViewWithExclusions(ctx, shardID, schema, nil)
+}
+
+// AcquireUpViewForRouting applies request-local exclusions before any View
+// lease or inline execution. A nil schema is used only for statistics.
+func (h *SNQueryViewHandler) AcquireUpViewForRouting(ctx context.Context, vchannel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*QueryViewLease, error) {
+	return h.acquireUpViewWithExclusions(ctx, qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}, schema, qviews.NewQueryRoutingExclusions(vchannel, constraints))
+}
+
+func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, shardID qviews.ShardID, schema *int32, exclusions *qviews.QueryRoutingExclusions) (*QueryViewLease, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -309,19 +319,25 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 		// hide an already servable one. Never nest shard locks under h.mu.
 		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
 		recovering := false
+		excluded := false
 		for _, candidate := range candidates {
-			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema)
+			lease, changed, err := candidate.tryAcquireUpViewWithExclusions(ctx, schema, exclusions)
 			if lease != nil {
 				return lease, nil
 			}
 			if err == nil {
 				recovering = true
+			} else if viewerror.AsViewError(err).IsAllCandidatesExcluded() {
+				excluded = true
 			} else if !viewerror.AsViewError(err).IsViewNotFound() {
 				return nil, err
 			}
 			if changed != nil {
 				waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(changed)})
 			}
+		}
+		if excluded {
+			return nil, viewerror.NewAllCandidatesExcluded()
 		}
 		if !recovering {
 			return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())

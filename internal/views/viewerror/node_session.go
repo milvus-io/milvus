@@ -6,6 +6,9 @@ package viewerror
 type NodeSessionUnavailable struct {
 	Cause   error
 	Changed <-chan struct{}
+	// Gone requires observing this exact session disappear from discovery.
+	// A missing picker entry alone is not sufficient evidence.
+	Gone bool
 }
 
 func (e *NodeSessionUnavailable) Error() string { return e.Cause.Error() }

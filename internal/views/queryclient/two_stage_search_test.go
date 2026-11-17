@@ -112,7 +112,7 @@ func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	service := &fakeViewQueryServiceClient{}
 	var mu sync.Mutex
 	plans, filters, anns := 0, 0, 0
-	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 		plans++
 		planResponse := twoStageResponse(id)
 		plan := planResponse.GetPlan()

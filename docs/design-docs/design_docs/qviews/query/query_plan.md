@@ -4,8 +4,9 @@
 
 The WAL adaptor selects the highest Up QueryView whose SchemaVersion exactly
 matches the legacy request. Version zero is an exact schema identity too.
-It never substitutes the latest schema. For an unknown replica ID, the handler
-locates the local shard by vchannel and returns its real identity in the plan.
+It never substitutes the latest schema. The planning request supplies a vchannel; the handler selects a replica and
+returns its real identity in the plan. Request-local Node/View exclusions are
+applied before the serving lease or any inline execution.
 Matching UpRecovering state waits for local recovery; missing or unusable views
 return the existing View errors.
 

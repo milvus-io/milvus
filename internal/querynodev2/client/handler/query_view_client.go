@@ -70,7 +70,8 @@ func executeViewQueryRPC[T any](
 	}
 	resp, err := call(contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, nodeID)), client)
 	if picker.IsErrSubConnNoExist(err) {
-		err = &viewerror.NodeSessionUnavailable{Cause: err, Changed: changed}
+		gone := qvc.owner.sessionChanges != nil && qvc.owner.sessionChanges.Gone(nodeID)
+		err = &viewerror.NodeSessionUnavailable{Cause: err, Changed: changed, Gone: gone}
 	}
 	return resp, err
 }

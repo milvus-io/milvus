@@ -208,8 +208,8 @@ type legacyPlanClient struct {
 	plans map[string]*viewpb.QueryPlan
 }
 
-func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
+func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID]}, nil
 }
 
 func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {

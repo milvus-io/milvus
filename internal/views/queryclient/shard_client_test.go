@@ -129,7 +129,7 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 
 	// Strong consistency targets the WAL owner, which selects the replica;
 	// it needs no cross-replica MVCC round trip.
-	require.Equal(t, (qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}).IntoProto(), planClient.planReq.GetShardId())
+	require.Equal(t, vchannel, planClient.planReq.GetVchannel())
 	require.Equal(t, commonpb.ConsistencyLevel_Strong, planClient.planReq.GetConsistencyLevel())
 	require.Nil(t, planClient.planReq.GetQueryPlanMvcc())
 	require.Equal(t, 0, planClient.mvccReqCount)
@@ -146,7 +146,7 @@ type fakeQueryPlanClient struct {
 	mvccReqCount          int
 }
 
-func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	f.planReq = proto.Clone(req).(*viewpb.GetQueryPlanRequest)
 	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary}, nil
 }

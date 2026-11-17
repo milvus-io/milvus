@@ -15,18 +15,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func publishReplicaView(t *testing.T, h *SNQueryViewHandler, resources *mockResourceManager, replica int64, vc string, version int64, schema int32) qviews.QueryViewKey {
+func publishReplicaView(t *testing.T, h *SNQueryViewHandler, resources *mockResourceManager, replica int64, vc string, version int64, schema int32, nodes ...int64) qviews.QueryViewKey {
 	t.Helper()
 	meta := buildHandlerTestMeta(version)
 	meta.ReplicaId, meta.Vchannel, meta.SchemaVersion = replica, vc, schema
-	view := qviews.NewQueryViewAtStreamingNode(meta, &viewpb.QueryViewOfStreamingNode{})
+	var queryNodes []*viewpb.QueryViewOfQueryNode
+	for _, id := range nodes {
+		queryNodes = append(queryNodes, &viewpb.QueryViewOfQueryNode{NodeId: id})
+	}
+	view := qviews.NewFullQueryViewAtStreamingNode(meta, &viewpb.QueryViewOfStreamingNode{}, queryNodes)
 	h.ApplyViews([]handler.ApplyView{{View: view}})
 	acquired, ok := resources.getAcquired(view.QueryViewKey())
 	require.True(t, ok)
 	acquired.OnReady()
 	up := proto.Clone(meta).(*viewpb.QueryViewMeta)
 	up.State = viewpb.QueryViewState_QueryViewStateUp
-	h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtStreamingNode(up, &viewpb.QueryViewOfStreamingNode{})}})
+	h.ApplyViews([]handler.ApplyView{{View: qviews.NewFullQueryViewAtStreamingNode(up, &viewpb.QueryViewOfStreamingNode{}, queryNodes)}})
 	return view.QueryViewKey()
 }
 
@@ -141,4 +145,34 @@ func TestReplicaIndexRemovesOnlyMatchingShardIncarnation(t *testing.T) {
 	h.makeOnEmpty(id)(current)
 	h.CloseForHandoff()
 	require.Nil(t, h.getOrCreateShard(id))
+}
+
+func TestReplicaRoutingExcludesBeforeLeaseAndNeverFallsBackToOldVersion(t *testing.T) {
+	resources := newMockResourceManager()
+	h := recoverSNQueryViewHandler(t.Context(), testPChannel, newMockCatalog(), resources, nil)
+	publishReplicaView(t, h, resources, 11, testVChannel, 1, 0, 101)
+	latest := publishReplicaView(t, h, resources, 11, testVChannel, 2, 0, 101)
+	publishReplicaView(t, h, resources, 22, testVChannel, 3, 0, 102)
+	constraints := &viewpb.QueryRoutingConstraints{ExcludedQueryViews: []*viewpb.QueryViewIdentity{{ReplicaId: 11, Version: latest.QueryViewVersion.IntoProto()}}}
+	schema := int32(0)
+	for range 3 {
+		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+		require.NoError(t, err)
+		require.EqualValues(t, 22, lease.Meta.ReplicaId)
+		lease.Release()
+	}
+	entry := h.shards[latest.ShardID].views[latest.QueryViewVersion]
+	require.Zero(t, entry.queryRefs)
+	require.True(t, entry.leaseExpireAt.IsZero(), "excluded View must not receive a serving lease")
+	constraints.ExcludedQueryNodeIds = []int64{102}
+	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+	require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded())
+	require.False(t, viewerror.AsViewError(err).IsViewNotFound())
+	// A newer exact-schema View in the excluded replica is a separate identity.
+	publishReplicaView(t, h, resources, 11, testVChannel, 4, 0, 103)
+	lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+	require.NoError(t, err)
+	require.EqualValues(t, 11, lease.Meta.ReplicaId)
+	require.EqualValues(t, 4, lease.Version.QueryVersion)
+	lease.Release()
 }
