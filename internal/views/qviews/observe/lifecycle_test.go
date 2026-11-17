@@ -92,3 +92,114 @@ func TestStreamingNodeUnrecoverablePrepareEndsAsError(t *testing.T) {
 	require.NoError(t, histogram.Write(&after))
 	require.Equal(t, before.GetHistogram().GetSampleCount()+1, after.GetHistogram().GetSampleCount())
 }
+
+func histogramSampleCount(t *testing.T, observer prometheus.Observer) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, observer.(prometheus.Metric).Write(&m))
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestQueryNodeLifecycleWaitsForAllSegmentsReady(t *testing.T) {
+	o := NewMetricsObserver()
+	ctx := context.Background()
+	view := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "qn-multi-seg", ReplicaID: 1}}
+	inflight := metrics.QueryStageInflight.WithLabelValues("queryNode", "view_load", "prepare")
+	baseline := testutil.ToFloat64(inflight)
+	successHist := metrics.QueryStageDuration.WithLabelValues("queryNode", "view_load", "prepare", "success")
+	beforeSuccess := histogramSampleCount(t, successHist)
+
+	o.Observe(ctx, QueryNodeAcquireSegmentsEvent{View: view, SegmentCount: 2})
+	require.Len(t, o.lifecycles, 1)
+	require.Equal(t, baseline+1, testutil.ToFloat64(inflight))
+
+	// First segment ready: view remains Preparing, so timer must stay active.
+	o.Observe(ctx, QueryNodeSegmentsReadyEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: view,
+			From: qviews.QueryViewStatePreparing,
+			To:   qviews.QueryViewStatePreparing,
+		},
+		ReadySegmentCount: 1,
+	})
+	require.Len(t, o.lifecycles, 1)
+	require.Equal(t, baseline+1, testutil.ToFloat64(inflight))
+	require.Equal(t, beforeSuccess, histogramSampleCount(t, successHist))
+
+	// Final segment ready: view reaches Ready, completing preparation once.
+	o.Observe(ctx, QueryNodeSegmentsReadyEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: view,
+			From: qviews.QueryViewStatePreparing,
+			To:   qviews.QueryViewStateReady,
+		},
+		ReadySegmentCount: 1,
+	})
+	require.Empty(t, o.lifecycles)
+	require.Equal(t, baseline, testutil.ToFloat64(inflight))
+	require.Equal(t, beforeSuccess+1, histogramSampleCount(t, successHist))
+
+	// Duplicate ready callback after completion does not emit another observation.
+	o.Observe(ctx, QueryNodeSegmentsReadyEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: view,
+			From: qviews.QueryViewStateReady,
+			To:   qviews.QueryViewStateReady,
+		},
+	})
+	require.Equal(t, beforeSuccess+1, histogramSampleCount(t, successHist))
+}
+
+func TestQueryNodeLifecyclePartialProgressPreservesFailureAndCancel(t *testing.T) {
+	o := NewMetricsObserver()
+	ctx := context.Background()
+	inflight := metrics.QueryStageInflight.WithLabelValues("queryNode", "view_load", "prepare")
+	baseline := testutil.ToFloat64(inflight)
+	successHist := metrics.QueryStageDuration.WithLabelValues("queryNode", "view_load", "prepare", "success")
+	errorHist := metrics.QueryStageDuration.WithLabelValues("queryNode", "view_load", "prepare", "error")
+	canceledHist := metrics.QueryStageDuration.WithLabelValues("queryNode", "view_load", "prepare", "canceled")
+	beforeSuccess := histogramSampleCount(t, successHist)
+	beforeError := histogramSampleCount(t, errorHist)
+	beforeCanceled := histogramSampleCount(t, canceledHist)
+
+	failedView := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "qn-partial-fail", ReplicaID: 1}}
+	o.Observe(ctx, QueryNodeAcquireSegmentsEvent{View: failedView, SegmentCount: 2})
+	o.Observe(ctx, QueryNodeSegmentsReadyEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: failedView,
+			From: qviews.QueryViewStatePreparing,
+			To:   qviews.QueryViewStatePreparing,
+		},
+		ReadySegmentCount: 1,
+	})
+	o.Observe(ctx, QueryNodeSegmentUnrecoverableEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: failedView,
+			From: qviews.QueryViewStatePreparing,
+			To:   qviews.QueryViewStateUnrecoverable,
+		},
+	})
+	o.Observe(ctx, QueryNodeReleaseSegmentsEvent{View: failedView})
+	require.Empty(t, o.lifecycles)
+	require.Equal(t, baseline, testutil.ToFloat64(inflight))
+	require.Equal(t, beforeSuccess, histogramSampleCount(t, successHist))
+	require.Equal(t, beforeError+1, histogramSampleCount(t, errorHist))
+	require.Equal(t, beforeCanceled, histogramSampleCount(t, canceledHist))
+
+	canceledView := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "qn-partial-cancel", ReplicaID: 1}}
+	o.Observe(ctx, QueryNodeAcquireSegmentsEvent{View: canceledView, SegmentCount: 2})
+	o.Observe(ctx, QueryNodeSegmentsReadyEvent{
+		ViewStateTransition: ViewStateTransition{
+			View: canceledView,
+			From: qviews.QueryViewStatePreparing,
+			To:   qviews.QueryViewStatePreparing,
+		},
+		ReadySegmentCount: 1,
+	})
+	o.Observe(ctx, QueryNodeReleaseSegmentsEvent{View: canceledView})
+	require.Empty(t, o.lifecycles)
+	require.Equal(t, baseline, testutil.ToFloat64(inflight))
+	require.Equal(t, beforeSuccess, histogramSampleCount(t, successHist))
+	require.Equal(t, beforeError+1, histogramSampleCount(t, errorHist))
+	require.Equal(t, beforeCanceled+1, histogramSampleCount(t, canceledHist))
+}

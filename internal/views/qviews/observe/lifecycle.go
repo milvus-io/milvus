@@ -87,10 +87,14 @@ func (o *MetricsObserver) observeLifecycle(event Event) {
 		}
 	case QueryNodeSegmentsReadyEvent:
 		view = e.View
-		finish = true
+		if e.To == qviews.QueryViewStateReady || e.To == qviews.QueryViewStateUp {
+			finish = true
+		}
 	case StreamingNodeResourceReadyEvent:
 		view = e.View
-		finish = true
+		if e.To == qviews.QueryViewStateReady || e.To == qviews.QueryViewStateUp {
+			finish = true
+		}
 	case StreamingNodeReportViewEvent:
 		view = e.View
 		if e.State == qviews.QueryViewStateUnrecoverable {
@@ -121,8 +125,10 @@ func (o *MetricsObserver) observeLifecycle(event Event) {
 		}
 	case QueryNodeSegmentUnrecoverableEvent:
 		view = e.View
-		finish = true
-		result = stage.Error
+		if e.To == qviews.QueryViewStateUnrecoverable {
+			finish = true
+			result = stage.Error
+		}
 	default:
 		return
 	}
