@@ -176,6 +176,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
 	}
+	req := t.req
+	sourceCM, err := importutilv2.NewSourceChunkManager(t.ctx, req.GetOptions(), t.cm)
+	if err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := t.GetBufferSize()
 	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		mlog.Int64("bufferSize", bufferSize),
@@ -185,8 +191,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
-	req := t.req
-	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, req.GetStorageConfig(), req.GetOptions())
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions())
 
 	fn := func(ctx context.Context, file *internalpb.ImportFile, rowBuffer, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, int(rowBuffer), deleteBudget, shared)
