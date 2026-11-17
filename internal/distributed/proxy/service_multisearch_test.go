@@ -33,7 +33,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
-	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -153,10 +152,6 @@ func startMultiSearchTestProxy(t *testing.T, component types.ProxyComponent) mil
 	return newMultiSearchTestClient(t, server.grpcExternalServer)
 }
 
-func grpcSearchItem(request *milvuspb.SearchRequest) *milvuspb.MultiSearchSubRequest {
-	return &milvuspb.MultiSearchSubRequest{Request: &milvuspb.MultiSearchSubRequest_Search{Search: request}}
-}
-
 func TestMultiSearchGRPCRejectsInvalidBatch(t *testing.T) {
 	proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
 	t.Cleanup(func() { proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
@@ -170,20 +165,8 @@ func TestMultiSearchGRPCRejectsInvalidBatch(t *testing.T) {
 	require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrParameterMissing)
 	require.Empty(t, response.GetResults())
 
-	futureOperation := &milvuspb.MultiSearchSubRequest{}
-	futureOperation.ProtoReflect().SetUnknown(protowire.AppendBytes(protowire.AppendTag(nil, 2, protowire.BytesType), nil))
 	response, err = client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests: []*milvuspb.MultiSearchSubRequest{
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers"}),
-			futureOperation,
-		},
-	})
-	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrParameterInvalid)
-	require.Empty(t, response.GetResults())
-
-	response, err = client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests:  []*milvuspb.MultiSearchSubRequest{grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers"})},
+		Requests:  []*milvuspb.SearchRequest{{CollectionName: "papers"}},
 		TimeoutMs: proto.Int64(-1),
 	})
 	require.NoError(t, err)
@@ -203,7 +186,7 @@ func TestMultiSearchGRPCRejectsInvalidIdentity(t *testing.T) {
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs(util.HeaderAuthorize, "!"))
 
 	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests: []*milvuspb.MultiSearchSubRequest{grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers"})},
+		Requests: []*milvuspb.SearchRequest{{CollectionName: "papers"}},
 	})
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
 	require.Nil(t, response)
@@ -312,36 +295,38 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
 		MaxConcurrency: 2,
 		TimeoutMs:      proto.Int64(budget.Milliseconds()),
-		Requests: []*milvuspb.MultiSearchSubRequest{
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: vectorInput}),
-			grpcSearchItem(&milvuspb.SearchRequest{DbName: "explicit_db", CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: &milvuspb.SearchRequest_Ids{
+		Requests: []*milvuspb.SearchRequest{
+			{CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: vectorInput},
+			{DbName: "explicit_db", CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: &milvuspb.SearchRequest_Ids{
 				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
-			}}),
-			grpcSearchItem(&milvuspb.SearchRequest{DbName: "denied_db", CollectionName: collection, Nq: 2, SearchInput: vectorInput}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 2, SearchInput: vectorInput, SubReqs: []*milvuspb.SubSearchRequest{{Nq: 2}}}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 1, SearchInput: vectorInput}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: -1, SearchInput: vectorInput}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{}}}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, PartitionNames: []string{"["}, Nq: 2, SearchInput: vectorInput}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: collection, Nq: 2, SearchInput: vectorInput}),
+			}},
+			{DbName: "denied_db", CollectionName: collection, Nq: 2, SearchInput: vectorInput},
+			{CollectionName: collection, Nq: 2, SearchInput: vectorInput, SubReqs: []*milvuspb.SubSearchRequest{{Nq: 2}}},
+			{CollectionName: collection, Nq: 1, SearchInput: vectorInput},
+			{CollectionName: collection, Nq: -1, SearchInput: vectorInput},
+			{CollectionName: collection, Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}},
+			{CollectionName: collection, SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{}}},
+			{CollectionName: collection, PartitionNames: []string{"["}, Nq: 2, SearchInput: vectorInput},
+			{CollectionName: collection, Nq: 2, SearchInput: vectorInput},
+			{},
+			nil,
 		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
-	require.Len(t, response.GetResults(), 10)
+	require.Len(t, response.GetResults(), 12)
 	for i, nq := range map[int]int64{0: 2, 1: 3, 9: 2} {
-		result := response.GetResults()[i].GetSearch()
+		result := response.GetResults()[i]
 		require.NoError(t, merr.Error(result.GetStatus()))
 		require.Equal(t, collection, result.GetCollectionName())
 		require.Equal(t, uint64(1234), result.GetSessionTs())
 		require.Equal(t, nq, result.GetResults().GetNumQueries())
 		require.Len(t, result.GetResults().GetTopks(), int(nq))
 	}
-	require.ErrorIs(t, merr.Error(response.GetResults()[2].GetSearch().GetStatus()), merr.ErrPrivilegeNotPermitted)
-	require.Nil(t, response.GetResults()[2].GetSearch().GetResults())
-	for i := 3; i <= 8; i++ {
-		require.ErrorIs(t, merr.Error(response.GetResults()[i].GetSearch().GetStatus()), merr.ErrParameterInvalid, "item %d", i)
+	require.ErrorIs(t, merr.Error(response.GetResults()[2].GetStatus()), merr.ErrPrivilegeNotPermitted)
+	require.Nil(t, response.GetResults()[2].GetResults())
+	for _, i := range []int{3, 4, 5, 6, 7, 8, 10, 11} {
+		require.ErrorIs(t, merr.Error(response.GetResults()[i].GetStatus()), merr.ErrParameterInvalid, "item %d", i)
 	}
 	require.Len(t, charges, 3)
 	require.Equal(t, charge{11, map[int64][]int64{101: {1001}}, 2}, <-charges)
@@ -375,7 +360,7 @@ func TestMultiSearchGRPCUnimplementedOnOldService(t *testing.T) {
 	t.Cleanup(cancel)
 
 	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests: []*milvuspb.MultiSearchSubRequest{grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers"})},
+		Requests: []*milvuspb.SearchRequest{{CollectionName: "papers"}},
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Nil(t, response)
@@ -417,16 +402,16 @@ func TestMultiSearchGRPCPreservesSearchHookFields(t *testing.T) {
 	ids := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
 	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
 		MaxConcurrency: 1,
-		Requests: []*milvuspb.MultiSearchSubRequest{
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-reader"}),
-			grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-owner", SkipRls: true}),
+		Requests: []*milvuspb.SearchRequest{
+			{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-reader"},
+			{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-owner", SkipRls: true},
 		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
 	require.Len(t, response.GetResults(), 2)
 	for _, result := range response.GetResults() {
-		require.NoError(t, merr.Error(result.GetSearch().GetStatus()))
+		require.NoError(t, merr.Error(result.GetStatus()))
 	}
 	require.Len(t, seen, 2)
 	require.Equal(t, hookFields{"paper-reader", false}, <-seen)
@@ -484,24 +469,24 @@ func TestMultiSearchGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.
 		response, err := client.MultiSearch(parent, &milvuspb.MultiSearchRequest{
 			MaxConcurrency: 1,
 			TimeoutMs:      proto.Int64(budget.Milliseconds()),
-			Requests: []*milvuspb.MultiSearchSubRequest{
-				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "ready", SearchInput: input}),
-				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "active", SearchInput: input}),
-				grpcSearchItem(&milvuspb.SearchRequest{CollectionName: "undispatched", SearchInput: input}),
+			Requests: []*milvuspb.SearchRequest{
+				{CollectionName: "ready", SearchInput: input},
+				{CollectionName: "active", SearchInput: input},
+				{CollectionName: "undispatched", SearchInput: input},
 			},
 		})
 		require.NoError(t, err)
 		require.NoError(t, parent.Err())
 		require.NoError(t, merr.Error(response.GetStatus()))
 		require.Len(t, response.GetResults(), 3)
-		ready := response.GetResults()[0].GetSearch()
+		ready := response.GetResults()[0]
 		require.NoError(t, merr.Error(ready.GetStatus()))
 		require.Equal(t, "ready", ready.GetCollectionName())
 		require.Equal(t, uint64(42), ready.GetSessionTs())
 		require.Equal(t, []int64{0}, ready.GetResults().GetTopks())
 		for _, item := range response.GetResults()[1:] {
-			require.Equal(t, merr.TimeoutCode, item.GetSearch().GetStatus().GetCode())
-			require.Nil(t, item.GetSearch().GetResults())
+			require.Equal(t, merr.TimeoutCode, item.GetStatus().GetCode())
+			require.Nil(t, item.GetResults())
 		}
 		synctest.Wait()
 		require.Len(t, started, 2)

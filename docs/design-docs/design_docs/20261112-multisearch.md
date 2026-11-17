@@ -12,18 +12,18 @@ Related request [#41791](https://github.com/milvus-io/milvus/issues/41791).
 
 ## API
 
-MultiSearch accepts an ordered, nonempty list. Each item wraps one Search
-request. The operation discriminator leaves room for additional operations in a
-future protocol revision. Each Search can specify its own target, filter, search
+MultiSearch accepts an ordered, nonempty list of Search requests. The gRPC
+request and response contain `SearchRequest` and `SearchResults` directly.
+Each Search can specify its own target, filter, search
 parameters, output fields, and query vectors.
 
 | Concept | gRPC | REST V2 |
 | --- | --- | --- |
 | Entry point | `MilvusService.MultiSearch` | `POST /v2/vectordb/entities/multi_search` |
-| Search list | `requests[].search` | `requests[].search` |
+| Search list | `requests[]` | `requests[].search` |
 | In-flight items per batch | `max_concurrency` | `maxConcurrency` |
 | Optional execution budget in milliseconds | `timeout_ms` | `timeoutMs` |
-| Ordered results | `results[].search` | `data[].search` |
+| Ordered results | `results[]` | `data[].search` |
 
 For example, this REST payload searches two collections, with two query vectors
 in the first item and one in the second.
@@ -46,9 +46,10 @@ and fewer hits than requested are successful outcomes. Each failed item
 contains its Search error. An entire list of item failures is a valid batch
 response.
 
-Invalid authentication, an empty batch, an unrecognized operation, or a full
-batch queue fails the entire request before any Search begins. Malformed fields
-inside a recognized Search, such as a missing collection name, fail that item.
+Invalid authentication, an empty batch, or a full batch queue fails the entire
+request before any Search begins. REST also rejects an item without a recognized
+`search` object at this stage. Malformed fields inside a Search, such as a
+missing collection name or an empty gRPC Search request, fail that item.
 A transport error can prevent delivery of the response after searches have
 already run. Clients can identify a Proxy that predates MultiSearch through
 the gRPC unimplemented-method status.

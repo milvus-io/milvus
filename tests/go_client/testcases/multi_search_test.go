@@ -81,12 +81,9 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 	missing := proto.CloneOf(req)
 	missing.CollectionName += "_missing"
 
-	wrap := func(search *milvuspb.SearchRequest) *milvuspb.MultiSearchSubRequest {
-		return &milvuspb.MultiSearchSubRequest{Request: &milvuspb.MultiSearchSubRequest_Search{Search: search}}
-	}
 	service := archive.GetService()
 	batch := &milvuspb.MultiSearchRequest{
-		Requests:       []*milvuspb.MultiSearchSubRequest{wrap(req), wrap(missing), wrap(explicit), wrap(empty)},
+		Requests:       []*milvuspb.SearchRequest{req, missing, explicit, empty},
 		MaxConcurrency: 2,
 	}
 	response, err := service.MultiSearch(ctx, batch)
@@ -94,40 +91,42 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 	require.Len(t, response.GetResults(), 4)
 
 	for _, i := range []int{0, 2, 3} {
-		ordinary, err := service.Search(ctx, batch.Requests[i].GetSearch())
+		ordinary, err := service.Search(ctx, batch.Requests[i])
 		require.NoError(t, merr.CheckRPCCall(ordinary, err))
-		item := response.Results[i].GetSearch()
+		item := response.Results[i]
 		require.NotNil(t, item)
 		require.NoError(t, merr.Error(item.GetStatus()))
 		require.Equal(t, ordinary.GetCollectionName(), item.GetCollectionName())
 		require.True(t, proto.Equal(ordinary.GetResults(), item.GetResults()), "item %d differs from Search", i)
 		require.EqualValues(t, 2, item.GetResults().GetNumQueries())
 	}
-	require.Equal(t, []int64{2, 2}, response.Results[0].GetSearch().GetResults().GetTopks())
-	require.Equal(t, int64(101), response.Results[0].GetSearch().GetResults().GetIds().GetIntId().GetData()[0])
-	require.Equal(t, int64(1), response.Results[2].GetSearch().GetResults().GetIds().GetIntId().GetData()[0])
-	failure := response.Results[1].GetSearch()
+	require.Equal(t, []int64{2, 2}, response.Results[0].GetResults().GetTopks())
+	require.Equal(t, int64(101), response.Results[0].GetResults().GetIds().GetIntId().GetData()[0])
+	require.Equal(t, int64(1), response.Results[2].GetResults().GetIds().GetIntId().GetData()[0])
+	failure := response.Results[1]
 	require.NotNil(t, failure)
 	require.ErrorIs(t, merr.Error(failure.GetStatus()), merr.ErrCollectionNotFound)
 	require.Nil(t, failure.GetResults())
-	require.Empty(t, response.Results[3].GetSearch().GetResults().GetIds().GetIntId().GetData())
+	require.Empty(t, response.Results[3].GetResults().GetIds().GetIntId().GetData())
 
 	t.Run("unused database metadata", func(t *testing.T) {
 		missingDB := metadata.AppendToOutgoingContext(ctx, "dbname", db+"_missing")
 		resp, err := service.MultiSearch(missingDB, &milvuspb.MultiSearchRequest{
-			Requests: []*milvuspb.MultiSearchSubRequest{wrap(explicit)},
+			Requests: []*milvuspb.SearchRequest{explicit},
 		})
 		require.NoError(t, merr.CheckRPCCall(resp, err))
 		require.Len(t, resp.GetResults(), 1)
-		require.NoError(t, merr.Error(resp.Results[0].GetSearch().GetStatus()))
+		require.NoError(t, merr.Error(resp.Results[0].GetStatus()))
 	})
-	t.Run("invalid operation", func(t *testing.T) {
+	t.Run("empty search fails per item", func(t *testing.T) {
 		resp, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-			Requests: []*milvuspb.MultiSearchSubRequest{wrap(req), {}},
+			Requests: []*milvuspb.SearchRequest{req, {}},
 		})
-		require.NoError(t, err)
-		require.Error(t, merr.Error(resp.GetStatus()))
-		require.Empty(t, resp.GetResults())
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Len(t, resp.GetResults(), 2)
+		require.NoError(t, merr.Error(resp.Results[0].GetStatus()))
+		require.ErrorIs(t, merr.Error(resp.Results[1].GetStatus()), merr.ErrParameterInvalid)
+		require.Nil(t, resp.Results[1].GetResults())
 	})
 	t.Run("budget exhausted", func(t *testing.T) {
 		zero := int64(0)
@@ -139,9 +138,9 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 		require.NoError(t, merr.CheckRPCCall(resp, err))
 		require.Len(t, resp.GetResults(), len(batch.GetRequests()))
 		for _, item := range resp.GetResults() {
-			require.NotNil(t, item.GetSearch())
-			require.Equal(t, merr.TimeoutCode, item.GetSearch().GetStatus().GetCode())
-			require.Nil(t, item.GetSearch().GetResults())
+			require.NotNil(t, item)
+			require.Equal(t, merr.TimeoutCode, item.GetStatus().GetCode())
+			require.Nil(t, item.GetResults())
 		}
 	})
 }

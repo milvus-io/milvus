@@ -58,11 +58,7 @@ func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchReque
 		return fail(err)
 	}
 	items := make([]proxy.MultiSearchPrepare, len(requests))
-	for i, item := range requests {
-		search := item.GetSearch()
-		if search == nil {
-			return fail(merr.WrapErrParameterInvalidMsg("requests[%d] requires a search", i))
-		}
+	for i, search := range requests {
 		items[i] = func(ctx context.Context) (*milvuspb.SearchRequest, error) {
 			return prepareMultiSearchRequest(ctx, search)
 		}
@@ -79,18 +75,18 @@ func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchReque
 		}
 		return fail(err)
 	}
-	response := &milvuspb.MultiSearchResponse{
+	return &milvuspb.MultiSearchResponse{
 		Status:  merr.Success(),
-		Results: make([]*milvuspb.MultiSearchSubResult, len(results)),
-	}
-	for i, result := range results {
-		response.Results[i] = &milvuspb.MultiSearchSubResult{Result: &milvuspb.MultiSearchSubResult_Search{Search: result}}
-	}
-	return response, nil
+		Results: results,
+	}, nil
 }
 
 func prepareMultiSearchRequest(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchRequest, error) {
 	request := proto.CloneOf(search)
+	if request == nil {
+		// A nil repeated message is encoded as an empty Search request on the wire.
+		request = &milvuspb.SearchRequest{}
+	}
 	request.DbName = proxy.GetCurDBNameFromRequestOrContext(ctx, request)
 	if err := dql.NormalizeMultiSearchNQ(request); err != nil {
 		return nil, err
