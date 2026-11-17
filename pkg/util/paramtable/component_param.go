@@ -3712,7 +3712,7 @@ Disabled if the value is less or equal to 0.`,
 	p.EnableReduceStream = ParamItem{
 		Key:          "proxy.queryView.enableReduceStream",
 		Version:      "3.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
 		Export:       true,
 	}

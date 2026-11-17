@@ -531,7 +531,7 @@ proxy:
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
   queryView:
-    enableReduceStream: false # Refreshable. Route supported new requests through Streaming Reduce.
+    enableReduceStream: true # Refreshable. Route supported new requests through Streaming Reduce.
     reduceStreamChunkBytes: 262144 # Refreshable. Reducible-payload byte threshold captured once per request.
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:

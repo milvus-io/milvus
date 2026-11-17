@@ -98,7 +98,7 @@ not resume from a partial position. See [Search](../../../internal/proxy/dql/tas
 
 | Server YAML key | Default |
 | --- | --- |
-| `proxy.queryView.enableReduceStream` | `false` |
+| `proxy.queryView.enableReduceStream` | `true` |
 | `proxy.queryView.reduceStreamChunkBytes` | `262144` |
 
 Both [settings](../../../configs/milvus.yaml#L528) are refreshable: Proxy captures
@@ -905,7 +905,7 @@ Sources: [reserved messages](../../../pkg/proto/view.proto#L450),
 ```yaml
 proxy:
   queryView:
-    enableReduceStream: false
+    enableReduceStream: true
     reduceStreamChunkBytes: 262144
 ```
 
