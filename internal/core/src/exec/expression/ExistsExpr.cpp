@@ -266,6 +266,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     auto shredding_fields =
                         index->GetShreddingFieldsWithPrefix(pointer);
                     for (const auto& field : shredding_fields) {
+                        // Descendants only add matches. Avoid reading another
+                        // column (especially array contents) once all rows match.
+                        if (res_view.all()) {
+                            break;
+                        }
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
                         if (index->GetShreddingJsonType(field) ==
@@ -288,7 +293,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                 }
 
                 // process shared data
-                {
+                if (!res_view.all()) {
                     milvus::ScopedTimer timer(
                         "exists_json_stats_shared_data", [this](double us) {
                             json_stats_shared_latency_us_ += us;
