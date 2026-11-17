@@ -1,9 +1,11 @@
-# Latency-weighted QueryView replica selection
+# Latency-weighted QueryView replica selection and hedged reads
 
 Related issue: [#55587](https://github.com/milvus-io/milvus/issues/55587).
 The time-decayed latency, failure accrual, p99 trigger, and hedge win-rate
 algorithms originate in [#55588](https://github.com/milvus-io/milvus/pull/55588)
-by @xiaofan-luan. This implementation applies them to master's QueryView client.
+by @xiaofan-luan. This implementation applies them to master's QueryView client
+with live-refreshable policy selection, orthogonal hedging configuration, and
+concurrent speculative load bounding.
 
 ## Problem and scope
 
@@ -13,20 +15,25 @@ replica. The existing replica directory already supplies eligible replica IDs
 and versions; it does not rank them by observed request latency or race a slow
 attempt against another replica.
 
-The opt-in policy covers shard Search and Query in both QueryView client entry
-points. Statistics and requery bound to retained Search plans keep their existing
-execution paths. The default proxy policy and existing QueryView round-robin
-routing remain unchanged. This is a local proxy routing choice, with no durable
-metadata, WAL message, or cross-cluster replication change.
+Replica selection (`proxy.replicaSelectionPolicy`) and hedged execution
+(`proxy.hedging.*`) are configured orthogonally and cover shard Search and Query
+in both QueryView client entry points. Statistics and requery bound to retained
+Search plans keep their existing execution paths. Defaults remain unchanged
+(`proxy.replicaSelectionPolicy: look_aside`, which preserves QueryView's
+round-robin router, and `proxy.hedging.enabled: false`). Both can be toggled
+live for new shard requests without restarting the proxy. This is a local proxy
+routing choice, with no durable metadata, WAL message, or cross-cluster
+replication change.
 
 ## Selection and feedback
 
-A proxy records observations separately for each channel, operation, and
-consistency level. Each replica has a time-decayed successful latency mean,
-consecutive negative observations, a decaying penalty, and an in-flight count.
-Selection weight is `1 / (latency * (in-flight count + 1))`. Unknown or stale replicas inherit the mean of known
-eligible replicas. A probability floor preserves exploration. Inactivity alone
-does not count as failure or create a penalty.
+When `proxy.replicaSelectionPolicy` is `latency_weighted`, a proxy records
+observations separately for each channel, operation, and consistency level. Each
+replica has a time-decayed successful latency mean, consecutive negative
+observations, a decaying penalty, and an in-flight count. Selection weight is
+`1 / (latency * (in-flight count + 1))`. Unknown or stale replicas inherit the
+mean of known eligible replicas. A probability floor preserves exploration.
+Inactivity alone does not count as failure or create a penalty.
 
 Three consecutive negative observations apply a penalty. Only failures from
 QueryNode execution, or a hedge overtaking an attempt with currently outstanding
@@ -36,25 +43,54 @@ growing-side stall alone does not penalize any replica. A single attempt cannot
 record both an overtake and a late error as two negative observations. A late
 success still records its measured latency and resets consecutive failures.
 
+Note that `retryableQueryError` intentionally retains QueryView's existing retry
+classification (view/session changes and transport unavailability) rather than
+retrying worker business errors such as `CodeMemAllocateFailed` (OOM) across
+replicas inside `shard_client`, avoiding cascading OOM amplification while still
+recording negative replica feedback for subsequent routing.
+
 Selections retain the configuration sampled at shard-request entry. Live
 configuration changes cannot leave unmatched accounting for dispatched work.
 Idle replica entries are pruned even when their channel remains active. Idle
 channel/class entries are also reclaimed. Cleanup is lazy, at most once per
 minute; no additional background goroutine is required.
 
-## Hedged execution
+## Hedged execution and speculative load budget
 
-The first attempt uses weighted selection. After the greater of the configured
-minimum delay and recent successful request p99, the client may dispatch one
-additional replica from the current subscribed directory snapshot. The lookup
-performs no coordinator RPC and never waits for a refreshed directory. An
-invalid snapshot or absence of another eligible replica skips that hedge. Normal
-retry and subscription handling continue to handle view/session changes.
+Hedging can be enabled under any `proxy.replicaSelectionPolicy` (using weighted
+selection under `latency_weighted` and QueryView round-robin otherwise). After
+the greater of `proxy.hedging.minDelay` and the recent successful request p99,
+the client may dispatch one speculative attempt to another replica from the
+current subscribed directory snapshot. The lookup performs no coordinator RPC
+and never waits for a refreshed directory. An invalid snapshot or absence of
+another eligible replica skips that hedge.
 
-Recent hedge outcomes suppress speculative work when its win rate is low, while
-ten percent of eligible opportunities remain probes. Quantile sorting operates
-on a copied sample ring outside the policy mutex. Retry rounds retain the
-existing attempt budget/full-pass rules, with at most one hedge per round.
+To prevent retry-times-hedge multiplication and overload cascades, speculative
+work is bounded by three mechanisms:
+
+1. **Single hedge per shard request**: At most one hedge attempt is dispatched
+   across the entire lifecycle of a shard request (across all failure-retry
+   rounds), keeping `proxy.hedging.*` orthogonal to sequential error retries.
+2. **In-flight hedge ratio cap (`proxy.hedging.maxInflightRatio`, default `0.1`)**:
+   The proxy bounds concurrent in-flight hedged attempts to
+   `max(2, ceil(maxInflightRatio * inflightPrimaries))`. Importantly, a hedge
+   slot is held until the hedged RPC goroutine actually finishes, not when the
+   outer request returns. Un-canceled loser attempts still running on QueryNodes
+   continue occupying hedge budget.
+   - **Why `0.1` (10%), referencing gRPC**: `0.1` matches the standard 10%
+     speculative/retry budget popularized by gRPC (`gRFC A6` `retryThrottling`
+     `tokenRatio: 0.1`) and Google SRE tail-tolerant designs. In steady state,
+     the p99 trigger fires on ~1% of requests, so a 10% concurrent cap gives 10x
+     headroom. During a single-replica stall (e.g., Replica A hangs for seconds
+     while Replica B answers in 20ms), hedged calls to healthy Replica B finish
+     in 20ms and immediately recycle their in-flight slots (dozens of rescues
+     per slot per second). Conversely, under cluster-wide overload where every
+     replica is slow, slow hedges hold their slots for the full execution
+     duration, immediately capping extra concurrent load on both QueryNodes and
+     the shared WAL owner StreamingNode at <= 10% with zero window lag.
+3. **Win-rate guard**: In low-concurrency regimes where the minimum floor of 2
+   slots exceeds 10%, recent hedge outcomes additionally cut unproductive hedges
+   (win rate below 30% over at least 10 samples in 10s) to 10% recovery probes.
 
 Every attempt owns its GetQueryPlan request payload, plan, response buffers,
 and two-stage Search state. All workers must succeed before an attempt can
@@ -83,46 +119,44 @@ Selecting a winner does not cancel already dispatched loser RPCs. Existing
 caller cancellation and per-attempt error cancellation remain in force. This
 avoids introducing an earlier cancellation that could interact with QueryNode
 SearchTask merging. Consequently, speculative work can continue after a winner
-is known until it completes or the request context ends.
+is known until it completes or the request context ends, accounted for by the
+in-flight hedge budget above.
 
 All replicas share the primary WAL owner for planning and growing data.
-Hedging therefore cannot bypass that common dependency and can add load to it.
-The implementation makes no cluster-wide throughput or recovery-time claim;
-those require workload and fault benchmarks.
+Hedging therefore cannot bypass that common dependency, though the concurrent
+in-flight cap strictly bounds additional planning and growing load.
 
 ## Configuration and observability
 
-Set `proxy.replicaSelectionPolicy: latency_weighted` before starting the proxy.
-The policy name is restart-only. Its live settings are:
+All settings are live-refreshable (`refreshable: true`) and apply to new shard
+requests:
 
-| Setting under `proxy.latencyWeighted` | Default | Meaning |
+| Setting | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `true` | New shard requests use this policy; false restores existing QueryView routing. |
-| `decay` | `10s` | Latency and penalty decay time constant. |
-| `minShare` | `0.001` | Minimum share per eligible replica, capped by replica count. |
-| `hedge.enabled` | `true` | Permit one extra attempt per retry round. |
-| `hedge.minDelay` | `200ms` | Lower limit of the p99-based trigger. |
-| `hedge.minWinRate` | `0.3` | Below this recent win rate, retain only ten-percent probes. |
+| `proxy.replicaSelectionPolicy` | `look_aside` | Replica selection policy (`round_robin`, `look_aside`, `refined_look_aside`, or `latency_weighted`); QueryView uses round-robin unless `latency_weighted` is selected. |
+| `proxy.latencyWeighted.decay` | `10s` | Exponential decay time constant for replica latency samples and failure penalties. |
+| `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection share per eligible replica, capped by replica count. |
+| `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `replicaSelectionPolicy`. |
+| `proxy.hedging.minDelay` | `200ms` | Lower bound of the p99-based hedge trigger delay. |
+| `proxy.hedging.maxInflightRatio` | `0.1` | Maximum ratio of concurrent in-flight hedged attempts to in-flight hedgeable primaries (floor 2). |
 
 `milvus_proxy_replica_hedge_total` uses only proxy node ID and decision labels:
-`sent`, `won`, `skipped_low_win_rate`, and `skipped_no_replica`. It does not create
-per-channel or per-replica metric series. Master currently exposes no resource
-group selection in this QueryView request contract; the policy uses only the
-replicas offered by its existing directory.
+`sent`, `won`, `skipped_inflight_limit`, `skipped_low_win_rate`, and
+`skipped_no_replica`. It does not create per-channel or per-replica metric
+series. Master currently exposes no resource group selection in this QueryView
+request contract; the policy uses only the replicas offered by its existing
+directory.
 
 ## Verification
 
 Deterministic tests hold the first QueryNode dispatch open to demonstrate the
-baseline wait and the enabled hedge's complete winner. Other tests cover fixed
-MVCC, exact retained selections, empty Query, isolated late loser results,
-two-stage Search, retained requery failure, local target selection, feedback
-attribution, and idle replica cleanup. Existing router/session/retry tests cover
-the disabled path, whose executeShard implementation is unchanged.
-Search and Query regression tests also cover wire-encoded worker OOM followed
-by sibling success, both failure orders, retry exhaustion, InputError followed
-by sibling success, all-attempt failure, single-attempt InputError, and caller
-cancellation while the sibling is pending.
-
-Distributed fault injection, workload throughput measurements, and cancellation
-isolation across merged QueryNode tasks remain follow-up validation before
-considering default enablement or active loser cancellation.
+baseline wait and the enabled hedge's complete winner, both with
+`latency_weighted` and with decoupled round-robin hedging. Additional tests
+verify the concurrent in-flight hedge ratio limit, lingering-loser slot
+occupancy, single-hedge-per-shard enforcement across retry rounds, fixed MVCC,
+exact retained selections, empty Query, isolated late loser results, two-stage
+Search, retained requery failure, local target selection, feedback attribution,
+and idle replica cleanup. Search and Query regression tests cover wire-encoded
+worker OOM followed by sibling success, both failure orders, retry exhaustion,
+InputError followed by sibling success, all-attempt failure, single-attempt
+InputError, and caller cancellation while the sibling is pending.

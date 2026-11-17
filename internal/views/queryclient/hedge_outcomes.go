@@ -23,6 +23,9 @@ const (
 	// hedgeWinRateMinSamples is the number of outcomes within hedgeWindow
 	// below which the win rate is not acted upon.
 	hedgeWinRateMinSamples = 10
+	// defaultHedgeMinWinRate suppresses speculative hedges when recent win rate
+	// falls below this threshold, retaining hedgeProbeRate as recovery probes.
+	defaultHedgeMinWinRate = 0.3
 	// hedgeProbeRate is the probability a hedge is still sent with when the
 	// win rate is below the minimum: the probes let the win rate recover.
 	hedgeProbeRate = 0.1
