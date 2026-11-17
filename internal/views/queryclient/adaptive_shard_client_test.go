@@ -915,7 +915,9 @@ func TestHedgeInflightRatioLimitAndLoserOccupancy(t *testing.T) {
 	require.NoError(t, <-errCh)
 
 	// Even though the caller received its primary response, the un-canceled loser hedge RPC still occupies the hedge slot.
-	require.Equal(t, int64(29), client.selection.inflightPrimaries.Load())
+	require.Eventually(t, func() bool {
+		return client.selection.inflightPrimaries.Load() == 29
+	}, time.Second, 5*time.Millisecond)
 	require.Equal(t, int64(3), client.selection.inflightHedges.Load())
 
 	// Request 31 brings inflightPrimaries to 30 (limit = 3), so its slow primary still gets throttled by the lingering loser.

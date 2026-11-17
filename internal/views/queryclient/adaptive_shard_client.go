@@ -180,6 +180,7 @@ type adaptiveReplicaResult struct {
 	candidate qviews.Replica
 	attempt   *adaptiveShardAttempt
 	plan      *ShardPlan
+	latency   time.Duration
 	blocked   bool
 	err       error
 }
@@ -240,13 +241,14 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 			}
 			attempt := newAttempt(observation)
 			knownDead := maps.Clone(deadNodes)
+			attemptStarted := time.Now()
 			go func() {
 				defer release()
 				plan, blocked, err := s.executeReplica(ctx, qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: key.channel}, attempt.params, knownDead)
 				var failure *workNodeFailure
 				qnFailure := errors.As(err, &failure) && failure.node.NodeType() == qviews.NodeTypeQueryNode
 				observation.finish(ctx, err, qnFailure, err == nil && !blocked)
-				results <- adaptiveReplicaResult{candidate: candidate, attempt: attempt, plan: plan, blocked: blocked, err: err}
+				results <- adaptiveReplicaResult{candidate: candidate, attempt: attempt, plan: plan, latency: time.Since(attemptStarted), blocked: blocked, err: err}
 			}()
 			return observation
 		}
@@ -310,7 +312,7 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 						metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "won").Inc()
 						primaryObservation.overtaken(ctx)
 					}
-					s.selection.completed(key, time.Since(started), true, hedgeSent, hedgeWon)
+					s.selection.completed(key, result.latency, true, hedgeSent, hedgeWon)
 					return result.plan, nil
 				}
 				lastErr = result.err
