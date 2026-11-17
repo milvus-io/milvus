@@ -150,11 +150,7 @@ PROTOC_GEN_GO_GRPC_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go-grpc  
 INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
-ifeq ($(index_engine),cardinal)
-    WITH_GPU ?= ON
-else
-    WITH_GPU ?= OFF
-endif
+WITH_GPU ?= OFF
 unexport WITH_GPU
 
 ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)

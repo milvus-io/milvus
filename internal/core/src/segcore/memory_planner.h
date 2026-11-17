@@ -120,6 +120,21 @@ struct CellSpec {
         0;  // extra transient bytes during loading; 0 = memory_size
 };
 
+// One contiguous batch, shared by sealed loading and growing recovery.
+struct CellLoadBatch {
+    size_t file_idx;
+    int64_t rg_offset;
+    int64_t rg_count;
+    int64_t batch_loaded_memory_bytes = 0;
+    size_t batch_loading_overhead_bytes = 0;
+    std::vector<CellSpec> cells;
+};
+
+// Sorts cells by file/offset and groups neighbors by estimated transient bytes.
+// A cell larger than the positive split target occupies its own batch.
+[[nodiscard]] std::vector<CellLoadBatch>
+PlanCellLoadBatches(std::vector<CellSpec> cell_specs, int64_t memory_limit);
+
 struct LoadedCell {
     int64_t cid;
     std::unique_ptr<milvus::GroupChunk> chunk;

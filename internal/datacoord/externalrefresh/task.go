@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -222,9 +223,28 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	starts map[string]uint64,
 	logFields ...mlog.Field,
 ) error {
+	return applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx, mt, collectionID, 0, baselineSegmentIDs, keptSegmentIDs, updatedSegments, starts, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta.Meta, collectionID, jobID int64, baselineSegmentIDs, keptSegmentIDs []int64, updatedSegments []*datapb.SegmentInfo, logFields ...mlog.Field) error {
+	return applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx, mt, collectionID, jobID, baselineSegmentIDs, keptSegmentIDs, updatedSegments, nil, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx context.Context, mt *meta.Meta, collectionID, jobID int64, baselineSegmentIDs, keptSegmentIDs []int64, updatedSegments []*datapb.SegmentInfo, starts map[string]uint64, logFields ...mlog.Field) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
 	}
+	if g := mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, jobID, ""); jobID != 0 && g != nil {
+		if g.State == model.SegmentChangeStateCommitted {
+			mt.RecomputeDataView(ctx, collectionID)
+			return nil
+		}
+		if g.IsTerminal() {
+			return mt.RequirePublishedChange(ctx, g)
+		}
+		return nil // The checker retains the job until this group publishes.
+	}
+	staging := jobID != 0 && Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
 	mlog.Info(ctx, "processing external collection update response",
 		append(logFields,
 			mlog.FieldCollectionID(collectionID),
@@ -364,6 +384,18 @@ func applyExternalCollectionSegmentUpdateAtFence(
 		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
+	// A same-ID patch changes a visible segment's manifest. The current group
+	// record carries only membership, so it cannot roll that patch back if
+	// publication fails. Keep mixed and patch-only refreshes on the legacy
+	// composite update until content patches are part of the group protocol.
+	if staging {
+		for id := range upsertSegmentMap {
+			if _, patch := baselineSegmentMap[id]; patch {
+				staging = false
+				break
+			}
+		}
+	}
 
 	// Build update operators
 	var operators []meta.UpdateOperator
@@ -451,6 +483,9 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	// Operator 1: Drop only the segment IDs selected during validation. For an
 	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *meta.UpdateSegmentPack) bool {
+		if staging {
+			return true
+		}
 		for _, segmentID := range segmentsToDrop {
 			current := modPack.Peek(segmentID)
 			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
@@ -490,6 +525,9 @@ func applyExternalCollectionSegmentUpdateAtFence(
 			}
 
 			segInfo := meta.NewSegmentInfo(incoming)
+			if staging {
+				segInfo.IsInvisible = true
+			}
 			modPack.Segments[incoming.GetID()] = segInfo
 
 			modPack.Increments[incoming.GetID()] = metastore.BinlogsIncrement{
@@ -505,6 +543,25 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	}
 
 	// Execute all operators atomically
+	if staging {
+		var newIDs []int64
+		for _, seg := range normalizedUpdatedSegments {
+			if _, patch := baselineSegmentMap[seg.GetID()]; !patch {
+				newIDs = append(newIDs, seg.GetID())
+			}
+		}
+		_, _, err := mt.StageAdmittedChange(mt.Ctx, &model.SegmentChangeGroup{
+			GroupID: jobID, SourceJobID: jobID,
+			Source: model.SegmentChangeSourceExternalRefresh, CollectionID: collectionID, NewSegmentIDs: newIDs, SupersededSegmentIDs: segmentsToDrop,
+		}, true, operators...)
+		if err != nil {
+			return err
+		}
+		// The checker nudges index builds once this refresh's source/spec is
+		// visible in collection meta. A build dispatched here can use the old
+		// external location and fail permanently.
+		return nil // Registration succeeded; publication is a later job phase.
+	}
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err

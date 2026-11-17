@@ -180,8 +180,10 @@ func (policy *StorageVersionUpgradePolicy) TriggerOneCollection(ctx context.Cont
 	formatEnabled := paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
 	targetFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 
+	excluded := policy.meta.SegmentChangeCompactionExclusions(collectionID)
 	segments := policy.meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 		return meta.IsSegmentHealthy(segment) &&
+			!excluded.Contain(segment.GetID()) &&
 			meta.IsFlushed(segment) &&
 			!segment.IsCompacting &&
 			!segment.GetIsImporting() &&
