@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -305,6 +306,12 @@ func TestListLocalRunningRequests(t *testing.T) {
 	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: 1 << 40})
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetRequests())
+
+	// the largest threshold the field can carry excludes every request
+	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: math.MaxInt64})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Empty(t, resp.GetRequests())
 }
 
 func TestCancelLocalRequests(t *testing.T) {
@@ -315,7 +322,8 @@ func TestCancelLocalRequests(t *testing.T) {
 	defer node.unregisterRequest(entry)
 
 	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{
-		RequestIds: []string{testReqID(1), testReqID(2)},
+		// a repeated id does not repeat its row in the answer
+		RequestIds: []string{testReqID(1), testReqID(2), testReqID(1), testReqID(2)},
 		Reason:     "too heavy",
 	})
 	require.NoError(t, err)

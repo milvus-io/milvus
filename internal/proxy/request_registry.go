@@ -354,7 +354,7 @@ func (node *Proxy) ListLocalRunningRequests(ctx context.Context, request *milvus
 		DBName:         request.GetDbName(),
 		CollectionName: request.GetCollectionName(),
 		User:           request.GetUser(),
-		MinElapsed:     time.Duration(request.GetMinElapsedMs()) * time.Millisecond,
+		MinElapsedMs:   request.GetMinElapsedMs(),
 	})
 	return &milvuspb.ListRunningRequestsResponse{
 		Status:   merr.Success(),
