@@ -2,8 +2,6 @@
 package viewfeedback
 
 import (
-	"slices"
-	"sort"
 	"sync"
 	"time"
 
@@ -56,14 +54,10 @@ type replicaFeedback struct {
 }
 
 type shardFeedback struct {
-	rates   [4]float64
-	windows []feedbackContribution // Sorted by the Node's report time.
-	recent  [4]windowAggregate
-}
-
-type windowAggregate struct {
-	requestCount uint64
-	startedAt    int64
+	rates         [4]float64
+	windows       []feedbackContribution // Append-only, strictly disjoint Node windows.
+	recent        [4]uint64
+	lastWindowEnd int64 // Retained after expiration to reject late windows.
 }
 
 // Counts are reverted; LastAccess is a lifetime high-water mark.
@@ -135,7 +129,7 @@ func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.
 // OnViewFeedback accepts best-effort windows only for currently configured replicas.
 func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) {
 	// Use the Node's window end as report time, without a receipt timestamp.
-	if window.StartUnixNanos <= 0 || window.EndUnixNanos <= window.StartUnixNanos || window.EndUnixNanos-window.StartUnixNanos > int64(retention) {
+	if window.StartUnixNanos <= 0 || window.EndUnixNanos <= window.StartUnixNanos {
 		return
 	}
 	s.mu.Lock()
@@ -155,22 +149,17 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 			shard = &shardFeedback{}
 			replica.shards[id] = shard
 		}
-		// Reports can arrive out of order across stream reconnections.
-		index := sort.Search(len(shard.windows), func(i int) bool {
-			return shard.windows[i].reportedAt > window.EndUnixNanos
-		})
-		shard.windows = slices.Insert(shard.windows, index, feedbackContribution{
+		if window.StartUnixNanos <= shard.lastWindowEnd {
+			continue
+		}
+		shard.lastWindowEnd = window.EndUnixNanos
+		shard.windows = append(shard.windows, feedbackContribution{
 			startedAt: window.StartUnixNanos, reportedAt: window.EndUnixNanos, requestCount: sample.RequestCount,
 		})
 		for i, n := range rateWindowCounts {
-			start := max(0, len(shard.windows)-n)
-			if index >= start {
-				shard.recent[i].requestCount += sample.RequestCount
-				if len(shard.windows) > n {
-					// The inserted window replaces the oldest member of this group.
-					old := shard.windows[start-1]
-					shard.recent[i].requestCount -= old.requestCount
-				}
+			shard.recent[i] += sample.RequestCount
+			if len(shard.windows) > n {
+				shard.recent[i] -= shard.windows[len(shard.windows)-n-1].requestCount
 			}
 		}
 		replica.lastAccessUnixNanos = max(replica.lastAccessUnixNanos, sample.LastAccessUnixNanos)
@@ -259,7 +248,6 @@ func (s *ReplicaFeedbackStore) publishReplicaSnapshot(r *replicaFeedback) {
 }
 
 func (s *shardFeedback) updateRates() {
-	s.refreshRateStarts()
 	for i := range s.rates {
 		s.rates[i] = s.requestRate(i)
 	}
@@ -269,23 +257,9 @@ func (s *shardFeedback) requestRate(index int) float64 {
 	if len(s.windows) == 0 {
 		return 0
 	}
-	aggregate := s.recent[index]
-	span := s.windows[len(s.windows)-1].reportedAt - aggregate.startedAt
-	return float64(aggregate.requestCount) / time.Duration(span).Seconds()
-}
-
-// Refresh only the bounded recent groups, never the full retained history.
-// Start times need not be ordered when reports overlap across owner changes.
-func (s *shardFeedback) refreshRateStarts() {
-	for i, n := range rateWindowCounts {
-		start := max(0, len(s.windows)-n)
-		s.recent[i].startedAt = 0
-		for _, window := range s.windows[start:] {
-			if s.recent[i].startedAt == 0 || window.startedAt < s.recent[i].startedAt {
-				s.recent[i].startedAt = window.startedAt
-			}
-		}
-	}
+	start := max(0, len(s.windows)-rateWindowCounts[index])
+	span := s.windows[len(s.windows)-1].reportedAt - s.windows[start].startedAt
+	return float64(s.recent[index]) / time.Duration(span).Seconds()
 }
 
 func (s *ReplicaFeedbackStore) expireLoop() {
@@ -316,7 +290,7 @@ func (s *ReplicaFeedbackStore) expire(now int64) {
 			for i, count := range rateWindowCounts {
 				for j := max(0, len(shard.windows)-count); j < n; j++ {
 					old := shard.windows[j]
-					shard.recent[i].requestCount -= old.requestCount
+					shard.recent[i] -= old.requestCount
 				}
 			}
 			if n == len(shard.windows) {

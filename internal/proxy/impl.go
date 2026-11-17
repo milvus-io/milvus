@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2842,7 +2843,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -2851,10 +2852,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3062,7 +3061,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(len(request.GetRequests()) * int(qt.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -3071,10 +3070,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3668,10 +3665,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
+			extension.QueryResourceGroupFromContext(ctx),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
-			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true

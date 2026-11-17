@@ -98,6 +98,18 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() && h.dqlQueueFull() {
 			err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
+			// admission aborts before wrapperPost, the only ProxyFunctionCall
+			// site for v2 routes, so the rejection is recorded here. The
+			// method comes from the route; db and collection stay empty:
+			// neither authoritative value exists before decode, and a
+			// client-controlled header must not mint or shift per-database
+			// series.
+			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
+				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
+				label, cause := requestutil.ParseMetricLabel(nil, err)
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
+			}
 			rejectQueueFullBeforeDecode(c, err)
 			return
 		}
@@ -504,6 +516,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
 			mlog.Any("url", gCtx.Request.URL.Path))
 
+		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
 		resp, err := v2(ctx, gCtx, req, dbName)
 		if _, batch := req.(*MultiSearchReqV2); batch {
 			dbName = "" // The fallback DB header does not describe the batch's targets.
@@ -512,6 +525,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		if !ok {
 			return
 		}
+		resourceGroup := requestMetrics.ResourceGroup()
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
@@ -519,6 +533,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			metrics.CauseNA,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
@@ -529,6 +544,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			cause,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 
 		// Mirror the metric's cause into the logs so a failed REST request can be

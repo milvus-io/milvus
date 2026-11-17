@@ -84,6 +84,12 @@ tikv:
     tlsCert:  # path to your cert file
     tlsKey:  # path to your key file
     tlsCACert:  # path to your CACert file
+  gc:
+    # Whether MixCoord advances the GC safe point of the TiKV cluster, so that TiKV reclaims old versions of metadata keys.
+    # Enable it only on a dedicated TiKV cluster whose garbage collection is managed by Milvus.
+    enabled: false
+    lifeTime: 600 # seconds, how long TiKV keeps an overwritten or deleted version of a metadata key. A transaction that lasts longer fails.
+    interval: 600 # seconds, how often MixCoord advances the TiKV GC safe point
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.

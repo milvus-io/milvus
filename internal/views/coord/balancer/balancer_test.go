@@ -46,6 +46,47 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	assert.NotEmpty(t, stats.Segments)
 }
 
+func TestBalancerReleaseDoesNotRequeueItsOwnProgress(t *testing.T) {
+	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
+		for _, views := range group.ViewsByNode {
+			for _, view := range views {
+				response := view.View.IntoProto()
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStateDown {
+					continue // Keep teardown pending while checking the next reconcile.
+				}
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStatePreparing {
+					response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+				}
+				view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+			}
+		}
+		return nil
+	})
+	shard := cacheShard(1, 10)
+	addShardWithPreparingView(t, registry, shard, map[int64]map[int64][]int64{1: {1: {1000}}})
+	manager := registry.Get(shard)
+	require.Eventually(t, func() bool { return manager.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	cache := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
+	cache.MarkReady()
+	controller := NewDefaultBalancer(cache, registry, nil, nil)
+
+	var calls int
+	var original func(*DefaultBalancePolicy, balancercache.Reader, []qviews.ShardID) *BalancePlan
+	patch := mockey.Mock((*DefaultBalancePolicy).Plan).Origin(&original).To(func(policy *DefaultBalancePolicy, reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+		calls++
+		return original(policy, reader, dirty)
+	}).Build()
+	defer patch.UnPatch()
+	cache.PublishLoadConfig(1, nil, 2)
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Nil(t, manager.Stats().UpVersion)
+	require.NotNil(t, registry.Get(shard), "SN has not acknowledged Down yet")
+	require.Equal(t, 1, calls)
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Equal(t, 1, calls, "release progress must not enqueue another balance decision")
+}
+
 func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}

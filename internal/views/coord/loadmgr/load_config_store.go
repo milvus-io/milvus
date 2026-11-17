@@ -44,7 +44,7 @@ type LoadConfigStore struct {
 	history         map[int64]map[uint64]*LoadConfig
 	references      map[loadInfoKey]int
 	gcEnabled       bool
-	version         uint64
+	version         uint64 // In-memory publication revision, including source-only updates.
 	listeners       map[uint64]LoadConfigListener
 	nextListener    uint64
 
@@ -110,8 +110,10 @@ func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencie
 	return s, nil
 }
 
-// Put publishes a new immutable version after persistence. The caller holds the
-// collection DDL guard; the local guard also serializes reference GC and release.
+// Put persists and publishes an immutable snapshot. Only resource requirements
+// advance the version; AutoLoad changes replace the snapshot at the same version.
+// The caller holds the collection DDL guard; the local guard also serializes GC
+// and release.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	if cfg == nil {
 		return nil
@@ -130,16 +132,22 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	previous := s.configs[cfg.CollectionID]
 	s.mu.RUnlock()
 	if sameLoadRequirements(previous, cfg) {
-		return nil
+		if previous.AutoLoad == cfg.AutoLoad {
+			return nil
+		}
+		// normalize owns cfg. Replace only scheduling metadata, preserving the
+		// requirements identity held by live Views and their reference counts.
+		cfg.Version = previous.Version
+	} else {
+		version, err := s.allocateVersion(ctx)
+		if err != nil {
+			return err
+		}
+		if version == 0 || (previous != nil && version <= previous.Version) {
+			return merr.WrapErrServiceInternalMsg("non-increasing collection load version %d", version)
+		}
+		cfg.Version = version
 	}
-	version, err := s.allocateVersion(ctx)
-	if err != nil {
-		return err
-	}
-	if version == 0 || (previous != nil && version <= previous.Version) {
-		return merr.WrapErrServiceInternalMsg("non-increasing collection load version %d", version)
-	}
-	cfg.Version = version
 	if err := s.catalog.Save(ctx, cfg.toCollectionLoadConfigProto()); err != nil {
 		return err
 	}
@@ -149,8 +157,10 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 		versions = make(map[uint64]*LoadConfig)
 		s.history[cfg.CollectionID] = versions
 	}
-	versions[version] = cfg
-	s.configs[cfg.CollectionID], s.versions[cfg.CollectionID] = cfg, version
+	versions[cfg.Version] = cfg
+	s.configs[cfg.CollectionID], s.versions[cfg.CollectionID] = cfg, cfg.Version
+	// Notify even at the same requirements version: future planning must see
+	// the new AutoLoad source. Existing readers keep their immutable snapshot.
 	s.version++
 	s.publishConfigLocked(cfg.CollectionID)
 	s.mu.Unlock()
@@ -205,12 +215,14 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 // sameLoadRequirements compares canonical immutable content, not its identity.
 // It makes durable callback replay idempotent without reusing version IDs after
 // Release. Index selections and replica priorities participate in equality.
+// AutoLoad is scheduling metadata and does not change a View's requirements.
 func sameLoadRequirements(a, b *LoadConfig) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
 	left, right := a.toCollectionLoadConfigProto(), b.toCollectionLoadConfigProto()
 	left.Version, right.Version = 0, 0
+	left.AutoLoad, right.AutoLoad = false, false
 	return proto.Equal(left, right)
 }
 
@@ -259,7 +271,7 @@ func (s *LoadConfigStore) GetConfig(collectionID int64) *LoadConfig {
 	return s.configs[collectionID]
 }
 
-// GetConfigVersion returns the stable content identity of one live config
+// GetConfigVersion returns the stable requirements identity of one live config
 // without materializing the full management snapshot. It is the
 // O(1) counterpart of LoadConfigSnapshot.ConfigVersion. Use GetConfigWithVersion
 // when a caller needs a config and its version atomically.
@@ -313,7 +325,8 @@ func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error
 }
 
 // LoadConfigListener receives immutable committed configs and their durable
-// version; nil and version zero denote withdrawal of load intent.
+// requirements version. Different snapshots may share a version after an
+// AutoLoad-only update; nil and version zero denote withdrawal of load intent.
 // It runs under the store lock and must not re-enter the store or perform I/O.
 type LoadConfigListener func(collectionID int64, config *LoadConfig, version uint64)
 

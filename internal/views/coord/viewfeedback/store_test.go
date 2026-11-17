@@ -2,7 +2,6 @@ package viewfeedback
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -69,6 +68,8 @@ func TestReplicaFeedbackLoadLifecycle(t *testing.T) {
 		next.RequestCount = 2
 		next.LastAccessUnixNanos = 90
 		nextWindow := testWindow(next, qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 10, VChannel: "p_2v0"}}, qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 10, VChannel: "bad"}}, qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 999, VChannel: "p_1v0"}})
+		nextWindow.StartUnixNanos = firstWindow.EndUnixNanos + 1
+		nextWindow.EndUnixNanos = nextWindow.StartUnixNanos + int64(5*time.Second)
 		store.OnViewFeedback(nextWindow)
 		got, _ = store.GetViewFeedback(id.ReplicaID)
 		require.Equal(t, 9/time.Duration(nextWindow.EndUnixNanos-firstWindow.StartUnixNanos).Seconds(), got.RequestRates.Last24Windows)
@@ -145,9 +146,6 @@ func TestReplicaFeedbackWindowValidationAndNodeTime(t *testing.T) {
 		bad := w
 		bad.StartUnixNanos = bad.EndUnixNanos
 		store.OnViewFeedback(bad)
-		long := w
-		long.StartUnixNanos -= int64(3 * time.Minute)
-		store.OnViewFeedback(long)
 		_, ok := store.GetViewFeedback(id.ReplicaID)
 		require.False(t, ok)
 		// Reads return the cached value until the independent cleanup tick.
@@ -229,13 +227,13 @@ func TestReplicaFeedbackRevertsOrderedContributions(t *testing.T) {
 			w.StartUnixNanos = w.EndUnixNanos - int64(5*time.Second)
 			store.OnViewFeedback(w)
 		}
-		// Receive newer first, then older, then another batch with the same time.
-		report(20*time.Second, 3, 90)
+		// Accepted windows append in order; duplicate and late reports are discarded.
 		report(0, 5, 100)
-		report(0, 2, 80)
+		report(20*time.Second, 3, 90)
+		report(0, 2, 800)
 		store.mu.RLock()
-		require.Equal(t, []feedbackContribution{{end - int64(5*time.Second), end, 5}, {end - int64(5*time.Second), end, 2}, {end + int64(15*time.Second), end + int64(20*time.Second), 3}}, store.replicas[10].shards[id].windows)
-		require.EqualValues(t, 10, store.replicas[10].shards[id].recent[3].requestCount, "aggregate is updated on write")
+		require.Equal(t, []feedbackContribution{{end - int64(5*time.Second), end, 5}, {end + int64(15*time.Second), end + int64(20*time.Second), 3}}, store.replicas[10].shards[id].windows)
+		require.EqualValues(t, 8, store.replicas[10].shards[id].recent[3], "aggregate is updated on write")
 		store.mu.RUnlock()
 		store.expire(end + int64(retention))
 		got, ok := store.GetViewFeedback(id.ReplicaID)
@@ -250,9 +248,8 @@ func TestReplicaFeedbackRevertsOrderedContributions(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, RequestRates{}, got.RequestRates)
 		require.EqualValues(t, 100, got.LastAccessUnixNanos)
-		// A late old report is inserted by Node time and removed on the next sweep.
-		report(-3*time.Minute, 7, 50)
-		store.expire(end)
+		// Expiring every window must not admit a late report again.
+		report(-3*time.Minute, 7, 500)
 		got, _ = store.GetViewFeedback(id.ReplicaID)
 		require.Equal(t, RequestRates{}, got.RequestRates)
 		require.EqualValues(t, 100, got.LastAccessUnixNanos)
@@ -288,6 +285,52 @@ func TestReplicaFeedbackRatesUseActualWindowSpan(t *testing.T) {
 	})
 }
 
+func TestReplicaFeedbackRejectsOverlappingWindows(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := New(&loadmgr.LoadConfigStore{}, testDataViews{})
+		defer store.Close()
+		store.onLoadConfig(1, &loadmgr.LoadConfig{Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}, 1)
+		id := qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"}
+		first := testWindow(qviews.ViewFeedback{ShardID: id, RequestCount: 5, LastAccessUnixNanos: 100})
+		store.OnViewFeedback(first)
+		before, _ := store.GetViewFeedback(10)
+		global := store.GetGlobalRequestRates()
+		for _, bounds := range [][2]int64{
+			{first.StartUnixNanos - 2, first.StartUnixNanos - 1}, // Older window.
+			{first.StartUnixNanos, first.EndUnixNanos},           // Replay.
+			{first.EndUnixNanos - 1, first.EndUnixNanos + 2},     // Later End still overlaps.
+			{first.EndUnixNanos, first.EndUnixNanos + 2},         // Equal boundary is rejected.
+		} {
+			store.OnViewFeedback(qviews.ViewFeedbackWindow{
+				StartUnixNanos: bounds[0], EndUnixNanos: bounds[1],
+				Shards: map[qviews.ShardID]qviews.ViewFeedback{id: {RequestCount: 1000, LastAccessUnixNanos: 999}},
+			})
+			got, _ := store.GetViewFeedback(10)
+			require.Same(t, before, got, "discarded windows cannot update rates or LastAccess")
+			require.Same(t, global, store.GetGlobalRequestRates())
+		}
+		store.expire(first.EndUnixNanos + int64(retention))
+		empty, _ := store.GetViewFeedback(10)
+		store.OnViewFeedback(first)
+		got, _ := store.GetViewFeedback(10)
+		require.Same(t, empty, got, "expiration retains the last accepted End")
+
+		next := qviews.ViewFeedbackWindow{
+			StartUnixNanos: first.EndUnixNanos + 1,
+			EndUnixNanos:   first.EndUnixNanos + 1 + int64(time.Second),
+			Shards:         map[qviews.ShardID]qviews.ViewFeedback{id: {RequestCount: 7, LastAccessUnixNanos: 200}},
+		}
+		store.OnViewFeedback(next)
+		got, _ = store.GetViewFeedback(10)
+		require.Equal(t, &Snapshot{LastAccessUnixNanos: 200, RequestRates: RequestRates{7, 7, 7, 7}}, got)
+		store.onLoadConfig(1, nil, 0)
+		store.onLoadConfig(1, &loadmgr.LoadConfig{Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}, 1)
+		store.OnViewFeedback(first)
+		got, _ = store.GetViewFeedback(10)
+		require.Equal(t, before, got, "withdrawing the Replica clears its window watermark")
+	})
+}
+
 func TestReplicaFeedbackRecentGroupsMatchReceivedWindows(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := New(&loadmgr.LoadConfigStore{}, testDataViews{})
@@ -303,7 +346,6 @@ func TestReplicaFeedbackRecentGroupsMatchReceivedWindows(t *testing.T) {
 					live = append(live, w)
 				}
 			}
-			sort.SliceStable(live, func(i, j int) bool { return live[i].EndUnixNanos < live[j].EndUnixNanos })
 			got, ok := store.GetViewFeedback(id.ReplicaID)
 			require.True(t, ok)
 			rates := []float64{got.RequestRates.Last2Windows, got.RequestRates.Last6Windows, got.RequestRates.Last12Windows, got.RequestRates.Last24Windows}
@@ -314,7 +356,6 @@ func TestReplicaFeedbackRecentGroupsMatchReceivedWindows(t *testing.T) {
 					start := selected[0].StartUnixNanos
 					var attempts uint64
 					for _, w := range selected {
-						start = min(start, w.StartUnixNanos)
 						attempts += w.Shards[id].RequestCount
 					}
 					expected = float64(attempts) / time.Duration(selected[len(selected)-1].EndUnixNanos-start).Seconds()
@@ -325,23 +366,22 @@ func TestReplicaFeedbackRecentGroupsMatchReceivedWindows(t *testing.T) {
 				require.InDelta(t, expected, globalRates[index], 1e-10, "global recent %d windows", count)
 			}
 		}
-		// Alternate old/new arrivals; varying durations also create overlapping
-		// windows whose Start order differs from their End order.
-		for step := range 32 {
-			i := step / 2
-			if step%2 == 0 {
-				i = 31 - i
-			}
-			end := base + int64(time.Duration(i*3)*time.Second)
+		// Vary window lengths and gaps while keeping each accepted window disjoint.
+		end := base
+		for i := range 32 {
+			start := end + int64(time.Duration(1+i%3)*time.Second)
+			end = start + int64(time.Duration(1+i%7)*time.Second)
 			w := qviews.ViewFeedbackWindow{
-				StartUnixNanos: end - int64(time.Duration(1+i%7)*time.Second), EndUnixNanos: end,
+				StartUnixNanos: start, EndUnixNanos: end,
 				Shards: map[qviews.ShardID]qviews.ViewFeedback{id: {RequestCount: uint64(i + 1), LastAccessUnixNanos: end}},
 			}
 			received = append(received, w)
 			store.OnViewFeedback(w)
+			// Replayed earlier windows cannot change any group's count or span.
+			store.OnViewFeedback(received[i/2])
 			check(0)
 		}
-		for _, seconds := range []int{0, 24, 60, 84, 93} {
+		for _, seconds := range []int{0, 24, 60, 120, 240} {
 			cutoff := base + int64(time.Duration(seconds)*time.Second)
 			store.expire(cutoff + int64(retention))
 			check(cutoff)
@@ -507,7 +547,10 @@ func TestGlobalRequestRatesFollowReplicaContributions(t *testing.T) {
 		require.Equal(t, &RequestRates{6, 6, 6, 6}, store.GetGlobalRequestRates(), "expiry retracts Replica 10 while retaining collection 2")
 		store.expire(secondWindow.EndUnixNanos + int64(retention))
 		require.Equal(t, &RequestRates{}, store.GetGlobalRequestRates(), "all windows expired")
-		store.OnViewFeedback(testWindow(qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 20, VChannel: "p_2v0"}, RequestCount: 7}))
+		newWindow := testWindow(qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 20, VChannel: "p_2v0"}, RequestCount: 7})
+		newWindow.StartUnixNanos = secondWindow.EndUnixNanos + 1
+		newWindow.EndUnixNanos = newWindow.StartUnixNanos + int64(5*time.Second)
+		store.OnViewFeedback(newWindow)
 		beforeClose := store.GetGlobalRequestRates()
 		require.Equal(t, &RequestRates{1.4, 1.4, 1.4, 1.4}, beforeClose)
 		store.Close()

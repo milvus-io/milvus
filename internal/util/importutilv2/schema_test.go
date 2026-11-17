@@ -71,7 +71,7 @@ func TestValidateImportSchema(t *testing.T) {
 		{"backup import", Options{kv(BackupFlag, "true")}, "binlog import (backup restore)"},
 		{"backup import upper case", Options{kv(BackupFlag, "TRUE")}, "binlog import (backup restore)"},
 		{"snapshot-source import", Options{kv(BackupFlag, "true"), kv(SourceType, SourceTypeSnapshot)}, "snapshot-source import"},
-		// The gate runs before ValidateSnapshotSourceOptions, so a snapshot
+		// The gate runs before ValidateImportSourceOptions, so a snapshot
 		// source without the backup flag must be rejected here too.
 		{"snapshot-source without backup flag", Options{kv(SourceType, SourceTypeSnapshot)}, "snapshot-source import"},
 	}
