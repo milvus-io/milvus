@@ -416,7 +416,7 @@ ReadCellBatch(OpContext* op_ctx,
               const BatchReaderFactory& reader_factory,
               int64_t reader_memory_limit,
               const CellFinalizeFunc& finalize_cell) {
-    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+    CheckCancellation(op_ctx, -1, "LoadCellBatchesAsync");
 
     auto tables_result = reader_factory(
         batch.file_idx, batch.rg_offset, batch.rg_count, reader_memory_limit);
@@ -433,13 +433,13 @@ ReadCellBatch(OpContext* op_ctx,
                "count: {}, result size: {}",
                batch.rg_count,
                all_tables.size());
-    CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+    CheckCancellation(op_ctx, -1, "LoadCellBatchesAsync");
 
     int64_t table_offset = 0;
     LoadedCellBatch loaded_cells;
     loaded_cells.reserve(batch.cells.size());
     for (const auto& cell : batch.cells) {
-        CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+        CheckCancellation(op_ctx, -1, "LoadCellBatchesAsync");
         std::vector<std::shared_ptr<arrow::Table>> cell_tables;
         cell_tables.reserve(cell.rg_count);
         for (int64_t i = 0; i < cell.rg_count; ++i) {
@@ -448,95 +448,13 @@ ReadCellBatch(OpContext* op_ctx,
         table_offset += cell.rg_count;
         auto chunk = finalize_cell(cell_tables, cell.cid);
         cell_tables.clear();
-        CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+        CheckCancellation(op_ctx, -1, "LoadCellBatchesAsync");
         loaded_cells.push_back({cell.cid, std::move(chunk)});
     }
     return loaded_cells;
 }
 
 }  // namespace
-
-std::vector<CellLoadFuture>
-LoadCellBatchAsync(milvus::OpContext* op_ctx,
-                   std::vector<CellSpec> cell_specs,
-                   BatchReaderFactory reader_factory,
-                   const int64_t memory_limit,
-                   const milvus::proto::common::LoadPriority priority,
-                   CellFinalizeFunc finalize_cell) {
-    auto batches = PlanCellLoadBatches(std::move(cell_specs), memory_limit);
-    if (batches.empty()) {
-        return {};
-    }
-
-    const auto pool_priority = milvus::PriorityForLoad(priority);
-    auto& pool = ThreadPools::GetExecutor(pool_priority);
-    const auto budget_priority =
-        milvus::storage::LoadAdmissionPriorityForThreadPool(pool_priority);
-    const auto shared_factory =
-        std::make_shared<BatchReaderFactory>(std::move(reader_factory));
-    const auto shared_finalizer =
-        std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
-    AssertInfo(static_cast<bool>(*shared_finalizer),
-               "[StorageV2] LoadCellBatchAsync requires a cell finalizer");
-
-    std::vector<CellLoadFuture> futures;
-    futures.reserve(batches.size());
-
-    const auto append_failed_future = [&](std::exception_ptr error) {
-        futures.emplace_back(folly::makeSemiFuture<LoadedCellBatch>(
-            folly::exception_wrapper(std::move(error))));
-    };
-
-    for (auto& batch : batches) {
-        const auto batch_loading_overhead_bytes =
-            batch.batch_loading_overhead_bytes;
-        const auto reader_memory_limit = BatchReaderMemoryLimit(
-            batch.batch_loaded_memory_bytes, memory_limit);
-        auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
-        const auto cancellation_token =
-            op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
-        const bool budget_admitted =
-            budget.AcquireUntil({batch_loading_overhead_bytes, 1},
-                                budget_priority,
-                                cancellation_token);
-        if (!budget_admitted) {
-            // AcquireUntil waits for budget and returns false only when the
-            // caller's lifecycle ends before admission.
-            append_failed_future(std::make_exception_ptr(SegcoreError(
-                ErrorCode::FollyCancel, "LoadCellBatchAsync cancelled")));
-            continue;
-        }
-
-        auto budget_guard =
-            folly::makeGuard([&budget, batch_loading_overhead_bytes]() {
-                budget.Release({batch_loading_overhead_bytes, 1});
-            });
-        try {
-            futures.emplace_back(
-                folly::via(&pool,
-                           [batch = std::move(batch),
-                            shared_factory,
-                            budget_guard = std::move(budget_guard),
-                            reader_memory_limit,
-                            shared_finalizer,
-                            op_ctx]() mutable {
-                               // ReadCellBatch destroys Arrow buffers before this
-                               // guard releases the batch reservation.
-                               auto release_guard = std::move(budget_guard);
-                               return ReadCellBatch(op_ctx,
-                                                    batch,
-                                                    *shared_factory,
-                                                    reader_memory_limit,
-                                                    *shared_finalizer);
-                           })
-                    .semi());
-        } catch (...) {
-            append_failed_future(std::current_exception());
-        }
-    }
-
-    return futures;
-}
 
 folly::coro::Task<std::vector<LoadedCellBatch>>
 LoadCellBatchesAsync(OpContext* op_ctx,
@@ -545,10 +463,20 @@ LoadCellBatchesAsync(OpContext* op_ctx,
                      int64_t memory_limit,
                      proto::common::LoadPriority priority,
                      CellFinalizeFunc finalize_cell) {
+    const auto cell_count = cell_specs.size();
     auto batches = PlanCellLoadBatches(std::move(cell_specs), memory_limit);
     if (batches.empty()) {
         co_return std::vector<LoadedCellBatch>{};
     }
+    LOG_DEBUG(
+        "[StorageV2] LoadCellBatchesAsync: {} cells -> {} batches "
+        "(memory_limit={}MB, budget_capacity={}MB, read_window={}MB)",
+        cell_count,
+        batches.size(),
+        memory_limit >> 20,
+        storage::LoadAdmissionController::GetInstance().CapacityBytes() >> 20,
+        FieldDataReadWindowBytes() >> 20);
+
     AssertInfo(static_cast<bool>(finalize_cell),
                "[StorageV2] LoadCellBatchesAsync requires a cell finalizer");
     const auto caller_token =

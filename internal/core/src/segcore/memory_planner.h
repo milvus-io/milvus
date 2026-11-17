@@ -20,7 +20,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <folly/futures/Future.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -142,7 +141,6 @@ struct LoadedCell {
 };
 
 using LoadedCellBatch = std::vector<LoadedCell>;
-using CellLoadFuture = folly::SemiFuture<LoadedCellBatch>;
 
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
@@ -161,34 +159,12 @@ using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
     const std::vector<std::shared_ptr<arrow::Table>>& tables, int64_t cid)>;
 
 /**
- * Load cells in batches using a pluggable reader factory. Cells are sorted by
- * (file_idx, local_rg_offset) and grouped into IO-merged batches.
- * Each completed cell is finalized and returned in its batch future.
- * Batch admission waits on the global transient memory budget before
- * submitting work to the load pool. After finalize_cell returns, the batch task
- * releases transient Arrow tables before storing the result in the future.
- *
- * @param op_ctx operation context for cancellation
- * @param cell_specs cell specifications (sorted internally)
- * @param reader_factory factory that reads all row groups for a batch
- * @param memory_limit split target for per-batch loading overhead and
- * per-reader upper bound for final loaded memory. A global transient memory
- * budget gates concurrent batch loading across calls.
- * @param priority load priority
- * @param finalize_cell converts loaded Arrow tables into the final GroupChunk
- * before the cell is stored in the batch result
- * @return futures containing finalized cells for each batch
- */
-std::vector<CellLoadFuture>
-LoadCellBatchAsync(milvus::OpContext* op_ctx,
-                   std::vector<CellSpec> cell_specs,
-                   BatchReaderFactory reader_factory,
-                   int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority,
-                   CellFinalizeFunc finalize_cell);
-
-/**
- * Await admission and HIGH/LOW worker completion for every planned batch.
+ * Sort cells by (file_idx, local_rg_offset) and group contiguous cells into
+ * batches using memory_limit as the loading-overhead split target. Await
+ * admission and HIGH/LOW worker completion, including cell finalization,
+ * for every batch.
+ * The reader window is capped by memory_limit, with FieldDataReadWindowBytes()
+ * as its minimum.
  * Owns specs and callbacks; op_ctx and references captured by callbacks remain
  * borrowed until completion. On failure or cancellation, drains all issued work
  * before propagating the error. Results preserve planned batch order.
