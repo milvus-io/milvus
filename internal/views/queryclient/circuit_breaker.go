@@ -63,12 +63,13 @@ type excludedView struct {
 
 type routingAttemptKey struct{}
 
-// A permit lives from planning through the joined execution attempt. Its maps
-// are immutable except for observations, which use the breaker's mutex.
+// An attempt snapshots constraints before planning and reserves probes only
+// after the plan arrives. Probe and observation state uses the breaker's mutex.
 type routingAttempt struct {
 	breaker     *QueryViewCircuitBreaker
 	started     time.Time
 	constraints *viewpb.QueryRoutingConstraints
+	changed     <-chan struct{}
 	probes      map[int64]*nodeCircuit
 	failedNodes map[int64]time.Time
 	failedViews map[qviews.QueryViewKey]time.Time
@@ -144,7 +145,7 @@ func (b *QueryViewCircuitBreaker) begin(ctx context.Context, vchannel string, fa
 	defer b.mu.Unlock()
 	now := time.Now()
 	b.expireLocked(now)
-	a := &routingAttempt{breaker: b, started: now, constraints: &viewpb.QueryRoutingConstraints{}, probes: make(map[int64]*nodeCircuit), failedNodes: failedNodes, failedViews: failedViews}
+	a := &routingAttempt{breaker: b, started: now, constraints: &viewpb.QueryRoutingConstraints{}, changed: b.changed, probes: make(map[int64]*nodeCircuit), failedNodes: failedNodes, failedViews: failedViews}
 	nodes := make(map[int64]struct{})
 	for id, until := range failedNodes {
 		if until.After(now) {
@@ -156,13 +157,6 @@ func (b *QueryViewCircuitBreaker) begin(ctx context.Context, vchannel string, fa
 	for id, entry := range b.nodes {
 		if entry.gone || entry.probe != nil || entry.retryAt.After(now) {
 			nodes[id] = struct{}{}
-		} else if !entry.retryAt.IsZero() {
-			if _, blocked := nodes[id]; blocked {
-				continue
-			}
-			entry.probe = a
-			a.probes[id] = entry
-			metrics.QueryViewCircuitBreakerEvents.WithLabelValues("node", "probe").Inc()
 		}
 	}
 	for id := range nodes {
@@ -185,27 +179,56 @@ func (b *QueryViewCircuitBreaker) begin(ctx context.Context, vchannel string, fa
 	return context.WithValue(ctx, routingAttemptKey{}, a), a
 }
 
-// releaseUnused is called as soon as the actual plan is known, then again after
-// execution joins. An unused probe is not a failure and does not grow backoff.
-func (a *routingAttempt) releaseUnused(plan *viewpb.QueryPlan) {
-	used := make(map[int64]bool)
-	for _, work := range plan.GetWorkNodes() {
-		if node := work.GetQueryNode(); node != nil {
-			used[node.GetNodeId()] = true
-		}
-	}
+// acquireProbes rechecks shared exclusions and atomically reserves only the
+// selected QNs. A competing attempt may have claimed a probe during planning;
+// reject the entire plan without reserving a partial set in that case.
+func (a *routingAttempt) acquireProbes(plan *viewpb.QueryPlan) bool {
 	b := a.breaker
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for id, entry := range a.probes {
-		if used[id] {
-			continue
+	now := time.Now()
+	b.expireLocked(now)
+	a.changed = b.changed
+	key := qviews.QueryViewKey{ShardID: qviews.FromProtoShardID(plan.ShardId), QueryViewVersion: qviews.FromProtoQueryViewVersion(plan.Version)}
+	if b.views[key.ShardID.VChannel][key] != nil {
+		return false
+	}
+	for _, work := range plan.GetWorkNodes() {
+		if node := work.GetQueryNode(); node != nil {
+			if entry := b.nodes[node.NodeId]; entry != nil && (entry.gone || entry.probe != nil || entry.retryAt.After(now)) {
+				return false
+			}
 		}
+	}
+	for _, work := range plan.GetWorkNodes() {
+		if node := work.GetQueryNode(); node != nil {
+			if entry := b.nodes[node.NodeId]; entry != nil && !entry.retryAt.IsZero() && entry.probe == nil {
+				entry.probe = a
+				a.probes[node.NodeId] = entry
+				metrics.QueryViewCircuitBreakerEvents.WithLabelValues("node", "probe").Inc()
+			}
+		}
+	}
+	return true
+}
+
+// release runs after execution joins, including cancellation. An unobserved
+// probe is not a failure and does not grow backoff. Wake admission waiters.
+func (a *routingAttempt) release() {
+	b := a.breaker
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	released := false
+	for id, entry := range a.probes {
 		if b.nodes[id] == entry && entry.probe == a {
 			entry.probe = nil
 			entry.retryAt = time.Now().Add(shardRetryInterval)
+			released = true
 		}
 		delete(a.probes, id)
+	}
+	if released {
+		b.notifyLocked()
 	}
 }
 
@@ -358,9 +381,9 @@ func (b *QueryViewCircuitBreaker) observe(ctx context.Context, qn qviews.QueryNo
 
 // Polling is bounded to notice newly published Views without a discovery stream.
 // State changes wake the wait early; callers enforce a total routing wait budget.
-func (b *QueryViewCircuitBreaker) wait(ctx context.Context) error {
+func (a *routingAttempt) wait(ctx context.Context) error {
+	b := a.breaker
 	b.mu.Lock()
-	changed := b.changed
 	delay := time.Second
 	now := time.Now()
 	for _, entry := range b.nodes {
@@ -374,7 +397,7 @@ func (b *QueryViewCircuitBreaker) wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-changed:
+	case <-a.changed:
 		return nil
 	case <-timer.C:
 		return nil

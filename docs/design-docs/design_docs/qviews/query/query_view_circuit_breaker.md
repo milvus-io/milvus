@@ -54,9 +54,18 @@ must not create a View tombstone. SN success also cannot clear QN failure eviden
 ## Recovery, concurrency and bounds
 
 Connection cooldown begins at one second and doubles to a 30-second base, with
-20% jitter. A planning attempt reserves eligible probe keys; unused permits are
-released when the actual plan arrives, and all remaining permits are released
-after execution joins. Cancellation/unused permits do not grow failure backoff.
+20% jitter. Planning only snapshots exclusions; a cooled node with no probe
+owner may be selected by SN, without reserving it during GetQueryPlan. After
+the plan arrives, Proxy rechecks the selected View and QNs against current shared
+state and atomically reserves probes only for selected cooled QNs. If any selected
+node is blocked or already has a probe owner, the whole plan is rejected without
+partial reservations and replanned within the admission wait budget. Healthy QNs
+need no probe, and SN workers are not probed.
+
+Remaining permits are released after execution joins. Cancellation/unused permits
+do not grow failure backoff; release wakes admission waiters. An attempt retains
+the change channel from its last exclusion check so a release between that check
+and entering the wait cannot be missed.
 Entry identity and generation fence late results. Recovered node entries retain
 a bounded generation fence until their idle TTL; View and gone-session tombstones
 cannot be cleared by a late success.
@@ -75,6 +84,14 @@ All-excluded admission waits poll at most once per second to notice newly
 published Views, and wake early on breaker changes. A five-second per-call total
 wait budget and the caller context bound these waits; they do not consume the
 normal execution-attempt budget. No load-info request is issued for this error.
+
+Each retry constructs fresh constraints by merging unexpired request-local
+failures with shared Node exclusions (connection cooldown, active probe, or gone
+session) and shared exact View exclusions for this vchannel. ALL_CANDIDATES_EXCLUDED
+does not itself add failure evidence. Cooldown/TTL expiry or another request's
+probe result may change the next snapshot; otherwise retries remain bounded and
+return ServiceUnavailable when the budget expires. No discovery topology is
+needed to build this snapshot.
 
 Configuration is immutable on the breaker. The metric
 `milvus_proxy_query_view_circuit_breaker_events_total{scope,reason}` uses only
