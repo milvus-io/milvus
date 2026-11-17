@@ -48,7 +48,7 @@ type PrivilegeCache interface {
 
 	GetPrivilegeInfo(ctx context.Context) []string
 	GetUserRole(username string) []string
-	RefreshPolicyInfo(op typeutil.CacheOp) error
+	RefreshPolicyInfo(ctx context.Context, op typeutil.CacheOp) error
 	InitPolicyInfo(info []string, userRoles []string)
 }
 
@@ -188,18 +188,18 @@ func (m *privilegeCache) GetUserRole(user string) []string {
 	return util.StringList(m.userToRoles[user])
 }
 
-func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
-	return m.RefreshPolicyInfoWithVisibility(op, nil)
+func (m *privilegeCache) RefreshPolicyInfo(ctx context.Context, op typeutil.CacheOp) error {
+	return m.RefreshPolicyInfoWithVisibility(ctx, op, nil)
 }
 
 // RefreshPolicyInfoWithVisibility keeps role bindings and visibility replacements
 // under the existing cache lock. Cluster-wide revision ordering is a follow-up.
-func (m *privilegeCache) RefreshPolicyInfoWithVisibility(op typeutil.CacheOp, visibility *internalpb.CollectionVisibilitySnapshot) (err error) {
+func (m *privilegeCache) RefreshPolicyInfoWithVisibility(ctx context.Context, op typeutil.CacheOp, visibility *internalpb.CollectionVisibilitySnapshot) (err error) {
 	defer func() {
 		if err == nil {
 			le := GetEnforcer().LoadPolicy()
 			if le != nil {
-				mlog.Error(context.TODO(), "failed to load policy after RefreshPolicyInfo", mlog.Err(le))
+				mlog.Error(ctx, "failed to load policy after RefreshPolicyInfo", mlog.Err(le))
 			}
 			CleanPrivilegeCache()
 		}
@@ -256,14 +256,17 @@ func (m *privilegeCache) RefreshPolicyInfoWithVisibility(op typeutil.CacheOp, vi
 			}
 		}
 	case typeutil.CacheRefresh:
-		resp, err := m.mixCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		resp, err := m.mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		if err != nil {
-			mlog.Error(context.TODO(), "fail to init meta cache", mlog.Err(err))
+			mlog.Error(ctx, "fail to init meta cache", mlog.Err(err))
 			return err
 		}
 
 		if !merr.Ok(resp.GetStatus()) {
-			mlog.Error(context.TODO(), "fail to init meta cache",
+			mlog.Error(ctx, "fail to init meta cache",
 				mlog.String("error_code", resp.GetStatus().GetErrorCode().String()),
 				mlog.String("reason", resp.GetStatus().GetReason()))
 			return merr.Error(resp.Status)

@@ -5689,7 +5689,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 	priCache := privilege.GetPrivilegeCache()
 	if priCache != nil {
-		err := priCache.RefreshPolicyInfoWithVisibility(typeutil.CacheOp{
+		err := priCache.RefreshPolicyInfoWithVisibility(ctx, typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
 		}, req.GetCollectionVisibility())
