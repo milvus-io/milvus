@@ -140,6 +140,9 @@ func TestHedgeLookupDoesNotBlockPrimary(t *testing.T) {
 	for _, primaryErr := range []error{nil, merr.ErrServiceUnavailable} {
 		t.Run(strconv.FormatBool(primaryErr == nil), func(t *testing.T) {
 			paramtable.Init()
+			pt := paramtable.Get()
+			prevEnabled := pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+			t.Cleanup(func() { _ = pt.Save(pt.ProxyCfg.HedgingEnabled.Key, prevEnabled) })
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			lookupStarted := make(chan struct{})
@@ -253,4 +256,29 @@ func TestLatencyWeightedAccountingAcrossSwitch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHedgeTrackerScheduledCleanup(t *testing.T) {
+	tracker := newHedgeTracker()
+	now := time.Now()
+	tracker.now = func() time.Time { return now }
+	tracker.cleanupInterval = 5 * time.Millisecond
+
+	tracker.ObserveRequest(hedgeTestKey, 10*time.Millisecond)
+	tracker.mu.Lock()
+	require.Len(t, tracker.keys, 1)
+	tracker.mu.Unlock()
+
+	now = now.Add(statsIdleTTL + time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker.Start(ctx)
+	defer tracker.Close()
+
+	require.Eventually(t, func() bool {
+		tracker.mu.Lock()
+		defer tracker.mu.Unlock()
+		return len(tracker.keys) == 0
+	}, time.Second, 5*time.Millisecond)
 }
