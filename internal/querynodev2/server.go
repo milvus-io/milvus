@@ -193,7 +193,9 @@ func (node *QueryNode) initSession() error {
 
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 	// start liveness check
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
 	return nil

@@ -247,7 +247,9 @@ func (node *Proxy) IsDQLQueueFull() bool {
 
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
 

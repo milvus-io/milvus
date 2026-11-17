@@ -518,8 +518,21 @@ func (_c *MockSession_ProcessActiveStandBy_Call) RunAndReturn(run func(func() er
 }
 
 // Register provides a mock function with no fields
-func (_m *MockSession) Register() {
-	_m.Called()
+func (_m *MockSession) Register() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Register")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // MockSession_Register_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Register'
@@ -539,13 +552,13 @@ func (_c *MockSession_Register_Call) Run(run func()) *MockSession_Register_Call 
 	return _c
 }
 
-func (_c *MockSession_Register_Call) Return() *MockSession_Register_Call {
-	_c.Call.Return()
+func (_c *MockSession_Register_Call) Return(_a0 error) *MockSession_Register_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSession_Register_Call) RunAndReturn(run func()) *MockSession_Register_Call {
-	_c.Run(run)
+func (_c *MockSession_Register_Call) RunAndReturn(run func() error) *MockSession_Register_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

@@ -164,7 +164,9 @@ func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	mlog.Debug(node.ctx, "node begin to register to etcd", mlog.String("serverName", node.session.ServerName), mlog.Int64("ServerID", node.session.ServerID))
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
 	mlog.Info(node.ctx, "DataNode Register Finished")

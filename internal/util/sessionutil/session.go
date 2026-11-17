@@ -27,7 +27,7 @@ type SessionInterface interface {
 
 	Init(serverName, address string, exclusive bool)
 	String() string
-	Register()
+	Register() error
 
 	GetSessions(ctx context.Context, prefix string) (map[string]*Session, int64, error)
 	GetSessionsWithVersionRange(prefix string, r semver.Range) (map[string]*Session, int64, error)

@@ -131,7 +131,9 @@ func (node *MockQueryNode) Start() error {
 	// Register
 	node.session.Init(typeutil.QueryNodeRole, node.addr, false)
 	node.session.ServerID = node.ID
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 	mlog.Debug(context.TODO(), "mock QueryNode started",
 		mlog.FieldNodeID(node.ID),
 		mlog.String("nodeAddr", node.addr))

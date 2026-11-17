@@ -164,8 +164,7 @@ func (r *Runner) CheckSessions() error {
 }
 
 func (r *Runner) RegisterSession() error {
-	r.session.Register()
-	return nil
+	return r.session.Register()
 }
 
 func (r *Runner) Backup() error {

@@ -89,7 +89,9 @@ func (s *Server) stop() {
 	mlog.Info(s.ctx, "stopping cdc...")
 
 	// Stop CDC service.
-	s.cdcServer.Stop()
+	if s.cdcServer != nil {
+		s.cdcServer.Stop()
+	}
 
 	// Don't close s.etcdCli here because it's a shared instance from kvfactory.
 	// The kvfactory.CloseEtcdClient() will be called in roles.go to close it properly.
