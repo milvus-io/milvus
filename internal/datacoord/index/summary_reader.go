@@ -40,9 +40,14 @@ func (m *IndexMeta) segmentIndexRecords(segmentID int64) (*typeutil.ConcurrentMa
 	return records, records.Len() != 0
 }
 
-func (m *IndexMeta) GetSegmentIndexBuild(segmentID, buildID int64) (*model.SegmentIndex, bool) {
+// GetSegmentIndexSummary returns detached inventory and task state without file metadata.
+func (m *IndexMeta) GetSegmentIndexSummary(segmentID, buildID int64) (*model.SegmentIndexSummary, bool) {
 	if record, ok := m.GetIndexJob(buildID); ok {
-		return record, record.SegmentID == segmentID
+		return model.SummarizeSegmentIndex(record), record.SegmentID == segmentID
 	}
-	return m.summaryRecord(segmentID, buildID)
+	record, ok := m.summaryRecord(segmentID, buildID)
+	if !ok {
+		return nil, false
+	}
+	return model.SummarizeSegmentIndex(record), true
 }
