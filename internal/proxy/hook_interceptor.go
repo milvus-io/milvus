@@ -2,8 +2,6 @@ package proxy
 
 import (
 	"context"
-	"strconv"
-	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // UnaryServerHookInterceptor installs the request hook on every unary RPC.
@@ -46,7 +43,6 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		mlog.Info(ctx, "hook mock", mlog.String("user", userName),
 			mlog.String("full method", fullMethod), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod, err)
 		return mockResp, hookError(err)
 	}
 
@@ -54,19 +50,16 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		mlog.Warn(ctx, "hook before error", mlog.String("user", userName), mlog.String("full method", fullMethod),
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod, err)
 		return nil, hookError(err)
 	}
+	setRequestResourceGroup(ctx, newCtx)
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
 		mlog.Warn(ctx, "hook after error", mlog.String("user", userName), mlog.String("full method", fullMethod),
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod, err)
-		observeResourceGroupRequest(newCtx, fullMethod, req, nil, hookError(err))
 		return nil, hookError(err)
 	}
-	observeResourceGroupRequest(newCtx, fullMethod, req, realResp, realErr)
 	return realResp, realErr
 }
 
@@ -84,15 +77,4 @@ func hookError(err error) error {
 	}
 	// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 	return status.Error(codes.InvalidArgument, "detail: "+err.Error())
-}
-
-func updateProxyFunctionCallMetric(fullMethod string, err error) {
-	strs := strings.Split(fullMethod, "/")
-	method := strs[len(strs)-1]
-	if method == "" {
-		return
-	}
-	status, cause := failMetricLabel(err)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, status, cause, "", "").Inc()
 }
