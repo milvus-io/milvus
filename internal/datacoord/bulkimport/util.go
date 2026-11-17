@@ -1248,6 +1248,20 @@ func appendDenied(denied []string, dir string, localStorage bool) []string {
 // delta_log is exactly what they do. They are gated instead by the cluster-level
 // ImportBinlog privilege, checked in the proxy.
 func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	source, err := importutilv2.GetSourceStorageConfig(options)
+	if err != nil {
+		return err
+	}
+	if source != nil {
+		// Explicit source credentials authorize reads in that bucket. These
+		// keys are unrelated to the destination's local paths or storage root.
+		for _, file := range files {
+			if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
 		return nil
 	}

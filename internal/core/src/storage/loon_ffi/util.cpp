@@ -964,8 +964,7 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
-    // (Lance version, Iceberg branch, etc.) land here.
+    // Lance and Iceberg use reader.exttable.snapshot_id.
     if (external_spec.empty()) {
         return arrow::Status::OK();
     }
@@ -977,7 +976,7 @@ InjectExternalSpecProperties(
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
+            if (format == "lance-table" || format == "iceberg-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;

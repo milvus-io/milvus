@@ -233,7 +233,7 @@ func (i *IndexInspector) createIndexForSegment(ctx context.Context, collection *
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := i.estimateIndexFieldSize(ctx, collection, segment, fieldID)
-	taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+	taskSlot := calculateIndexTaskSlot(fieldSize, segment.GetNumOfRows(), indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -350,15 +350,13 @@ func (i *IndexInspector) reloadFromMeta() {
 			}
 
 			indexParams := i.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
-			indexType := meta.GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 			fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			// Only the local cache is consulted: recovery runs synchronously in
 			// Start(), so it must not load collections through rootcoord. On a
 			// cold cache the estimation falls back to the conservative binlog
 			// size, which is the pre-optimization behavior.
 			fieldSize := i.estimateIndexFieldSize(i.ctx, i.meta.GetCollection(segment.GetCollectionID()), segment, fieldID)
-			taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+			taskSlot := calculateIndexTaskSlot(fieldSize, segment.GetNumOfRows(), indexParams)
 
 			i.scheduler.Enqueue(newIndexBuildTask(
 				model.CloneSegmentIndex(segIndex),

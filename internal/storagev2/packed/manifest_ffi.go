@@ -181,7 +181,12 @@ func CreateManifestForSegment(
 
 	// Begin transaction (read_version=0 for earliest, retry_limit=10)
 	var transactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(0), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_begin failed")
 	}
@@ -195,7 +200,11 @@ func CreateManifestForSegment(
 
 	// Commit transaction
 	var committedVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	result = C.loon_transaction_commit(transactionHandle, &committedVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_commit failed")
 	}
@@ -326,9 +335,12 @@ func createMilvusTableManifest(
 	// updates append, even with OVERWRITE; opening the old version would retain
 	// its stale deletes. Version allocation still advances past existing files.
 	var handle C.LoonTransactionHandle
-	if err := HandleLoonFFIResult(C.loon_transaction_begin(cBasePath, cProperties,
+	acquireManifestFFI(context.Background())
+	err = HandleLoonFFIResult(C.loon_transaction_begin(cBasePath, cProperties,
 		C.int64_t(ManifestEarliest), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
-		getRetryLimit(), &handle)); err != nil {
+		getRetryLimit(), &handle))
+	releaseManifestFFI()
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "begin milvus-table manifest")
 	}
 	defer C.loon_transaction_destroy(handle)
@@ -341,6 +353,11 @@ func createMilvusTableManifest(
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
 	}
+	// The call reads the source segment manifests and writes the new target
+	// manifest, blocking this goroutine's OS thread; bound it process-wide.
+	// Release before the commit below, which acquires its own slot: holding
+	// this one through it would nest and deadlock a budget of one.
+	acquireManifestFFI(context.Background())
 	result := C.loon_milvus_table_append_source_manifests(
 		handle,
 		cPathsPtr,
@@ -352,6 +369,7 @@ func createMilvusTableManifest(
 		cProperties,
 		hasExternalPrimaryKey,
 	)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
@@ -359,6 +377,10 @@ func createMilvusTableManifest(
 		return "", err
 	}
 	var committedVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &committedVersion)); err != nil {
 		return "", merr.WrapErrStorage(err, "commit milvus-table manifest")
 	}

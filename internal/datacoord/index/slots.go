@@ -16,9 +16,134 @@
 
 package index
 
-func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
+import (
+	"math"
+	"strconv"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+const (
+	fmIndexDefaultSASampleRate = int64(8)
+	fmIndexDefaultBlockBytes   = int64(64)
+	fmIndexSuffixArrayExtra    = int64(6144)
+	bytesPerWorkerMemoryUnit   = int64(8 * 1024 * 1024 * 1024)
+)
+
+func getFMIndexBuildParam(indexParams []*commonpb.KeyValuePair, key string, defaultValue int64) int64 {
+	for _, param := range indexParams {
+		if param.GetKey() != key {
+			continue
+		}
+		value, err := strconv.ParseInt(param.GetValue(), 10, 64)
+		if err == nil && value > 0 {
+			return value
+		}
+		break
+	}
+	return defaultValue
+}
+
+// estimateFMIndexBuildPeakBytes mirrors the allocations in
+// fmindex::FMIndex::Build. fieldSize is the uncompressed VARCHAR payload size;
+// numRows determines the per-row object/view/boundary overhead and separator
+// count. The larger of suffix-array construction and wavelet construction is
+// returned because their scratch buffers do not all overlap.
+func estimateFMIndexBuildPeakBytes(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	fieldSize = max(fieldSize, 0)
+	numRows = max(numRows, 0)
+	saSampleRate := getFMIndexBuildParam(indexParams, indexparamcheck.FmSaSampleRateKey, fmIndexDefaultSASampleRate)
+	blockBytes := getFMIndexBuildParam(indexParams, indexparamcheck.FmBlockBytesKey, fmIndexDefaultBlockBytes)
+
+	// One separator per row and one trailing sentinel are appended to the text.
+	textSymbols := meta.SaturatingAdd(fieldSize, numRows, 1)
+	rowBitmaps := meta.SaturatingMul(meta.CeilDiv(numRows, 8), 2) // valid + null bitmap
+	inputAndRows := meta.SaturatingAdd(
+		fieldSize,
+		meta.SaturatingMul(numRows, 32), // FieldData std::string objects (libstdc++)
+		meta.SaturatingMul(numRows, 16), // build-time std::string_view array
+		meta.SaturatingMul(meta.SaturatingAdd(numRows, 1), 8), // document boundaries
+		rowBitmaps,
+	)
+
+	// The sampled-SA bitmap and its rank9 directory coexist with the suffix
+	// array and remain live through wavelet construction.
+	sampleWords := meta.CeilDiv(textSymbols, 64)
+	sampleBitmap := meta.SaturatingMul(sampleWords, 8)
+	sampleDirectory := meta.SaturatingMul(meta.SaturatingAdd(meta.CeilDiv(sampleWords, 8), 1), 16)
+	sampleCount := meta.SaturatingAdd((textSymbols-1)/saSampleRate, 1)
+	sampleWidth := int64(4)
+	if textSymbols >= 1<<32 {
+		sampleWidth = 8
+	}
+	samples := meta.SaturatingMul(sampleCount, sampleWidth)
+	shared := meta.SaturatingAdd(inputAndRows, sampleBitmap, sampleDirectory, samples)
+
+	// Compact builds hold int32 text + int32 SA (including libsais scratch).
+	// The C++ decision uses the pre-sentinel length, so textSymbols itself can
+	// equal INT32_MAX and still use the compact path.
+	var suffixArrayScratch int64
+	if textSymbols <= math.MaxInt32 {
+		suffixArrayScratch = meta.SaturatingAdd(
+			meta.SaturatingMul(textSymbols, 4),
+			meta.SaturatingMul(meta.SaturatingAdd(textSymbols, fmIndexSuffixArrayExtra), 4),
+		)
+	} else {
+		suffixArrayScratch = meta.SaturatingMul(textSymbols, 16)
+	}
+	suffixArrayPeak := meta.SaturatingAdd(shared, suffixArrayScratch)
+
+	// Wavelet construction holds two uint16 ping-pong buffers plus one packed
+	// 2-bit vector and rank directory per quad level. Five levels is the maximum
+	// for the byte alphabet plus separator/sentinel and is conservative.
+	wordsPerBlock := max(blockBytes/8, 1)
+	waveletWords := meta.CeilDiv(textSymbols, 32)
+	waveletBlocks := meta.CeilDiv(waveletWords, wordsPerBlock)
+	waveletSuperBlocks := meta.CeilDiv(waveletBlocks, 64)
+	waveletDirectoryPerLevel := meta.SaturatingAdd(
+		meta.SaturatingMul(meta.SaturatingAdd(waveletSuperBlocks, 1), 32),
+		meta.SaturatingMul(meta.SaturatingAdd(waveletBlocks, 1), 8),
+	)
+	waveletLevelBytes := meta.SaturatingAdd(meta.SaturatingMul(waveletWords, 8), waveletDirectoryPerLevel)
+	waveletPeak := meta.SaturatingAdd(
+		shared,
+		meta.SaturatingMul(textSymbols, 4),
+		meta.SaturatingMul(waveletLevelBytes, 5),
+	)
+
+	return max(suffixArrayPeak, waveletPeak)
+}
+
+func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	// CalculateNodeSlots exposes WorkerSlotUnit * BuildParallel slots per 8 GiB
+	// memory unit. Use the inverse conversion so the coordinator and worker
+	// account for the same amount of memory per slot.
+	workerSlotsPerMemoryUnit := meta.SaturatingMul(
+		max(Params.DataNodeCfg.WorkerSlotUnit.GetAsInt64(), 1),
+		max(Params.DataNodeCfg.BuildParallel.GetAsInt64(), 1),
+	)
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		workerSlotsPerMemoryUnit = max(
+			int64(float64(workerSlotsPerMemoryUnit)*Params.DataNodeCfg.StandaloneSlotRatio.GetAsFloat()),
+			1,
+		)
+	}
+	bytesPerSlot := max(bytesPerWorkerMemoryUnit/workerSlotsPerMemoryUnit, 1)
+	return max(meta.CeilDiv(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams), bytesPerSlot), 1)
+}
+
+func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	indexType := meta.GetIndexType(indexParams)
+	if indexType == indexparamcheck.IndexFMINDEX {
+		return fmIndexBuildTaskSlots(fieldSize, numRows, indexParams)
+	}
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if !isVectorIndex {
+	if !vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
 		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	}
 	if fieldSize > 512*1024*1024 {

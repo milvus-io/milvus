@@ -456,6 +456,9 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
 	schemas := make(map[int64]*schemapb.CollectionSchema)
 	infos = lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+		if len(info.GetIndexInfos()) == 0 {
+			return info
+		}
 		schema, ok := schemas[info.GetCollectionID()]
 		if !ok {
 			if loader.manager != nil && loader.manager.Collection != nil {

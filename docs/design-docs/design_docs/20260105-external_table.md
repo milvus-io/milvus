@@ -496,6 +496,32 @@ Supported formats:
 `snapshot_id` for Iceberg snapshot selection. Parsing and validation are defined
 in `pkg/util/externalspec/specutil/spec.go`.
 
+For Azure Parquet workload identity, use an external source such as
+`azure://core.windows.net/<container>/<prefix>` with:
+
+```json
+{
+    "format": "parquet",
+    "extfs": {
+        "cloud_provider": "azure",
+        "use_iam": "true",
+        "access_key_id": "mystorageacct"
+    }
+}
+```
+
+Here `access_key_id` is the required storage account name, not a credential.
+Omit `access_key_value`: a shared account key cannot be combined with workload
+identity. The Milvus pods accessing storage must have `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` configured for an identity
+with read access to the container. Do not set credential broker fields for
+native workload identity. On 3.0 this example is for the native Parquet path;
+Iceberg planning still uses the separate Rust backend and does not support
+this workload-identity path. API validation alone does not establish format
+backend support. See the
+[Azure workload identity E2E instructions](../../../tests/go_client/README_azure_workload_identity.md)
+for deployment prerequisites and verification.
+
 ### 4.4 Fragment Structure
 
 **File**: `internal/storagev2/packed/manifest_ffi.go`

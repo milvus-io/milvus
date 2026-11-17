@@ -361,6 +361,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -804,6 +805,23 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
+	p.ManifestFFIConcurrency = ParamItem{
+		Key:          "common.storage.manifestFFIConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Formatter: func(v string) string {
+			return strconv.Itoa(min(2048, max(1, getAsInt(v))))
+		},
+		Doc: "Maximum number of goroutines that may concurrently execute blocking milvus-storage manifest FFI calls " +
+			"in one process. cgo pins each such goroutine to an OS thread, so unbounded concurrency across the " +
+			"synchronous manifest transaction/filesystem entry points and the async manifest executor workers inflates " +
+			"thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is " +
+			"process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at " +
+			"first manifest I/O, changes require restart.",
+		Export: false,
+	}
+	p.ManifestFFIConcurrency.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
@@ -4173,6 +4191,7 @@ type queryNodeConfig struct {
 	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
 	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
 	ChunkRows                          ParamItem `refreshable:"false"`
+	FmindexCostRatio                   ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
 	InterimIndexNlist                  ParamItem `refreshable:"false"`
 	InterimIndexNProbe                 ParamItem `refreshable:"false"`
@@ -4833,6 +4852,31 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.ChunkRows.Init(base.mgr)
+
+	p.FmindexCostRatio = ParamItem{
+		Key:          "queryNode.fmindexCostRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.001",
+		Formatter: func(v string) string {
+			// The value is pushed to segcore as a C float (float32), and the C++
+			// setter asserts it is in (0, 1]. Validate the NARROWED value so a
+			// bad config never crashes the query node at init:
+			//   - NaN must be rejected explicitly (ParseFloat accepts "NaN", and
+			//     both NaN<=0 and NaN>1 are false, so it would slip through);
+			//   - a tiny-but-positive float64 like 1e-50 underflows to 0.0f as a
+			//     float32 and would trip the `ratio > 0` assert — checking the
+			//     float32 value (not the float64) catches it.
+			ratio := getAsFloat(v)
+			f := float32(ratio)
+			if math.IsNaN(ratio) || math.IsInf(ratio, 0) || f <= 0 || f > 1 {
+				return "0.001"
+			}
+			return v
+		},
+		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
+		Export: true,
+	}
+	p.FmindexCostRatio.Init(base.mgr)
 
 	p.EnableInterminSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",
