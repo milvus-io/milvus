@@ -57,6 +57,8 @@ type GrpcComponent interface {
 // clientConnWrapper is the wrapper for client & conn.
 type clientConnWrapper[T GrpcComponent] struct {
 	client T
+	// nodeID is the identity captured by this connection's interceptors.
+	nodeID int64
 	conn   *grpc.ClientConn
 	mut    sync.RWMutex
 }
@@ -335,6 +337,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		return err
 	}
 
+	nodeID := c.GetNodeID()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	var conn *grpc.ClientConn
@@ -372,12 +375,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
-				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionUnaryClientInterceptor(nodeID),
 				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				interceptor.ClusterInjectionStreamClientInterceptor(),
-				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionStreamClientInterceptor(nodeID),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -411,12 +414,12 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			),
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
-				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionUnaryClientInterceptor(nodeID),
 				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				interceptor.ClusterInjectionStreamClientInterceptor(),
-				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionStreamClientInterceptor(nodeID),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -454,6 +457,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	c.ctxCounter.Store(0)
 	c.grpcClient = &clientConnWrapper[T]{
 		client: c.newGrpcClient(conn),
+		nodeID: nodeID,
 		conn:   conn,
 	}
 	return nil
@@ -559,6 +563,7 @@ func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	log := log.Ctx(ctx).With(zap.String("client_role", c.GetRole()))
 	var ret any
+	var mismatched *clientConnWrapper[T]
 	attempts := retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))
 	failFastOnConnectionError, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
 	var attempt uint
@@ -568,7 +573,8 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		attempt++
 		// The scoped worker policy must not sleep after its final failed RPC.
 		canRetry := attempts != 1 && (!failFastOnConnectionError || attempts == 0 || attempt < attempts)
-		// Connection acquisition belongs to this attempt, including the first dial.
+		mismatched = nil
+		// Each attempt acquires a connection after any preceding backoff.
 		wrapper, clientErr := c.GetGrpcClient(ctx)
 		if clientErr != nil {
 			log.Warn("fail to get grpc client", zap.Error(clientErr))
@@ -593,6 +599,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			if needReset {
 				log.Warn("start to reset connection because of specific reasons", zap.Error(err))
 				c.resetConnection(wrapper, forceReset)
+				if needRetry && !c.isNode && !failFastOnConnectionError && IsServerIDMismatchErr(err) {
+					mismatched = wrapper
+				}
 			} else if needRetry && canRetry && !failFastOnConnectionError {
 				// err occurs but no need to reset connection, try to verify session
 				err := c.verifySession(ctx)
@@ -632,6 +641,27 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		}
 		return false, nil
 	}, retry.Attempts(attempts),
+		retry.RetryImmediately(func(error) bool {
+			if mismatched == nil {
+				return false
+			}
+			// Refresh only when another attempt is allowed. Compare connection
+			// identities, since a concurrent reset may already have changed NodeID.
+			wrapper, err := c.GetGrpcClient(ctx)
+			if err != nil {
+				// Let the next attempt return terminal acquisition errors promptly.
+				return ctx.Err() != nil || IsConnectionClosingErr(err)
+			}
+			if wrapper.nodeID != mismatched.nodeID {
+				return true
+			}
+			// A stale eager reconnect must not replace discovery after backoff:
+			// the new session may become visible while this call is sleeping.
+			// resetConnection only removes this wrapper, preserving a concurrent
+			// replacement installed by another caller.
+			c.resetConnection(wrapper, true)
+			return false
+		}),
 		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
 		// For compatibility, this is multiplied by 1000.
 		retry.Sleep(time.Duration(c.InitialBackoff*1000)*time.Millisecond),
