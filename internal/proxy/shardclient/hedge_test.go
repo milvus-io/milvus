@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
