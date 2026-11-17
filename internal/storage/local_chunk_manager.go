@@ -35,25 +35,43 @@ import (
 
 // LocalChunkManager is responsible for read and write local file.
 //
-// localPath bounds directory synchronization of durable writes. Each write
-// prepares it, so a root that is missing or unavailable fails that write and
-// a later write succeeds once the root is back; an empty root bounds each
-// file by its own parent.
+// Like the C++ DurableLocalChunkManager, it prepares localPath once at
+// construction (see localstorage.PrepareRoot) and bounds directory
+// synchronization of durable writes by that physical boundary. The root must
+// stay in place afterwards; GC may recreate descendants, not the root. An
+// empty localPath has no provisioned root: each file is bounded by its parent.
 type LocalChunkManager struct {
 	localPath string
+	boundary  string
 }
 
 var _ ChunkManager = (*LocalChunkManager)(nil)
 
-// NewLocalChunkManager create a new local manager object.
+// NewLocalChunkManager creates a local manager and panics if its root cannot be
+// prepared. Production code constructs it through ChunkManagerFactory, which
+// returns that failure instead.
 func NewLocalChunkManager(opts ...objectstorage.Option) *LocalChunkManager {
+	lcm, err := newLocalChunkManager(opts...)
+	if err != nil {
+		panic(err)
+	}
+	return lcm
+}
+
+func newLocalChunkManager(opts ...objectstorage.Option) (*LocalChunkManager, error) {
 	c := objectstorage.NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
-	return &LocalChunkManager{
-		localPath: c.RootPath,
+	lcm := &LocalChunkManager{localPath: c.RootPath}
+	if c.RootPath != "" {
+		boundary, err := localstorage.PrepareRoot(c.RootPath)
+		if err != nil {
+			return nil, merr.WrapErrIoFailed(c.RootPath, err)
+		}
+		lcm.boundary = boundary
 	}
+	return lcm, nil
 }
 
 // RootPath returns lcm root path.
@@ -107,7 +125,7 @@ func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, conten
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return merr.WrapErrIoFailed(filePath, localstorage.WriteFile(filePath, content, os.ModePerm, lcm.localPath))
+	return merr.WrapErrIoFailed(filePath, localstorage.WriteFile(filePath, content, os.ModePerm, lcm.boundary))
 }
 
 // MultiWrite writes the data to local storage.
@@ -316,17 +334,15 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// A direct-write copy must not truncate its own source, including aliases.
+	// The destination is truncated in place, so copying a file onto itself
+	// (including through an alias) would destroy the source. No caller does it.
 	if dstInfo, statErr := os.Stat(dstFilePath); statErr == nil {
 		srcInfo, err := srcFile.Stat()
 		if err != nil {
 			return merr.WrapErrIoFailed(srcFilePath, err)
 		}
 		if os.SameFile(srcInfo, dstInfo) {
-			if err := srcFile.Sync(); err != nil {
-				return merr.WrapErrIoFailed(dstFilePath, err)
-			}
-			return merr.WrapErrIoFailed(dstFilePath, localstorage.SyncFileDirectory(lcm.localPath, dstFilePath))
+			return merr.WrapErrServiceInternalMsg("copy source %s and destination %s are the same file", srcFilePath, dstFilePath)
 		}
 	}
 
@@ -336,7 +352,7 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 		}
 		_, err := io.Copy(dst, srcFile)
 		return err
-	}, lcm.localPath)
+	}, lcm.boundary)
 	return merr.WrapErrIoFailed(dstFilePath, err)
 }
 
