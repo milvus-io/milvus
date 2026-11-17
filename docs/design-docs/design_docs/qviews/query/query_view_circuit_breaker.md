@@ -16,7 +16,10 @@ SN applies exclusions to each replica's normally selected exact-schema Up View,
 before granting/renewing a serving lease or executing inline statistics. It does
 not fall back to arbitrary historical versions or omit failed workers. Filtering
 all serving candidates yields ALL_CANDIDATES_EXCLUDED, distinct from absent or
-not-yet-ready Views. No schema/data/load/MVCC or serving-lease rule is relaxed.
+not-yet-ready Views. Its gRPC status is Aborted: neither transparent gRPC retries
+nor the WAL readiness loop may resend the same exclusions. Proxy owns the bounded
+wait and rebuilds constraints on each attempt. The public Milvus error remains
+retriable ServiceUnavailable. No schema/data/load/MVCC or serving-lease rule is relaxed.
 
 ## Failure classes
 
@@ -24,7 +27,7 @@ not-yet-ready Views. No schema/data/load/MVCC or serving-lease rule is relaxed.
 | --- | --- | --- |
 | QN connection | Three consecutive connection failures within ten seconds | One probe per key per client; successful RPC restores connection eligibility |
 | QN session gone | Previously observed node disappears from session discovery and the RPC picker cannot find it | Five-minute TTL; no probe |
-| View unavailable | Any selected worker returns ViewNotFound or ViewInvalidated | One-minute TTL; no probe; a new version is independent |
+| View unavailable | A selected QueryNode returns ViewNotFound or ViewInvalidated | One-minute TTL; no probe; a new version is independent |
 
 Picker absence alone is a discovery/connection observation, not authoritative
 session deletion. The existing session observer retains at most 4096 recent
@@ -40,10 +43,13 @@ retained execution; retained execution never replans.
 Phase 1 errors never create Proxy Node/View exclusions and carry no failed View
 identity. SN owns selection and local resource lifetime; ordinary handoff cannot
 release a View while planning holds its call reference. Planning failures keep
-their existing retry/load-intent handling. Only Phase 2 worker responses create
+their existing retry/load-intent handling. Only Phase 2 QueryNode responses create
 View exclusions, using the actual execution request's full identity; this also
 applies to filter-first and retained execution. Inline growing statistics remains
-part of Phase 1 and does not contribute to View exclusions.
+part of Phase 1 and does not contribute to View exclusions. All StreamingNode
+RPC responses bypass breaker observation, including Phase 2 and retained calls:
+WAL owner handoff can recover the same View identity, so its transient errors
+must not create a View tombstone. SN success also cannot clear QN failure evidence.
 
 ## Recovery, concurrency and bounds
 

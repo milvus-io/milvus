@@ -39,6 +39,6 @@ func TestPlanningExclusionSurvivesWire(t *testing.T) {
 	require.True(t, decoded.IsAllCandidatesExcluded())
 	require.True(t, decoded.IsRetryable())
 	require.False(t, decoded.IsViewNotFound())
-	require.Equal(t, codes.Unavailable, NewGRPCStatusFromError(excluded).Code())
+	require.Equal(t, codes.Aborted, NewGRPCStatusFromError(excluded).Code())
 	require.Equal(t, excluded.Cause, decoded.Cause)
 }

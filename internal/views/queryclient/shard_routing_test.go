@@ -201,7 +201,7 @@ func TestShardRoutingAllExcludedHasSeparateBoundedWait(t *testing.T) {
 		calls := 0
 		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(*fakeQueryPlanClient, context.Context, string, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			calls++
-			return nil, viewerror.NewAllCandidatesExcluded()
+			return nil, viewerror.ConvertViewError("GetQueryPlan", viewerror.NewGRPCStatusFromError(viewerror.NewAllCandidatesExcluded()).Err())
 		}).Build()
 		defer patch.UnPatch()
 		client := newShardViewQueryClient(1, &fakeQueryPlanClient{}, nil)
@@ -225,4 +225,30 @@ func TestRetainedRequeryRecordsViewFailureWithoutReplanning(t *testing.T) {
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 	_, snapshot := beginBreakerTest(t, client.shardClient.breaker, id.VChannel)
 	require.Len(t, snapshot.constraints.ExcludedQueryViews, 1)
+}
+
+func TestShardRoutingRefreshesConstraintsAfterWireExclusion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		id := qviews.ShardID{ReplicaID: 22, VChannel: "p_1v0"}
+		plans := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(id, &viewpb.QueryPlanMVCC{})}
+		client := newShardViewQueryClient(1, plans, &fakeViewQueryServiceClient{})
+		defer client.Close()
+		client.breaker = NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{MaxRoutingWait: 3 * time.Second})
+		client.breaker.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(2 * time.Second), expires: time.Now().Add(time.Minute)}
+		calls := 0
+		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			calls++
+			if qviews.NewQueryRoutingExclusions(channel, req.RoutingConstraints).ExcludesNode(11) {
+				return nil, viewerror.ConvertViewError("GetQueryPlan", viewerror.NewGRPCStatusFromError(viewerror.NewAllCandidatesExcluded()).Err())
+			}
+			return &viewpb.GetQueryPlanResponse{Plan: plans.plan}, nil
+		}).Build()
+		defer patch.UnPatch()
+		started := time.Now()
+		_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
+		require.NoError(t, err)
+		require.Equal(t, 2*time.Second, time.Since(started))
+		require.Equal(t, 3, calls)
+		require.True(t, client.breaker.nodes[11].retryAt.IsZero())
+	})
 }

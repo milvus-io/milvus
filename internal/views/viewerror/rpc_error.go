@@ -15,12 +15,14 @@ import (
 )
 
 var viewCodeToGRPCStatus = map[viewpb.ViewCode]codes.Code{
-	viewpb.ViewCode_VIEW_CODE_OK:                      codes.OK,
-	viewpb.ViewCode_VIEW_CODE_VIEW_INVALIDATED:        codes.FailedPrecondition,
-	viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND:          codes.NotFound,
-	viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN:             codes.Unavailable,
-	viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY:             codes.FailedPrecondition,
-	viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED: codes.Unavailable,
+	viewpb.ViewCode_VIEW_CODE_OK:               codes.OK,
+	viewpb.ViewCode_VIEW_CODE_VIEW_INVALIDATED: codes.FailedPrecondition,
+	viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND:   codes.NotFound,
+	viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN:      codes.Unavailable,
+	viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY:      codes.FailedPrecondition,
+	// Replanning must refresh exclusions in the query orchestrator. Unavailable
+	// would retry the same constraints in both gRPC and the WAL readiness loop.
+	viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED: codes.Aborted,
 	viewpb.ViewCode_VIEW_CODE_UNKNOWN:                 codes.Unknown,
 }
 
