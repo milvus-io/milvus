@@ -31,7 +31,6 @@ class MilvusConan(ConanFile):
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
-        "milvus-common/1.0.0-a88c21f@milvus/dev#0eb9a7f2f5d5fe0e7d37f45f3f9a38ea",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
         "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
@@ -42,6 +41,7 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
+        "milvus-common/1.0.0-60f998e@milvus/dev#c1fd9fa7f972e6a23faf48c332f43825",
         "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 
