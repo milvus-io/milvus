@@ -68,12 +68,23 @@ parents block their own searches.
 The batch reuses `BaseTaskQueue` admission and task ID allocation (without TSO),
 `processTask`, and `TaskCondition`. `PreExecute` checks the execution context and
 sets the batch concurrency; `Execute` prepares and dispatches items within that
-limit, retries, and records outcomes. `PostExecute` finalizes normal results.
-The caller also invokes the same once-only finalization on timeout or
-cancellation, since those paths may skip `PostExecute`. Canceled queued tasks
+limit, retries, and records outcomes. `PostExecute` has no work. After waiting
+for completion or execution expiry, `RunMultiSearch` freezes the result slots
+under their mutex and takes ownership of the results directly. It fills any
+unfinished slots and records terminal counts before returning; late searches
+cannot overwrite or count those results again. Canceled queued tasks
 release their waiting slot. A running task keeps its worker until outstanding
 searches exit, even if its response has already been delivered. Scheduler close
 cancels the batches and waits for those workers.
+
+Each REST or gRPC Search attempt owns a request-metrics scope and records its
+resolved database, collection and resource group, including refusals and
+retries. The outer MultiSearch counter has an empty database label because a
+batch can span databases, and child resource groups do not alter its attribution.
+Batch, terminal-item, attempt and retry counters describe separate events.
+Accepted results record their elapsed time and completion trace event immediately;
+finalization records these observations for unfinished items. Rejections and
+actual retries are logged with the item index and request context.
 
 An item takes its database from its request, the call's database header or
 metadata, and finally the default database, in that order. It then uses the

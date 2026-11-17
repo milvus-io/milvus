@@ -36,98 +36,61 @@ const (
 	multiSearchRetryQueueFull = "queue_full"
 )
 
-// Progress is protected by the batch lock until finish transfers ownership.
-type multiSearchItemProgress struct {
-	completedAt  time.Time
-	backoffStart time.Time
-	backoff      time.Duration
-	attempts     int
-	rateLimited  int
-	queueFull    int
-	deferrals    int
-}
-
 func (b *MultiSearchTask) startAttempt(ctx context.Context, index int, retryReason string) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.progress == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+	if b.results == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+		b.mu.Unlock()
 		return false
 	}
-	item := &b.progress[index]
-	item.attempts++
 	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(b.nodeID).Inc()
 	if retryReason != "" {
-		item.finishBackoff(time.Now())
 		metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(b.nodeID, retryReason).Inc()
+	}
+	b.mu.Unlock()
+	if retryReason != "" && mlog.LevelEnabled(mlog.DebugLevel) {
+		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest retry",
+			mlog.Int("index", index), mlog.String("reason", retryReason))
 	}
 	return true
 }
 
-func (b *MultiSearchTask) recordRejection(index int, reason string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.progress == nil {
-		return
-	}
-	item := &b.progress[index]
-	switch reason {
-	case multiSearchRetryRateLimit:
-		item.rateLimited++
-	case multiSearchRetryQueueFull:
-		item.queueFull++
+func logMultiSearchRejection(ctx context.Context, index int, reason string) {
+	if mlog.LevelEnabled(mlog.DebugLevel) {
+		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest rejected",
+			mlog.Int("index", index), mlog.String("reason", reason))
 	}
 }
 
-func (b *MultiSearchTask) startBackoff(ctx context.Context, index int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.progress != nil && contextutil.ErrOrDeadlineExceeded(ctx) == nil {
-		item := &b.progress[index]
-		item.backoffStart = time.Now()
-		item.deferrals++
-	}
-}
-
-func (p *multiSearchItemProgress) finishBackoff(now time.Time) {
-	if !p.backoffStart.IsZero() {
-		p.backoff += now.Sub(p.backoffStart)
-		p.backoffStart = time.Time{}
-	}
-}
-
-func (p multiSearchItemProgress) observe(ctx context.Context, nodeID string, index int, batchStart time.Time, status *commonpb.Status) {
+func multiSearchResultLabel(status *commonpb.Status) (string, int32) {
 	code := merr.Code(merr.Error(status))
-	result := "failed"
 	switch code {
 	case 0:
-		result = "success"
+		return "success", code
 	case merr.TimeoutCode:
-		result = "timeout"
+		return "timeout", code
 	case merr.CanceledCode, merr.Code(merr.ErrRequestCanceled):
-		result = "cancelled" //nolint:misspell // Preserve the documented cancellation label.
+		return "cancelled", code //nolint:misspell // Preserve the documented cancellation label.
+	default:
+		return "failed", code
 	}
-	metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, result).Inc()
+}
 
-	duration := p.completedAt.Sub(batchStart)
+func traceMultiSearchCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		span.AddEvent("MultiSearch subrequest finished", trace.WithAttributes(
 			attribute.Int("index", index),
 			attribute.String("result", result),
 			attribute.Int("code", int(code)),
-			attribute.Int("attempts", p.attempts),
-			attribute.Int("rate_limited_attempts", p.rateLimited),
-			attribute.Int("queue_full_attempts", p.queueFull),
-			attribute.Int("deferrals", p.deferrals),
-			attribute.Int64("backoff_ms", p.backoff.Milliseconds()),
 			attribute.Int64("duration_ms", duration.Milliseconds()),
 		))
 	}
+}
+
+func logMultiSearchCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
 	if mlog.LevelEnabled(mlog.DebugLevel) {
 		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest finished",
 			mlog.Int("index", index), mlog.String("result", result), mlog.Int32("code", code),
-			mlog.Int("attempts", p.attempts), mlog.Int("rateLimitedAttempts", p.rateLimited),
-			mlog.Int("queueFullAttempts", p.queueFull), mlog.Int("deferrals", p.deferrals),
-			mlog.Duration("backoff", p.backoff), mlog.Duration("duration", duration))
+			mlog.Duration("duration", duration))
 	}
 }
 

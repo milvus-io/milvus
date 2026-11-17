@@ -406,6 +406,8 @@ func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				p := NewMultiSearchTestProxy(t, 1, 1)
+				retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
+				beforeRetries := testutil.ToFloat64(retries)
 				start := time.Now()
 				options := MultiSearchOptions{}
 				if tc.budget != 0 {
@@ -429,6 +431,7 @@ func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 				require.Equal(t, tc.attempts, attempts)
 				require.Equal(t, tc.attempts[len(tc.attempts)-1], time.Since(start))
 				require.Same(t, lastStatus, results[0].GetStatus())
+				require.Equal(t, beforeRetries+float64(len(attempts)-1), testutil.ToFloat64(retries), "the final rejection does not start a retry")
 			})
 		})
 	}
@@ -471,6 +474,8 @@ func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
 func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := NewMultiSearchTestProxy(t, 1, 1)
+		retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
+		beforeRetries := testutil.ToFloat64(retries)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		finished := make(chan error, 1)
@@ -488,6 +493,7 @@ func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
 		require.ErrorIs(t, <-finished, context.Canceled)
 		synctest.Wait()
 		require.Equal(t, 1, attempts)
+		require.Equal(t, beforeRetries, testutil.ToFloat64(retries), "cancellation during backoff does not start a retry")
 	})
 }
 
@@ -554,22 +560,26 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		}
 		require.NotNil(t, batchSpan)
 		require.Len(t, batchSpan.Events(), 3)
-		for i, event := range batchSpan.Events() {
+		seen := make(map[int64]bool)
+		for _, event := range batchSpan.Events() {
 			values := make(map[string]any)
 			for _, attr := range event.Attributes {
 				values[string(attr.Key)] = attr.Value.AsInterface()
 			}
-			require.Equal(t, int64(i), values["index"])
-			if i == 0 {
+			index := values["index"].(int64)
+			require.False(t, seen[index], "duplicate completion event for item %d", index)
+			seen[index] = true
+			require.False(t, event.Time.After(batchSpan.EndTime()))
+			if index == 0 {
 				require.Equal(t, "success", values["result"])
-				require.Equal(t, int64(3), values["attempts"])
-				require.Equal(t, int64(2), values["rate_limited_attempts"])
-				require.Equal(t, int64(2), values["deferrals"])
-				require.Equal(t, int64(600), values["backoff_ms"])
+				require.Equal(t, int64(600), values["duration_ms"])
+				require.Equal(t, 600*time.Millisecond, event.Time.Sub(batchSpan.StartTime()), "emit accepted completion before batch expiry")
 			} else {
 				require.Equal(t, "timeout", values["result"])
+				require.Equal(t, int64(1000), values["duration_ms"])
 			}
 		}
+		require.Equal(t, map[int64]bool{0: true, 1: true, 2: true}, seen)
 	})
 }
 

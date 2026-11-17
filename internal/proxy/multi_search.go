@@ -123,7 +123,6 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		execute:        execute,
 		maxConcurrency: options.MaxConcurrency,
 		results:        make([]*milvuspb.SearchResults, len(items)),
-		progress:       make([]multiSearchItemProgress, len(items)),
 	}
 	err = s.MSearchQueue.Enqueue(batch)
 	if err != nil && !errors.Is(err, executionCtx.Err()) {
@@ -132,15 +131,12 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	if err == nil {
 		err = batch.WaitToFinish()
 	}
-	// PostExecute runs only on success. Queue expiry, an interrupted lifecycle,
-	// and parent cancellation must finalize the same ordered result slots.
+	// Freeze the ordered results on success, queue expiry, or cancellation.
 	unfinished := contextutil.ErrOrDeadlineExceeded(executionCtx)
 	if unfinished == nil {
 		unfinished = err
 	}
-	batch.finish(ctx, unfinished)
-	batchResults := batch.response
-	batch.response = nil // Do not retain delivered results while canceled work unwinds.
+	batchResults := batch.finish(ctx, unfinished)
 
 	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return nil, err
@@ -163,14 +159,11 @@ type MultiSearchTask struct {
 	execute        MultiSearchExecute
 	maxConcurrency uint32
 	concurrency    int
-	finishOnce     sync.Once
-	response       []*milvuspb.SearchResults
 	nodeID         string
 	startedAt      time.Time
 
-	mu       sync.Mutex
-	results  []*milvuspb.SearchResults
-	progress []multiSearchItemProgress
+	mu      sync.Mutex
+	results []*milvuspb.SearchResults
 }
 
 var _ taskmodel.Task = (*MultiSearchTask)(nil)
@@ -220,42 +213,48 @@ func (b *MultiSearchTask) Execute(ctx context.Context) error {
 	return contextutil.ErrOrDeadlineExceeded(ctx)
 }
 
-func (b *MultiSearchTask) PostExecute(ctx context.Context) error {
-	b.finish(b.TraceCtx(), contextutil.ErrOrDeadlineExceeded(ctx))
-	return nil
-}
+func (b *MultiSearchTask) PostExecute(context.Context) error { return nil }
 
 func (b *MultiSearchTask) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if result == nil || b.results == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+	if result == nil || b.results == nil || b.results[i] != nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+		b.mu.Unlock()
 		return
 	}
 	b.results[i] = result
-	b.progress[i].completedAt = time.Now()
+	label, code := multiSearchResultLabel(result.GetStatus())
+	duration := time.Since(b.startedAt)
+	// Serialize the event with finish so the caller cannot end the batch span
+	// before an accepted completion has been recorded.
+	traceMultiSearchCompletion(b.TraceCtx(), i, label, code, duration)
+	b.mu.Unlock()
+	logMultiSearchCompletion(ctx, i, label, code, duration)
 }
 
-func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) {
-	b.finishOnce.Do(func() {
-		b.mu.Lock()
-		// Transfer ownership to the response. Late searches can no longer write
-		// slots or retain completed Search data while they unwind.
-		results, progress := b.results, b.progress
-		b.results, b.progress = nil, nil
-		finishedAt := time.Now()
-		b.mu.Unlock()
+// finish is called once by RunMultiSearch, which owns final response accounting.
+func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) []*milvuspb.SearchResults {
+	b.mu.Lock()
+	// Transfer ownership to the caller. Late searches can no longer write
+	// slots or retain completed Search data while they unwind.
+	results := b.results
+	b.results = nil
+	duration := time.Since(b.startedAt)
+	b.mu.Unlock()
 
-		for i, result := range results {
-			if result == nil {
-				result = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
-				results[i] = result
-				progress[i].completedAt = finishedAt
-			}
-			progress[i].finishBackoff(progress[i].completedAt)
-			progress[i].observe(ctx, b.nodeID, i, b.startedAt, result.GetStatus())
+	for i, result := range results {
+		isUnfinished := result == nil
+		if isUnfinished {
+			result = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
+			results[i] = result
 		}
-		b.response = results
-	})
+		label, code := multiSearchResultLabel(result.GetStatus())
+		if isUnfinished {
+			traceMultiSearchCompletion(ctx, i, label, code, duration)
+			logMultiSearchCompletion(ctx, i, label, code, duration)
+		}
+		metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
+	}
+	return results
 }
 
 type multiSearchDQLAdmissionKey struct{}
@@ -297,17 +296,17 @@ func (b *MultiSearchTask) runItem(ctx context.Context, index int, prepare MultiS
 		switch merr.Code(merr.Error(st)) {
 		case merr.Code(merr.ErrServiceRateLimit):
 			reason = multiSearchRetryRateLimit
-			b.recordRejection(index, reason)
+			logMultiSearchRejection(ctx, index, reason)
 			return true, merr.ErrServiceRateLimit
 		case merr.Code(merr.ErrServiceTooManyRequests):
 			if admission.rejected {
 				reason = multiSearchRetryQueueFull
-				b.recordRejection(index, reason)
+				logMultiSearchRejection(ctx, index, reason)
 				return true, merr.ErrServiceTooManyRequests
 			}
 		}
 		return false, nil
-	}, retry.OnBackoff(func() { b.startBackoff(ctx, index) }))
+	})
 	if !merr.Ok(result.GetStatus()) && result.GetResults() != nil {
 		return &milvuspb.SearchResults{
 			Status:         result.GetStatus(),
