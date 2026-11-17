@@ -2197,11 +2197,11 @@ type proxyConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 
 	// latency_weighted replica selection, see docs/design-docs/design_docs/20261113-latency-weighted-replica-selection.md
-	LatencyWeightedDecay           ParamItem `refreshable:"true"`
-	LatencyWeightedMinShare        ParamItem `refreshable:"true"`
-	HedgingEnabled                 ParamItem `refreshable:"true"`
-	HedgingMinDelay                ParamItem `refreshable:"true"`
-	HedgingMaxInflightRatio        ParamItem `refreshable:"true"`
+	LatencyWeightedDecay    ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare ParamItem `refreshable:"true"`
+	HedgingEnabled          ParamItem `refreshable:"true"`
+	HedgingMinDelay         ParamItem `refreshable:"true"`
+	HedgingMaxInflightRatio ParamItem `refreshable:"true"`
 }
 
 func positiveProxyLimitFormatter(defaultValue string) func(string) string {
