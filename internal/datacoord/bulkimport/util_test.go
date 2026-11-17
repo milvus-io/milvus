@@ -1915,6 +1915,30 @@ func TestValidateImportFilePaths(t *testing.T) {
 	}
 }
 
+func TestValidateImportFilePathsExternalSource(t *testing.T) {
+	options := []*commonpb.KeyValuePair{
+		{Key: importutilv2.StorageEndpoint, Value: "minio.example.com:9000"},
+		{Key: importutilv2.StorageBucket, Value: "external-bucket"},
+		{Key: importutilv2.StorageAccessKeyID, Value: "source-key"},
+		{Key: importutilv2.StorageSecretAccessKey, Value: "source-secret"},
+	}
+	params := paramtable.Get()
+	for _, storageType := range []string{"local", "remote"} {
+		t.Run(storageType, func(t *testing.T) {
+			previous := params.CommonCfg.StorageType.SwapTempValue(storageType)
+			defer params.CommonCfg.StorageType.SwapTempValue(previous)
+			// Source object keys must not be resolved against the target's
+			// filesystem or root; no destination chunk manager is needed.
+			for _, key := range []string{"external_folder/data.parquet", "files/insert_log/data.parquet"} {
+				require.NoError(t, ValidateImportFilePaths(nil, []*msgpb.ImportFile{{Paths: []string{key}}}, options))
+			}
+			for _, key := range []string{"", " ", "/data.parquet", "s3://external-bucket/data.parquet"} {
+				require.Error(t, ValidateImportFilePaths(nil, []*msgpb.ImportFile{{Paths: []string{key}}}, options))
+			}
+		})
+	}
+}
+
 // materializeLocalImportPath moves rootPath under a temp directory and creates
 // filePath there when it is absolute. A relative filePath is returned as is.
 func materializeLocalImportPath(t *testing.T, rootPath, filePath string) (string, string) {
