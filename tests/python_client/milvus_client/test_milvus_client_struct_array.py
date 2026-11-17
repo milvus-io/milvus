@@ -26,6 +26,7 @@ from pymilvus.bulk_writer import (
     get_import_progress,
 )
 from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.exceptions import ParamError
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -227,18 +228,19 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             # Random array length for each row (1 to capacity)
             array_length = random.randint(1, min(capacity, 20))
 
+            document_vectors = cf.gen_embedding_vectors(array_length, dim)
             struct_array = []
             for j in range(array_length):
                 struct_element = {
                     "clip_str": f"item_{i}_{j}",
-                    "clip_embedding1": [random.random() for _ in range(dim)],
-                    "clip_embedding2": [random.random() for _ in range(dim)],
+                    "clip_embedding1": document_vectors[j],
+                    "clip_embedding2": cf.gen_vectors(1, dim)[0],
                 }
                 struct_array.append(struct_element)
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": cf.gen_vectors(1, dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -400,6 +402,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             (DataType.FLOAT, {}),
             (DataType.DOUBLE, {}),
             (DataType.VARCHAR, {"max_length": 256}),
+            (DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 10}),
         ],
     )
     def test_create_struct_with_various_scalar_types(self, scalar_type, scalar_params):
@@ -478,7 +481,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         data = [
             {
                 "id": 0,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "data_records": [
                     {
                         "bool_field": True,
@@ -504,7 +507,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             },
             {
                 "id": 1,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "data_records": [
                     {
                         "bool_field": True,
@@ -740,7 +743,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "image_features": image_features_list,
                 "text_features": text_features_list,
             }
@@ -1066,7 +1069,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -1137,14 +1140,14 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             for j in range(array_length):
                 struct_element = {
                     "clip_str": f"row_{i}_elem_{j}",
-                    "clip_embedding1": [random.random() for _ in range(default_dim)],
-                    "clip_embedding2": [random.random() for _ in range(default_dim)],
+                    "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
+                    "clip_embedding2": cf.gen_vectors(1, default_dim)[0],
                 }
                 struct_array.append(struct_element)
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -1178,14 +1181,14 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             for j in range(capacity):  # Fill to max capacity
                 struct_element = {
                     "clip_str": f"max_capacity_{j}",
-                    "clip_embedding1": [random.random() for _ in range(default_dim)],
-                    "clip_embedding2": [random.random() for _ in range(default_dim)],
+                    "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
+                    "clip_embedding2": cf.gen_vectors(1, default_dim)[0],
                 }
                 struct_array.append(struct_element)
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -1243,6 +1246,62 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         assert check
         assert res["insert_count"] == 5
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
+    def test_struct_array_with_nullable_field(self, nullable_field):
+        """
+        target: allow nullable scalar/vector children in a non-nullable Struct Array
+        method: create independent child nullability and round-trip explicit null and non-null values
+        expected: child nulls survive growing and sealed reads without nulling the parent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(
+            "clip_embedding1",
+            DataType.FLOAT_VECTOR,
+            dim=default_dim,
+            nullable=("clip_embedding1" == nullable_field),
+        )
+        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
+        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+        indexes = client.prepare_index_params()
+        indexes.add_index("normal_vector", index_type="FLAT", metric_type="L2")
+        indexes.add_index("clips[clip_embedding1]", index_type="FLAT", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=indexes)
+        vector = [1.0] + [0.0] * (default_dim - 1)
+        clips = [
+            {"clip_embedding1": vector, "scalar_field": 7, "label": "null_child"},
+            {"clip_embedding1": vector, "scalar_field": 8, "label": "present_child"},
+        ]
+        clips[0][nullable_field] = None
+        self.insert(client, collection_name, [{"id": 0, "normal_vector": vector, "clips": clips}])
+        for sealed in (False, True):
+            if sealed:
+                self.flush(client, collection_name)
+                self.release_collection(client, collection_name)
+                self.load_collection(client, collection_name)
+            rows, _ = self.query(
+                client,
+                collection_name,
+                filter="id == 0",
+                output_fields=["id", "clips"],
+                consistency_level="Strong",
+            )
+            assert rows == [{"id": 0, "clips": clips}]
+
 
 class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
     """Test case of struct array index functionality"""
@@ -1281,17 +1340,18 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         data = []
         for i in range(nb):
             array_length = random.randint(1, 10)
+            document_vectors = cf.gen_embedding_vectors(array_length, dim)
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(dim)],
+                    "clip_embedding1": document_vectors[j],
                     "scalar_field": i * 10 + j,
                 }
                 struct_array.append(struct_element)
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": cf.gen_vectors(1, dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -1418,7 +1478,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "multi_vector_struct": struct_array,
             }
             data.append(row)
@@ -1616,10 +1676,11 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         data = []
         for i in range(nb):
             array_length = random.randint(1, 5)
+            document_vectors = cf.gen_embedding_vectors(array_length, dim)
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(dim)],
+                    "clip_embedding1": document_vectors[j],
                     "scalar_field": i * 10 + j,
                     "category": f"cat_{i % 5}",
                 }
@@ -1627,7 +1688,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": cf.gen_vectors(1, dim)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"cat_{i % 5}",
@@ -1666,8 +1727,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     def create_embedding_list(self, dim: int, num_vectors: int):
         """Create EmbeddingList for search"""
         embedding_list = EmbeddingList()
-        for _ in range(num_vectors):
-            vector = [random.random() for _ in range(dim)]
+        for vector in cf.gen_embedding_vectors(num_vectors, dim):
             embedding_list.add(vector)
         return embedding_list
 
@@ -1687,7 +1747,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
     def create_embedding_list_by_vector_type(self, dim: int, num_vectors: int, vector_type: DataType):
         """Create EmbeddingList for the specified vector type"""
-        vectors = cf.gen_vectors(num_vectors, dim, vector_type)
+        vectors = cf.gen_embedding_vectors(num_vectors, dim, vector_type)
         if vector_type == DataType.BINARY_VECTOR:
             return EmbeddingList([np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in vectors])
         return EmbeddingList([np.array(v) if not isinstance(v, np.ndarray) else v for v in vectors])
@@ -1733,10 +1793,11 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         data = []
         for i in range(nb):
             array_length = random.randint(1, 5)
+            document_vectors = cf.gen_embedding_vectors(array_length, dim)
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(dim)],
+                    "clip_embedding1": document_vectors[j],
                     "scalar_field": i * 10 + j,
                     "category": f"cat_{i % 5}",
                 }
@@ -1744,7 +1805,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": cf.gen_vectors(1, dim)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"cat_{i % 5}",
@@ -1798,7 +1859,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         self.create_collection_with_index(client, collection_name)
 
         # Create search vector
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
 
         # Search using normal vector field first (for comparison)
         normal_search_results, check = self.search(
@@ -1919,17 +1980,11 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             data.append(
                 {
                     "id": i,
-                    "normal_vector": [random.random() for _ in range(default_dim)],
-                    "suspects": [
-                        {"name": f"suspect_{i}", "name_vector": [random.random() for _ in range(default_dim)]}
-                    ],
-                    "victims": [{"name": f"victim_{i}", "name_vector": [random.random() for _ in range(default_dim)]}],
-                    "vehicles": [
-                        {"model": f"vehicle_{i}", "vehicle_vector": [random.random() for _ in range(default_dim)]}
-                    ],
-                    "evidence": [
-                        {"item": f"evidence_{i}", "evidence_vector": [random.random() for _ in range(default_dim)]}
-                    ],
+                    "normal_vector": cf.gen_vectors(1, default_dim)[0],
+                    "suspects": [{"name": f"suspect_{i}", "name_vector": cf.gen_vectors(1, default_dim)[0]}],
+                    "victims": [{"name": f"victim_{i}", "name_vector": cf.gen_vectors(1, default_dim)[0]}],
+                    "vehicles": [{"model": f"vehicle_{i}", "vehicle_vector": cf.gen_vectors(1, default_dim)[0]}],
+                    "evidence": [{"item": f"evidence_{i}", "evidence_vector": cf.gen_vectors(1, default_dim)[0]}],
                 }
             )
 
@@ -1941,7 +1996,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         search_tensor = EmbeddingList()
-        search_tensor.add([random.random() for _ in range(default_dim)])
+        search_tensor.add(cf.gen_vectors(1, default_dim)[0])
         results, check = self.search(
             client,
             collection_name,
@@ -1997,7 +2052,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         data = self.create_collection_with_index(client, collection_name)
         scalar_field_array_lists = [row["scalar_field"] for row in data]
         # Create search vector
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         # Search with scalar filter
@@ -2064,7 +2119,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         self.create_collection_with_index(client, collection_name)
 
         # Create search vectors
-        normal_vector = [random.random() for _ in range(default_dim)]
+        normal_vector = cf.gen_vectors(1, default_dim)[0]
         struct_vectors = self.create_embedding_list(default_dim, 2)
 
         # Search normal vector field
@@ -2127,10 +2182,10 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Insert data
         data = []
         for i in range(20):
-            struct_array = [{"clip_embedding1": [random.random() for _ in range(default_dim)]}]
+            struct_array = [{"clip_embedding1": cf.gen_vectors(1, default_dim)[0]}]
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -2162,7 +2217,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         # Search with the metric
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         results, check = self.search(
@@ -2191,7 +2246,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         self.create_collection_with_index(client, collection_name)
 
         # Create search vector
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         # Search with specific output fields
@@ -2252,7 +2307,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         self.create_collection_with_index(client, collection_name)
 
         # Create search vector
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -2352,7 +2407,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 embeddings_list = []
 
                 for j in range(array_length):
-                    embedding = [random.random() for _ in range(dim)]
+                    embedding = cf.gen_vectors(1, dim)[0]
                     struct_element = {
                         "clip_embedding1": embedding,
                         "scalar_field": i * 10 + j,
@@ -2362,7 +2417,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
                 row = {
                     "id": i,
-                    "normal_vector": [random.random() for _ in range(dim)],
+                    "normal_vector": cf.gen_vectors(1, dim)[0],
                     "clips": struct_array,
                 }
                 data.append(row)
@@ -2394,7 +2449,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
         # Generate query vectors
         log.info(f"Generating {num_query_vectors} query vectors...")
-        query_vectors = [np.array([random.random() for _ in range(dim)]) for _ in range(num_query_vectors)]
+        query_vectors = [np.array(cf.gen_vectors(1, dim)[0]) for _ in range(num_query_vectors)]
         query_emb = np.array(query_vectors)  # Shape: (num_query_vectors, dim)
 
         # Calculate ground truth: compute MaxSim score for each document
@@ -2558,7 +2613,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "clip_embedding1": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                     "scalar_field": i * 10 + j,
                     "category": f"cat_{i % 5}",
                 }
@@ -2566,7 +2621,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"cat_{i % 5}",
@@ -2589,7 +2644,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "clip_embedding1": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                     "scalar_field": i * 10 + j,
                     "category": f"cat_{i % 5}",
                 }
@@ -2597,7 +2652,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"cat_{i % 5}",
@@ -2657,10 +2712,10 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         for i in range(10):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(EMB_LIST_DIM)],
+                        "clip_embedding1": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                         "scalar_field": i + 10000,
                         "category": f"upserted_{i}",
                     }
@@ -2783,7 +2838,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             rows.append(
                 {
                     "id": i,
-                    "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                     "clips": clips,
                 }
             )
@@ -2875,14 +2930,14 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             for j in range(2):
                 clips.append(
                     {
-                        "clip_embedding1": [random.random() for _ in range(EMB_LIST_DIM)],
+                        "clip_embedding1": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                         "scalar_field": i * 10 + j,
                     }
                 )
             data.append(
                 {
                     "id": i,
-                    "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                     "clips": clips,
                 }
             )
@@ -3059,7 +3114,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"flushed_{i}",
@@ -3091,7 +3146,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
                 "category": f"growing_{i}",
@@ -3153,7 +3208,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         for i in range(10):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                "normal_vector": cf.gen_vectors(1, EMB_LIST_DIM)[0],
                 "clips": [
                     {
                         "clip_embedding1": cf.gen_vectors(1, EMB_LIST_DIM, vector_type)[0],
@@ -3281,14 +3336,14 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
                 clips.append(
                     {
                         "clip_str": f"item_{i}_{j}",
-                        "clip_embedding": rng.random(default_dim).tolist(),
+                        "clip_embedding": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0],
                     }
                 )
 
             row = {
                 "pk": str(i),
                 "random": rng.random(),
-                "embeddings": rng.random(default_dim).tolist(),
+                "embeddings": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0],
                 "clips": clips,
             }
             data.append(row)
@@ -3305,7 +3360,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         req_list = []
 
         # Request 1: Search on normal vector field
-        vectors_to_search = rng.random((nq, default_dim)).tolist()
+        vectors_to_search = cf.gen_vectors(nq, default_dim, seed=int(rng.integers(2**32)))
         log.info(f"vectors_to_search: {len(vectors_to_search)}")
         search_param_1 = {
             "data": vectors_to_search,
@@ -3318,7 +3373,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Request 2: Search on struct array vector field
         search_tensor = EmbeddingList()
-        search_tensor.add([random.random() for _ in range(default_dim)])
+        search_tensor.add(cf.gen_vectors(1, default_dim)[0])
         search_param_2 = {
             "data": [search_tensor],
             "anns_field": "clips[clip_embedding]",
@@ -3391,12 +3446,12 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         data = []
         for i in range(num_entities):
-            clips = [{"clip_embedding": rng.random(default_dim).tolist()}]
+            clips = [{"clip_embedding": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0]}]
 
             row = {
                 "pk": str(i),
                 "random": rng.random(),
-                "embeddings": rng.random(default_dim).tolist(),
+                "embeddings": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0],
                 "clips": clips,
             }
             data.append(row)
@@ -3413,7 +3468,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         req_list = []
 
         # Normal vector search
-        vectors_to_search = rng.random((nq, default_dim)).tolist()
+        vectors_to_search = cf.gen_vectors(nq, default_dim, seed=int(rng.integers(2**32)))
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3427,7 +3482,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Struct array vector search
         search_tensor = EmbeddingList()
-        search_tensor.add([random.random() for _ in range(default_dim)])
+        search_tensor.add(cf.gen_vectors(1, default_dim)[0])
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3501,12 +3556,12 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         data = []
         for i in range(num_entities):
-            clips = [{"clip_embedding": rng.random(default_dim).tolist()}]
+            clips = [{"clip_embedding": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0]}]
 
             row = {
                 "pk": str(i),
                 "random": rng.random(),
-                "normal_vector": rng.random(default_dim).tolist(),
+                "normal_vector": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0],
                 "clips": clips,
             }
             data.append(row)
@@ -3522,7 +3577,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         req_list = []
 
         # Search on normal vector
-        vectors_to_search = rng.random((1, default_dim)).tolist()
+        vectors_to_search = cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3536,7 +3591,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Search on struct array vector
         search_tensor = EmbeddingList()
-        search_tensor.add(rng.random(default_dim).tolist())
+        search_tensor.add(cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0])
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3610,11 +3665,11 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         data = []
         for i in range(num_entities):
-            clips = [{"clip_embedding": rng.random(default_dim).tolist()}]
+            clips = [{"clip_embedding": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0]}]
 
             row = {
                 "pk": str(i),
-                "embeddings": rng.random(default_dim).tolist(),
+                "embeddings": cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0],
                 "clips": clips,
             }
             data.append(row)
@@ -3629,7 +3684,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         default_limit = 5
         req_list = []
 
-        vectors_to_search = rng.random((1, default_dim)).tolist()
+        vectors_to_search = cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3642,7 +3697,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         )
 
         search_tensor = EmbeddingList()
-        search_tensor.add(rng.random(default_dim).tolist())
+        search_tensor.add(cf.gen_vectors(1, default_dim, seed=int(rng.integers(2**32)))[0])
         req_list.append(
             AnnSearchRequest(
                 **{
@@ -3700,7 +3755,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             struct_array = []
             for j in range(array_length):
                 struct_element = {
-                    "clip_embedding1": [random.random() for _ in range(default_dim)],
+                    "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                     "scalar_field": i * 10 + j,
                     "category": f"cat_{i % 3}",
                     "score": random.uniform(0.1, 10.0),
@@ -3709,7 +3764,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
                 "category": f"cat_{i % 3}",
                 "scalar_field": i * 10 + j,
@@ -3842,19 +3897,19 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             rows.append(
                 {
                     "id": i,
-                    "vector": [random.random() for _ in range(dim)],
+                    "vector": cf.gen_vectors(1, dim)[0],
                     "array_struct": [
                         {
                             "name": f"n{i}",
                             "age": i % 100,
-                            "float_vector": [random.random() for _ in range(dim)],
-                            "nested_float_vector": [random.random() for _ in range(dim)],
+                            "float_vector": cf.gen_vectors(1, dim)[0],
+                            "nested_float_vector": cf.gen_vectors(1, dim)[0],
                         },
                         {
                             "name": f"n{i}_alt",
                             "age": (i + 1) % 100,
-                            "float_vector": [random.random() for _ in range(dim)],
-                            "nested_float_vector": [random.random() for _ in range(dim)],
+                            "float_vector": cf.gen_vectors(1, dim)[0],
+                            "nested_float_vector": cf.gen_vectors(1, dim)[0],
                         },
                     ],
                 }
@@ -4099,10 +4154,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
+                "normal_vector": cf.gen_vectors(1, default_dim)[0] if random.random() > 0.8 else None,
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"flushed_{i}",
                     }
@@ -4123,10 +4178,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 3000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
+                "normal_vector": cf.gen_vectors(1, default_dim)[0] if random.random() > 0.8 else None,
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"growing_{i}",
                     }
@@ -4163,10 +4218,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(0, 10):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
+                "normal_vector": cf.gen_vectors(1, default_dim)[0] if random.random() > 0.8 else None,
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i + 10000,  # Modified
                         "label": f"updated_flushed_{i}",  # Modified
                     }
@@ -4178,10 +4233,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 2010):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
+                "normal_vector": cf.gen_vectors(1, default_dim)[0] if random.random() > 0.8 else None,
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i + 10000,  # Modified
                         "label": f"updated_growing_{i}",  # Modified
                     }
@@ -4228,10 +4283,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"flushed_{i}",
                     }
@@ -4252,10 +4307,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 3000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"growing_{i}",
                     }
@@ -4333,10 +4388,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i % 100,
                         "label": f"flushed_{i}",
                     }
@@ -4357,10 +4412,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 3000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i % 100,
                         "label": f"growing_{i}",
                     }
@@ -4378,10 +4433,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(100):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i + 1000,  # Modified
                         "label": f"upserted_flushed_{i}",  # Modified
                     }
@@ -4393,10 +4448,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 2050):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i + 1000,  # Modified
                         "label": f"upserted_growing_{i}",  # Modified
                     }
@@ -4430,10 +4485,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"flushed_{i}",
                     }
@@ -4454,10 +4509,10 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 3000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {
-                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "clip_embedding1": cf.gen_vectors(1, default_dim)[0],
                         "scalar_field": i,
                         "label": f"growing_{i}",
                     }
@@ -4517,11 +4572,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
     """Test case of struct array invalid operations and edge cases"""
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("unsupported_type", [DataType.STRUCT, DataType.ARRAY])
+    @pytest.mark.parametrize("unsupported_type", [DataType.STRUCT, DataType._ARRAY_OF_VECTOR])
     def test_nested_struct_array(self, unsupported_type):
         """
         target: test creating struct with unsupported nested types (should fail)
-        method: attempt to create struct with STRUCT, ARRAY, GEOMETRY or TIMESTAMPTZ field
+        method: attempt to create struct with STRUCT or internal ArrayOfVector field
         expected: creation should fail with appropriate error
         """
         client = self._client()
@@ -4529,27 +4584,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
 
-        # Try to add unsupported field type to struct schema (this should fail immediately)
-        try:
-            if unsupported_type == DataType.ARRAY:
-                struct_schema.add_field(
-                    "unsupported_field",
-                    unsupported_type,
-                    element_type=DataType.INT64,
-                    max_capacity=10,
-                )
-            else:
-                struct_schema.add_field("unsupported_field", unsupported_type)
-            assert False, f"Expected ParamError when adding {unsupported_type} field to struct schema"
-        except Exception as e:
-            # Verify the error message indicates the type is not supported
-            error_msg = str(e)
-            # Different error messages for different types
-            assert (
-                "Struct field schema does not support Array, ArrayOfVector or Struct" in error_msg
-                or "is not supported" in error_msg
-                or "not supported for fields in struct" in error_msg
-            )
+        with pytest.raises(ParamError, match="Struct field schema does not support"):
+            struct_schema.add_field("unsupported_field", unsupported_type)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_with_unsupported_vector_field(self):
@@ -4696,7 +4732,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         data = [
             {
                 "id": 1,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {"scalar_field": 1},
                     {"scalar_field": 2},
@@ -4786,7 +4822,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         invalid_data = [
             {
                 "id": 1,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [{"field1": 1, "field2": "a"}, {"field2": "b"}],
             }
         ]
@@ -4806,7 +4842,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         invalid_data = [
             {
                 "id": 1,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": [
                     {"field1": 1, "field2": "a", "field3": "c"},
                 ],
@@ -4867,45 +4903,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
-    def test_struct_array_with_nullable_field(self, nullable_field):
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-
-        struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1",
-            DataType.FLOAT_VECTOR,
-            dim=default_dim,
-            nullable=("clip_embedding1" == nullable_field),
-        )
-        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
-        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
-
-        schema.add_field(
-            "clips",
-            datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=struct_schema,
-            max_capacity=100,
-        )
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually, "
-            f"set nullable on the struct instead",
-        }
-        self.create_collection(
-            client,
-            collection_name,
-            schema=schema,
-            check_task=CheckTasks.err_res,
-            check_items=error,
-        )
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_embedding_list_field_nullable_insert_none_supported(self):
         """
@@ -4954,7 +4951,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         data = [
             {
                 "id": 0,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": None,
             }
         ]
@@ -5019,10 +5016,10 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         for i in range(nb):
             struct_array = []
             for j in range(random.randint(1, 10)):
-                struct_array.append({"clip_embedding1": [random.random() for _ in range(default_dim)]})
+                struct_array.append({"clip_embedding1": cf.gen_vectors(1, default_dim)[0]})
             tmp_data = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": cf.gen_vectors(1, default_dim)[0],
                 "clips": struct_array,
             }
             data.append(tmp_data)
@@ -5030,7 +5027,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         assert check
 
         # Create search vector
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -5636,7 +5633,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
     @staticmethod
     def float_values(seed: int, dim: int) -> list[float]:
-        return [float(((seed + i) % 97) + 1) / 97 for i in range(dim)]
+        return cf.gen_vectors(1, dim, seed=seed, normalize=False)[0]
 
     @classmethod
     def binary_bytes(cls, seed: int, dim: int) -> list[int]:
@@ -5713,7 +5710,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     }
                 )
             id_arr.append(i)
-            float_vector = [rng.random() for _ in range(dim)]
+            float_vector = cf.gen_vectors(1, dim, seed=rng.getrandbits(32))[0]
             float_vector_arr.append(float_vector)
             struct_arr.append(struct_list)
         return {
@@ -5976,13 +5973,13 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                         "struct_float": random.random() * 100,
                         "struct_double": random.random() * 1000,
                         "struct_bool": random.choice([True, False]),
-                        "struct_float_vec": [random.random() for _ in range(dim)],
+                        "struct_float_vec": cf.gen_vectors(1, dim)[0],
                     }
                     struct_list.append(struct_obj)
 
             row = {
                 "id": i,
-                "float_vector": [random.random() for _ in range(dim)],
+                "float_vector": cf.gen_vectors(1, dim)[0],
                 "struct_array": struct_list,
             }
             insert_data.append(row)
@@ -6047,7 +6044,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             id_arr.append(np.int64(i))
 
             # Float vector field
-            raw_vector = [random.random() for _ in range(dim)]
+            raw_vector = cf.gen_vectors(1, dim)[0]
             float_vector_arr.append(np.array(raw_vector, dtype=np.float32))
 
             # Struct array field - generate array of struct objects with all types
@@ -6063,7 +6060,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     "struct_float": np.float32(random.random() * 100),
                     "struct_double": np.float64(random.random() * 1000),
                     "struct_bool": bool(random.choice([True, False])),
-                    "struct_float_vec": [random.random() for _ in range(dim)],
+                    "struct_float_vec": cf.gen_vectors(1, dim)[0],
                 }
                 struct_list.append(struct_obj)
             struct_arr.append(struct_list)
@@ -6127,7 +6124,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             id_arr.append(i)
 
             # Float vector field
-            float_vector = [random.random() for _ in range(dim)]
+            float_vector = cf.gen_vectors(1, dim)[0]
             float_vector_arr.append(float_vector)
 
             # Struct array field with all supported types
@@ -6143,7 +6140,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     "struct_float": random.random() * 100,
                     "struct_double": random.random() * 1000,
                     "struct_bool": random.choice([True, False]),
-                    "struct_float_vec": [random.random() for _ in range(dim)],
+                    "struct_float_vec": cf.gen_vectors(1, dim)[0],
                 }
                 struct_list.append(struct_obj)
             struct_arr.append(struct_list)
@@ -6176,7 +6173,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             for i in range(num_rows):
                 rng = random.Random(i)
                 id_arr.append(i)
-                float_vector = [rng.random() for _ in range(dim)]
+                float_vector = cf.gen_vectors(1, dim, seed=rng.getrandbits(32))[0]
                 float_vector_arr.append(float_vector)
 
                 struct_list = []
@@ -6191,7 +6188,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                             "struct_float": rng.random() * 100,
                             "struct_double": rng.random() * 1000,
                             "struct_bool": rng.choice([True, False]),
-                            "struct_float_vec": [rng.random() for _ in range(dim)],
+                            "struct_float_vec": cf.gen_vectors(1, dim, seed=rng.getrandbits(32))[0],
                         }
                     )
                 struct_arr.append(struct_list)
@@ -6223,18 +6220,19 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             # Random array length for each row (1 to capacity)
             array_length = random.randint(1, min(capacity, 20))
 
+            document_vectors = cf.gen_embedding_vectors(array_length, dim)
             struct_array = []
             for j in range(array_length):
                 struct_element = {
                     "clip_str": f"item_{i}_{j}",
-                    "clip_embedding1": [random.random() for _ in range(dim)],
-                    "clip_embedding2": [random.random() for _ in range(dim)],
+                    "clip_embedding1": document_vectors[j],
+                    "clip_embedding2": cf.gen_vectors(1, dim)[0],
                 }
                 struct_array.append(struct_element)
 
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": cf.gen_vectors(1, dim)[0],
                 "clips": struct_array,
             }
             data.append(row)
@@ -6386,7 +6384,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Verify search works with mmap enabled
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6462,7 +6460,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Verify search works with mmap enabled on field
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6538,7 +6536,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Verify search works on the field with mmap enabled
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6635,7 +6633,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Verify search works with mmap enabled on index
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6725,7 +6723,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Verify search works with mmap enabled at multiple levels
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6812,7 +6810,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
         # Load and verify search works
         self.load_collection(client, collection_name)
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6889,7 +6887,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works without mmap
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -6971,7 +6969,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works with mmap enabled (from schema)
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -7061,7 +7059,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works with mmap enabled (from schema)
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -7147,7 +7145,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works without mmap
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -7229,7 +7227,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works with mmap enabled (from schema)
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
@@ -7311,7 +7309,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.insert(client, collection_name, data)
 
         # Verify search works without mmap
-        search_vector = [random.random() for _ in range(default_dim)]
+        search_vector = cf.gen_vectors(1, default_dim)[0]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
