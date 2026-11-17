@@ -304,6 +304,9 @@ func TestCrossingSegmentWritesDoNotDeadlock(t *testing.T) {
 // its output still drops the output: the compaction holds its inputs until
 // the output is published, and the drop selects again once it holds them.
 func TestDropPartitionDropsTheOutputOfACompactionCommittedMeanwhile(t *testing.T) {
+	// Exercise legacy publication, which retires the inputs in the catalog write.
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	m, catalog := newSegmentLockTestMeta(t, flushedTestSegment(1, 10), flushedTestSegment(2, 10))
 	gate := catalog.gate(1)
