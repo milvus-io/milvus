@@ -17,14 +17,11 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
-#include <string>
-#include <utility>
 
 #include "common/type_c.h"
 #include "milvus-storage/properties.h"
-#include "util.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 
@@ -43,86 +40,56 @@ struct ExternalIopsConfig {
     uint32_t max_rate = 5000;
 };
 
+struct PropertiesOptions {
+    // Requested Talon stage bits; zero leaves the shared properties unchanged.
+    uint32_t talon_stage = 0;
+};
+
 class LoonFFIPropertiesSingleton {
  private:
-    LoonFFIPropertiesSingleton() = default;
+    friend class StorageTalonConfig_PropertiesFollowStorageConfig_Test;
+
+    LoonFFIPropertiesSingleton();
 
  public:
+    ~LoonFFIPropertiesSingleton();
+
     static LoonFFIPropertiesSingleton&
-    GetInstance() {
-        static LoonFFIPropertiesSingleton instance;
-        return instance;
-    }
+    GetInstance();
 
     void
-    Init(CStorageConfig c_storage_config) {
-        std::unique_lock lck(mutex_);
-
-        if (properties_ == nullptr) {
-            if (c_storage_config.crt_queue_sizes > 0) {
-                std::unique_lock cfg_lck(config_mutex_);
-                s3_crt_queue_sizes_ = c_storage_config.crt_queue_sizes;
-            }
-            auto properties =
-                MakeInternalPropertiesFromStorageConfig(c_storage_config);
-            ApplyArrowReaderConfig(*properties);
-            properties_ = std::move(properties);
-        }
-    }
+    Init(CStorageConfig c_storage_config);
 
     void
     SetArrowReaderConfig(int64_t hole_size_limit_bytes,
-                         int64_t range_size_limit_bytes) {
-        // Publish both limits as one snapshot. They are validated against
-        // each other downstream (the parquet reader rejects
-        // range_size_limit <= hole_size_limit), so a reader must never
-        // observe one value from the new generation and the other from the
-        // old one — e.g. updating 1MiB/4MiB to 8MiB/16MiB could otherwise
-        // transiently expose 8MiB/4MiB and fail the build task.
-        {
-            std::unique_lock cfg_lck(config_mutex_);
-            arrow_reader_limits_ = {hole_size_limit_bytes,
-                                    range_size_limit_bytes};
-        }
-        std::unique_lock lck(mutex_);
-        if (properties_ != nullptr) {
-            auto properties =
-                std::make_shared<milvus_storage::api::Properties>(*properties_);
-            ApplyArrowReaderConfig(*properties);
-            properties_ = std::move(properties);
-        }
-    }
+                         int64_t range_size_limit_bytes);
 
+    // Ordinary readers share the immutable configuration snapshot (nullptr
+    // before Init). Callers that need to modify it must make a private copy.
     std::shared_ptr<const milvus_storage::api::Properties>
-    GetProperties() const {
-        std::shared_lock lck(mutex_);
-        return properties_;
-    }
+    GetProperties() const;
+
+    // Explicit options require Init. Equivalent effective settings share an
+    // immutable snapshot from a 128-entry LRU; unchanged settings reuse the base.
+    // Base-config updates invalidate the cache; existing readers retain their
+    // snapshots. Copy before injecting caller-specific values.
+    // LoadOpen selects the open-only file policy; Manifest selects Talon for the
+    // whole manifest. The stage mask is consumed here, not by storage.
+    std::shared_ptr<const milvus_storage::api::Properties>
+    GetProperties(const PropertiesOptions& options) const;
 
     void
-    SetS3CrtQueueSizes(uint32_t crt_queue_sizes) {
-        std::unique_lock cfg_lck(config_mutex_);
-        s3_crt_queue_sizes_ = crt_queue_sizes;
-    }
+    SetS3CrtQueueSizes(uint32_t crt_queue_sizes);
 
     // Job messages do not carry node-local CRT resource tuning.
     uint32_t
-    GetS3CrtQueueSizes() const {
-        std::shared_lock cfg_lck(config_mutex_);
-        return s3_crt_queue_sizes_;
-    }
+    GetS3CrtQueueSizes() const;
 
     void
-    SetExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
-        std::unique_lock cfg_lck(config_mutex_);
-        external_iops_config_ = {initial_rate, max_rate};
-    }
+    SetExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
 
     ExternalIopsConfig
-    GetExternalIopsConfig() const {
-        std::shared_lock cfg_lck(config_mutex_);
-        return external_iops_config_;
-    }
+    GetExternalIopsConfig() const;
 
     // Sets the per-round read window (loon's reader.record_batch_max_size)
     // applied to index-build manifest reads. 0 keeps loon's built-in default
@@ -132,37 +99,20 @@ class LoonFFIPropertiesSingleton {
     // NOT part of ApplyArrowReaderConfig so query-node load paths keep
     // their small default window.
     void
-    SetIndexBuildReadWindow(int64_t window_bytes) {
-        index_build_read_window_bytes_.store(window_bytes,
-                                             std::memory_order_relaxed);
-    }
+    SetIndexBuildReadWindow(int64_t window_bytes);
 
     int64_t
-    GetIndexBuildReadWindow() const {
-        return index_build_read_window_bytes_.load(std::memory_order_relaxed);
-    }
+    GetIndexBuildReadWindow() const;
 
     // Stamps the index-build read window into `properties` when configured
     // (> 0). Lock-free; no-op when unset so loon's default applies.
     void
     ApplyIndexBuildReadWindow(
-        milvus_storage::api::Properties& properties) const {
-        auto window =
-            index_build_read_window_bytes_.load(std::memory_order_relaxed);
-        if (window <= 0) {
-            return;
-        }
-        milvus_storage::api::SetValue(properties,
-                                      PROPERTY_READER_RECORD_BATCH_MAX_SIZE,
-                                      std::to_string(window).c_str());
-    }
+        milvus_storage::api::Properties& properties) const;
 
     // Returns the currently published limits as one coherent snapshot.
     ArrowReaderLimits
-    GetArrowReaderLimits() const {
-        std::shared_lock cfg_lck(config_mutex_);
-        return arrow_reader_limits_;
-    }
+    GetArrowReaderLimits() const;
 
     // Applies the configured arrow reader prebuffer limits to `properties`.
     // Reads one coherent snapshot, so the two values always come from the
@@ -172,22 +122,15 @@ class LoonFFIPropertiesSingleton {
     // SetArrowReaderConfig releases config_mutex_ before taking mutex_).
     // A value of 0 means "keep the arrow default" downstream.
     void
-    ApplyArrowReaderConfig(milvus_storage::api::Properties& properties) const {
-        auto limits = GetArrowReaderLimits();
-        milvus_storage::api::SetValue(
-            properties,
-            PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT,
-            std::to_string(limits.hole_size_limit_bytes).c_str());
-        milvus_storage::api::SetValue(
-            properties,
-            PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT,
-            std::to_string(limits.range_size_limit_bytes).c_str());
-    }
+    ApplyArrowReaderConfig(milvus_storage::api::Properties& properties) const;
 
  private:
     mutable std::shared_mutex mutex_;
     std::shared_ptr<const milvus_storage::api::Properties> properties_ =
         nullptr;
+    struct PropertiesCache;
+    std::unique_ptr<PropertiesCache> properties_cache_;
+    TalonReadConfig talon_config_{};
     // Guards configuration snapshots that do not belong to the internal
     // filesystem properties. Separate from mutex_ so the limits can be read
     // while mutex_ is held; see ApplyArrowReaderConfig.
