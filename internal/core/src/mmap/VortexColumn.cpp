@@ -619,7 +619,7 @@ struct VortexColumn::OrderedTakeOwner {
 template <bool HasCandidateMask>
 class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     struct Selection {
-        const TargetBitmap* mask;
+        const TargetBitmapView* mask;
         std::vector<int64_t> value_indices;
         mutable std::optional<ChunkedColumnInterface::OwnedTakeData> dense;
     };
@@ -631,7 +631,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
                      std::shared_ptr<void> owner,
                      int64_t size,
                      DataType data_type,
-                     const TargetBitmap* candidate_mask,
+                     const TargetBitmapView* candidate_mask,
                      std::vector<int64_t> value_indices)
         : values_(values),
           validity_(validity),
