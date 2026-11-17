@@ -174,7 +174,7 @@ func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) 
 
 	assert.Len(t, slots, 2)
 	for _, slot := range slots {
-		assert.Equal(t, calculateIndexTaskSlot(fieldSize, true), slot)
+		assert.Equal(t, calculateIndexTaskSlot(fieldSize, 0, vecSlotIndexParams), slot)
 	}
 }
 
@@ -398,9 +398,9 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 	// A 128 dim nullable float vector over 3000 rows is bounded by its width
 	// plus the nullable encoding overhead — ~1.5MB, the smallest slot bucket,
 	// instead of the whole 2GB column group.
-	expected := calculateIndexTaskSlot((int64(128*4)+nullablePadPerRow)*numRows, true)
+	expected := calculateIndexTaskSlot((int64(128*4)+nullablePadPerRow)*numRows, 0, vecSlotIndexParams)
 	assert.Equal(t, expected, enqueuedSlot)
-	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, true))
+	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, 0, vecSlotIndexParams))
 }
 
 func TestIndexInspector_CreateIndexesForSegment_PassesResolvedCollection(t *testing.T) {
@@ -475,5 +475,9 @@ func TestIndexInspector_CreateIndexesForSegment_PassesResolvedCollection(t *test
 	}).Return()
 
 	assert.NoError(t, inspector.createIndexesForSegment(ctx, segment))
-	assert.Equal(t, calculateIndexTaskSlot((int64(128*4)+nullablePadPerRow)*numRows, true), enqueuedSlot)
+	assert.Equal(t, calculateIndexTaskSlot((int64(128*4)+nullablePadPerRow)*numRows, 0, vecSlotIndexParams), enqueuedSlot)
 }
+
+// vecSlotIndexParams selects the vector slot curve in calculateIndexTaskSlot;
+// it matches the IVF_FLAT index the tests above register.
+var vecSlotIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}}

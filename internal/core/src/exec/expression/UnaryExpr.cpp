@@ -1569,6 +1569,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
+    if constexpr (std::is_same_v<T, std::string> ||
+                  std::is_same_v<T, std::string_view>) {
+        // PatternMatch(Match) is candidates only. Never serve it through
+        // UnaryIndexFuncForMatch. Recheck on VARCHAR, or scan.
+        if (expr_->op_type_ == proto::plan::OpType::Match &&
+            PinnedIndexIsFMIndex() && !has_offset_input_) {
+            if (CanUseFMMatch()) {
+                auto res = ExecFMMatch(context);
+                if (res.has_value()) {
+                    return res.value();
+                }
+                return nullptr;
+            }
+            return ExecRangeVisitorImplForData<T>(context);
+        }
+    }
+
     if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
@@ -2055,6 +2072,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     return res_vec;
 }
 
+std::string
+PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
+    switch (expr_->op_type_) {
+        // Anchored pattern ops and general LIKE: FMINDEX's count-first guard
+        // uses the literal to decline degenerate high-hit patterns.
+        // Equality (Equal/IN) is intentionally NOT accelerated by FMINDEX
+        // (ShouldUseOp declines it), so it needs no literal here.
+        case proto::plan::PrefixMatch:
+        case proto::plan::PostfixMatch:
+        case proto::plan::InnerMatch:
+        case proto::plan::Match:
+            return GetValueFromProto<std::string>(expr_->val_);
+        default:
+            return "";
+    }
+}
+
 void
 PhyUnaryRangeFilterExpr::DetermineExecPath() {
     // TextMatch/PhraseMatch/TextMatchFuzzy use a separate text index path
@@ -2184,10 +2218,11 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
-        case DataType::TEXT:
-            can_use =
-                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+        case DataType::TEXT: {
+            can_use = SegmentExpr::CanUseIndexForOp<std::string>(
+                expr_->op_type_, StringLiteralForCostGuard());
             break;
+        }
         case DataType::JSON: {
             const auto val_case = expr_->val_.val_case();
             if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
@@ -2203,6 +2238,9 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             switch (val_type) {
                 case DataType::STRING:
                 case DataType::VARCHAR:
+                    // FMINDEX is VARCHAR-only in this release; JSON string
+                    // paths never carry it, so no cost-guard literal is needed
+                    // here (other JSON string indexes judge on the op alone).
                     can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                         expr_->op_type_);
                     break;
@@ -2400,6 +2438,138 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
 
     index->ExecutePhase2(
         literal, expr_->op_type_, this, candidates, segment_offset, batch_size);
+}
+
+bool
+PhyUnaryRangeFilterExpr::PinnedIndexIsFMIndex() const {
+    if (pinned_index_.empty() || pinned_index_[0].get() == nullptr) {
+        return false;
+    }
+    auto* scalar = dynamic_cast<const index::ScalarIndex<std::string>*>(
+        pinned_index_[0].get());
+    return scalar != nullptr &&
+           scalar->GetIndexType() == index::ScalarIndexType::FMINDEX;
+}
+
+bool
+PhyUnaryRangeFilterExpr::CanUseFMMatch() {
+    if (has_offset_input_ || exec_path_ != ExprExecPath::ScalarIndex) {
+        return false;
+    }
+    if (expr_->op_type_ != proto::plan::OpType::Match) {
+        return false;
+    }
+    if (segment_->type() != SegmentType::Sealed) {
+        return false;
+    }
+    // num_data_chunk_ is the construction snapshot. ProcessDataByOffsets on a
+    // ScalarIndex cursor with no data chunks Reverse_Lookups, which FMINDEX
+    // does not implement.
+    return PinnedIndexIsFMIndex() && num_data_chunk_ > 0;
+}
+
+std::optional<VectorPtr>
+PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    auto literal = value_arg_.GetValue<std::string>();
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return std::nullopt;
+    }
+
+    auto* index = const_cast<index::ScalarIndex<std::string>*>(
+        dynamic_cast<const index::ScalarIndex<std::string>*>(
+            pinned_index_[0].get()));
+    AssertInfo(index != nullptr,
+               "FMINDEX Match path requires a string scalar index");
+    AssertInfo(num_data_chunk_ > 0,
+               "FMINDEX Match recheck needs sealed VARCHAR field data");
+
+    if (cached_phase1_res_ == nullptr) {
+        auto candidates =
+            index->PatternMatch(literal, proto::plan::OpType::Match);
+        cached_phase1_res_ =
+            std::make_shared<TargetBitmap>(std::move(candidates));
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(index->IsNotNull());
+    }
+
+    const int64_t segment_offset = current_index_chunk_pos_;
+    TargetBitmap batch_candidates;
+    batch_candidates.append(
+        *cached_phase1_res_, segment_offset, real_batch_size);
+
+    const auto& bitmap_input = context.get_bitmap_input();
+    if (!bitmap_input.empty()) {
+        AssertInfo(static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
+                   "bitmap_input size {} != real_batch_size {}",
+                   bitmap_input.size(),
+                   real_batch_size);
+        batch_candidates &= bitmap_input;
+    }
+
+    if (!batch_candidates.none()) {
+        EnsureLikeMatcherCache();
+        const LikePatternMatcher* matcher = cached_like_matcher_.get();
+        AssertInfo(matcher != nullptr, "LIKE matcher cache missing for Match");
+
+        OffsetVector offsets;
+        offsets.reserve(batch_candidates.count());
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            if (batch_candidates[i]) {
+                offsets.push_back(static_cast<int32_t>(segment_offset + i));
+            }
+        }
+
+        TargetBitmap compact(offsets.size(), false);
+        TargetBitmap compact_valid(offsets.size(), true);
+        TargetBitmapView compact_view(compact);
+        TargetBitmapView compact_valid_view(compact_valid);
+
+        auto execute_sub_batch = [matcher]<FilterType filter_type =
+                                               FilterType::sequential>(
+            const std::string_view* data,
+            ValidityView valid_data,
+            const int32_t* /*offsets*/,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView /*valid_res*/) {
+            if (data == nullptr) {
+                return;
+            }
+            for (int i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
+                res[i] = (*matcher)(data[i]);
+            }
+        };
+
+        ProcessDataByOffsets<std::string_view>(execute_sub_batch,
+                                               nullptr,
+                                               &offsets,
+                                               compact_view,
+                                               compact_valid_view);
+
+        for (size_t j = 0; j < offsets.size(); ++j) {
+            if (!compact[j]) {
+                batch_candidates[static_cast<int64_t>(offsets[j]) -
+                                 segment_offset] = false;
+            }
+        }
+    }
+
+    TargetBitmap valid_result;
+    valid_result.append(
+        *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(batch_candidates),
+                                          std::move(valid_result));
 }
 
 std::optional<VectorPtr>

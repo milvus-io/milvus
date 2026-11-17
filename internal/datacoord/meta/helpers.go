@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -410,4 +411,32 @@ func GetSortStatus(sorted bool) string {
 		return "sorted"
 	}
 	return "unsorted"
+}
+
+func SaturatingAdd(values ...int64) int64 {
+	var result int64
+	for _, value := range values {
+		if value > math.MaxInt64-result {
+			return math.MaxInt64
+		}
+		result += value
+	}
+	return result
+}
+
+func SaturatingMul(left, right int64) int64 {
+	if left <= 0 || right <= 0 {
+		return 0
+	}
+	if left > math.MaxInt64/right {
+		return math.MaxInt64
+	}
+	return left * right
+}
+
+func CeilDiv(value, divisor int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return 1 + (value-1)/divisor
 }
