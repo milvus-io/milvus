@@ -238,3 +238,16 @@ retains its lease semantics for replica retirement. Balancer applies the control
 already-Down Views. DDL callbacks only withdraw intent and wait; they never
 modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
 the release completion fence.
+
+## Load-config compliance
+
+Management compliance uses Coordinator state: every configured replica must have
+an Up view at the current LoadInfoVersion for every expected VChannel. Cleanup
+reads ShardViewRegistry resident references, not legacy segment/channel distribution.
+Views of removed replicas and QueryNode references outside a current replica's
+desired resource group block compliance until final durable view removal. The
+holding QueryNode's ResourceManager group attributes each residual; unknown groups
+and removed replicas with only growing views contribute a global violation.
+ResidentViews covers views without QueryNodes, including Dropped awaiting deletion.
+Ordinary view replacement within the desired replica/RG does not add a cleanup
+barrier. This is configuration convergence, not a general physical resource GC audit.

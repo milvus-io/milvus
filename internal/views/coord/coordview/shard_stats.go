@@ -27,6 +27,9 @@ type ShardStats struct {
 	UpNodes        []int64
 	PreparingNodes []int64
 	ResidentNodes  []int64
+	// ResidentViews includes views with no QueryNodes and Dropped views awaiting
+	// durable removal. An empty node footprint alone does not prove teardown.
+	ResidentViews int
 	// Resources contains confirmed ready resources. Matching the full key is
 	// conservative: a different DataVersion may still be physically reusable.
 	Resources map[int64]map[ResourceKey]struct{}

@@ -36,6 +36,35 @@ func (s *Server) qviewsReplicaSnapshot(collectionID int64) []*meta.Replica {
 	return result
 }
 
+// qviewsLeakedResourcesByCollectionPerRG checks configuration teardown using
+// Coord-owned resident views, including replicas absent from the current config.
+// Ordinary view evolution inside a replica's desired RG does not block compliance.
+func (s *Server) qviewsLeakedResourcesByCollectionPerRG(collectionID int64) map[string]int {
+	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(collectionID)
+	desired := make(map[int64]string)
+	if cfg != nil {
+		for _, replica := range cfg.Replicas {
+			desired[replica.ReplicaID] = replica.ResourceGroup
+		}
+	}
+	leaked := make(map[string]int)
+	for shard, stats := range s.qviewsRuntime.shardViewRegistry.SnapshotForCollection(collectionID).StatsMap() {
+		target, exists := desired[shard.ReplicaID]
+		for _, node := range stats.ResidentNodes {
+			actual := s.meta.GetResourceGroupByNodeID(node)
+			if !exists || actual != target {
+				leaked[actual]++
+			}
+		}
+		// A growing-only view still has an SN lifecycle, but no QN whose RG
+		// can attribute cleanup. Report it globally without probing WAL placement.
+		if !exists && len(stats.ResidentNodes) == 0 && stats.ResidentViews > 0 {
+			leaked[""]++
+		}
+	}
+	return leaked
+}
+
 // qviewsReplicaErrors checks the complete expected channel set at the current
 // load version. A config-only replica or an old Up view cannot certify readiness.
 func (s *Server) qviewsReplicaErrors(ctx context.Context, collectionID int64) map[int64]error {
