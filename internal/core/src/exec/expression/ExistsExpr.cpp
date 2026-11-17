@@ -265,30 +265,42 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         });
                     auto shredding_fields =
                         index->GetShreddingFieldsWithPrefix(pointer);
+                    // Resolve cheap scalar validity first, regardless of field
+                    // name order, before reading any array payloads.
                     for (const auto& field : shredding_fields) {
-                        // Descendants only add matches. Avoid reading another
-                        // column (especially array contents) once all rows match.
                         if (res_view.all()) {
                             break;
                         }
-                        TargetBitmap temp_valid(active_count_, true);
-                        TargetBitmapView temp_valid_view(temp_valid);
                         if (index->GetShreddingJsonType(field) ==
                             index::JSONType::ARRAY) {
-                            TargetBitmap array_exists(active_count_, false);
-                            index->ExecutorForShreddingData<std::string_view>(
-                                op_ctx_,
-                                field,
-                                EvaluateShreddedArrayExists,
-                                nullptr,
-                                TargetBitmapView(array_exists),
-                                temp_valid_view);
-                            res_view |= TargetBitmapView(array_exists);
-                        } else {
-                            index->ExecutorForGettingValid(
-                                op_ctx_, field, temp_valid_view);
-                            res_view |= temp_valid_view;
+                            continue;
                         }
+                        TargetBitmap temp_valid(active_count_, true);
+                        TargetBitmapView temp_valid_view(temp_valid);
+                        index->ExecutorForGettingValid(
+                            op_ctx_, field, temp_valid_view);
+                        res_view |= temp_valid_view;
+                    }
+
+                    // Only read arrays if scalar validity left unresolved rows.
+                    for (const auto& field : shredding_fields) {
+                        if (res_view.all()) {
+                            break;
+                        }
+                        if (index->GetShreddingJsonType(field) !=
+                            index::JSONType::ARRAY) {
+                            continue;
+                        }
+                        TargetBitmap temp_valid(active_count_, true);
+                        TargetBitmap array_exists(active_count_, false);
+                        index->ExecutorForShreddingData<std::string_view>(
+                            op_ctx_,
+                            field,
+                            EvaluateShreddedArrayExists,
+                            nullptr,
+                            TargetBitmapView(array_exists),
+                            TargetBitmapView(temp_valid));
+                        res_view |= TargetBitmapView(array_exists);
                     }
                 }
 

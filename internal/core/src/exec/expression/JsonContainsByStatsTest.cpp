@@ -2112,14 +2112,19 @@ TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
     }
 }
 
-TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
+class JsonStatsExistsOrderTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
     DisableExprCache disable_cache;
     milvus::test::ExprBatchSizeGuard batch_size(7);
     constexpr int64_t n =
         17;  // Exercise a partial bitmap word and final batch.
-    enum LastRow { Scalar, Array, Shared, Empty };
-    for (auto last_row : {Scalar, Array, Shared, Empty}) {
+    const bool array_first = GetParam();
+    const std::string scalar_key = array_first ? "z" : "a";
+    enum LastRow { Scalar, ComplementaryScalars, Array, Shared, Empty };
+    for (auto last_row : {Scalar, ComplementaryScalars, Array, Shared, Empty}) {
         SCOPED_TRACE(last_row);
+        const int64_t id = 55594 + last_row + (array_first ? 10 : 0);
         auto schema = std::make_shared<Schema>();
         auto fid = schema->AddDebugField("json", DataType::JSON);
         auto segment = segcore::CreateSealedSegment(schema);
@@ -2130,9 +2135,14 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
         std::vector<std::string> rows;
         for (int64_t i = 0; i < n; ++i) {
             nlohmann::json parent = {
-                {"a", 1}, {"b", nulls}, {"c", nullptr}, {"d", nulls}};
-            if (i == n - 1 && last_row != Scalar) {
-                parent["a"] = nullptr;
+                {scalar_key, 1}, {"b", nulls}, {"c", nullptr}, {"d", nulls}};
+            if (last_row == ComplementaryScalars) {
+                // Neither scalar alone covers every row, but their OR does.
+                parent[scalar_key] = nullptr;
+                parent["zz"] = nullptr;
+                parent[i % 2 == 0 ? scalar_key : "zz"] = 1;
+            } else if (i == n - 1 && last_row != Scalar) {
+                parent[scalar_key] = nullptr;
                 if (last_row == Array) {
                     parent["b"] = nlohmann::json::array({1});
                 } else if (last_row == Shared) {
@@ -2141,16 +2151,10 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
             }
             rows.push_back(nlohmann::json({{"parent", parent}}).dump());
         }
-        auto stats = BuildAndLoadJsonKeyStats(rows,
-                                              fid,
-                                              TestLocalPath,
-                                              55594,
-                                              55594,
-                                              55594 + last_row,
-                                              fid.get(),
-                                              55594 + last_row,
-                                              1);
-        auto scalar = stats->GetShreddingField("/parent/a", JSONType::INT64);
+        auto stats = BuildAndLoadJsonKeyStats(
+            rows, fid, TestLocalPath, 55594, 55594, id, fid.get(), id, 1);
+        auto scalar =
+            stats->GetShreddingField("/parent/" + scalar_key, JSONType::INT64);
         auto first_array =
             stats->GetShreddingField("/parent/b", JSONType::ARRAY);
         auto second_array =
@@ -2158,8 +2162,18 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
         ASSERT_FALSE(scalar.empty());
         ASSERT_FALSE(first_array.empty());
         ASSERT_FALSE(second_array.empty());
-        ASSERT_LT(scalar, first_array);
+        if (array_first) {
+            ASSERT_LT(second_array, scalar);
+        } else {
+            ASSERT_LT(scalar, first_array);
+        }
         ASSERT_LT(first_array, second_array);
+        if (last_row == ComplementaryScalars) {
+            auto other =
+                stats->GetShreddingField("/parent/zz", JSONType::INT64);
+            ASSERT_FALSE(other.empty());
+            ASSERT_LT(second_array, other);
+        }
         ASSERT_TRUE(stats->GetShreddingFields("/parent/c").empty());
 
         // The wrapper only needs row metadata; all reads delegate to the real
@@ -2175,8 +2189,7 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::make_unique<TestChunkTranslator>(
                 std::vector<int64_t>{n},
-                fmt::format("exists_short_circuit_{}",
-                            static_cast<int>(last_row)),
+                fmt::format("exists_short_circuit_{}", id),
                 std::move(chunks)),
             nullptr);
         auto wrap = [&](std::shared_ptr<ChunkedColumnInterface>& column) {
@@ -2202,7 +2215,7 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
         auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
                       .GetRemoteChunkManager();
         segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
-            55594, 55594, 55594 + last_row, fid.get(), {field}, cm));
+            55594, 55594, id, fid.get(), {field}, cm));
 
         auto exists = std::make_shared<expr::ExistsExpr>(
             expr::ColumnInfo(fid, DataType::JSON, {"parent"}));
@@ -2221,13 +2234,19 @@ TEST(JsonStatsExistsTest, ResolvedParentSkipsRemainingColumns) {
                       Json(simdjson::padded_string(rows[i])).exist("/parent"))
                 << i;
         }
-        EXPECT_EQ(array_b->array_scans, last_row == Scalar ? 0 : 1);
+        const bool scalars_resolve =
+            last_row == Scalar || last_row == ComplementaryScalars;
+        EXPECT_EQ(array_b->array_scans, scalars_resolve ? 0 : 1);
         EXPECT_EQ(array_d->array_scans,
-                  last_row == Scalar || last_row == Array ? 0 : 1);
+                  scalars_resolve || last_row == Array ? 0 : 1);
         EXPECT_EQ(shared->shared_reads == 0,
-                  last_row == Scalar || last_row == Array);
+                  scalars_resolve || last_row == Array);
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(JsonStatsFieldNameOrder,
+                         JsonStatsExistsOrderTest,
+                         ::testing::Bool());
 
 // #55290: JSON path IS NOT NULL compiles to EXISTS, and IS NULL to NOT
 // EXISTS. Compare both plans with stats off/on/off after building and loading
