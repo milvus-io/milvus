@@ -22,8 +22,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -142,8 +145,9 @@ func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// Only transient etcd errors are retried; a request timeout aborts.
-		if !etcd.IsRetriableWatchErr(err) {
+		// A snapshot request deadline does not end the watcher's lifetime.
+		// clientv3 may return a context error or a gRPC deadline status.
+		if !errors.Is(err, context.DeadlineExceeded) && status.Code(err) != codes.DeadlineExceeded && !etcd.IsRetriableWatchErr(err) {
 			return nil, err
 		}
 		mlog.Warn(ctx, "failed to list proxy sessions, retry", mlog.Err(err))
