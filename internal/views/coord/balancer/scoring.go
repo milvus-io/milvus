@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
@@ -122,9 +123,20 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	for _, n := range nodes {
 		ctx.collectionBase[n] = c.ReplicaSize(id.ReplicaID, n) + p.replicaDelta[id.ReplicaID][n] - old[n]
 	}
+	// Reuse evidence and its version must come from the same pinned collection.
+	// Published-schema recovery can still allocate without a current DataView,
+	// but cannot claim compatible resources in that case.
+	data := c.DataView()
+	key := coordview.ResourceKey{LoadInfoVersion: c.ConfigVersion()}
+	if data != nil {
+		key.DataVersion = data.DataVersion
+	}
 	for _, segment := range entries {
 		ctx.segments[segment.SegmentID] = segment
-		ctx.reusable[segment.SegmentID] = reusableResources(p, id, segment, nodes)
+		if data != nil {
+			key.PartitionID, key.SegmentID = segment.PartitionID, segment.SegmentID
+			ctx.reusable[segment.SegmentID] = reusableResources(c, key, nodes)
+		}
 	}
 	return ctx
 }
@@ -270,13 +282,8 @@ func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
 }
 
 // reusableResources only credits confirmed, protected, exact-compatible loads.
-func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64) map[int64]bool {
-	c := p.collectionForShard(id)
+func reusableResources(c *balancercache.CollectionEntry, key coordview.ResourceKey, nodes []int64) map[int64]bool {
 	states := make(map[int64]bool)
-	if c == nil || c.DataView() == nil {
-		return states
-	}
-	key := coordview.ResourceKey{PartitionID: segment.PartitionID, SegmentID: segment.SegmentID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
 	for _, n := range nodes {
 		if resources := c.PlacementNode(n); resources != nil && resources.HasResource(key) {
 			states[n] = true

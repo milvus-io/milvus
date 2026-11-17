@@ -100,7 +100,48 @@ func TestMemoryReusableResourcesWithoutData(t *testing.T) {
 	c := balancercache.New(nil)
 	id := cacheShard(1, 10)
 	segment := &SegmentDataView{SegmentID: 1000, PartitionID: 1}
-	require.Empty(t, reusableResources(newPlanningContext(c), id, segment, []int64{1}))
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
-	require.Empty(t, reusableResources(newPlanningContext(c), id, segment, []int64{1}))
+	p := newPlanningContext(c)
+	p.fanouts = make(map[qviews.ShardID]int)
+	ctx := newAllocationContext(p, id, nil, []*SegmentDataView{segment})
+	require.Same(t, segment, ctx.segments[segment.SegmentID])
+	require.Empty(t, ctx.reusable[segment.SegmentID])
+}
+
+func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
+	c := balancercache.New(nil)
+	id := cacheShard(1, 10)
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
+	c.PublishDataView(1, cacheData(1, id.VChannel, 10, 20))
+	c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1},
+		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1001, 1, 1, coordview.SegmentStateUp)))
+	p := newPlanningContext(c)
+	p.targets[10] = []int64{1}
+	p.fanouts = make(map[qviews.ShardID]int)
+	pinned := p.GetCollection(1)
+	entries := pinned.DataView().Shard(id.VChannel).Partitions[0].Segments
+
+	// Later publications must not change this allocation's reuse identities.
+	c.PublishLoadConfig(1, pinned.LoadConfig(), 2)
+	next := *pinned.DataView()
+	next.DataVersion.StreamingVersion++
+	c.PublishDataView(1, &next)
+	var original func(qviews.ShardID) (int64, bool)
+	calls := 0
+	patch := mockey.Mock(parseShardCollection).Origin(&original).To(func(id qviews.ShardID) (int64, bool) {
+		calls++
+		return original(id)
+	}).Build()
+	defer patch.UnPatch()
+	ctx := newAllocationContext(p, id, map[int64]int64{}, entries)
+	require.Equal(t, 1, calls, "resolve the collection once, regardless of segment count")
+	require.Equal(t, map[int64]map[int64]bool{1000: {1: true}, 1001: {1: true}}, ctx.reusable)
+
+	fresh := newPlanningContext(c)
+	fresh.targets[10] = []int64{1}
+	fresh.fanouts = make(map[qviews.ShardID]int)
+	for _, reusable := range newAllocationContext(fresh, id, map[int64]int64{}, entries).reusable {
+		require.Empty(t, reusable, "a new context must reject the old materialization")
+	}
 }
