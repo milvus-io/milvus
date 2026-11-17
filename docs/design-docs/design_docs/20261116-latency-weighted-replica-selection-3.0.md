@@ -7,32 +7,39 @@ xiaofan-luan, to the 3.0 delegator execution path.
 
 ## Scope and configuration
 
-The policy is opt-in through `proxy.replicaSelectionPolicy: latency_weighted`.
-The default remains `look_aside`. Search and Query, including Search requery
-and query iterator reads, support hedging. Other shardclient users use weighted
-selection without hedging. No QueryNode protocol, persisted metadata, or WAL
-messages change. Routing statistics are local to each Proxy and are not
-replicated between clusters.
+Replica selection policy is configured via `proxy.replicaSelectionPolicy`
+(`round_robin`, `look_aside`, or `latency_weighted`; default `look_aside`).
+`proxy.replicaSelectionPolicy` is refreshable (`refreshable: true`): live changes
+apply to new channel requests, while an in-flight channel request retains the
+policy and accounting owner captured at entry to `ExecuteWithRetry`.
 
-The selector captures the policy at entry to `ExecuteWithRetry`. Changes to
-`proxy.latencyWeighted.enabled` affect subsequent channel requests; a request
-already executing retains its policy across retries. Disabling it uses the
-underlying look-aside balancer, including the existing blacklist behavior.
-Selection and release therefore use the same accounting owner even when the
-switch changes in flight.
+Hedged reads are configured orthogonally under `proxy.hedging` (default
+`enabled: false`) and apply to Search and Query (including Search requery and
+query iterator reads) regardless of which `proxy.replicaSelectionPolicy` is
+active. Each channel request sends at most one hedge across all retry rounds,
+keeping speculative hedging orthogonal to `proxy.retryTimesOnReplica` error
+retries. Other shardclient users use the configured selection policy without
+hedging. No QueryNode protocol, persisted metadata, or WAL messages change.
+Routing statistics are local to each Proxy and are not replicated between
+clusters.
 
-| Parameter under `proxy.latencyWeighted` | Default | Meaning |
+| Parameter | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `true` | Use weighted selection when the policy is selected |
-| `decay` | `10s` | Time constant for successful latency samples and penalties |
-| `minShare` | `0.001` | Minimum selection probability among eligible replicas |
-| `hedge.enabled` | `true` | Enable hedging for Search/Query |
-| `hedge.minDelay` | `200ms` | Minimum wait before looking for a hedge target |
-| `hedge.minWinRate` | `0.3` | Below this win rate, retain 10% hedge probes |
+| `proxy.replicaSelectionPolicy` | `look_aside` | Replica selection policy (`round_robin`, `look_aside`, `latency_weighted`); refreshable |
+| `proxy.latencyWeighted.decay` | `10s` | Time constant for successful latency samples and penalties |
+| `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection probability among eligible replicas |
+| `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `proxy.replicaSelectionPolicy` |
+| `proxy.hedging.minDelay` | `200ms` | Minimum wait before looking for a hedge target |
+| `proxy.hedging.maxInflightRatio` | `0.1` | Proxy-level cap on concurrent in-flight hedged attempts relative to concurrent in-flight hedgeable primary attempts |
 
-These parameters are refreshable. The policy name itself requires a restart.
-The other parameters are read when used; the enable switch alone selects the
-request's accounting and blacklist policy for its full retry lifetime.
+`maxInflightRatio` defaults to `0.1` (10%), referencing gRPC's `retryThrottling`
+(`tokenRatio = 0.1`, gRFC A6), to bound worst-case speculative fan-out under
+cluster-wide tail latency spikes without requiring per-cluster tuning. A
+built-in floor of `2` concurrent hedges preserves hedging at low QPS, and
+`inflightHedges` is held until the hedged RPC goroutine actually returns (so
+un-canceled lingering losers count against the budget). Internally,
+`hedgeOutcomes` retains a `0.3` win-rate threshold (`defaultHedgeMinWinRate`) to
+throttle ineffective hedges to a 10% probe rate.
 
 ## Selection and failure feedback
 
@@ -145,9 +152,9 @@ than ten recent outcomes, hedges are allowed. Below the minimum win rate,
 not a hard concurrency limit or a guarantee against added load during a burst.
 
 The new counter `milvus_proxy_replica_hedge_total` has Proxy node ID and
-`decision` labels: `sent`, `won`, `skipped_low_win_rate`, and
-`skipped_no_replica`. It does not add channel, collection, or resource-group
-labels.
+`decision` labels: `sent`, `won`, `skipped_low_win_rate`,
+`skipped_no_replica`, and `skipped_inflight_limit`. It does not add channel,
+collection, or resource-group labels.
 
 ## Verification and limits
 

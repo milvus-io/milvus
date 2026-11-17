@@ -42,12 +42,14 @@ func TestLatencyPolicyBlacklistAndSwitch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHedgeHarness(t, 1, 2)
 			pt := paramtable.Get()
-			value, nextValue := "true", "false"
+			value, nextValue := LatencyWeighted, LookAside
 			if !enabled {
 				value, nextValue = nextValue, value
 			}
-			pt.Save(pt.ProxyCfg.LatencyWeightedEnabled.Key, value)
-			t.Cleanup(func() { pt.Reset(pt.ProxyCfg.LatencyWeightedEnabled.Key) })
+			pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, value)
+			t.Cleanup(func() { pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key) })
+			h.policy.getBalancer = NewLBPolicyImpl(h.policy.clientMgr).getBalancer
+			h.balancer = h.policy.balancerMap[LatencyWeighted].(*LatencyWeightedBalancer)
 			var visited []int64
 			err := h.policy.ExecuteWithRetry(context.Background(), ChannelWorkload{
 				Channel: hedgeTestChannel, Nq: 1, StatsClass: hedgeTestClass,
@@ -56,7 +58,7 @@ func TestLatencyPolicyBlacklistAndSwitch(t *testing.T) {
 					if len(visited) == 1 {
 						// Releasing this attempt and dispatching its retry must retain
 						// the accounting owner and blacklist policy captured at entry.
-						pt.Save(pt.ProxyCfg.LatencyWeightedEnabled.Key, nextValue)
+						pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, nextValue)
 						return merr.ErrChannelNotAvailable
 					}
 					return nil
@@ -120,24 +122,28 @@ func TestLatencyCandidateRetainsResourceGroupScope(t *testing.T) {
 }
 
 func TestLatencyHedgeHistoryIsScoped(t *testing.T) {
-	b, _ := newTestBalancer(t)
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	defer pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+	h := newHedgeTracker()
 	unscoped := ChannelWorkload{Channel: hedgeTestChannel, StatsClass: hedgeTestClass}
 	slow, fast := unscoped, unscoped
 	slow.ResourceGroup, fast.ResourceGroup = "slow", "fast"
 	for i := 0; i < 20; i++ {
-		b.ObserveRequest(hedgeStatsKey(slow), 5*time.Second)
-		b.ObserveHedge(hedgeStatsKey(slow), false)
-		b.ObserveRequest(hedgeStatsKey(fast), time.Millisecond)
+		h.ObserveRequest(hedgeStatsKey(slow), 5*time.Second)
+		h.ObserveHedge(hedgeStatsKey(slow), false)
+		h.ObserveRequest(hedgeStatsKey(fast), time.Millisecond)
 	}
-	delay, ok := b.HedgeDelay(hedgeStatsKey(slow))
+	delay, ok := h.HedgeDelay(hedgeStatsKey(slow))
 	require.True(t, ok)
 	require.Equal(t, 5*time.Second, delay)
 	for _, work := range []ChannelWorkload{fast, unscoped} {
-		delay, ok = b.HedgeDelay(hedgeStatsKey(work))
+		delay, ok = h.HedgeDelay(hedgeStatsKey(work))
 		require.True(t, ok)
 		require.Equal(t, 200*time.Millisecond, delay)
 		for i := 0; i < 20; i++ {
-			require.True(t, b.AllowHedge(hedgeStatsKey(work)))
+			require.True(t, h.AllowHedge(hedgeStatsKey(work)))
 		}
 	}
 	require.Equal(t, statsKey(slow), statsKey(fast), "the same serving node retains shared latency observations")

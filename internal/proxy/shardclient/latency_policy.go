@@ -41,15 +41,6 @@ func statsKey(workload ChannelWorkload) string {
 	return workload.Channel + "|" + workload.StatsClass
 }
 
-// latencyWeighted returns the balancer as a LatencyWeightedBalancer when it
-// is one and its switch is on.
-func latencyWeighted(balancer LBBalancer) *LatencyWeightedBalancer {
-	if lw, ok := balancer.(*LatencyWeightedBalancer); ok && lw.Enabled() {
-		return lw
-	}
-	return nil
-}
-
 // hedgeStatsKey separates pooled timing and hedge outcomes by request routing scope.
 // Replica latency and in-flight observations remain shared for the same node.
 func hedgeStatsKey(workload ChannelWorkload) string {
@@ -59,17 +50,10 @@ func hedgeStatsKey(workload ChannelWorkload) string {
 	return fmt.Sprintf("%s|resource_group=%q", statsKey(workload), workload.ResourceGroup)
 }
 
-// snapshotBalancer captures the accounting owner for this request. In particular,
-// disabled latency weighting uses the underlying look-aside balancer directly,
-// so a later configuration change cannot change how its workload is released.
+// snapshotBalancer captures the accounting owner for this request.
 func snapshotBalancer(balancer LBBalancer) (LBBalancer, *LatencyWeightedBalancer) {
-	if lw, ok := balancer.(*LatencyWeightedBalancer); ok {
-		if lw.Enabled() {
-			return lw, lw
-		}
-		return lw.LookAsideBalancer, nil
-	}
-	return balancer, nil
+	lw, _ := balancer.(*LatencyWeightedBalancer)
+	return balancer, lw
 }
 
 // selectNodeWithPolicy may refresh shard locations. Hedge execution performs
@@ -180,6 +164,7 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload ChannelWorkload, balancer LBBalancer, lw *LatencyWeightedBalancer) error {
 	excludeNodes := typeutil.NewUniqueSet()
 	var lastErr error
+	hedgedOnce := false
 	tryExecute := func() (bool, error) {
 		node, selected, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
 		if err != nil {
@@ -192,14 +177,20 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 			return true, err
 		}
 		start := time.Now()
-		if workload.Hedgeable {
-			if delay, enabled := lw.HedgeDelay(hedgeStatsKey(workload)); enabled {
-				again, err := lb.executeHedged(ctx, workload, lw, node, selected, start, delay, &excludeNodes)
+		if workload.Hedgeable && !hedgedOnce {
+			if delay, enabled := lb.hedging.HedgeDelay(hedgeStatsKey(workload)); enabled {
+				again, hedged, err := lb.executeHedged(ctx, workload, balancer, lw, node, selected, start, delay, nil, &excludeNodes)
+				if hedged {
+					hedgedOnce = true
+				}
 				if err != nil {
 					lastErr = err
 				}
 				return again, err
 			}
+		}
+		if workload.Hedgeable {
+			defer lb.hedging.EnterPrimary()()
 		}
 		client, err := lb.clientMgr.GetClient(ctx, node)
 		if err == nil {
@@ -214,7 +205,7 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 			lastErr = merr.Wrapf(err, "failed to search/query delegator %d for channel %s", node.NodeID, workload.Channel)
 			return true, lastErr
 		}
-		lw.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
+		lb.hedging.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
 		return true, nil
 	}
 	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
