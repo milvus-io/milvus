@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "storage/StsCredentials.h"
 #include "HuaweiCloudSTSClient.h"
 
 #include <aws/core/http/HttpClient.h>
@@ -141,8 +142,7 @@ HuaweiCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
     } catch (const std::exception& e) {
         AWS_LOGSTREAM_ERROR(
             STS_RESOURCE_CLIENT_LOG_TAG,
-            "Exception during Huawei Cloud STS credential retrieval: "
-                << e.what());
+            "Exception during Huawei Cloud STS credential retrieval");
     } catch (...) {
         AWS_LOGSTREAM_ERROR(
             STS_RESOURCE_CLIENT_LOG_TAG,
@@ -160,8 +160,7 @@ HuaweiCloudSTSCredentialsClient::parseSTSResponse(
         httpResponseCode != Aws::Http::HttpResponseCode::CREATED) {
         result.errorMessage =
             "Huawei Cloud STS security token request failed with HTTP code: " +
-            std::to_string(static_cast<int>(httpResponseCode)) +
-            ", body: " + responseBody.substr(0, 200);
+            std::to_string(static_cast<int>(httpResponseCode));
         return result;
     }
     if (responseBody.empty()) {
@@ -170,22 +169,26 @@ HuaweiCloudSTSCredentialsClient::parseSTSResponse(
     }
     Aws::Utils::Json::JsonValue jsonValue(responseBody);
     if (!jsonValue.WasParseSuccessful()) {
-        result.errorMessage = "Failed to parse STS response as JSON: " +
-                              std::string(responseBody.substr(0, 200).c_str());
+        result.errorMessage = "Failed to parse STS response as JSON";
         return result;
     }
     auto json = jsonValue.View();
-    auto rootNode = json.GetObject("credential");
+    auto rootNode =
+        milvus::storage::native_sts::ObjectField(json, "credential");
 
     if (rootNode.IsNull()) {
         result.errorMessage = "Get credential from STS result failed";
         return result;
     }
-    result.credentials.SetAWSAccessKeyId(rootNode.GetString("access"));
-    result.credentials.SetAWSSecretKey(rootNode.GetString("secret"));
-    result.credentials.SetSessionToken(rootNode.GetString("securitytoken"));
+    result.credentials.SetAWSAccessKeyId(
+        milvus::storage::native_sts::StringField(rootNode, "access"));
+    result.credentials.SetAWSSecretKey(
+        milvus::storage::native_sts::StringField(rootNode, "secret"));
+    result.credentials.SetSessionToken(
+        milvus::storage::native_sts::StringField(rootNode, "securitytoken"));
 
-    auto expiresAt = rootNode.GetString("expires_at");
+    auto expiresAt =
+        milvus::storage::native_sts::StringField(rootNode, "expires_at");
     if (expiresAt.empty()) {
         result.errorMessage =
             "STS response missing 'expires_at' field, rejecting credentials";
@@ -195,12 +198,14 @@ HuaweiCloudSTSCredentialsClient::parseSTSResponse(
         Aws::Utils::StringUtils::Trim(expiresAt.c_str()).c_str(),
         Aws::Utils::DateFormat::ISO_8601);
     if (!parsedExpiration.WasParseSuccessful()) {
-        result.errorMessage =
-            "STS response 'expires_at' field has invalid format: " +
-            std::string(expiresAt.c_str());
+        result.errorMessage = "STS response expiration is invalid";
         return result;
     }
     result.credentials.SetExpiration(parsedExpiration);
+    if (!milvus::storage::native_sts::IsUsable(result.credentials)) {
+        result.errorMessage = "STS returned incomplete or expired credentials";
+        return result;
+    }
     result.success = true;
     return result;
 }

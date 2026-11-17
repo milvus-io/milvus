@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -224,8 +225,8 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 		return minioCred.Value{}, errors.Wrap(err, "failed to create temporary access key")
 	}
 
-	if response.Credential == nil ||
-		response.Credential.Access == "" || response.Credential.Secret == "" || response.Credential.Securitytoken == "" {
+	if response == nil || response.Credential == nil ||
+		strings.TrimSpace(response.Credential.Access) == "" || strings.TrimSpace(response.Credential.Secret) == "" || strings.TrimSpace(response.Credential.Securitytoken) == "" {
 		p.stsFailureCount.Add(1)
 		p.lastReloadFailed = true
 		p.lastFailedReloadTime = time.Now()
@@ -243,6 +244,9 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	}
 
 	expiration, err := time.Parse(time.RFC3339, response.Credential.ExpiresAt)
+	if err == nil && !expiration.After(time.Now().UTC()) {
+		err = merr.WrapErrServiceUnavailableMsg("Huawei STS returned already expired credentials")
+	}
 	if err != nil {
 		p.stsFailureCount.Add(1)
 		mlog.Warn(context.TODO(), "HuaweiCloud credential provider: failed to parse expiration time",

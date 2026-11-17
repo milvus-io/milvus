@@ -19,6 +19,9 @@ func Test_NewMinioClient(t *testing.T) {
 	})
 
 	t.Run("iam failed", func(t *testing.T) {
+		for _, key := range []string{"TKE_REGION", "TKE_PROVIDER_ID", "TKE_ROLE_ARN", "TKE_WEB_IDENTITY_TOKEN_FILE"} {
+			t.Setenv(key, "")
+		}
 		_, err := NewMinioClient("", nil)
 		assert.Error(t, err)
 	})

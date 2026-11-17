@@ -86,7 +86,7 @@ TEST_F(TencentCloudSTSClientTest, RejectsMissingResponseObject) {
             "TmpSecretKey": "SECRET_TEST",
             "Token": "SESSION_TOKEN"
         },
-        "Expiration": "2026-07-03T12:34:56Z"
+        "Expiration": "2099-07-03T12:34:56Z"
     })";
     auto result = Helper::parseSTSResponse(body);
 
@@ -97,7 +97,7 @@ TEST_F(TencentCloudSTSClientTest, RejectsMissingResponseObject) {
 TEST_F(TencentCloudSTSClientTest, RejectsMissingCredentialsObject) {
     const std::string body = R"({
         "Response": {
-            "Expiration": "2026-07-03T12:34:56Z"
+            "Expiration": "2099-07-03T12:34:56Z"
         }
     })";
     auto result = Helper::parseSTSResponse(body);
@@ -146,7 +146,7 @@ TEST_F(TencentCloudSTSClientTest, RejectsMissingAccessKeyId) {
                 "TmpSecretKey": "SECRET_TEST",
                 "Token": "SESSION_TOKEN"
             },
-            "Expiration": "2026-07-03T12:34:56Z"
+            "Expiration": "2099-07-03T12:34:56Z"
         }
     })";
     auto result = Helper::parseSTSResponse(body);
@@ -162,7 +162,7 @@ TEST_F(TencentCloudSTSClientTest, RejectsMissingSecretKey) {
                 "TmpSecretId": "AKID_TEST",
                 "Token": "SESSION_TOKEN"
             },
-            "Expiration": "2026-07-03T12:34:56Z"
+            "Expiration": "2099-07-03T12:34:56Z"
         }
     })";
     auto result = Helper::parseSTSResponse(body);
@@ -178,7 +178,7 @@ TEST_F(TencentCloudSTSClientTest, RejectsMissingSessionToken) {
                 "TmpSecretId": "AKID_TEST",
                 "TmpSecretKey": "SECRET_TEST"
             },
-            "Expiration": "2026-07-03T12:34:56Z"
+            "Expiration": "2099-07-03T12:34:56Z"
         }
     })";
     auto result = Helper::parseSTSResponse(body);
@@ -196,7 +196,7 @@ TEST_F(TencentCloudSTSClientTest,
                 "TmpSecretKey": "SECRET_TEST",
                 "Token": "SESSION_TOKEN"
             },
-            "Expiration": "2026-07-03T12:34:56Z",
+            "Expiration": "2099-07-03T12:34:56Z",
             "RequestId": "req-123"
         }
     })";

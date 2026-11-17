@@ -1,7 +1,6 @@
 package aliyun
 
 import (
-	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -24,14 +23,21 @@ func TestNewMinioClient(t *testing.T) {
 	})
 
 	t.Run("iam failed", func(t *testing.T) {
+		t.Setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
+		t.Setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+		t.Setenv("ALIBABA_CLOUD_ROLE_ARN", "")
+		t.Setenv("ALIBABA_CLOUD_OIDC_PROVIDER_ARN", "")
+		t.Setenv("ALIBABA_CLOUD_OIDC_TOKEN_FILE", "")
+		t.Setenv("ALIBABA_CLOUD_CREDENTIALS_FILE", "/tmp/nonexistent-aliyun-test-profile")
+		t.Setenv("ALIBABA_CLOUD_ECS_METADATA", "")
 		_, err := NewMinioClient("", nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("iam ok", func(t *testing.T) {
-		os.Setenv("ALIBABA_CLOUD_ROLE_ARN", "roleArn")
-		os.Setenv("ALIBABA_CLOUD_OIDC_PROVIDER_ARN", "oidcProviderArn")
-		os.Setenv("ALIBABA_CLOUD_OIDC_TOKEN_FILE", "oidcTokenFilePath")
+		t.Setenv("ALIBABA_CLOUD_ROLE_ARN", "roleArn")
+		t.Setenv("ALIBABA_CLOUD_OIDC_PROVIDER_ARN", "oidcProviderArn")
+		t.Setenv("ALIBABA_CLOUD_OIDC_TOKEN_FILE", "oidcTokenFilePath")
 		minioCli, err := NewMinioClient("", nil)
 		assert.NoError(t, err)
 		assert.Equal(t, OSSDefaultAddress, minioCli.EndpointURL().Host)
@@ -43,6 +49,8 @@ func TestCredentialProvider_Retrieve(t *testing.T) {
 	c := new(CredentialProvider)
 	mockAliyunCreds := mocks.NewCredential(t)
 	c.aliyunCreds = mockAliyunCreds
+	kind := "sts"
+	mockAliyunCreds.EXPECT().GetType().Return(&kind).Maybe()
 
 	ak := "ak"
 	sk := "sk"
@@ -75,30 +83,10 @@ func TestCredentialProvider_Retrieve(t *testing.T) {
 		assert.Equal(t, ak, ret.AccessKeyID)
 		assert.Equal(t, sk, ret.SecretAccessKey)
 		assert.Equal(t, token, ret.SessionToken)
-		assert.Equal(t, c.akCache, ret.AccessKeyID)
 	})
 }
 
 func TestCredentialProvider_IsExpired(t *testing.T) {
-	c := new(CredentialProvider)
-	mockAliyunCreds := mocks.NewCredential(t)
-	c.aliyunCreds = mockAliyunCreds
-
-	ak := "ak"
-	errMock := errors.Errorf("mock")
-	t.Run("expired", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
-		assert.True(t, c.IsExpired())
-	})
-
-	t.Run("not expired", func(t *testing.T) {
-		c.akCache = ak
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(&ak, nil).Times(1)
-		assert.False(t, c.IsExpired())
-	})
-
-	t.Run("get failed, assume expired", func(t *testing.T) {
-		mockAliyunCreds.EXPECT().GetAccessKeyId().Return(nil, errMock).Times(1)
-		assert.True(t, c.IsExpired())
-	})
+	// MinIO must call Retrieve so the shared cache can enforce real expiration.
+	assert.True(t, new(CredentialProvider).IsExpired())
 }

@@ -23,6 +23,7 @@
 #include <cstring>
 
 #include "AzureBlobChunkManager.h"
+#include "milvus-storage/filesystem/azure/refreshing_token_credential.h"
 #include "azure/core/context.hpp"
 #include "azure/core/diagnostics/logger.hpp"
 #include "azure/core/http/http.hpp"
@@ -104,7 +105,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
-                    workloadIdentityCredential);
+                    milvus_storage::fs::MakeRefreshingAzureCredential(
+                        workloadIdentityCredential));
         } else {
             const char* client_id_env = std::getenv("AZURE_CLIENT_ID");
             std::string client_id =
@@ -122,7 +124,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
-                    credential);
+                    milvus_storage::fs::MakeRefreshingAzureCredential(
+                        credential));
         }
     } else {
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(

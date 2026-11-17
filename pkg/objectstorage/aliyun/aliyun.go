@@ -1,14 +1,16 @@
 package aliyun
 
 import (
-	"context"
+	"sync"
+	"time"
 
-	"github.com/aliyun/credentials-go/credentials" // >= v1.2.6
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/aliyun/internal/credentials"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage/credentialcache"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -45,58 +47,44 @@ type Credential interface {
 // CredentialProvider implements "github.com/minio/minio-go/v7/pkg/credentials".Provider
 // also implements transport
 type CredentialProvider struct {
-	// aliyunCreds doesn't provide a way to get the expire time, so we use the cache to check if it's expired
-	// when aliyunCreds.GetAccessKeyId is different from the cache, we know it's expired
-	akCache     string
 	aliyunCreds Credential
+	once        sync.Once
+	cache       *credentialcache.Provider
 }
 
 func NewCredentialProvider() (minioCred.Provider, error) {
 	aliyunCreds, err := credentials.NewCredential(nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create aliyun credential")
+		return nil, merr.WrapErrServiceUnavailableErr(err, "initialize Aliyun credential source")
 	}
-	// backend, err := minio.DefaultTransport(true)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "failed to create default transport")
-	// }
+
 	return &CredentialProvider{aliyunCreds: aliyunCreds}, nil
 }
 
-// Retrieve returns nil if it successfully retrieved the value.
-// Error is returned if the value were not obtainable, or empty.
-// according to the caller minioCred.Credentials.Get(),
-// it already has a lock, so we don't need to worry about concurrency
+// Retrieve delegates source selection to the compatibility SDK and caches only
+// complete atomic tuples with their real expiration.
 func (c *CredentialProvider) Retrieve() (minioCred.Value, error) {
-	ret := minioCred.Value{}
-	ak, err := c.aliyunCreds.GetAccessKeyId()
-	if err != nil {
-		return ret, errors.Wrap(err, "failed to get access key id from aliyun credential")
-	}
-	ret.AccessKeyID = *ak
-	sk, err := c.aliyunCreds.GetAccessKeySecret()
-	if err != nil {
-		return minioCred.Value{}, errors.Wrap(err, "failed to get access key secret from aliyun credential")
-	}
-	securityToken, err := c.aliyunCreds.GetSecurityToken()
-	if err != nil {
-		return minioCred.Value{}, errors.Wrap(err, "failed to get security token from aliyun credential")
-	}
-	ret.SecretAccessKey = *sk
-	c.akCache = *ak
-	ret.SessionToken = *securityToken
-	return ret, nil
+	c.once.Do(func() {
+		kind := ""
+		if c.aliyunCreds != nil && c.aliyunCreds.GetType() != nil {
+			kind = *c.aliyunCreds.GetType()
+		}
+		allowStatic := kind == "access_key" || kind == "sts"
+		requireToken := kind != "access_key" && kind != "rsa_key_pair"
+		c.cache = credentialcache.New(func() (minioCred.Value, error) {
+			snapshot, err := credentials.RetrieveSnapshot(c.aliyunCreds)
+			if err != nil {
+				return minioCred.Value{}, merr.WrapErrServiceUnavailableErr(err, "refresh Aliyun credential source")
+			}
+			return minioCred.Value{
+				AccessKeyID: snapshot.AccessKeyId, SecretAccessKey: snapshot.AccessKeySecret,
+				SessionToken: snapshot.SecurityToken, Expiration: snapshot.Expiration,
+				SignerType: minioCred.SignatureV4,
+			}, nil
+		}, 3*time.Minute, requireToken, allowStatic)
+	})
+	return c.cache.Retrieve()
 }
 
-// IsExpired returns if the credentials are no longer valid, and need
-// to be retrieved.
-// according to the caller minioCred.Credentials.IsExpired(),
-// it already has a lock, so we don't need to worry about concurrency
-func (c CredentialProvider) IsExpired() bool {
-	ak, err := c.aliyunCreds.GetAccessKeyId()
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to get access key id from aliyun credential, assume it's expired")
-		return true
-	}
-	return *ak != c.akCache
-}
+// Always enter the shared provider; its cache-hit path does not fetch remotely.
+func (c *CredentialProvider) IsExpired() bool { return true }
