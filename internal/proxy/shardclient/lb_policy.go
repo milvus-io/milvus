@@ -121,6 +121,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	for _, lb := range lb.balancerMap {
 		lb.Start(ctx)
 	}
+	lb.hedging.Start(ctx)
 }
 
 // GetShard will retry until ctx done, except the collection is not loaded.
@@ -154,15 +155,6 @@ func statsKey(workload ChannelWorkload) string {
 		return workload.Channel
 	}
 	return workload.Channel + "|" + workload.StatsClass
-}
-
-// latencyWeighted returns the balancer as a LatencyWeightedBalancer when it
-// is one and its switch is on.
-func latencyWeighted(balancer LBBalancer) *LatencyWeightedBalancer {
-	if lw, ok := balancer.(*LatencyWeightedBalancer); ok && lw.Enabled() {
-		return lw
-	}
-	return nil
 }
 
 func recordPreferredNodeSelection(status string) {
@@ -483,4 +475,5 @@ func (lb *LBPolicyImpl) Close() {
 	for _, lb := range lb.balancerMap {
 		lb.Close()
 	}
+	lb.hedging.Close()
 }
