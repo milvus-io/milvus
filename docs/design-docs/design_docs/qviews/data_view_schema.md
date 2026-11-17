@@ -50,3 +50,20 @@ The parent still defers Import/AlterSchema lifecycle exclusion. In particular,
 an import frozen under an older schema must not later publish data missing a
 new Function output. These component tests do not establish that production
 concurrency guarantee.
+
+
+## External Refresh
+
+`Manager.PublishRefresh` publishes the refreshed projection and its required
+SchemaVersion in the same immutable snapshot. Data-only refreshes keep the
+schema version; explicit source/spec overrides advance it. Ordinary recompute is
+fenced while the durable Refresh callback owns publication, including recovery,
+so it cannot publish new external data with the previous schema. Old DataViews
+and their exact manifest versions remain immutable. External schema history is
+currently retained on StreamingNode until collection drop, because its segment
+GC references do not cover external sealed QueryViews.
+
+Coord collection metadata is published after target QueryViews are ready, using
+the existing schema handoff. A retry resumes the same task plan and snapshot.
+TODO(#55380): terminal job failure after WAL submission has no automatic
+rollback; the cluster may be inconsistent and requires manual intervention.

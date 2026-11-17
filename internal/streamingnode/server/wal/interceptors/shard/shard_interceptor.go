@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -34,21 +35,22 @@ type shardInterceptor struct {
 // initOpTable initializes the operation table for the segment interceptor.
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
-		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
-		message.MessageTypeRestoreSnapshot:    impl.handleRestoreSnapshot,
-		message.MessageTypeDropCollection:     impl.handleDropCollection,
-		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
-		message.MessageTypeDropPartition:      impl.handleDropPartition,
-		message.MessageTypeInsert:             impl.handleInsertMessage,
-		message.MessageTypeDelete:             impl.handleDeleteMessage,
-		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
-		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
-		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
-		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
-		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
-		message.MessageTypeFlush:              impl.handleFlushSegment,
-		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
-		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
+		message.MessageTypeCreateCollection:          impl.handleCreateCollection,
+		message.MessageTypeRestoreSnapshot:           impl.handleRestoreSnapshot,
+		message.MessageTypeDropCollection:            impl.handleDropCollection,
+		message.MessageTypeCreatePartition:           impl.handleCreatePartition,
+		message.MessageTypeDropPartition:             impl.handleDropPartition,
+		message.MessageTypeInsert:                    impl.handleInsertMessage,
+		message.MessageTypeDelete:                    impl.handleDeleteMessage,
+		message.MessageTypeManualFlush:               impl.handleManualFlushMessage,
+		message.MessageTypeCreateSnapshot:            impl.handleCreateSnapshotMessage,
+		message.MessageTypeSchemaChange:              impl.handleSchemaChange,
+		message.MessageTypeAlterCollection:           impl.handleAlterCollection,
+		message.MessageTypeRefreshExternalCollection: impl.handleRefreshExternalCollection,
+		message.MessageTypeCreateSegment:             impl.handleCreateSegment,
+		message.MessageTypeFlush:                     impl.handleFlushSegment,
+		message.MessageTypeFlushAll:                  impl.handleFlushAllMessage,
+		message.MessageTypeTruncateCollection:        impl.handleTruncateCollectionMessage,
 	}
 }
 
@@ -451,4 +453,23 @@ func (impl *shardInterceptor) Close() {
 			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
+}
+
+// handleRefreshExternalCollection installs the target using the existing shard
+// schema transition. The adapter is never appended: only Refresh goes to WAL.
+func (impl *shardInterceptor) handleRefreshExternalCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	refresh := message.MustAsMutableRefreshExternalCollectionMessageV2(msg)
+	schema := refresh.MustBody().GetSchema()
+	if schema == nil {
+		return appendOp(ctx, msg)
+	}
+	alter := message.NewAlterCollectionMessageBuilderV2().WithVChannel(msg.VChannel()).WithHeader(&message.AlterCollectionMessageHeader{
+		CollectionId: refresh.Header().GetCollectionId(), UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
+	}).WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: schema}}).MustBuildMutable()
+	alter.WithTimeTick(msg.TimeTick())
+	_, err := impl.shardManager.AlterCollection(message.MustAsMutableAlterCollectionMessageV2(alter))
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	return appendOp(ctx, msg)
 }

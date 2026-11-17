@@ -1,59 +1,42 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License. You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package datacoord
 
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// updateExternalSchemaViaWAL updates collection schema's external_source and
-// external_spec by delegating to RootCoord's AlterCollection API. This ensures
-// RootCoord remains the authoritative schema owner and avoids stale-cache
-// overwrites that can occur when DataCoord broadcasts full schema directly.
-func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID int64, externalSource, externalSpec string) error {
-	coll := s.meta.GetCollection(collectionID)
-	// AlterCollection goes by name, which a Dropping collection may already
-	// have handed to a new one.
-	if !coll.IsCreated() {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
+type ExternalRefreshSchemaManager interface {
+	PrepareExternalRefreshSchema(context.Context, int64, string, string) (*schemapb.CollectionSchema, error)
+	PublishExternalRefreshSchema(context.Context, message.BroadcastResultRefreshExternalCollectionMessageV2) error
+}
 
-	resp, err := s.mixCoord.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         coll.DatabaseName,
-		CollectionName: coll.Schema.GetName(),
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.CollectionExternalSource, Value: externalSource},
-			{Key: common.CollectionExternalSpec, Value: externalSpec},
-		},
-	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
+func (s *Server) SetExternalRefreshSchemaManager(manager ExternalRefreshSchemaManager) {
+	s.externalRefreshSchemaManager = manager
+}
+
+func refreshOwnsDataView(ctx context.Context, id int64) (bool, error) {
+	target, err := broadcast.GetPendingSchemaTarget(id)
+	if err != nil {
+		return true, nil
+	}
+	return target != nil && target.RefreshJobID != 0, nil
+}
+
+func (s *Server) publishExternalRefresh(ctx context.Context, result message.BroadcastResultRefreshExternalCollectionMessageV2) error {
+	id := result.Message.Header().GetCollectionId()
+	// One immutable snapshot contains the new membership and its schema. Ordinary
+	// recompute is fenced by the pending broadcast, including during recovery.
+	if _, err := s.dataViewManager.PublishRefresh(ctx, id, result.Message.MustBody().GetSchema().GetVersion(), s.meta.LoadableProjection); err != nil {
 		return err
 	}
-
-	mlog.Info(ctx, "updated external schema via RootCoord after refresh",
-		mlog.FieldCollectionID(collectionID),
-		mlog.String("externalSource", externalSource),
-		mlog.String("externalSpec", externalspec.RedactExternalSpecForLog(externalSpec)))
-	return nil
+	if err := s.externalRefreshSchemaManager.PublishExternalRefreshSchema(ctx, result); err != nil {
+		return err
+	}
+	meta.NotifyCollectionIndexBuild(s.notifyIndexChan, id)
+	return resource.Resource().Refresh(ctx, id)
 }

@@ -30,7 +30,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel + collection VChannels (AckSyncUp) | No | — |
+| RefreshExternalCollection | Broadcast: CChannel + collection VChannels (AckSyncUp) | No | SharedDBName + ExclusiveCollectionName |
 
 ## Message Descriptions
 
@@ -53,7 +53,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
-- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. Target business VChannels advance Transform MVCC; the callback persists their TimeTicks with the job. Legacy CChannel-only messages remain consumable. Job completion separately waits for schema publication and QueryView handoff after applying segment results.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. Target business VChannels advance Transform MVCC; the callback persists their TimeTicks with the job. Legacy CChannel-only messages remain consumable. The original callback waits for prepared task results, atomically publishes the data/schema DataView, and completes schema publication and QueryView handoff without a second DDL.
 
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.
@@ -98,7 +98,7 @@ Import → UpdateImport → (CommitImport | RollbackImport)
 
 ### Exclusive Lock Rule
 
-DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
+DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, RefreshExternalCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
 - Locally originated in-flight transactions on locked VChannels are failed. Local flushes drain the current replicated transaction before taking the exclusive lock and hold subsequent replication until their append completes.
 
@@ -120,3 +120,37 @@ CreateCollection(p0)@tt=1                    (creates collection with default pa
   → ManualFlush@tt=18                        (exclusive, seals remaining segments)
 → DropCollection@tt=20                       (exclusive, flushes all segments, collection terminated)
 ```
+
+
+### RefreshExternalCollection schema publication
+
+Refresh is broadcast to every collection vchannel under SharedDBName and
+ExclusiveCollectionName resource keys, with exclusive append and AckSyncUp.
+It remains unreplicable. Coordinator validation, Explore and ownership planning
+run before Broadcast. The body carries the complete target schema and the fixed
+task plan; replay does not discover external files again.
+
+Explicit source/spec overrides advance SchemaVersion (even when equal to the
+previous values). Omitted overrides preserve the existing version. StreamingNode
+installs the target through schema evolution. The original callback persists and
+runs the job, waits for task results, publishes one DataView binding the new
+membership/manifest revisions to its schema, waits for loaded QueryViews, then
+publishes Coord collection metadata and invalidates caches. No completion-stage
+AlterCollection RPC or second DDL is emitted. The RPC returns a jobID after WAL
+ACK and durable job acceptance; resource guards remain held through the callback.
+
+**TODO(#55380): a job can fail after WAL submission. StreamingNode and Coord may
+then disagree about the collection schema/data. There is no automatic rollback
+or reconciliation; the cluster can be inconsistent and requires manual
+intervention before further operations.** Preflight cannot detect every file
+content error or prevent external objects/permissions changing later. Failed
+schema versions must not be assumed safe to reuse. The callback logs this
+condition explicitly. Finish old refresh jobs before upgrade; unfinished legacy
+override jobs whose DDL already completed need manual reconciliation as well.
+
+A full-node restart can also terminate an in-flight job when its recorded
+DataNode is gone (`query task failed: node not found`). This is part of the
+failure TODO above, not a guarantee of transparent job resumption. Deploy the
+schema-aware Refresh producer only with StreamingNodes that understand this
+body; decoding an old empty body does not make mixed-version schema publication
+safe.

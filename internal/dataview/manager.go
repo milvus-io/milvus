@@ -61,6 +61,13 @@ type FrontierProjector func(ctx context.Context, collectionID int64) (map[string
 // the candidate snapshot, such as a pending Import. It must not reenter Manager.
 type PendingTransformProjector func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error)
 
+// RecomputeGuard reserves snapshot publication for a durable DDL callback.
+type RecomputeGuard func(context.Context, int64) (bool, error)
+
+func WithRecomputeGuard(guard RecomputeGuard) Option {
+	return func(m *dataViewManager) { m.recomputeGuard = guard }
+}
+
 type Option func(*dataViewManager)
 
 func WithFrontierProjector(project FrontierProjector) Option {
@@ -101,6 +108,7 @@ type Manager interface {
 	// need a deterministic reconciliation. Same semantics as the async
 	// worker's step.
 	RecomputeNow(ctx context.Context, collectionID int64, project Projector) (*viewpb.DataVersion, error)
+	PublishRefresh(ctx context.Context, collectionID int64, schemaVersion int32, project Projector) (*viewpb.DataVersion, error)
 	AdvanceSchema(ctx context.Context, collectionID int64, schemaVersion int32, project Projector) (*viewpb.DataVersion, error)
 	OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
@@ -205,6 +213,7 @@ func newCollectionState(collectionID int64) *collectionState {
 }
 
 type dataViewManager struct {
+	recomputeGuard RecomputeGuard
 	// Fixed at construction so one manager never mixes sizing modes.
 	useInsertBytes bool
 	bytesPerUnit   int64
@@ -542,7 +551,15 @@ func (m *dataViewManager) RecomputeNow(ctx context.Context, collectionID int64, 
 	return m.recomputeNow(ctx, collectionID, project)
 }
 
+func (m *dataViewManager) PublishRefresh(ctx context.Context, collectionID int64, schemaVersion int32, project Projector) (*viewpb.DataVersion, error) {
+	return m.recomputeWithSchema(ctx, collectionID, project, &schemaVersion)
+}
+
 func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, project Projector) (*viewpb.DataVersion, error) {
+	return m.recomputeWithSchema(ctx, collectionID, project, nil)
+}
+
+func (m *dataViewManager) recomputeWithSchema(ctx context.Context, collectionID int64, project Projector, schemaVersion *int32) (*viewpb.DataVersion, error) {
 	if project == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView Recompute requires a projection function")
 	}
@@ -558,6 +575,15 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		// Only Create/Bootstrap may install the complete initial shard skeleton.
 		return nil, nil
 	}
+	if schemaVersion == nil && m.recomputeGuard != nil {
+		blocked, err := m.recomputeGuard(ctx, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			return dataVersionFromView(base), nil
+		}
+	}
 	segments, err := project(ctx, collectionID, base)
 	if err != nil {
 		return nil, err
@@ -572,8 +598,11 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
 		return nil, err
 	}
+	if schemaVersion != nil {
+		next.SchemaVersion = *schemaVersion
+	}
 	canonicalizeDataView(next)
-	if dataViewMembershipEqual(base, next) {
+	if dataViewMembershipEqual(base, next) && base.GetSchemaVersion() == next.GetSchemaVersion() {
 		// Recovery path: a persisted entry loaded from the catalog carries no
 		// stats (they are never serialized), so a restart leaves the latest
 		// entry with an empty footprint. Initialize it from the projection

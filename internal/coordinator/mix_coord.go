@@ -206,6 +206,7 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog),
 		datacoord.WithPKIndexService(s.pkindexService))
 	s.datacoordServer.SetRestoreCollectionManager(s.rootcoordServer)
+	s.datacoordServer.SetExternalRefreshSchemaManager(s.rootcoordServer)
 	s.datacoordServer.SetDataViewCollectionRecoveryValidator(s.rootcoordServer.ValidateDataViewCollectionForRecovery)
 	s.datacoordServer.SetCollectionDroppedChecker(s.rootcoordServer.IsCollectionDropped)
 	s.datacoordServer.SetSession(s.session)

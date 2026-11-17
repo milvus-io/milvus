@@ -297,7 +297,7 @@ func (bm *broadcastTaskManager) broadcast(
 		// bounded by the request context, which answers with the caller's own timeout
 		// instead of an ID that nothing backs. An owner already tombstoned returns
 		// immediately.
-		result, err := task.BlockUntilDone(ctx)
+		result, err := task.waitForResponse(ctx)
 		if err != nil {
 			return nil, err
 		}

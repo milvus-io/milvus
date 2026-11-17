@@ -743,8 +743,12 @@ message RefreshExternalCollectionMessageHeader {
 }
 
 // RefreshExternalCollectionMessageBody is the body of refresh external collection message.
-// Empty - all info is in header.
-message RefreshExternalCollectionMessageBody {}
+// The coordinator validates and plans before broadcasting. Replay uses this
+// exact plan; it must not explore the external source again.
+message RefreshExternalCollectionMessageBody {
+    schema.CollectionSchema schema = 1;
+    repeated data.ExternalCollectionRefreshTask tasks = 2;
+}
 
 // CommitImportMessageHeader is the header of commit import message.
 message CommitImportMessageHeader {

@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -447,6 +449,14 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		}, &stubAllocator{nextID: 99999})
 		return task, refreshMeta, &stubCluster{}
 	}
+
+	t.Run("preparation_schema_pending", func(t *testing.T) {
+		task, refreshMeta, cluster := newOwnershipTask(t, externalRefreshOwnershipPlanVersion, nil)
+		patch := mockey.Mock((*meta.Meta).CollectionForPreparation).Return(nil, merr.ErrServiceNotReady).Build()
+		defer patch.UnPatch()
+		task.CreateTaskOnWorker(1, cluster)
+		require.Equal(t, indexpb.JobState_JobStateInit, refreshMeta.GetTask(1001).GetState(), "temporary schema recovery must remain retriable")
+	})
 
 	t.Run("meta_is_nil", func(t *testing.T) {
 		catalog := &StubCatalog{}

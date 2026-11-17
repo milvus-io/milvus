@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // SchemaCleanupPlan first tombstones unreachable versions, then returns only
@@ -38,6 +39,12 @@ func (info *VChannelView) SchemaCleanupPlan(
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{Schemas: dropped},
 			}, false
 		}
+	}
+	// External sealed segments do not appear in the SN segment references below.
+	// Keep their schema history until collection drop so old QueryViews can reload.
+	// TODO(#55380): reclaim external schemas once QueryView references are tracked.
+	if typeutil.IsExternalCollection(schemas[len(schemas)-1].GetSchema()) {
+		return nil, false
 	}
 	keep := make([]bool, len(schemas))
 	// Retain the version covering the replay floor, plus every newer version.

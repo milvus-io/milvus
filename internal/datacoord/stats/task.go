@@ -604,6 +604,9 @@ func (st *StatsTask) prepareJobRequest(ctx context.Context, segment *meta.Segmen
 		return nil, merr.WrapErrServiceInternalMsg("collection schema is nil or has no fields, collectionID: %d", segment.GetCollectionID())
 	}
 
+	if err := meta.CheckRefreshSchema(segment, collInfo.Schema); err != nil {
+		return nil, err
+	}
 	// Calculate binlog allocation
 	binlogNum := (segment.GetSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) *
 		int64(len(collInfo.Schema.GetFields())) *

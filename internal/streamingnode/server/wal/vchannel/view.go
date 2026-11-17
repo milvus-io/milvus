@@ -552,6 +552,30 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	return true
 }
 
+// ObserveRefreshExternalCollectionMessageV2 installs the schema carried by the
+// original Refresh. Old messages have no schema and retain their old semantics.
+func (info *VChannelView) ObserveRefreshExternalCollectionMessageV2(msg message.ImmutableRefreshExternalCollectionMessageV2) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	schema := msg.MustBody().GetSchema()
+	if schema == nil || !info.shouldObserveLocked(msg.TimeTick()) || info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+		return false
+	}
+	// A data-only refresh reuses the schema and must not grow its history.
+	schemas := info.meta.GetCollectionInfo().GetSchemas()
+	if len(schemas) > 0 && proto.Equal(schemas[len(schemas)-1].GetSchema(), schema) {
+		return false
+	}
+
+	info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
+		Schema: schema, State: streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL, CheckpointTimeTick: msg.TimeTick(),
+	})
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+	info.schemaDirty = true
+	return true
+}
+
 func (info *VChannelView) hasSchemaVersionLocked(timetick uint64, schema *schemapb.CollectionSchema) bool {
 	for _, existing := range info.meta.GetCollectionInfo().GetSchemas() {
 		if existing.GetCheckpointTimeTick() == timetick && proto.Equal(existing.GetSchema(), schema) {

@@ -5,9 +5,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -3745,12 +3749,78 @@ func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
 	common.CheckErr(t, err, true)
 	waitRefreshTerminal(t, ctx, mc, refreshA.JobID, entity.RefreshStateCompleted)
 
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+	// Loaded readers must switch to the DataView carrying the new schema.
+	// The recovery harness pauses object reads after Coord's listing preflight.
+	// It keeps this job active until the owning runner has restarted Milvus.
+	var refreshReadStarted <-chan struct{}
+	var gateRoot *os.Root
+	var gateName string
+	restartGate := os.Getenv("MILVUS_REFRESH_RESTART_GATE")
+	if restartGate != "" {
+		gateRoot, err = os.OpenRoot(filepath.Dir(restartGate))
+		require.NoError(t, err)
+		defer gateRoot.Close()
+		gateName = filepath.Base(restartGate)
+		upstream, err := url.Parse("http://" + minioCfg.address)
+		require.NoError(t, err)
+		proxy := httputil.NewSingleHostReverseProxy(upstream)
+		readsStarted := make(chan struct{}, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/data.parquet") {
+				select {
+				case readsStarted <- struct{}{}:
+				default:
+				}
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					if _, err := gateRoot.Stat(gateName + ".resume"); err == nil {
+						break
+					}
+					select {
+					case <-r.Context().Done():
+						return
+					case <-ticker.C:
+					}
+				}
+			}
+			proxy.ServeHTTP(w, r)
+		}))
+		defer func() { server.CloseClientConnections(); server.Close() }()
+		forwarded := minioCfg
+		forwarded.address = strings.TrimPrefix(server.URL, "http://")
+		uriB = extTestURI(forwarded, pathB)
+		// The signal is checked below, after the asynchronous API returns.
+		refreshReadStarted = readsStarted
+	}
 	// Override refresh to SRC_B with explicit external_source.
 	refreshB, err := mc.RefreshExternalCollection(ctx,
 		client.NewRefreshExternalCollectionOption(collName).
 			WithExternalSource(uriB).
 			WithExternalSpec(spec))
 	common.CheckErr(t, err, true)
+	if restartGate != "" {
+		select {
+		case <-refreshReadStarted:
+		case <-time.After(30 * time.Second):
+			t.Fatal("DataNode did not reach the blocked external read")
+		}
+		progress, err := mc.GetRefreshExternalCollectionProgress(ctx, client.NewGetRefreshExternalCollectionProgressOption(refreshB.JobID))
+		require.NoError(t, err)
+		require.NotEqual(t, entity.RefreshStateCompleted, progress.State)
+		require.NoError(t, gateRoot.WriteFile(gateName+".ready", []byte(fmt.Sprintf("collection=%s job=%d state=%s\n", collName, refreshB.JobID, progress.State)), 0o600))
+		require.Eventually(t, func() bool { _, err := gateRoot.Stat(gateName + ".resume"); return err == nil }, 3*time.Minute, 100*time.Millisecond)
+	}
+	if restartGate != "" && os.Getenv("MILVUS_REFRESH_RESTART_EXPECT_FAILED") == "1" {
+		// Known TODO: a full-node crash loses the worker task. There is no
+		// automatic rollback/reconciliation; this is not successful recovery.
+		waitRefreshTerminal(t, ctx, mc, refreshB.JobID, entity.RefreshStateFailed)
+		desc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+		require.NoError(t, err)
+		require.Equal(t, uriA, desc.Schema.ExternalSource)
+		return
+	}
 	waitRefreshTerminal(t, ctx, mc, refreshB.JobID, entity.RefreshStateCompleted)
 
 	// Persisted schema must now reflect SRC_B. Pre-fix this still showed pathA.
@@ -3758,6 +3828,25 @@ func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uriB, desc.Schema.ExternalSource,
 		"override refresh must persist new external_source; pre-fix #49335 left it stale")
+	verify := func() {
+		rows, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("id >= 1000").WithOutputFields("count(*)").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		count, err := rows.Fields[0].GetAsInt64(0)
+		require.NoError(t, err)
+		require.EqualValues(t, 8, count)
+	}
+	verify()
+	reuse, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, reuse.JobID, entity.RefreshStateCompleted)
+	verify()
+	// Invalid specs fail in the Coord preflight without creating another job.
+	_, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(collName).WithExternalSource(uriA).WithExternalSpec(`{"format":"unsupported"}`))
+	require.Error(t, err)
+	desc, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	require.Equal(t, uriB, desc.Schema.ExternalSource)
+	verify()
 }
 
 func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClient, jobID int64, expect entity.RefreshExternalCollectionState) {
