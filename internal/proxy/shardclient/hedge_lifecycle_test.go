@@ -141,7 +141,8 @@ func TestHedgeLookupDoesNotBlockPrimary(t *testing.T) {
 		t.Run(strconv.FormatBool(primaryErr == nil), func(t *testing.T) {
 			paramtable.Init()
 			pt := paramtable.Get()
-			prevEnabled := pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+			prevEnabled := pt.ProxyCfg.HedgingEnabled.GetValue()
+			_ = pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
 			t.Cleanup(func() { _ = pt.Save(pt.ProxyCfg.HedgingEnabled.Key, prevEnabled) })
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -269,7 +270,7 @@ func TestHedgeTrackerScheduledCleanup(t *testing.T) {
 	require.Len(t, tracker.keys, 1)
 	tracker.mu.Unlock()
 
-	now = now.Add(statsIdleTTL + time.Minute)
+	now = now.Add(statsIdleTimeout + time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
