@@ -20,7 +20,6 @@ package index
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -294,12 +293,14 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 
 // updateCollectionIndex installs index, which replaces any stored definition
 // with the same IDs. The caller must own index and must not have published
-// it yet. Its param lists are clipped to their length, so a reader that
-// appends to a shared list always gets a new backing array.
+// it yet. Its param lists are replaced by canonical lists, shared with every
+// index that has equal params (common.CanonicalKeyValuePairs) and read-only.
+// Their capacity equals their length, so a reader that appends to one always
+// gets a new backing array.
 func (m *IndexMeta) updateCollectionIndex(index *model.Index) {
-	index.TypeParams = slices.Clip(index.TypeParams)
-	index.IndexParams = slices.Clip(index.IndexParams)
-	index.UserIndexParams = slices.Clip(index.UserIndexParams)
+	index.TypeParams = common.CanonicalKeyValuePairs(index.TypeParams)
+	index.IndexParams = common.CanonicalKeyValuePairs(index.IndexParams)
+	index.UserIndexParams = common.CanonicalKeyValuePairs(index.UserIndexParams)
 	m.taskCounts.replaceIndex(m.Indexes[index.CollectionID][index.IndexID], index)
 	if _, ok := m.Indexes[index.CollectionID]; !ok {
 		m.Indexes[index.CollectionID] = make(map[UniqueID]*model.Index)
@@ -565,8 +566,8 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 				indexparamcheck.IsScalarIndexType(param1.Value) {
 				for _, param2 := range req.GetIndexParams() {
 					if param1.Key == param2.Key && param1.Value != param2.Value {
-						req.IndexParams = make([]*commonpb.KeyValuePair, len(fieldIndex.IndexParams))
-						copy(req.IndexParams, fieldIndex.IndexParams)
+						// stored elements are shared and read-only; never alias them
+						req.IndexParams = common.CloneKeyValuePairs(fieldIndex.IndexParams)
 						break
 					}
 				}
@@ -659,6 +660,9 @@ func (m *IndexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
+// CreateIndex persists index and installs it. It takes ownership of index:
+// the caller must not use index afterwards, since its TypeParams, IndexParams
+// and UserIndexParams are replaced by shared, read-only lists.
 func (m *IndexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	mlog.Info(ctx, "meta update: CreateIndex", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
@@ -679,6 +683,9 @@ func (m *IndexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	return nil
 }
 
+// AlterIndex persists indexes and installs them. Like CreateIndex, it takes
+// ownership of each index and replaces its param lists by shared, read-only
+// lists, so the caller must not use the indexes afterwards.
 func (m *IndexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
 	err := m.Catalog.AlterIndexes(ctx, indexes)
 	if err != nil {

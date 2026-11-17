@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -389,6 +390,18 @@ func UpdateParams(idx *model.Index, from []*commonpb.KeyValuePair, updates []*co
 	})
 }
 
+// sortParamsByKey sorts each of lists by key in place. AlterIndex rebuilds
+// param lists from maps, in random order; sorted, equal param sets become
+// equal lists, which IndexMeta then shares as one canonical list. Each list
+// must be newly built, never one of IndexMeta's shared lists.
+func sortParamsByKey(lists ...[]*commonpb.KeyValuePair) {
+	for _, list := range lists {
+		slices.SortFunc(list, func(a, b *commonpb.KeyValuePair) int {
+			return strings.Compare(a.GetKey(), b.GetKey())
+		})
+	}
+}
+
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "received AlterIndex request",
 		mlog.Any("params", req.GetParams()),
@@ -466,6 +479,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				mlog.Any("params", newIndexParams),
 			)
 			idx.IndexParams = newIndexParams
+			sortParamsByKey(idx.UserIndexParams, idx.IndexParams)
 		} else if len(req.GetDeleteKeys()) > 0 {
 			// delete user index params
 			newUserIndexParams := index.DeleteParams(idx.UserIndexParams, req.GetDeleteKeys())
@@ -482,6 +496,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				mlog.Any("params", newIndexParams),
 			)
 			idx.IndexParams = newIndexParams
+			sortParamsByKey(idx.UserIndexParams, idx.IndexParams)
 		}
 
 		if err := indexparamcheck.ValidateIndexParams(idx); err != nil {
