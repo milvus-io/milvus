@@ -155,10 +155,12 @@ func TestHedgedReadPublishesWinnerMetadata(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 	pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, "latency_weighted")
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key, "1ms")
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "1ms")
 	t.Cleanup(func() {
 		pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key)
-		pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key)
+		pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+		pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
 	})
 	for _, kind := range []string{"search", "query"} {
 		t.Run(kind, func(t *testing.T) {
@@ -256,10 +258,12 @@ func TestHedgedReadInputErrorWaitsForSibling(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 	pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, "latency_weighted")
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key, "1ms")
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "1ms")
 	t.Cleanup(func() {
 		pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key)
-		pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key)
+		pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+		pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
 	})
 	input := merr.WrapErrParameterInvalidMsg("search/query results exceed the maxOutputSize Limit")
 	for _, kind := range []string{"search", "query"} {

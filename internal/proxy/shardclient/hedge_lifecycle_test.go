@@ -178,7 +178,7 @@ func TestHedgeLookupDoesNotBlockPrimary(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				excluded := typeutil.NewUniqueSet()
-				_, err := lb.executeHedged(ctx, workload, b, NodeInfo{NodeID: 1, Serviceable: true}, false, time.Now(), 0, &excluded)
+				_, _, err := lb.executeHedged(ctx, workload, b, b, NodeInfo{NodeID: 1, Serviceable: true}, false, time.Now(), 0, &excluded)
 				done <- err
 			}()
 			select {
@@ -217,23 +217,26 @@ func TestLatencyWeightedAccountingAcrossSwitch(t *testing.T) {
 		t.Run(strconv.FormatBool(initiallyEnabled), func(t *testing.T) {
 			paramtable.Init()
 			pt := paramtable.Get()
-			pt.Save(pt.ProxyCfg.LatencyWeightedEnabled.Key, strconv.FormatBool(initiallyEnabled))
-			pt.Save(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key, "false")
+			initialPolicy, nextPolicy := LookAside, LatencyWeighted
+			if initiallyEnabled {
+				initialPolicy, nextPolicy = nextPolicy, initialPolicy
+			}
+			pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, initialPolicy)
+			pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "false")
 			t.Cleanup(func() {
-				pt.Reset(pt.ProxyCfg.LatencyWeightedEnabled.Key)
-				pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key)
+				pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key)
+				pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
 			})
 			mgr := NewMockShardClientManager(t)
 			qn := mocks.NewMockQueryNodeClient(t)
 			mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return([]NodeInfo{{NodeID: 1, Serviceable: true}}, nil)
 			mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Run(func(context.Context, NodeInfo) {
-				pt.Save(pt.ProxyCfg.LatencyWeightedEnabled.Key, strconv.FormatBool(!initiallyEnabled))
+				pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, nextPolicy)
 			}).Return(qn, nil)
 			lb := NewLBPolicyImpl(mgr)
-			b := NewLatencyWeightedBalancer(mgr)
+			b := lb.balancerMap[LatencyWeighted].(*LatencyWeightedBalancer)
 			b.metricsMap.Insert(1, &CostMetrics{})
-			lb.getBalancer = func() LBBalancer { return b }
 			require.NoError(t, lb.ExecuteWithRetry(context.Background(), ChannelWorkload{Channel: hedgeTestChannel, StatsClass: hedgeTestClass, Nq: 7, Exec: func(context.Context, int64, types.QueryNodeClient, string) error { return nil }}))
 			if m, ok := b.metricsMap.Get(1); ok {
 				assert.Zero(t, m.executingNQ.Load())

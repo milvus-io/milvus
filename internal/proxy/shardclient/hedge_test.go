@@ -59,8 +59,14 @@ func newHedgeHarness(t *testing.T, nodes ...int64) *hedgeHarness {
 	paramtable.Init()
 	// time the tests against a short hedge delay
 	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key, "20ms")
-	t.Cleanup(func() { pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key) })
+	pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, LatencyWeighted)
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "20ms")
+	t.Cleanup(func() {
+		pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key)
+		pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+		pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
+	})
 
 	h := &hedgeHarness{t: t}
 	mgr := NewMockShardClientManager(t)
@@ -95,7 +101,7 @@ func (h *hedgeHarness) warm(nodes ...int64) {
 		for _, n := range nodes {
 			h.balancer.ObserveAttempt(context.Background(), hedgeTestKey, n, false, time.Now().Add(-5*time.Millisecond), nil)
 		}
-		h.balancer.ObserveRequest(hedgeTestKey, 5*time.Millisecond)
+		h.policy.hedging.ObserveRequest(hedgeTestKey, 5*time.Millisecond)
 	}
 }
 
@@ -197,9 +203,11 @@ func TestHedgeSlowPrimary(t *testing.T) {
 	assert.Equal(t, 1, h.publishedCount())
 	assert.Eventually(t, func() bool { return h.inflight() == 0 }, time.Second, 10*time.Millisecond)
 
+	h.policy.hedging.mu.Lock()
+	assert.Less(t, h.policy.hedging.keys[hedgeTestKey].requests.newest(0).latency, 200*time.Millisecond, "request latency")
+	h.policy.hedging.mu.Unlock()
 	h.balancer.mu.Lock()
 	defer h.balancer.mu.Unlock()
-	assert.Less(t, h.balancer.keys[hedgeTestKey].requests.newest(0).latency, 200*time.Millisecond, "request latency")
 	slow, _ := h.balancer.replicas[replicaKey{hedgeTestKey, h.callNodes[0]}].mean(time.Now(), testDecay)
 	assert.Greater(t, slow, 5*time.Millisecond, "the loser's latency reached its replica")
 }
@@ -316,10 +324,10 @@ func TestHedgeSkippedWhenHedgesLose(t *testing.T) {
 	h := newHedgeHarness(t, 1, 2)
 	h.warm(1, 2)
 	for i := 0; i < 20; i++ {
-		h.balancer.ObserveHedge(hedgeTestKey, false)
+		h.policy.hedging.ObserveHedge(hedgeTestKey, false)
 	}
 	// the draws of this seed are above the probe rate
-	h.balancer.rng = rand.New(rand.NewSource(1))
+	h.policy.hedging.rng = rand.New(rand.NewSource(1))
 	_, err := h.run(func(int32, int64) (time.Duration, error) { return 60 * time.Millisecond, nil })
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), h.calls.Load())
@@ -347,9 +355,9 @@ func TestHedgeOutcomeReported(t *testing.T) {
 		return 200 * time.Millisecond, nil
 	})
 	require.NoError(t, err)
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	hedges := h.balancer.keys[hedgeTestKey].hedges
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	hedges := h.policy.hedging.keys[hedgeTestKey].hedges
 	require.Equal(t, 2, hedges.count)
 	assert.True(t, hedges.ring[0].won)
 	assert.False(t, hedges.ring[1].won)
@@ -397,18 +405,18 @@ func TestHedgeInputError(t *testing.T) {
 
 // The switch turns hedging off.
 func TestHedgeDisabled(t *testing.T) {
-	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key, "false")
-	defer pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key)
 	h := newHedgeHarness(t, 1, 2)
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "false")
+	defer pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
 	h.warm(1, 2)
 	_, err := h.run(func(int32, int64) (time.Duration, error) { return 60 * time.Millisecond, nil })
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), h.calls.Load())
 	// plain attempts still feed the statistics
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	assert.Len(t, h.balancer.keys[hedgeTestKey].requests.ring, 201)
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	assert.Len(t, h.policy.hedging.keys[hedgeTestKey].requests.ring, 201)
 }
 
 // The request class reaches the statistics through Execute.
@@ -421,8 +429,8 @@ func TestExecutePassesStatsClass(t *testing.T) {
 		Exec:       h.exec(func(int32, int64) (time.Duration, error) { return 0, nil }),
 	})
 	require.NoError(t, err)
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	_, ok := h.balancer.keys[hedgeTestKey]
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	_, ok := h.policy.hedging.keys[hedgeTestKey]
 	assert.True(t, ok)
 }
