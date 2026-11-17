@@ -28,13 +28,13 @@ import (
 func TestIndexSummaryReplacementAndEmptyCompletion(t *testing.T) {
 	segment := &datapb.SegmentInfo{}
 	old := &model.SegmentIndex{IndexID: 10, BuildID: 100, IndexFileKeys: []string{"index"}}
-	ApplyIndexSummary(segment, old, 5, true)
+	ApplyIndexSummary(segment, model.SummarizeSegmentIndex(old), 5, true)
 	replacement := &model.SegmentIndex{IndexID: 10, BuildID: 200}
-	ApplyIndexSummary(segment, replacement, 5, true)
-	ApplyIndexSummary(segment, old, 5, false)
+	ApplyIndexSummary(segment, model.SummarizeSegmentIndex(replacement), 5, true)
+	ApplyIndexSummary(segment, model.SummarizeSegmentIndex(old), 5, false)
 	require.Len(t, segment.IndexSummaries, 1)
 	require.EqualValues(t, 200, segment.IndexSummaries[0].GetBuildId())
 	require.False(t, segment.IndexSummaries[0].GetHasArtifact())
-	ApplyIndexSummary(segment, replacement, 5, false)
+	ApplyIndexSummary(segment, model.SummarizeSegmentIndex(replacement), 5, false)
 	require.Empty(t, segment.IndexSummaries)
 }

@@ -1074,24 +1074,20 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 // It performs no I/O and exposes no file metadata.
 func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary {
 	var summaries []*model.SegmentIndexSummary
-	activeBuilds := make(map[int64]struct{})
+	recordBuildIDs := make(map[int64]struct{})
 	if m.SegmentIndexes != nil {
-		if active, ok := m.SegmentIndexes.Get(segID); ok {
-			for _, record := range active.Values() {
+		if records, ok := m.SegmentIndexes.Get(segID); ok {
+			for _, record := range records.Values() {
 				summaries = append(summaries, model.SummarizeSegmentIndex(record))
-				activeBuilds[record.BuildID] = struct{}{}
+				recordBuildIDs[record.BuildID] = struct{}{}
 			}
 		}
 	}
 	if m.UsesSegmentSummaries() {
 		if segment, ok := m.summarySource.GetSegment(segID); ok {
 			for _, summary := range segment.GetIndexSummaries() {
-				if _, exists := activeBuilds[summary.GetBuildId()]; !exists {
-					summaries = append(summaries, &model.SegmentIndexSummary{
-						CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
-						SegmentID: segID, IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(),
-						IndexState: commonpb.IndexState_Finished, HasArtifact: summary.GetHasArtifact(),
-					})
+				if _, exists := recordBuildIDs[summary.GetBuildId()]; !exists {
+					summaries = append(summaries, model.SegmentIndexSummaryFromProto(segment, summary))
 				}
 			}
 		}
@@ -1428,7 +1424,14 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 
 	previous, ok := m.SegmentBuildInfo.Get(mut.BuildID)
 	if !ok && mut.Type == meta.SegmentIndexRemove {
-		previous, ok = m.summaryRecord(mut.SegmentID, mut.BuildID)
+		if summary, exists := m.completedIndexSummary(mut.SegmentID, mut.BuildID); exists {
+			staged.Summary = summary
+			staged.Install = func() func() {
+				m.taskCounts.adjustSummary(summary, -1)
+				return m.taskCounts.publishStoredSizes
+			}
+		}
+		return staged, nil
 	}
 	if !ok {
 		if mut.Type == meta.SegmentIndexUpsert {
@@ -1457,6 +1460,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.SaveSegmentIndex(destination)
 		staged.Action = &action
 		staged.Record = destination
+		staged.Summary = model.SummarizeSegmentIndex(destination)
 		staged.Install = func() func() {
 			// A replacement build may own the current (segment,index) slot.
 			m.updateSegmentIndexManifestPublished(destination, false)
@@ -1470,6 +1474,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.DropSegmentIndex(segIdx)
 		staged.Action = &action
 		staged.Record = segIdx
+		staged.Summary = model.SummarizeSegmentIndex(segIdx)
 		staged.Install = func() func() {
 			m.removeSegmentIndexRecordInMemory(segIdx)
 			return m.taskCounts.publishStoredSizes
@@ -1509,6 +1514,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.DropSegmentIndex(previous)
 		staged.Action = &action
 		staged.Record = destination
+		staged.Summary = model.SummarizeSegmentIndex(destination)
 		staged.Install = func() func() {
 			m.updateSegmentIndexManifestPublished(destination, true)
 			return func() {}
@@ -1516,12 +1522,12 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return staged, nil
 	}
 
-	var replacedSummary *model.SegmentIndex
+	var replacedSummary *model.SegmentIndexSummary
 	if m.UsesSegmentSummaries() {
 		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
 			for _, summary := range segment.GetIndexSummaries() {
 				if summary.GetIndexId() == previous.IndexID && summary.GetBuildId() != previous.BuildID {
-					replacedSummary = meta.SegmentIndexFromSummary(segment, summary)
+					replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
 				}
 			}
 		}
@@ -1536,10 +1542,11 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	action := metastore.DropSegmentIndex(finished)
 	staged.Action = &action
 	staged.Record = finished
+	staged.Summary = model.SummarizeSegmentIndex(finished)
 	staged.Install = func() func() {
 		finished.ManifestPublished = true
 		if replacedSummary != nil {
-			m.taskCounts.replaceTask(replacedSummary, nil)
+			m.taskCounts.adjustSummary(replacedSummary, -1)
 		}
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge

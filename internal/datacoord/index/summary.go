@@ -18,7 +18,6 @@ package index
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -41,14 +40,13 @@ func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
 	m.summarySource = source
 	for _, segment := range source.GetAllSegments() {
 		for _, summary := range segment.GetIndexSummaries() {
-			record := meta.SegmentIndexFromSummary(segment, summary)
-			m.taskCounts.replaceTask(nil, record)
+			m.taskCounts.adjustSummary(model.SegmentIndexSummaryFromProto(segment, summary), 1)
 		}
 	}
 	return nil
 }
 
-func (m *IndexMeta) summaryRecord(segmentID, buildID int64) (*model.SegmentIndex, bool) {
+func (m *IndexMeta) completedIndexSummary(segmentID, buildID int64) (*model.SegmentIndexSummary, bool) {
 	if !m.UsesSegmentSummaries() {
 		return nil, false
 	}
@@ -58,7 +56,7 @@ func (m *IndexMeta) summaryRecord(segmentID, buildID int64) (*model.SegmentIndex
 	}
 	for _, summary := range segment.GetIndexSummaries() {
 		if summary.GetBuildId() == buildID {
-			return meta.SegmentIndexFromSummary(segment, summary), true
+			return model.SegmentIndexSummaryFromProto(segment, summary), true
 		}
 	}
 	return nil, false
@@ -67,7 +65,7 @@ func (m *IndexMeta) summaryRecord(segmentID, buildID int64) (*model.SegmentIndex
 // AccountCopiedIndexes runs after a fresh importing target becomes durable.
 func (m *IndexMeta) AccountCopiedIndexes(segment *datapb.SegmentInfo) {
 	for _, summary := range segment.GetIndexSummaries() {
-		m.taskCounts.replaceTask(nil, meta.SegmentIndexFromSummary(segment, summary))
+		m.taskCounts.adjustSummary(model.SegmentIndexSummaryFromProto(segment, summary), 1)
 	}
 	m.taskCounts.publishStoredSizes()
 }

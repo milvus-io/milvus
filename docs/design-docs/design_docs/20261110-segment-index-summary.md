@@ -51,8 +51,11 @@ summaries under the same segment lock as the manifest change.
 
 `GetAllSegmentIndexSummaries` returns a separate in-memory inventory type for
 both legacy and summary modes. It contains collection/partition/segment/index/build
-identity, task state, deletion state and artifact presence, including active and
+identity, task state, deletion state, artifact presence, sizes and engine versions, including active and
 pending-cleanup tasks. It has no file metadata and performs no manifest I/O.
+Summary lookup, deletion staging and accounting consume this inventory directly.
+A summary-only removal has no SegmentIndex task record or task-catalog action;
+its inventory and counters are retired only after the segment update succeeds.
 Consumers that need files resolve task records or the owning manifest explicitly;
 a task record takes precedence when the same BuildID also has a persisted summary.
 

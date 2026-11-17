@@ -164,7 +164,10 @@ type SegmentIndexMutation struct {
 type StagedSegmentIndexMutation struct {
 	Source *model.SegmentIndex
 	Action *metastore.UpdateAction
+	// Record is a real task projection; summary-only removals leave it nil.
 	Record *model.SegmentIndex
+	// Summary is the file-free inventory used for validation and publication.
+	Summary *model.SegmentIndexSummary
 	// PublishSummary uses the same immutable mode as Install's record retirement.
 	PublishSummary bool
 	Install        func() (deferredMetric func())
@@ -381,10 +384,10 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			}
 			return nil, err
 		}
-		if staged.Record != nil && staged.Record.SegmentID != commit.SegmentID {
+		if staged.Summary != nil && staged.Summary.SegmentID != commit.SegmentID {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
-				indexMutation.BuildID, staged.Record.SegmentID, commit.SegmentID)
+				indexMutation.BuildID, staged.Summary.SegmentID, commit.SegmentID)
 		}
 		if (indexMutation.Type == SegmentIndexBackfill || indexMutation.Type == SegmentIndexRollback) && staged.Record != nil &&
 			(staged.Record.CollectionID != segment.GetCollectionID() ||
@@ -395,12 +398,12 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 				staged.Record.CollectionID, staged.Record.PartitionID, staged.Record.SegmentID,
 				segment.GetCollectionID(), segment.GetPartitionID(), commit.SegmentID)
 		}
-		if (indexMutation.Type == SegmentIndexRemove || (indexMutation.Type == SegmentIndexRollback && indexMutation.rollbackEntry != nil)) && staged.Record != nil &&
-			!commitRetractsIndexIdentity(commit, staged.Record.IndexID, indexMutation.BuildID) &&
-			(indexMutation.Type != SegmentIndexRemove || !commitDropsColumnOfIndex(m, staged.Record, commit)) {
+		if (indexMutation.Type == SegmentIndexRemove || (indexMutation.Type == SegmentIndexRollback && indexMutation.rollbackEntry != nil)) && staged.Summary != nil &&
+			!commitRetractsIndexIdentity(commit, staged.Summary.IndexID, indexMutation.BuildID) &&
+			(indexMutation.Type != SegmentIndexRemove || !commitDropsColumnOfIndex(m, staged.Summary, commit)) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"segment index removal does not match the manifest retraction, segmentID=%d indexID=%d buildID=%d",
-				commit.SegmentID, staged.Record.IndexID, indexMutation.BuildID)
+				commit.SegmentID, staged.Summary.IndexID, indexMutation.BuildID)
 		}
 		stagedIndexes = append(stagedIndexes, staged)
 		if indexMutation.Type == SegmentIndexRollback {
@@ -552,13 +555,13 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		}
 		updated.ManifestPath = manifestPath
 		for _, staged := range stagedIndexes {
-			if !staged.PublishSummary || staged.Record == nil {
+			if !staged.PublishSummary || staged.Summary == nil {
 				continue
 			}
-			ApplyIndexSummary(updated.SegmentInfo, staged.Record,
-				manifestSummaryFieldID(commit, staged.Record.BuildID),
+			ApplyIndexSummary(updated.SegmentInfo, staged.Summary,
+				manifestSummaryFieldID(commit, staged.Summary.BuildID),
 				slices.ContainsFunc(commit.CatalogMutation.SegmentIndexes, func(mut SegmentIndexMutation) bool {
-					return mut.BuildID == staged.Record.BuildID && (mut.Type == SegmentIndexUpsert || mut.Type == SegmentIndexBackfill)
+					return mut.BuildID == staged.Summary.BuildID && (mut.Type == SegmentIndexUpsert || mut.Type == SegmentIndexBackfill)
 				}))
 		}
 		var action metastore.UpdateAction
@@ -722,7 +725,7 @@ func commitRetractsIndexEntry(commit SegmentManifestCommit, buildID int64) bool 
 // milvus-storage auto-drop the index's manifest entry. This is the manifest
 // half of the backfill-replace index retraction; the record half is the paired
 // SegmentIndexRemove.
-func commitDropsColumnOfIndex(m *Meta, record *model.SegmentIndex, commit SegmentManifestCommit) bool {
+func commitDropsColumnOfIndex(m *Meta, record *model.SegmentIndexSummary, commit SegmentManifestCommit) bool {
 	if record == nil {
 		return false
 	}

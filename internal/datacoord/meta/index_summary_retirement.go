@@ -33,21 +33,21 @@ func (m *Meta) RetireIndexSummaryLocked(ctx context.Context, segmentID, buildID 
 	if err != nil {
 		return err
 	}
-	if staged.Record == nil {
+	if staged.Summary == nil {
 		return nil
 	}
 	var observe func()
 	err = func() error {
 		defer m.LockSegments(segmentID)()
 		segment := m.Segments.GetSegment(segmentID)
-		if segment != nil && IsSegmentHealthy(segment) && staged.Record.ArtifactPresent {
+		if segment != nil && IsSegmentHealthy(segment) && staged.Record == nil && staged.Summary.HasArtifact {
 			return merr.WrapErrServiceInternalMsg("live artifact summary must be retired with its manifest entry")
 		}
 		var updated *SegmentInfo
 		var actions []metastore.UpdateAction
 		if segment != nil && staged.PublishSummary {
 			updated = segment.Clone()
-			ApplyIndexSummary(updated.SegmentInfo, staged.Record, 0, false)
+			ApplyIndexSummary(updated.SegmentInfo, staged.Summary, 0, false)
 			actions = append(actions, metastore.UpdateSegment(updated.SegmentInfo))
 		}
 		if staged.Action != nil {

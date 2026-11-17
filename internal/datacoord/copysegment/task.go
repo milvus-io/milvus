@@ -1789,7 +1789,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 					return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
 				}
 			}
-			meta.ApplyIndexSummary(summarySegment, segIndex, indexInfo.GetFieldId(), true)
+			meta.ApplyIndexSummary(summarySegment, model.SummarizeSegmentIndex(segIndex), indexInfo.GetFieldId(), true)
 			continue
 		}
 		var err error

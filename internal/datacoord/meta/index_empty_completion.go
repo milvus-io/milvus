@@ -72,7 +72,7 @@ func (m *Meta) CompleteEmptyIndex(ctx context.Context, segmentID int64, result *
 			}
 		}
 		updated := segment.Clone()
-		ApplyIndexSummary(updated.SegmentInfo, staged.Record, fieldID, true)
+		ApplyIndexSummary(updated.SegmentInfo, staged.Summary, fieldID, true)
 		if err := m.Catalog.Update(ctx, metastore.UpdateSegment(updated.SegmentInfo), *staged.Action); err != nil {
 			return merr.Wrap(err, "publish empty index completion")
 		}
