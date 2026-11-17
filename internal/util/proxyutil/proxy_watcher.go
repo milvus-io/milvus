@@ -25,16 +25,13 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,7 +45,7 @@ type ProxyWatcherInterface interface {
 
 // ProxyWatcher manages proxy clients
 type ProxyWatcher struct {
-	wg               errgroup.Group
+	wg               sync.WaitGroup
 	lock             sync.Mutex
 	etcdCli          *clientv3.Client
 	initSessionsFunc []func([]*sessionutil.Session)
@@ -56,16 +53,19 @@ type ProxyWatcher struct {
 	delSessionsFunc  []func(*sessionutil.Session)
 
 	closeOnce sync.Once
-	closeCh   lifetime.SafeChan
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // NewProxyWatcher helper function to create a proxyWatcher
 // fns are the custom getSessions function list
 func NewProxyWatcher(client *clientv3.Client, fns ...func([]*sessionutil.Session)) *ProxyWatcher {
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in p.cancel and called by Stop.
 	p := &ProxyWatcher{
 		lock:    sync.Mutex{},
 		etcdCli: client,
-		closeCh: lifetime.NewSafeChan(),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	p.initSessionsFunc = append(p.initSessionsFunc, fns...)
 	return p
@@ -87,33 +87,74 @@ func (p *ProxyWatcher) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
-	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-
-	sessions, rev, err := p.getSessionsOnEtcd(childCtx)
-	if err != nil {
+	// Register before doing the initial Get, so Stop cancels and waits for
+	// both startup and recovery. The lock prevents Add racing with Stop's Wait.
+	p.lock.Lock()
+	if err := p.ctx.Err(); err != nil {
+		p.lock.Unlock()
 		return err
 	}
-	log.Info("succeed to init sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
-	// all init function should be clear meta firstly.
-	for _, f := range p.initSessionsFunc {
-		f(sessions)
+	p.wg.Add(1)
+	watchCtx, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(p.ctx, cancel)
+	p.lock.Unlock()
+	cleanup := func() {
+		stopCancel()
+		cancel()
+		p.wg.Done()
 	}
 
-	eventCh := p.etcdCli.Watch(
-		ctx,
-		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithCreatedNotify(),
-		clientv3.WithPrevKV(),
-		clientv3.WithRev(rev+1),
-	)
-
-	p.wg.Go(func() error {
-		p.startWatchEtcd(ctx, eventCh)
-		return nil
-	})
+	eventCh, err := p.listAndWatch(watchCtx)
+	if err != nil {
+		cleanup()
+		return err
+	}
+	go func() {
+		defer cleanup()
+		p.startWatchEtcd(watchCtx, eventCh)
+	}()
 	return nil
+}
+
+func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, error) {
+	interval := 200 * time.Millisecond
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+		sessions, rev, err := p.getSessionsOnEtcd(requestCtx)
+		cancel()
+		if err == nil {
+			log.Ctx(ctx).Info("succeed to init sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
+			// Replace the local snapshot before consuming subsequent changes.
+			for _, f := range p.initSessionsFunc {
+				f(sessions)
+			}
+			return p.etcdCli.Watch(
+				ctx,
+				path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+				clientv3.WithPrefix(),
+				clientv3.WithCreatedNotify(),
+				clientv3.WithPrevKV(),
+				clientv3.WithRev(rev+1),
+			), nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Only transient etcd errors are retried; a request timeout aborts.
+		if !etcd.IsRetriableWatchErr(err) {
+			return nil, err
+		}
+		log.Ctx(ctx).Warn("failed to list proxy sessions, retry", zap.Error(err))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+		interval = min(2*interval, 3*time.Second)
+	}
 }
 
 func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
@@ -125,71 +166,34 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 			logger.Warn("stop watching etcd loop")
 			return
 
-		case <-p.closeCh.CloseCh():
-			logger.Warn("stop watching etcd loop")
-			return
-
 		case event, ok := <-eventCh:
+			// Cancellation can make both ctx.Done and eventCh ready.
+			if ctx.Err() != nil {
+				return
+			}
 			if !ok {
 				logger.Warn("stop watching etcd loop due to closed etcd event channel")
 				panic("stop watching etcd loop due to closed etcd event channel")
 			}
 			if err := event.Err(); err != nil {
-				// Recoverable watch errors (compaction, or auth-token
-				// invalidation when etcd auth is enabled) are handled by
-				// re-establishing the watch instead of crashing. Re-watching
-				// issues a unary request that refreshes the etcd auth token, so
-				// the new watch stream recovers. See etcd.IsRetriableWatchErr.
-				if etcd.IsRetriableWatchErr(err) {
-					logger.Warn("proxy watch hit a recoverable error, re-establishing watch", zap.Error(err))
-					// Re-watch with a bounded retry/backoff. WatchProxy first issues
-					// a unary Get (getSessionsOnEtcd), which goes through clientv3's
-					// unary retry interceptor and refreshes the etcd auth token before
-					// a fresh watch stream is opened. retry.Do is bounded by its
-					// default attempt count and backoff; only transient errors are
-					// retried, a non-transient failure aborts immediately.
-					//
-					// On success WatchProxy spawns a new startWatchEtcd goroutine, so
-					// this goroutine returns and hands the watch over to it (not a
-					// recursive call that would accumulate goroutines).
-					//
-					// The retry must observe the watcher lifetime, not just the
-					// component ctx: Stop() closes closeCh and then blocks in
-					// wg.Wait(), so a retry bound only to ctx would stall Stop()
-					// and could re-establish a watch after the watcher stopped.
-					// Bridge closeCh into a child ctx that gates the retry (and
-					// its backoff sleeps); WatchProxy itself still runs on the
-					// component ctx so a successfully re-established watch is not
-					// torn down when the bridge is released.
-					reCtx, reCancel := context.WithCancel(ctx)
-					go func() {
-						defer reCancel()
-						select {
-						case <-p.closeCh.CloseCh():
-						case <-reCtx.Done():
-						}
-					}()
-					err2 := retry.Do(reCtx, func() error {
-						if p.closeCh.IsClosed() {
-							return merr.WrapErrServiceInternal("proxy watcher is stopped")
-						}
-						return p.WatchProxy(ctx)
-					}, retry.RetryErr(etcd.IsRetriableWatchErr))
-					reCancel()
-					if err2 != nil {
-						if ctx.Err() != nil || p.closeCh.IsClosed() {
-							logger.Warn("stop re-watching proxy due to shutdown", zap.Error(err2))
-							return
-						}
-						logger.Error("re watch proxy failed after retries, exit",
-							zap.NamedError("watchErr", err),
-							zap.NamedError("reWatchErr", err2))
-						panic("failed to handle etcd request, exit..")
-					}
-					return
+				if !etcd.IsRetriableWatchErr(err) {
+					logger.Error("Watch proxy service failed", zap.Error(err))
+					panic(err)
 				}
-				logger.Error("Watch proxy service failed", zap.Error(err))
-				panic(err)
+				// Refresh the snapshot (and auth token), then resume from its revision.
+				logger.Warn("proxy watch hit a recoverable error, re-establishing watch", zap.Error(err))
+				var err2 error
+				eventCh, err2 = p.listAndWatch(ctx)
+				if err2 != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					logger.Error("re watch proxy failed with a non-recoverable error, exit",
+						zap.NamedError("watchErr", err),
+						zap.NamedError("reWatchErr", err2))
+					panic("failed to handle etcd request, exit..")
+				}
+				continue
 			}
 			for _, e := range event.Events {
 				var err error
@@ -267,7 +271,9 @@ func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 // Stop stops the ProxyManager
 func (p *ProxyWatcher) Stop() {
 	p.closeOnce.Do(func() {
-		p.closeCh.Close()
+		p.lock.Lock()
+		p.cancel()
+		p.lock.Unlock()
 		p.wg.Wait()
 	})
 }
