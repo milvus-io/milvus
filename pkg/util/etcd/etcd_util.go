@@ -33,6 +33,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -56,17 +58,16 @@ import (
 //     token, so the watch owner must re-watch. Re-watching issues a unary
 //     request first, which goes through clientv3's unary retry interceptor and
 //     refreshes the auth token, so the new watch stream recovers.
+//   - transient availability/overload errors accepted by IsRetriableEtcdErr:
+//     stream setup can fail in getToken/Authenticate, which converts gRPC
+//     errors to EtcdError. clientv3's isHaltErr does not recognize their gRPC
+//     status and can terminate the watch instead of reconnecting it.
 //
-// Genuine authorization failures (permission denied, bad credentials) carry
-// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
-// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
-// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
-// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
-// source of Unauthenticated, so matching the sentinel is both sufficient and
-// narrower than trusting the code.
+// Genuine authorization failures (permission denied, bad credentials) are
+// deliberately NOT retriable. Match known etcd errors, including the
+// CancelReason transport forms below, rather than all Unauthenticated errors.
 //
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
+// Callers must back off between recovery attempts and honor context cancellation.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
@@ -74,7 +75,8 @@ func IsRetriableWatchErr(err error) bool {
 	if errors.Is(err, rpctypes.ErrCompacted) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision) {
+		errors.Is(err, rpctypes.ErrAuthOldRevision) ||
+		IsRetriableEtcdErr(err) {
 		return true
 	}
 	// A server-side watch cancellation loses the sentinel identity: etcd's
@@ -98,6 +100,41 @@ func IsRetriableWatchErr(err error) bool {
 		}
 	}
 	return false
+}
+
+// IsRetriableEtcdErr reports whether an etcd error is transient and safe to
+// retry the same request against.
+//
+// It accepts leader-election, request-timeout and availability errors,
+// including generic gRPC Unavailable when no connection is established.
+// Member shutdown (ErrStopped) and Raft apply backlog (ErrTooManyRequests) can
+// also recover after failover or backoff. Match the overload sentinel rather
+// than all ResourceExhausted errors, which include a full database (ErrNoSpace).
+//
+// Genuine authorization failures, permission denials, data loss (corrupt
+// cluster) and other non-transient errors carry different codes and are
+// deliberately NOT retriable.
+func IsRetriableEtcdErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Context cancellation / deadline is a terminal condition, never retried.
+	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, rpctypes.ErrLeaderChanged) ||
+		errors.Is(err, rpctypes.ErrNoLeader) ||
+		errors.Is(err, rpctypes.ErrNotLeader) ||
+		errors.Is(err, rpctypes.ErrNotCapable) ||
+		errors.Is(err, rpctypes.ErrStopped) ||
+		errors.Is(err, rpctypes.ErrTooManyRequests) ||
+		errors.Is(err, rpctypes.ErrTimeout) ||
+		errors.Is(err, rpctypes.ErrTimeoutDueToLeaderFail) ||
+		errors.Is(err, rpctypes.ErrTimeoutDueToConnectionLost) ||
+		errors.Is(err, rpctypes.ErrTimeoutWaitAppliedIndex) ||
+		errors.Is(err, rpctypes.ErrUnhealthy) ||
+		errors.Is(err, rpctypes.ErrClusterVersionUnavailable) ||
+		status.Code(err) == codes.Unavailable
 }
 
 type ClientOption func(*clientv3.Config)
