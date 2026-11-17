@@ -104,7 +104,7 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 			}
 			defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return(entries, nil).Build().UnPatch()
 
-			s.Require().NoError(SyncCopySegmentTask(task, resp, copies, m, im))
+			s.Require().NoError(SyncCopySegmentTask(ctx, task, resp, copies, m, im))
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
 			s.False(task.GetCleanupRequired())
 			s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(ctx, 2001).GetState())
