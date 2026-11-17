@@ -2537,13 +2537,12 @@ type proxyConfig struct {
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
-	LatencyWeightedEnabled            ParamItem `refreshable:"true"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"true"`
 	LatencyWeightedDecay              ParamItem `refreshable:"true"`
 	LatencyWeightedMinShare           ParamItem `refreshable:"true"`
-	LatencyWeightedHedgeEnabled       ParamItem `refreshable:"true"`
-	LatencyWeightedHedgeMinDelay      ParamItem `refreshable:"true"`
-	LatencyWeightedHedgeMinWinRate    ParamItem `refreshable:"true"`
+	HedgingEnabled                    ParamItem `refreshable:"true"`
+	HedgingMinDelay                   ParamItem `refreshable:"true"`
+	HedgingMaxInflightRatio           ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -3029,19 +3028,10 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and latency_weighted. Requires a proxy restart.",
+		Doc:          "Replica selection policy in multiple replicas load balancing: round_robin, look_aside, or latency_weighted. Live changes apply to new channel requests.",
 		Export:       true,
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
-
-	p.LatencyWeightedEnabled = ParamItem{
-		Key:          "proxy.latencyWeighted.enabled",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc:          "Switch of the latency_weighted replica selection policy (proxy.replicaSelectionPolicy: latency_weighted). When false, the policy behaves as look_aside. Takes effect on new channel requests.",
-		Export:       true,
-	}
-	p.LatencyWeightedEnabled.Init(base.mgr)
 
 	p.LatencyWeightedDecay = ParamItem{
 		Key:          "proxy.latencyWeighted.decay",
@@ -3061,32 +3051,32 @@ please adjust in embedded Milvus: false`,
 	}
 	p.LatencyWeightedMinShare.Init(base.mgr)
 
-	p.LatencyWeightedHedgeEnabled = ParamItem{
-		Key:          "proxy.latencyWeighted.hedge.enabled",
+	p.HedgingEnabled = ParamItem{
+		Key:          "proxy.hedging.enabled",
 		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc:          "Send a second attempt of a search or query of a channel to another replica when the first has not returned within the p99 latency of the recent requests of that channel, request class and resource-group scope (at least hedge.minDelay).",
+		DefaultValue: "false",
+		Doc:          "Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per channel request across all retry rounds.",
 		Export:       true,
 	}
-	p.LatencyWeightedHedgeEnabled.Init(base.mgr)
+	p.HedgingEnabled.Init(base.mgr)
 
-	p.LatencyWeightedHedgeMinDelay = ParamItem{
-		Key:          "proxy.latencyWeighted.hedge.minDelay",
+	p.HedgingMinDelay = ParamItem{
+		Key:          "proxy.hedging.minDelay",
 		Version:      "3.0.0",
 		DefaultValue: "200ms",
-		Doc:          "Shortest wait before a hedged attempt, whatever the p99 latency.",
+		Doc:          "Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).",
 		Export:       true,
 	}
-	p.LatencyWeightedHedgeMinDelay.Init(base.mgr)
+	p.HedgingMinDelay.Init(base.mgr)
 
-	p.LatencyWeightedHedgeMinWinRate = ParamItem{
-		Key:          "proxy.latencyWeighted.hedge.minWinRate",
+	p.HedgingMaxInflightRatio = ParamItem{
+		Key:          "proxy.hedging.maxInflightRatio",
 		Version:      "3.0.0",
-		DefaultValue: "0.3",
-		Doc:          "When fewer than this share of the recent hedges (about the last 10s) of a channel, request class and resource-group scope won, only 10% of its hedges are sent, as samples: a hedge that loses only adds load, as when every replica is slow under overall overload.",
+		DefaultValue: "0.1",
+		Doc:          "Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.",
 		Export:       true,
 	}
-	p.LatencyWeightedHedgeMinWinRate.Init(base.mgr)
+	p.HedgingMaxInflightRatio.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",

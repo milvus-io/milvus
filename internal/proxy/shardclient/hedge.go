@@ -38,10 +38,11 @@ var ErrAttemptSuperseded = errors.New("attempt superseded by another attempt of 
 
 // decisions of a hedge, as metric labels
 const (
-	hedgeSent              = "sent"
-	hedgeWon               = "won"
-	hedgeSkippedLowWinRate = "skipped_low_win_rate"
-	hedgeSkippedNoReplica  = "skipped_no_replica"
+	hedgeSent                 = "sent"
+	hedgeWon                  = "won"
+	hedgeSkippedLowWinRate    = "skipped_low_win_rate"
+	hedgeSkippedNoReplica     = "skipped_no_replica"
+	hedgeSkippedInflightLimit = "skipped_inflight_limit"
 )
 
 func recordHedge(decision string) {
@@ -70,8 +71,9 @@ func CommitAttempt(ctx context.Context) bool {
 }
 
 type hedgeResult struct {
-	node int64
-	err  error
+	node         int64
+	err          error
+	getClientErr bool
 }
 
 // attemptFeedback serializes the two observations of a primary: its actual
@@ -90,6 +92,9 @@ type attemptFeedback struct {
 }
 
 func (a *attemptFeedback) complete(err error) {
+	if a.balancer == nil {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.completed = true
@@ -102,6 +107,9 @@ func (a *attemptFeedback) complete(err error) {
 }
 
 func (a *attemptFeedback) overtaken() {
+	if a.balancer == nil {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.completed || a.failureRecorded || errors.Is(a.ctx.Err(), context.Canceled) {
@@ -121,28 +129,33 @@ type hedgeLookupResult struct {
 // keep the outer request context: canceling one earlier can affect other reads
 // merged into its QueryNode task. Only the candidate lookup has a round-local
 // context, so it cannot delay a primary result or outlive a completed round.
-func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkload, balancer *LatencyWeightedBalancer,
-	primary NodeInfo, primarySelected bool, primaryStart time.Time, delay time.Duration, excludeNodes *typeutil.UniqueSet,
-) (bool, error) {
+func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkload, balancer LBBalancer, lw *LatencyWeightedBalancer,
+	primary NodeInfo, primarySelected bool, primaryStart time.Time, delay time.Duration, requestExcludedNodes, excludeNodes *typeutil.UniqueSet,
+) (bool, bool, error) {
 	log := mlog.With(mlog.FieldCollectionID(workload.CollectionID), mlog.String("channelName", workload.Channel))
 	key := statsKey(workload)
 	hedgeKey := hedgeStatsKey(workload)
 	gate := &attemptGate{}
 	results := make(chan hedgeResult, 2)
-	launch := func(node NodeInfo, selected bool, start time.Time) *attemptFeedback {
+	launch := func(node NodeInfo, selected bool, start time.Time, release func()) *attemptFeedback {
 		attemptCtx := context.WithValue(ctx, attemptGateKey{}, gate)
-		feedback := &attemptFeedback{balancer: balancer, ctx: attemptCtx, key: key, node: node.NodeID, selected: selected, start: start}
+		feedback := &attemptFeedback{balancer: lw, ctx: attemptCtx, key: key, node: node.NodeID, selected: selected, start: start}
 		go func() {
+			defer release()
+			if lw == nil && selected {
+				defer balancer.CancelWorkload(node.NodeID, workload.Nq)
+			}
 			client, err := lb.clientMgr.GetClient(attemptCtx, node)
+			getClientErr := err != nil
 			if err == nil {
 				err = workload.Exec(attemptCtx, node.NodeID, client, workload.Channel)
 			}
 			feedback.complete(err)
-			results <- hedgeResult{node: node.NodeID, err: err}
+			results <- hedgeResult{node: node.NodeID, err: err, getClientErr: getClientErr}
 		}()
 		return feedback
 	}
-	primaryFeedback := launch(primary, primarySelected, primaryStart)
+	primaryFeedback := launch(primary, primarySelected, primaryStart, lb.hedging.EnterPrimary())
 	pending := 1
 	timer := time.NewTimer(max(delay-time.Since(primaryStart), 0))
 	defer timer.Stop()
@@ -150,7 +163,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 	hedgeNode := int64(-1)
 	settle := func(won bool) {
 		if hedgeNode >= 0 {
-			balancer.ObserveHedge(hedgeKey, won)
+			lb.hedging.ObserveHedge(hedgeKey, won)
 		}
 	}
 
@@ -173,18 +186,22 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 		case <-ctx.Done():
 			settle(false)
 			if inputErr != nil {
-				return false, inputErr
+				return false, hedgeNode >= 0, inputErr
 			}
 			if lastErr != nil {
-				return false, lastErr
+				return false, hedgeNode >= 0, lastErr
 			}
-			return false, ctx.Err()
+			return false, hedgeNode >= 0, ctx.Err()
 		case <-hedgeTimer:
 			hedgeTimer = nil
 			if gate.committed.Load() {
 				continue
 			}
-			if !balancer.AllowHedge(hedgeKey) {
+			if !lb.hedging.CanAcquireHedge() {
+				recordHedge(hedgeSkippedInflightLimit)
+				continue
+			}
+			if !lb.hedging.AllowHedge(hedgeKey) {
 				recordHedge(hedgeSkippedLowWinRate)
 				continue
 			}
@@ -214,7 +231,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				continue
 			}
 			start := time.Now()
-			node, selected, err := lb.selectCandidate(ctx, balancer, balancer, workload, candidates.nodes, &excluded)
+			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded)
 			if err != nil {
 				if !candidates.refreshed {
 					lookup(true)
@@ -223,11 +240,21 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 				continue
 			}
+			releaseHedge, ok := lb.hedging.TryAcquireHedge()
+			if !ok {
+				if lw != nil && selected {
+					lw.ReleaseSelection(key, node.NodeID)
+				} else if lw == nil && selected {
+					balancer.CancelWorkload(node.NodeID, workload.Nq)
+				}
+				recordHedge(hedgeSkippedInflightLimit)
+				continue
+			}
 			recordHedge(hedgeSent)
 			log.RatedInfo(ctx, 5, "attempt is slow, sending a hedged attempt to another replica",
 				mlog.Int64("primary", primary.NodeID), mlog.Int64("hedge", node.NodeID), mlog.Duration("delay", delay))
 			hedgeNode = node.NodeID
-			launch(node, selected, start)
+			launch(node, selected, start, releaseHedge)
 			pending++
 		case r := <-results:
 			pending--
@@ -238,8 +265,8 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 					primaryFeedback.overtaken()
 				}
 				settle(won)
-				balancer.ObserveRequest(hedgeKey, time.Since(primaryStart))
-				return true, nil
+				lb.hedging.ObserveRequest(hedgeKey, time.Since(primaryStart))
+				return true, hedgeNode >= 0, nil
 			}
 			if errors.Is(r.err, ErrAttemptSuperseded) {
 				continue
@@ -252,14 +279,21 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 			} else {
 				excludeNodes.Insert(r.node)
+				if lw == nil && !errors.Is(ctx.Err(), context.Canceled) {
+					if r.getClientErr || !merr.IsRetryableErr(r.err) {
+						lb.blacklist.Add(workload.Channel, r.node)
+					} else if requestExcludedNodes != nil {
+						requestExcludedNodes.Insert(r.node)
+					}
+				}
 				lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
 			}
 			if pending == 0 {
 				settle(false)
 				if inputErr != nil {
-					return false, inputErr
+					return false, hedgeNode >= 0, inputErr
 				}
-				return true, lastErr
+				return true, hedgeNode >= 0, lastErr
 			}
 		}
 	}

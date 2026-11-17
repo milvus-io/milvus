@@ -26,10 +26,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -59,8 +61,14 @@ func newHedgeHarness(t *testing.T, nodes ...int64) *hedgeHarness {
 	paramtable.Init()
 	// time the tests against a short hedge delay
 	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key, "20ms")
-	t.Cleanup(func() { pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeMinDelay.Key) })
+	pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, LatencyWeighted)
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "20ms")
+	t.Cleanup(func() {
+		pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key)
+		pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+		pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
+	})
 
 	h := &hedgeHarness{t: t}
 	mgr := NewMockShardClientManager(t)
@@ -95,7 +103,7 @@ func (h *hedgeHarness) warm(nodes ...int64) {
 		for _, n := range nodes {
 			h.balancer.ObserveAttempt(context.Background(), hedgeTestKey, n, false, time.Now().Add(-5*time.Millisecond), nil)
 		}
-		h.balancer.ObserveRequest(hedgeTestKey, 5*time.Millisecond)
+		h.policy.hedging.ObserveRequest(hedgeTestKey, 5*time.Millisecond)
 	}
 }
 
@@ -197,9 +205,11 @@ func TestHedgeSlowPrimary(t *testing.T) {
 	assert.Equal(t, 1, h.publishedCount())
 	assert.Eventually(t, func() bool { return h.inflight() == 0 }, time.Second, 10*time.Millisecond)
 
+	h.policy.hedging.mu.Lock()
+	assert.Less(t, h.policy.hedging.keys[hedgeTestKey].requests.newest(0).latency, 200*time.Millisecond, "request latency")
+	h.policy.hedging.mu.Unlock()
 	h.balancer.mu.Lock()
 	defer h.balancer.mu.Unlock()
-	assert.Less(t, h.balancer.keys[hedgeTestKey].requests.newest(0).latency, 200*time.Millisecond, "request latency")
 	slow, _ := h.balancer.replicas[replicaKey{hedgeTestKey, h.callNodes[0]}].mean(time.Now(), testDecay)
 	assert.Greater(t, slow, 5*time.Millisecond, "the loser's latency reached its replica")
 }
@@ -316,10 +326,10 @@ func TestHedgeSkippedWhenHedgesLose(t *testing.T) {
 	h := newHedgeHarness(t, 1, 2)
 	h.warm(1, 2)
 	for i := 0; i < 20; i++ {
-		h.balancer.ObserveHedge(hedgeTestKey, false)
+		h.policy.hedging.ObserveHedge(hedgeTestKey, false)
 	}
 	// the draws of this seed are above the probe rate
-	h.balancer.rng = rand.New(rand.NewSource(1))
+	h.policy.hedging.rng = rand.New(rand.NewSource(1))
 	_, err := h.run(func(int32, int64) (time.Duration, error) { return 60 * time.Millisecond, nil })
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), h.calls.Load())
@@ -347,9 +357,9 @@ func TestHedgeOutcomeReported(t *testing.T) {
 		return 200 * time.Millisecond, nil
 	})
 	require.NoError(t, err)
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	hedges := h.balancer.keys[hedgeTestKey].hedges
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	hedges := h.policy.hedging.keys[hedgeTestKey].hedges
 	require.Equal(t, 2, hedges.count)
 	assert.True(t, hedges.ring[0].won)
 	assert.False(t, hedges.ring[1].won)
@@ -397,18 +407,18 @@ func TestHedgeInputError(t *testing.T) {
 
 // The switch turns hedging off.
 func TestHedgeDisabled(t *testing.T) {
-	pt := paramtable.Get()
-	pt.Save(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key, "false")
-	defer pt.Reset(pt.ProxyCfg.LatencyWeightedHedgeEnabled.Key)
 	h := newHedgeHarness(t, 1, 2)
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "false")
+	defer pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
 	h.warm(1, 2)
 	_, err := h.run(func(int32, int64) (time.Duration, error) { return 60 * time.Millisecond, nil })
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), h.calls.Load())
 	// plain attempts still feed the statistics
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	assert.Len(t, h.balancer.keys[hedgeTestKey].requests.ring, 201)
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	assert.Len(t, h.policy.hedging.keys[hedgeTestKey].requests.ring, 201)
 }
 
 // The request class reaches the statistics through Execute.
@@ -421,8 +431,198 @@ func TestExecutePassesStatsClass(t *testing.T) {
 		Exec:       h.exec(func(int32, int64) (time.Duration, error) { return 0, nil }),
 	})
 	require.NoError(t, err)
-	h.balancer.mu.Lock()
-	defer h.balancer.mu.Unlock()
-	_, ok := h.balancer.keys[hedgeTestKey]
+	h.policy.hedging.mu.Lock()
+	defer h.policy.hedging.mu.Unlock()
+	_, ok := h.policy.hedging.keys[hedgeTestKey]
 	assert.True(t, ok)
+}
+
+func TestHedgeDecoupledFromReplicaSelectionPolicy(t *testing.T) {
+	for _, policyName := range []string{LookAside, RoundRobin} {
+		t.Run(policyName, func(t *testing.T) {
+			h := newHedgeHarness(t, 1, 2)
+			pt := paramtable.Get()
+			pt.Save(pt.ProxyCfg.ReplicaSelectionPolicy.Key, policyName)
+			t.Cleanup(func() { pt.Reset(pt.ProxyCfg.ReplicaSelectionPolicy.Key) })
+			h.policy.getBalancer = NewLBPolicyImpl(h.policy.clientMgr).getBalancer
+
+			releasePrimary := make(chan struct{})
+			defer close(releasePrimary)
+			elapsed, err := h.run(func(call int32, _ int64) (time.Duration, error) {
+				if call == 1 {
+					<-releasePrimary
+					return 0, nil
+				}
+				return 0, nil
+			})
+			require.NoError(t, err)
+			assert.Less(t, elapsed, 200*time.Millisecond)
+			assert.Equal(t, int32(2), h.calls.Load())
+			assert.Equal(t, 1, h.publishedCount())
+			h.balancer.mu.Lock()
+			assert.Empty(t, h.balancer.replicas, "non-latency_weighted policies must not record LatencyWeightedBalancer stats")
+			h.balancer.mu.Unlock()
+		})
+	}
+}
+
+func TestHedgeInflightRatioLimitAndLoserOccupancy(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2)
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "30ms")
+	pt.Save(pt.ProxyCfg.HedgingMaxInflightRatio.Key, "0.1")
+	t.Cleanup(func() {
+		pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
+		pt.Reset(pt.ProxyCfg.HedgingMaxInflightRatio.Key)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	callsPerReq := make(map[int64]int)
+	primaryCh := make(map[int64]chan struct{})
+	getPrimaryCh := func(reqID int64) chan struct{} {
+		mu.Lock()
+		defer mu.Unlock()
+		if primaryCh[reqID] == nil {
+			primaryCh[reqID] = make(chan struct{})
+		}
+		return primaryCh[reqID]
+	}
+
+	hedgeReleaseOne := make(chan struct{})
+	hedgeReleaseAll := make(chan struct{})
+	var fastHedge atomic.Bool
+	var hedgesDispatched atomic.Int64
+	var primariesStarted atomic.Int64
+
+	type reqIDKey struct{}
+	skippedCounter := metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), hedgeSkippedInflightLimit)
+	baseSkipped := testutil.ToFloat64(skippedCounter)
+
+	runReq := func(reqID int64) error {
+		return h.policy.ExecuteWithRetry(context.WithValue(ctx, reqIDKey{}, reqID), ChannelWorkload{
+			Channel:    hedgeTestChannel,
+			Nq:         1,
+			StatsClass: hedgeTestClass,
+			Hedgeable:  true,
+			Exec: func(execCtx context.Context, _ int64, _ types.QueryNodeClient, _ string) error {
+				id := execCtx.Value(reqIDKey{}).(int64)
+				mu.Lock()
+				callsPerReq[id]++
+				callNum := callsPerReq[id]
+				mu.Unlock()
+				if callNum == 1 {
+					primariesStarted.Add(1)
+					select {
+					case <-getPrimaryCh(id):
+					case <-execCtx.Done():
+						return execCtx.Err()
+					}
+				} else {
+					hedgesDispatched.Add(1)
+					if !fastHedge.Load() {
+						select {
+						case <-hedgeReleaseOne:
+						case <-hedgeReleaseAll:
+						case <-execCtx.Done():
+							return execCtx.Err()
+						}
+					}
+				}
+				if !CommitAttempt(execCtx) {
+					return ErrAttemptSuperseded
+				}
+				return nil
+			},
+		})
+	}
+
+	const totalPrimaries = 30
+	errCh := make(chan error, totalPrimaries)
+	for i := int64(1); i <= totalPrimaries; i++ {
+		reqID := i
+		go func() { errCh <- runReq(reqID) }()
+	}
+
+	require.Eventually(t, func() bool {
+		return primariesStarted.Load() == totalPrimaries
+	}, time.Second, time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return hedgesDispatched.Load() == 3 && testutil.ToFloat64(skippedCounter)-baseSkipped == 27
+	}, 2*time.Second, 2*time.Millisecond)
+	require.Equal(t, int64(3), h.policy.hedging.inflightHedges.Load())
+
+	var hedgedReqID int64
+	mu.Lock()
+	for id, count := range callsPerReq {
+		if count == 2 {
+			hedgedReqID = id
+			break
+		}
+	}
+	mu.Unlock()
+	require.NotZero(t, hedgedReqID)
+	close(getPrimaryCh(hedgedReqID))
+	require.NoError(t, <-errCh)
+
+	// Un-canceled loser hedge RPC still occupies the hedge slot.
+	require.Equal(t, int64(29), h.policy.hedging.inflightPrimaries.Load())
+	require.Equal(t, int64(3), h.policy.hedging.inflightHedges.Load())
+
+	done31 := make(chan error, 1)
+	go func() { done31 <- runReq(31) }()
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(skippedCounter)-baseSkipped == 28
+	}, time.Second, 2*time.Millisecond)
+	close(getPrimaryCh(31))
+	require.NoError(t, <-done31)
+
+	hedgeReleaseOne <- struct{}{}
+	require.Eventually(t, func() bool {
+		return h.policy.hedging.inflightHedges.Load() == 2
+	}, time.Second, time.Millisecond)
+
+	fastHedge.Store(true)
+	require.NoError(t, runReq(32))
+	require.Equal(t, int64(4), hedgesDispatched.Load())
+
+	close(hedgeReleaseAll)
+	for i := int64(1); i <= totalPrimaries; i++ {
+		if i != hedgedReqID {
+			close(getPrimaryCh(i))
+		}
+	}
+	require.Eventually(t, func() bool {
+		return h.policy.hedging.inflightPrimaries.Load() == 0 && h.policy.hedging.inflightHedges.Load() == 0
+	}, 2*time.Second, 2*time.Millisecond)
+}
+
+func TestAtMostOneHedgeAcrossRetries(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3, 4)
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "5ms")
+	t.Cleanup(func() { pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key) })
+
+	hedgeStarted := make(chan struct{})
+	sentCounter := metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), hedgeSent)
+	baseSent := testutil.ToFloat64(sentCounter)
+
+	_, err := h.run(func(call int32, _ int64) (time.Duration, error) {
+		switch call {
+		case 1:
+			<-hedgeStarted
+			return 0, merr.ErrServiceUnavailable
+		case 2:
+			close(hedgeStarted)
+			return 0, merr.ErrServiceUnavailable
+		default:
+			return 20 * time.Millisecond, nil
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(3), h.calls.Load(), "only 1 hedge may be dispatched across all retry rounds")
+	require.Equal(t, 1.0, testutil.ToFloat64(sentCounter)-baseSent)
 }

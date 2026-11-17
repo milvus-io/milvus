@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -127,6 +128,7 @@ type LBPolicyImpl struct {
 	getBalancer    func() LBBalancer
 	clientMgr      ShardClientMgr
 	balancerMap    map[string]LBBalancer
+	hedging        *hedgeTracker
 	retryOnReplica int
 	blacklist      *ChannelBlacklist
 }
@@ -137,8 +139,8 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
@@ -151,6 +153,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
+		hedging:        newHedgeTracker(),
 		retryOnReplica: retryOnReplica,
 		blacklist:      NewChannelBlacklist(),
 	}
@@ -373,6 +376,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var err error
 	var shardLeaders []NodeInfo
 	requestExcludedNodes := typeutil.NewUniqueSet()
+	hedgedOnce := false
 	tryExecute := func() (bool, error) {
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
@@ -447,6 +451,22 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			return true, err
 		}
+		start := time.Now()
+		if workload.Hedgeable && !hedgedOnce {
+			if delay, enabled := lb.hedging.HedgeDelay(hedgeStatsKey(workload)); enabled {
+				again, hedged, err := lb.executeHedged(ctx, workload, balancer, nil, targetNode, selectedByBalancer, start, delay, &requestExcludedNodes, &excludeNodes)
+				if hedged {
+					hedgedOnce = true
+				}
+				if err != nil {
+					lastErr = err
+				}
+				return again, err
+			}
+		}
+		if workload.Hedgeable {
+			defer lb.hedging.EnterPrimary()()
+		}
 		// cancel work load which assign to the target node
 		if selectedByBalancer {
 			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
@@ -495,6 +515,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, lastErr
 		}
 
+		if workload.Hedgeable {
+			lb.hedging.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
+		}
 		return true, nil
 	}
 
