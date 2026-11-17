@@ -18,6 +18,9 @@
 #include <atomic>
 #include <cstdint>
 #include <future>
+#include <filesystem>
+#include <thread>
+#include <folly/ScopeGuard.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -40,6 +43,8 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
 #include "exec/expression/JsonContainsExpr.h"
+#include "exec/expression/ExistsExpr.h"
+#include "exec/expression/ExprCacheFlight.h"
 #include "index/Meta.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
@@ -2052,5 +2057,165 @@ TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
 
         EXPECT_EQ(ContainsPath(ContainsInt(f, 9007199254740993), f),
                   exec::ExprExecPath::JsonStats);
+    }
+}
+
+namespace {
+struct JsonStatsFlightGate {
+    std::atomic<int> computes{0};
+    std::promise<void> entered, resume;
+    std::shared_future<void> resumed = resume.get_future().share();
+};
+
+class GatedJsonStatsFlightSegment : public segcore::ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    std::shared_ptr<JsonStatsFlightGate> gate;
+
+    std::shared_ptr<JsonKeyStats>
+    GetJsonStats(milvus::OpContext* ctx, FieldId field) const override {
+        // Prefetch and reader selection also access stats. Count and block
+        // only the actual complete-expression producer, inside ComputeScope.
+        if (gate && exec::ExprCacheFlightCoordinator::IsComputing()) {
+            if (gate->computes.fetch_add(1) == 0)
+                gate->entered.set_value();
+            gate->resumed.wait();
+        }
+        return ChunkedSegmentSealedImpl::GetJsonStats(ctx, field);
+    }
+};
+}  // namespace
+
+TEST(ExprCacheFlightJsonStatsTest, ExistsComputesOnceAndMatchesRawData) {
+    using namespace std::chrono_literals;
+    auto& manager = exec::ExprResCacheManager::Instance();
+    auto& flights = manager.Flights();
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("json-stats-flight-" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto cleanup = folly::makeGuard([&] {
+        flights.Configure({});
+        manager.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+        std::filesystem::remove_all(directory);
+    });
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON, true);
+    const std::vector<std::string> documents{
+        R"({"n":1,"mixed":"x","parent":{"child":1}})",
+        R"({"n":2,"mixed":[1,2],"parent":{"child":null}})",
+        R"({"n":3,"mixed":null})",
+        R"({"other":0})",
+        R"({"n":null,"mixed":{"child":2}})",
+        R"({"n":6})",
+        R"({"n":7,"mixed":true})",
+        R"({"n":8})"};
+    const std::vector<uint8_t> validity{0x7F};
+    const auto rows = documents.size();
+    milvus::test::ExprBatchSizeGuard batches(3);
+    for (auto mode : {exec::CacheMode::Memory, exec::CacheMode::Disk}) {
+        SCOPED_TRACE(static_cast<int>(mode));
+        exec::ExprResCacheManager::SetEnabled(false);
+        manager.Clear();
+        exec::CacheConfig cache;
+        cache.mode = mode;
+        cache.disk_base_path = directory.string();
+        cache.mem_min_eval_duration_us = cache.disk_min_eval_duration_us = 0;
+        cache.admission_threshold = 1;
+        ASSERT_TRUE(manager.SetConfig(cache));
+        exec::ExprCacheFlightConfig config;
+        config.enabled = true;
+        config.max_wait_ms = 5000;
+        ASSERT_TRUE(flights.Configure(config));
+
+        auto stats = BuildAndLoadJsonKeyStats(documents,
+                                              field,
+                                              TestLocalPath,
+                                              1801,
+                                              2801,
+                                              3801,
+                                              field.get(),
+                                              5801,
+                                              1,
+                                              &validity);
+        EXPECT_FALSE(
+            stats->GetShreddingField(index::JsonPointer({"n"}), JSONType::INT64)
+                .empty());
+        auto segment = std::make_unique<GatedJsonStatsFlightSegment>(
+            schema,
+            empty_index_meta,
+            segcore::SegcoreConfig::default_config(),
+            3801);
+        segment->SetJsonStatsForTesting(
+            field, MakeTestJsonStatsSlot(std::move(stats)));
+        auto raw = segcore::CreateSealedSegment(schema);
+        auto data =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        data->FillFieldData(MakeNullableJsonArray(documents, validity));
+        milvus::test::expr_index::RawFieldFiles files;
+        auto info = files.Prepare(field, {data});
+        segment->LoadFieldData(info);
+        raw->LoadFieldData(info);
+        segment->DropFieldData(field);
+        ASSERT_FALSE(segment->HasFieldData(field));
+
+        for (const auto* path : {"n", "mixed", "parent", "missing"}) {
+            SCOPED_TRACE(path);
+            exec::ExprResCacheManager::SetEnabled(false);
+            manager.Clear();
+            auto expr = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(field, DataType::JSON, {path}));
+            auto expected =
+                milvus::test::EvalExprInBatches(expr, raw.get(), rows);
+            segment->gate = std::make_shared<JsonStatsFlightGate>();
+            exec::ExprResCacheManager::SetEnabled(true);
+            std::vector<std::future<milvus::test::ExprBatchEvalResult>>
+                requests;
+            auto release =
+                folly::makeGuard([&] { segment->gate->resume.set_value(); });
+            auto evaluate = [&] {
+                return milvus::test::EvalExprInBatches(
+                    expr, segment.get(), rows);
+            };
+            requests.push_back(std::async(std::launch::async, evaluate));
+            ASSERT_EQ(segment->gate->entered.get_future().wait_for(3s),
+                      std::future_status::ready);
+            for (int i = 0; i < 3; ++i)
+                requests.push_back(std::async(std::launch::async, evaluate));
+            auto until = std::chrono::steady_clock::now() + 3s;
+            while (flights.GetStats().waiters != 3 &&
+                   std::chrono::steady_clock::now() < until)
+                std::this_thread::yield();
+            EXPECT_EQ(flights.GetStats().waiters, 3);
+            EXPECT_EQ(segment->gate->computes.load(), 1);
+            segment->gate->resume.set_value();
+            release.dismiss();
+            auto compare =
+                [&](const milvus::test::ExprBatchEvalResult& actual) {
+                    EXPECT_EQ(actual.batch_sizes, expected.batch_sizes);
+                    TargetBitmapView bits(actual.result->GetRawData(), rows);
+                    TargetBitmapView valid(actual.result->GetValidRawData(),
+                                           rows);
+                    TargetBitmapView wanted(expected.result->GetRawData(),
+                                            rows);
+                    TargetBitmapView wanted_valid(
+                        expected.result->GetValidRawData(), rows);
+                    for (size_t i = 0; i < rows; ++i) {
+                        EXPECT_EQ(valid[i], wanted_valid[i]) << i;
+                        if (wanted_valid[i])
+                            EXPECT_EQ(bits[i], wanted[i]) << i;
+                    }
+                };
+            for (auto& request : requests) compare(request.get());
+            compare(
+                evaluate());  // Warm hit must also retain the complete result.
+            EXPECT_EQ(segment->gate->computes.load(), 1);
+            EXPECT_EQ(manager.GetEntryCount(), 1);
+            EXPECT_EQ(flights.GetStats().flights, 0);
+            EXPECT_EQ(flights.GetStats().waiters, 0);
+            EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+        }
     }
 }

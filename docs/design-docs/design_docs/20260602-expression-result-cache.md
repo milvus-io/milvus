@@ -4,7 +4,7 @@
 - **Author(s):** @luzhang
 - **Status:** Under Review
 - **Component:** QueryNode / Segcore
-- **Related Issues:** N/A
+- **Related Issues:** [#55566](https://github.com/milvus-io/milvus/issues/55566)
 - **Released:** N/A
 
 ## Summary
@@ -17,6 +17,18 @@ The cache is implemented in segcore through `ExprResCacheManager`, with two stor
 - **Disk mode:** one fixed-slot cache file per sealed segment generation, direct `pread`/`pwrite`, frequency and latency admission, per-segment Clock eviction, and global segment-file eviction.
 
 The feature is controlled by refreshable `queryNode.exprCache` parameters. It is disabled by default and does not change query semantics when disabled.
+
+An independently disabled-by-default `queryNode.exprCache.singleFlight.enabled`
+switch can coalesce concurrent sealed full-row leaf expression misses. A process-local
+flight table tracks ongoing leaf computations separately from the cache
+backends. Followers wait for a bounded interval and receive private bitmap
+copies; complete results can be shared even when cache admission rejects the
+write. Eligible paths include the common scalar-index evaluator (comparisons,
+ranges, IN, and row-projected array/JSON predicates), text matches, and EXISTS
+through an index or JSON stats. Element-domain results, passive RawData capture,
+and other split Get/Put paths do not join flights. See the
+[Single-Flight Coordination](#71-single-flight-coordination)
+for lifecycle, limits, cancellation, and validation scope.
 
 ## Motivation
 
@@ -31,10 +43,18 @@ Some expressions are expensive because they need to:
 
 Recomputing the same bitmap wastes CPU and increases tail latency. Caching the full-segment bitmap avoids this work when the effective expression and segment snapshot are unchanged.
 
+Completed-result caching does not suppress duplicate computation while a result is
+still being produced. For example, a query and several group-by requests can
+share an expensive leaf predicate even when their remaining filters differ.
+Single-flight lets eligible concurrent misses reuse that leaf computation,
+with bounded waiting and fallback to independent evaluation.
+
 ## Goals
 
 - Cache reusable expression result bitmaps by segment and expression signature.
 - Support both memory-backed and disk-backed cache modes.
+- Coalesce eligible concurrent sealed leaf-expression misses with bounded
+  waiting, cancellation, and independent result ownership.
 - Preserve correctness when a segment's active row count changes.
 - Make cache parameters refreshable without restarting QueryNode.
 - Track memory and disk usage through existing cachinglayer metrics.
@@ -49,6 +69,9 @@ Recomputing the same bitmap wastes CPU and increases tail latency. Caching the f
 - Supporting growing segments in disk mode.
 - Caching final search results or vector-search intermediate results.
 - Replacing specialized scalar, text, JSON, or vector indexes.
+- Coordinating whole-filter, logical-combination, or growing-segment computations.
+- Guaranteeing exactly one computation when requests time out or bypass coordination.
+- Coalescing passive RawData scans or changing query scheduling.
 
 ## Public Interfaces
 
@@ -58,6 +81,12 @@ Recomputing the same bitmap wastes CPU and increases tail latency. Caching the f
 queryNode:
   exprCache:
     enabled: false
+    singleFlight:
+      enabled: false
+      maxWaitMs: 1000
+      maxFlights: 1024
+      maxWaiters: 64
+      maxWaitersPerKey: 8
     mode: disk
     minEvalDurationUs: 1000
     admissionThreshold: 2
@@ -75,10 +104,15 @@ queryNode:
 | Key | Default | Hot-reload | Description |
 |-----|---------|------------|-------------|
 | `queryNode.exprCache.enabled` | `false` | yes | Enable expression result cache. |
+| `queryNode.exprCache.singleFlight.enabled` | `false` | yes | Coalesce eligible concurrent sealed leaf-expression misses. Requires `exprCache.enabled`. |
+| `queryNode.exprCache.singleFlight.maxWaitMs` | `1000` | yes | Maximum synchronous follower wait in milliseconds; valid range is 1–60000. Timeout falls back to computation. |
+| `queryNode.exprCache.singleFlight.maxFlights` | `1024` | yes | Maximum live flight records, including detached records still held by requests. Must be positive. |
+| `queryNode.exprCache.singleFlight.maxWaiters` | `64` | yes | Maximum concurrent followers per process. Must be positive; tune below available query worker capacity. |
+| `queryNode.exprCache.singleFlight.maxWaitersPerKey` | `8` | yes | Maximum concurrent followers per expression snapshot. Must be positive. |
 | `queryNode.exprCache.mode` | `disk` | yes | Cache backend: `disk` or `memory`. |
 | `queryNode.exprCache.minEvalDurationUs` | `1000` | yes | Skip caching expressions that evaluate faster than this threshold. `0` disables latency admission. |
 | `queryNode.exprCache.admissionThreshold` | `2` | yes | Frequency admission threshold for each expression snapshot, shared by memory and disk modes. `1` disables frequency admission. |
-| `queryNode.exprCache.materialization.maxBytes` | `268435456` | yes | Maximum heap bytes retained by decoded cache-hit bitmap pairs and RawData miss-capture pairs across both storage modes. |
+| `queryNode.exprCache.materialization.maxBytes` | `268435456` | yes | Maximum heap bytes retained by decoded cache hits, RawData captures, and single-flight shared/follower bitmap pairs across both storage modes. |
 | `queryNode.exprCache.memory.maxBytes` | `268435456` | yes | Maximum memory budget for memory mode. |
 | `queryNode.exprCache.memory.compressionEnabled` | `true` | yes | Enable adaptive bitmap compression in memory mode. |
 | `queryNode.exprCache.memory.enableGrowing` | `false` | yes | Allow memory mode to cache eligible growing-segment snapshots. Text-index expressions remain excluded. |
@@ -92,6 +126,12 @@ Go-side paramtable refresh propagates config into C++ through:
 ```cpp
 void SetExprResCacheEnable(bool val);
 
+bool SetExprResCacheSingleFlightConfig(bool enabled,
+                                       int64_t max_wait_ms,
+                                       int64_t max_flights,
+                                       int64_t max_waiters,
+                                       int64_t max_waiters_per_key);
+
 void SetExprResCacheConfig(const char* mode,
                            const char* disk_base_path,
                            int64_t materialization_max_bytes,
@@ -104,6 +144,10 @@ void SetExprResCacheConfig(const char* mode,
                            int64_t disk_max_file_size,
                            int64_t disk_min_eval_duration_us);
 ```
+
+Single-flight configuration has a separate refresh handler. It does not call
+`SetExprResCacheConfig` or clear stored results. Invalid flight settings disable
+only coordination; ordinary expression caching keeps its current configuration.
 
 ### Internal Cache API
 
@@ -155,6 +199,14 @@ entries and to reserve the decoded bitmap size. `Get` is the compatibility
 wrapper; `GetWithStatus` lets batched callers distinguish a real miss from a
 materialization-budget rejection.
 
+`ExprResCacheManager` owns the `ExprCacheFlightCoordinator` and exposes it
+through `Flights()`.
+`ExprCacheHelper::GetOrCompute` accepts an optional
+`const ExprCacheFlightOptions*`, containing the request cancellation token.
+Passing a non-null options pointer explicitly declares that the compute lambda
+independently produces a complete row-level result/validity pair. The default
+is no coordination; `GetOrComputeBitmap` does not opt in internal artifacts.
+
 ## Design Details
 
 ### 1. Architecture
@@ -167,6 +219,11 @@ Expression execution
   | FilterBitsNode whole-filter cache
   v
 ExprResCacheManager
+  |
+  +-- Single-flight -> ExprCacheFlightCoordinator
+  |       +-- eligible sealed leaf misses only
+  |       +-- bounded waits and immutable temporary results
+  |       +-- independent map and per-flight locks
   |
   +-- Memory mode -> EntryPool
   |       +-- adaptive compression
@@ -181,6 +238,9 @@ ExprResCacheManager
 ```
 
 `ExprResCacheManager` owns mode selection, frequency admission, dynamic config rebuild, segment erasure, and usage metrics. Backend implementations focus on storage-specific behavior.
+The coordinator owns flight registration, waiting, and completion; the helper
+owns cache lookup, admission, and insertion. Expression implementations retain
+their synchronous compute lambdas.
 
 ### 2. Cache Key and Value
 
@@ -383,6 +443,12 @@ adapter evaluates normally one batch at a time but neither decodes a cache hit
 nor captures a full-segment miss. Allocation and exception paths destroy the
 buffers before releasing the reservation.
 
+When single-flight is enabled, its immutable shared result pair and each
+follower's private copy also reserve this budget. They remain charged until
+their holders are released, independently of flight-table removal. Ordinary
+query computation buffers, including the leader's original output, remain
+outside this materialization budget.
+
 The compressed payload reference is released when decoding finishes; returned
 bitmaps own only their materialization reservation. Exceptions release the
 lookup's payload reference and materialization reservation through ownership
@@ -418,13 +484,21 @@ All `queryNode.exprCache` parameters are refreshable.
 Refresh behavior is conservative:
 
 - `enabled=false` disables future cache get/put operations.
-- `enabled=true` first applies the current config, then enables cache access.
-- Changing any cache config while enabled calls `SetConfig`.
+- When enabling a disabled cache, both startup and the refresh callback apply
+  the current config before enabling cache access. Failed setup leaves it disabled.
+- Changing backend configuration while enabled calls `SetConfig`.
 - `SetConfig` rebuilds the backend and clears existing cache entries.
 - In disk mode, `SetConfig` removes old `.cache` files in the target cache directory.
 - Invalid config or disk directory creation failure disables the cache and clears backend state.
 
 When thresholds such as `admissionThreshold` or `minEvalDurationUs` change, existing entries are not reinterpreted. They are dropped, and future evaluations repopulate the cache under the new policy.
+
+The `singleFlight.*` settings refresh independently. Each update advances the
+coordinator's policy epoch without rebuilding the backend or clearing its map.
+New requests cannot join records from an earlier policy; existing waiters
+observe the change during their timed checks and fall back. Existing leaders
+retain cleanup ownership and are not forcibly cancelled. Lowering a limit does
+not evict live holders; new registrations are rejected until usage permits them.
 
 ### 7. Expression Integration
 
@@ -432,11 +506,12 @@ The common integration path is `ExprCacheHelper::GetOrCompute`:
 
 1. Check whether cache is enabled and the segment is eligible.
 2. Reject growing segments unless memory-mode growing caching is enabled.
-3. Build the `(segment_id, signature)` key.
-4. Attempt cache `Get`.
-5. On miss, compute the full-segment bitmap.
+3. Build the `(segment_id, generation, signature)` key.
+4. Attempt cache lookup, distinguishing `Miss` from `ResourceLimit`.
+5. On a genuine miss, use single-flight when the caller opts in and coordination
+   is enabled; otherwise compute normally.
 6. Measure evaluation duration when cache admission may need it.
-7. Attempt cache `Put`.
+7. Attempt cache insertion according to the selected path and write permission.
 
 For Volcano-style batched expressions, `BatchedCachedMixin` loads or computes the full-segment bitmap once, then slices it on later `Eval()` calls.
 
@@ -962,6 +1037,183 @@ Integration rules:
 - Cache both result and validity bitmaps for nullable expressions.
 - Do not mutate shared bitmaps returned from cache.
 
+### 7.1 Single-Flight Coordination
+
+Single-flight coordinates one eligible leaf expression on a sealed snapshot.
+For example, `A AND B` and `A AND C` can share A without sharing either complete
+filter. It is available with both memory and disk backends and requires both
+`exprCache.enabled` and `exprCache.singleFlight.enabled`. Ordinary cache hits
+return before consulting the flight table.
+
+#### Supported execution paths
+
+Cache support alone does not imply single-flight support. Only the following
+complete computation boundaries pass `ExprCacheFlightOptions` to the helper:
+
+| Entry point | Supported expressions | Eligibility requirements |
+|-------------|-----------------------|--------------------------|
+| `SegmentExpr::ProcessIndexChunksImpl` | Indexed unary comparisons, supported string pattern operations, binary ranges, IN/term predicates, compatible JSON path predicates, array equality, and JSON/array contains/any/all | The selected reader returns row coordinates, or the caller explicitly completes element-to-row projection and any exact refinement inside the compute lambda. Both result and validity must cover `active_count`. |
+| `PhyUnaryRangeFilterExpr::ExecTextMatch` | `TextMatch`, `PhraseMatch`, and `TextMatchFuzzy` | Sealed segments only. The shared computation includes validity and covered-row normalization, not just the text query. |
+| `PhyExistsFilterExpr::EvalJsonExistsForIndex` | JSON index EXISTS | The expression and selected reader must produce row-level results. |
+| `PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats` | JSON statistics EXISTS | The non-element-level expression computes the complete shredding and shared-data result in one lambda. |
+
+Element-domain results are excluded even when their element count happens to
+equal the segment row count. Array contains projects each term's hits to rows
+before combining them. Indexed array equality completes candidate projection
+and raw-array verification before sharing the result. Neither intermediate
+candidates nor internal `json-flat-validity:*` artifacts join a flight.
+
+Other JSON statistics paths with separate `TryCacheGet` and `CachePut` calls,
+passive RawData capture, PK/NGRAM/GIS paths, whole-filter caching, and logical
+`AND`/`OR`/`NOT` results do not participate. Arithmetic or other expression
+paths are not implicitly enabled by their use of the result cache. Growing
+segments remain excluded even when memory-mode growing caching is enabled.
+
+A final slice or gather is allowed when the coordinated computation is still
+independent of request masks and offsets. In particular, the JSON flat binary
+range full-bitmap-and-gather path uses the common index entry point. Each
+request prepares its arguments and reader selection before coordination, then
+stores the returned bitmaps and advances its own cursor as it would on a cache
+hit. The coordinator never retains a physical expression, reader, `EvalCtx`,
+or callback that borrows another request's state.
+
+RawData capture depends on later calls from the parent expression and can be
+abandoned by short-circuiting, masking, offsets, or `MoveCursor`. A miss on this
+path therefore cannot promise a complete result to waiting requests. Supporting
+shared RawData computation requires an independent full-leaf evaluator bound
+to the snapshot, with its own cursor and cancellation checks.
+
+#### Identity and admission
+
+A flight key is `(cache_key, active_count, cache_config_epoch)`, where
+`cache_key` contains the segment ID, complete expression signature, and retained
+generation token. The token must be valid and unretired before joining. Hash
+collisions must still compare the full key. The token identifies the version;
+the query's snapshot retains the actual read resources.
+Only a genuine lookup `Miss` may enter coordination. Lookup errors and
+`ResourceLimit` bypass it instead of allocating another materialized result.
+
+Each writable logical miss calls `ObserveMiss` at most once, outside flight
+locks. Leader rechecks and follower fallback do not count again. Admitted
+tickets from writable participants can contribute to the leader's insertion
+decision, preserving frequency admission across concurrent requests. The
+leader closes that decision once before calling `PutAdmitted`; later arrivals
+do not cause another write. Latency admission uses the leader's compute time,
+excluding waiting, shared-result copying, and cache insertion.
+
+Participation and write permission are independent. A read-only participant
+can lead or follow but does not record admission. A read-only leader shares its
+result without inserting it, even if a writable follower joins. A follower that
+has joined a flight never performs its own cache insertion for that miss,
+including after fallback. Requests rejected before joining evaluate normally
+and may write under the existing admission rules.
+
+#### Execution and completion
+
+```text
+cache lookup ---- Hit ----------------------> private request result
+     |
+    Miss
+     |
+flight registration
+     +-- leader ---> second cache lookup ---> synchronous compute
+     |                                           |
+     |                                    complete result + validity
+     |                                           |
+     +-- follower --> bounded wait <---------- Ready
+     |                    |                      |
+     |               private copy          optional cache Put
+     |                                           |
+     +-- bypass ---> normal compute         remove flight record
+```
+
+A flight transitions once from `Computing` to either `Ready` or `Aborted`.
+Registration returns an RAII handle that owns cleanup on every return or
+exception. The leader checks the cache again after registration to close the
+race with another completed writer. A second hit can satisfy the flight through
+an immutable copy without another insertion. A second lookup failure or lack
+of sharing budget aborts coordination and wakes followers before normal
+computation continues.
+
+The leader computes synchronously on its current query thread. It does not
+queue work back onto the same worker pool. Only a complete result/validity pair
+with both sizes equal to `active_count` may become `Ready`. Shape mismatch,
+copy failure, cancellation, or computation failure aborts sharing without
+changing the expression's normal result handling or error classification.
+
+`Ready` is published before optional cache insertion. Followers need not wait
+for compression, disk writes, or admission. Late followers may reuse a Ready
+record while the leader is still inserting. The leader removes its map entry
+on exit, matching both key and flight instance so old cleanup cannot remove a
+new flight. The record is not retained as a second long-lived result cache.
+
+The flight mutex protects the completion state and immutable result together.
+Followers check the state under that mutex and wait with a predicate;
+notifications occur after releasing it. Completion before waiting and spurious
+wakeups are safe. A fixed `steady_clock` deadline is established when the
+follower joins and is never extended by wakeups.
+
+#### Waiting, cancellation, and fallback
+
+Waiters check the caller's cancellation token, flight policy, cache epoch, and
+generation retirement at timed intervals of at most 5 ms. This is a polling
+interval, not a guaranteed cancellation latency under scheduler contention.
+After Ready, the helper rechecks cancellation and cache identity around private
+copying before returning the result.
+
+| Condition | Behavior |
+|-----------|----------|
+| Ready and current identity | Reserve a private bitmap pair, copy the immutable result, and continue the request's own evaluation. |
+| Wait timeout, leader abort, policy change, or invalid cache identity | Release coordination resources and compute independently without rejoining that flight or writing a duplicate entry. |
+| Follower cancellation | Leave through the request's existing cancellation path; do not start fallback computation. |
+| Leader exception or cancellation | Preserve the leader's error and abort the flight. Uncancelled followers evaluate independently. |
+| Flight/waiter limit reached | Bypass immediately; do not wait for a slot. |
+| Shared-result or private-copy budget/allocation failure | Release reservations and use normal computation. |
+
+A follower timeout does not cancel the leader or remove a Computing record.
+Fallback can produce duplicate computation, so single-flight does not guarantee
+exactly one evaluation in all circumstances. `maxWaitMs` bounds condition
+waiting, not total query duration, cache I/O, lock reacquisition, or synchronous
+reader execution. The helper receives a cancellation token rather than a
+separate absolute request deadline.
+
+`ComputeScope` prevents a synchronous leader or bypass producer from recursively
+joining another flight while computing. Internal validity helpers also remain
+outside coordination. This avoids producer-to-producer waiting dependencies
+without changing ordinary nested cache lookup. The guard is thread-local and
+assumes no coroutine migration during the synchronous compute call.
+
+#### Ownership, resource limits, and invalidation
+
+The leader keeps its normal mutable output and creates an additional immutable
+result/validity pair for the flight. Each successful follower receives a private
+mutable copy, so moving, flipping, or slicing one request's result cannot alter
+another request's result. Shared and follower copies use the materialization
+leases described in [Full-Bitmap Materialization Budget](#41-full-bitmap-materialization-budget).
+Their charges last until the actual bitmap holders are destroyed, independently
+of map removal or backend clearing.
+
+`maxFlights` counts live records, including detached records retained by
+followers. `maxWaiters` and `maxWaitersPerKey` bound concurrent follower handles.
+No separate key/metadata byte budget is imposed. These limits do not bound total
+process RSS or ordinary expression computation buffers.
+
+The coordinator uses its own map mutex and a mutex/condition variable per
+flight. Map and flight locks are not nested. Computation, bitmap copying,
+cache operations, and waiting do not hold the map lock; no request waits for
+a flight while holding manager/backend locks. Cache identity checks during
+waiting use atomic state rather than acquiring the backend lock.
+
+Cache clearing or backend rebuild invalidates the cache epoch; disabling cache
+and retiring the generation also prevent reuse. Old leaders may finish their
+original queries but cannot populate a new backend epoch or retired generation.
+Flight-policy updates use the separate policy epoch described in
+[Dynamic Refresh Semantics](#6-dynamic-refresh-semantics).
+[Segment Lifecycle](#8-segment-lifecycle) keeps atomic retirement inside the
+publication lease and backend detachment outside it. Publication does not
+acquire flight locks or wait for a producer. Flight registration alone does not
+mark backend use, so an unused generation retains the retirement fast path.
+
 ### 8. Segment Lifecycle
 
 Each sealed `PublishedSegmentState` owns an `ExprCacheGeneration` token with a
@@ -978,7 +1230,9 @@ All online state publications pass through `PublishStateOnline`. After acquiring
 the exclusive `PublishLease` and draining old readers, it retires the previous
 token with an atomic flag and publishes the new state before releasing the
 lease. Backend detachment happens after releasing the lease, because acquiring
-the manager lock can wait for unrelated disk cache I/O. Gate acquisition failures
+the manager lock can wait for unrelated disk cache I/O. This post-publication
+cleanup is best effort: cache initialization or detachment exceptions cannot
+turn an already committed publication into a reported failure. Gate acquisition failures
 and cancellation leave the previous token and
 cache intact. Successful publications conservatively invalidate the entire
 segment generation, including schema/index-only changes. The sealed destructor
@@ -994,6 +1248,19 @@ because the flag belongs to the token rather than the cache backend. A delayed
 writer carries its original snapshot token; it cannot recreate retired entries
 or write its bitmap under the latest generation. Admission tickets also include
 generation in their key hash.
+
+Retirement and first backend use share one atomic token state. After admission,
+`Put` registers backend use under the shared manager lock, before creating any
+memory entry, disk file, Clock record, or ineligible-segment metadata. If
+retirement wins, registration rejects the write. If registration wins,
+retirement observes the sticky backend-use bit and takes the exclusive manager
+lock to drain the writer. A retired token with no backend use returns without
+acquiring that lock, including during sealed publication and destruction.
+The bit is never reset by eviction, Clear, or disable/re-enable; the current
+enabled flag is not evidence that a generation needs no cleanup. Misses,
+admission observations, and single-flight participation alone do not set it.
+Existing single-flight handles retain their own lifetime; retired followers
+fall back and late leaders cannot repopulate the backend.
 
 Memory entries have a secondary intrusive list per `(segment_id, generation)`.
 Retirement visits only that generation, detaches entries from the lookup map and
@@ -1019,7 +1286,7 @@ The cache reports storage and materialization usage, and successful lookups:
 
 | Metric | Meaning |
 |--------|---------|
-| `internal_cache_loaded_bytes{data_type="OTHER", location="MEMORY"}` | Live compressed payload capacity plus estimated entry metadata, including reader-held retired payloads, and reserved bytes for decoded hit bitmaps and RawData capture buffers in both backends. |
+| `internal_cache_loaded_bytes{data_type="OTHER", location="MEMORY"}` | Live compressed payload capacity plus estimated entry metadata, including reader-held retired payloads, and reserved bytes for decoded hits, RawData captures, and single-flight shared/follower bitmap pairs in both backends. |
 | `internal_cache_loaded_bytes{data_type="OTHER", location="DISK"}` | Current expression cache disk used-slot logical bytes. |
 | `internal_expr_cache_hit_total` | Total successful expression cache lookups across memory and disk modes. |
 
@@ -1032,9 +1299,11 @@ and updates its gauge by delta.
 
 `internal_expr_cache_hit_total` increments exactly once when
 `ExprResCacheManager::GetWithStatus` returns `Hit`. Misses, stale entries, and
-materialization-budget rejections do not increment it.
+materialization-budget rejections do not increment it. Reusing a flight result
+is not a backend cache hit and does not increment this counter.
 
-Decoded hit values and RawData capture buffers are accounted separately by
+Decoded hit values, RawData capture buffers, and single-flight shared/follower
+bitmap pairs are accounted separately by
 the materialization lease counter and bounded by
 `queryNode.exprCache.materialization.maxBytes`. This counter is available
 through `GetMaterializationBytes()` for tests and diagnostics. Successful lease
@@ -1078,6 +1347,10 @@ Backend concurrency:
 - `DiskSlotFile` uses a shared mutex around slot metadata and file operations.
 - Disk used-byte accounting reads `DiskSlotFile` metadata under its shared mutex.
 
+Single-flight uses independent map and per-flight locks as described in
+[Single-Flight Coordination](#71-single-flight-coordination). Backend locks
+never cover flight waits, and the coordinator does not perform cache I/O.
+
 ### 11. Disabled Path Performance
 
 The feature is disabled by default.
@@ -1120,6 +1393,11 @@ Integration code should avoid doing cache-only work when disabled. In particular
 - do not clone bitmaps only for cache writes unless the cache is eligible;
 - only measure miss-path evaluation time when the result may be admitted into the cache.
 
+With expression caching disabled, `GetOrCompute` skips cache identity and
+signature construction before coordination. With single-flight disabled or an
+initial cache hit, it does not access the flight map, register waiters, or copy
+bitmaps for sharing.
+
 ### 12. Failure Handling
 
 The cache is best-effort and must not fail user queries.
@@ -1136,6 +1414,12 @@ Failure behavior:
   cache boundary; source-of-truth expression evaluation remains outside that
   boundary and its exceptions continue to propagate normally.
 
+Single-flight registration, sharing, and private-copy failures are optional
+cache failures and fall back to normal evaluation. Expression exceptions and
+request cancellation remain observable through their existing query error
+paths; they are not converted into successful empty results. Leader cleanup
+must abort unfinished coordination and release waiting requests.
+
 ### 13. Relationship with Two-Stage FilterBits Cache
 
 Expression result cache and `FilterBitsNode` cache are different cache layers.
@@ -1149,8 +1433,10 @@ For two-stage search, `QueryContext` can allow whole-filter cache reads and
 writes while disabling sub-expression cache writes. This prevents caching both
 a full-filter bitmap and duplicate child-expression bitmaps for the same
 request path. Existing sub-expression entries remain readable; on a miss, the
-request evaluates normally without affecting admission or populating the
-sub-expression cache.
+request may participate in an eligible leaf flight without affecting admission
+or populating the sub-expression cache. If it cannot reuse a flight, it evaluates
+normally. A read-only leader also remains read-only even when writable
+followers join. Whole-filter results themselves do not join leaf flights.
 
 ## Correctness Guarantees
 
@@ -1163,13 +1449,23 @@ sub-expression cache.
   visibility can change without changing the active row count.
 - **Disk mode sealed-only.** Growing segments are rejected before disk cache usage.
 - **Best-effort fallback.** Misses and cache failures fall back to regular expression evaluation.
-- **Config changes do not reinterpret entries.** Config refresh rebuilds the backend and drops existing entries.
+- **Independent result ownership.** Flight followers receive private mutable
+  bitmaps; no caller can modify the immutable shared result.
+- **Complete results only.** Only complete row-level result/validity pairs can
+  satisfy a flight, with the same generation, signature, row count, and cache epoch.
+- **Bounded coordination.** Wait deadlines and record/follower limits permit
+  fallback without blocking on capacity or forcing duplicate-work suppression.
+- **Config changes do not reinterpret entries.** Backend refresh drops existing
+  entries; flight-policy refresh changes coordination without clearing the backend.
 
 ## Compatibility and Migration
 
 The feature is controlled by `queryNode.exprCache.enabled`, defaulting to `false`.
 
 All config values are refreshable. Operators can enable, disable, or tune the cache without restarting QueryNode.
+
+Single-flight is independently disabled by default. Enabling it only affects
+eligible sealed cache misses; disabling it preserves ordinary expression caching.
 
 The feature does not change client-facing API or query semantics.
 
@@ -1195,6 +1491,51 @@ The feature does not change client-facing API or query semantics.
 - RawData disabled-path structural, allocation, and CPU equivalence tests.
 - Two-stage `FilterBitsNode` tests to verify outer filter cache does not duplicate sub-expression entries.
 
+### Single-Flight Verification
+
+Use controlled concurrency windows to verify behavior rather than relying on
+sleep timing alone. `ExprCacheFlightTest.cpp` covers the coordinator/helper
+protocol, `ExprCacheFlightIndexTest.cpp` covers real scalar/JSON/array callers,
+`ExprCacheFlightTextTest.cpp` covers text callers,
+`ExprCacheFlightJsonStatsTest` in `JsonContainsByStatsTest.cpp` compares concurrent
+JSON-statistics EXISTS evaluation with RawData, and
+`internal/util/initcore/expr_cache_flight_test.go` covers configuration refresh
+and recovery from invalid limits. Coordinator/helper and scalar-index tests
+run against both memory and disk backends.
+
+| Scenario | Required behavior |
+|----------|-------------------|
+| Concurrent identical eligible misses with sufficient budget and wait time | One computation and at most one insertion attempt through the flight. |
+| Different signatures, parameters, segments, generations, row counts, or epochs | No cross-identity reuse. |
+| Result ready before a follower waits; spurious wakeups | Correct result without lost notifications or deadline extension. |
+| Result computed while validity is still pending | Followers cannot consume a partial pair. |
+| Nullable scalar, JSON, text, and projected array predicates | Result and validity match independent evaluation; each request advances its own batch cursor or gathers its own offsets. |
+| Element count equals row count | Element-domain results still bypass coordination. |
+| Move or mutate a request result | Other requests and the cache remain unchanged. |
+| Leader error/cancellation; follower cancellation/timeout | Correct error ownership or fallback, with no leaked records, waiters, or reservations. |
+| Nested validity computation | No recursive flight wait. |
+| Budget, flight, or waiter limit reached | Immediate bypass or normal fallback without exceeding the configured limits. |
+| Admission rejects insertion or cache I/O blocks after Ready | Followers can use the completed result independently of the cache write. |
+| Read-only leader or follower | Coordination does not grant cache-write permission or duplicate admission observations. |
+| Clear, backend refresh, flight-policy refresh, disable, or generation retirement | Cache epochs and retired tokens reject stale writes; policy changes stop further joins/waits on old flights. Publication does not wait for a flight. |
+| Unused generation retirement during unrelated disk I/O | No backend lock wait; first backend use racing retirement remains safe. |
+| Disabled cache, disabled single-flight, or warm hit | No flight-map access or sharing-only allocation. |
+
+`tests/integration/exprcacheflight` exercises concurrent RPC query and group-by
+results for scalar comparisons, ranges, IN, string patterns, array predicates,
+JSON predicates, and text match variants. The configurations include disabled
+caching, disabled coordination, memory and disk modes, and low flight/waiter
+limits. Repeated requests, deletion after warmup, and collection release/reload
+check result correctness across cache and lifecycle states. RPC concurrency
+alone does not prove coalescing or force a timeout; controlled C++ barriers
+verify those behaviors and computation counts.
+
+Workload validation should include shared leaves
+across different filters, distinct keys, mixed hot/cold traffic, slow producers,
+cheap predicates, and large bitmaps. Measure computation counts, CPU, QPS,
+p50/p95/p99, and memory under mixed worker-pool load before claiming a throughput
+or latency benefit.
+
 ## Known Limitations and Follow-Ups
 
 Current limitations:
@@ -1203,7 +1544,16 @@ Current limitations:
 - Disk mode stores raw bitmaps; compression is memory-only.
 - Disk mode supports sealed segments only.
 - Cache key quality depends on expression signature stability and completeness.
-- Current metrics report usage bytes only, not hit rate or admission/eviction counts.
+- Current metrics expose usage bytes and backend hit counts, but not flight
+  reuse, wait, fallback, admission, or eviction counts.
+- Single-flight applies only to the explicitly integrated complete row-level
+  computations in the support table; other cached paths are not automatically eligible.
+- Synchronous followers still occupy execution threads and can retain read
+  resources longer. Waiting does not interrupt a blocked synchronous reader.
+- Prefetch can occur before flight registration, so duplicate prefetch I/O is
+  not necessarily suppressed.
+- Immutable sharing and private copies add work. Cheap expressions, warm hits,
+  and distinct-key traffic may not benefit; defaults are not workload tuning results.
 
 Potential follow-ups:
 
@@ -1212,3 +1562,9 @@ Potential follow-ups:
 - Evaluate compressed disk slots if disk footprint becomes a bottleneck.
 - Introduce a structured expression signature builder to reduce reliance on hand-written `ToString()`.
 - Add an operational option to choose whether disabling cache should clear existing entries.
+- Audit complete compute boundaries before integrating the remaining JSON
+  statistics paths into single-flight.
+- Evaluate an independent full-leaf RawData evaluator before allowing requests
+  to wait for raw scans; account for work that parent short-circuiting would skip.
+- Evaluate non-waiting RawData capture ownership separately if duplicate
+  capture buffers or cache writes are a measured problem.

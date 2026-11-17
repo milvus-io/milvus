@@ -26,6 +26,7 @@
 #include "cachinglayer/Metrics.h"
 #include "exec/expression/DiskSlotFile.h"
 #include "exec/expression/EntryPool.h"
+#include "exec/expression/ExprCacheFlight.h"
 #include "monitor/Monitor.h"
 #include "xxhash.h"
 
@@ -197,7 +198,9 @@ ExprResCacheManager::RetireGeneration(
     if (!generation) {
         return retired;
     }
-    generation->Retire();
+    if (!generation->Retire()) {
+        return retired;
+    }
     // Drain puts that passed the token check before retirement. Later puts
     // still check the token under this lock and cannot recreate the entries.
     std::unique_lock state_lock(state_mutex_);
@@ -278,8 +281,11 @@ ExprResCacheManager::ExprResCacheManager()
           config_.mem_max_bytes, /*report_metrics=*/true)),
       materialization_budget_(
           std::make_shared<ExprCacheMaterializationBudgetState>(
-              config_.materialization_max_bytes)) {
+              config_.materialization_max_bytes)),
+      flights_(std::make_unique<ExprCacheFlightCoordinator>()) {
 }
+
+ExprResCacheManager::~ExprResCacheManager() = default;
 
 ExprResCacheManager&
 ExprResCacheManager::Instance() {
@@ -720,6 +726,9 @@ ExprResCacheManager::PutInternal(const Key& key,
                                      config_.admission_threshold)) {
             return;
         }
+        if (key.generation && !key.generation->TryUseBackend()) {
+            return;
+        }
         entry_pool_->Put(key.SegmentKey(),
                          key.signature,
                          value.active_count,
@@ -757,6 +766,11 @@ ExprResCacheManager::PutInternal(const Key& key,
             return;
         }
 
+        // Register before touching the file map, Clock, or ineligible set.
+        // A failed/empty put may still leave metadata requiring retirement.
+        if (key.generation && !key.generation->TryUseBackend()) {
+            return;
+        }
         std::unique_lock lock(disk_files_mutex_);
         if (disk_ineligible_segments_.find(key.SegmentKey()) !=
             disk_ineligible_segments_.end()) {

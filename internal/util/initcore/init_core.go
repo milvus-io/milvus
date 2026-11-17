@@ -874,9 +874,11 @@ func SetupCoreConfigChangelCallback() {
 			if err != nil {
 				return err
 			}
-			UpdateExprResCacheEnable(enable)
 			if enable {
+				// Applying the configuration enables the cache only on success.
 				UpdateExprResCacheConfig()
+			} else {
+				UpdateExprResCacheEnable(false)
 			}
 			return nil
 		})
