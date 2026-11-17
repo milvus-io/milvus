@@ -479,7 +479,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	return loader.requestResourceWithSchema(ctx, nil, infos...)
 }
 
-func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (_ requestResourceResult, err error) {
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -499,6 +499,18 @@ func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, sche
 		logger.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
 		return requestResourceResult{}, err
 	}
+
+	resource := LoadResource{MemorySize: loadingUsage.MemorySize, DiskSize: loadingUsage.DiskSize}
+	tieredEvictionEnabled := paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool()
+	reservedLoadingResource := false
+	if tieredEvictionEnabled {
+		reservedLoadingResource = tryReserveLoadingResource(resource)
+	}
+	defer func() {
+		if reservedLoadingResource && err != nil {
+			releaseLoadingResource(resource)
+		}
+	}()
 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
@@ -523,6 +535,20 @@ func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, sche
 	}
 
 	result.ConcurrencyLevel = funcutil.Min(hardware.GetCPUNum(), len(infos))
+
+	if tieredEvictionEnabled && !reservedLoadingResource {
+		memUsage := physicalMemoryUsage + loader.committedResource.MemorySize
+		diskUsage := uint64(physicalDiskUsage) + loader.committedResource.DiskSize
+		return result, merr.WrapErrSegmentRequestResourceFailed("memory/disk",
+			fmt.Sprintf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
+				logutil.ToMB(float64(memUsage+loadingUsage.MemorySize)),
+				logutil.ToMB(float64(diskUsage+loadingUsage.DiskSize)),
+				logutil.ToMB(float64(memUsage)),
+				logutil.ToMB(float64(diskUsage)),
+				paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
+				paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
+			))
+	}
 
 	// TODO: disable logical resource checking for now
 	// lmu, ldu, err := loader.checkLogicalSegmentSize(ctx, infos, totalMemory)
@@ -562,22 +588,30 @@ func (loader *segmentLoader) ReserveLoadResourceWithSchema(ctx context.Context, 
 
 // freeRequestResource returns request memory & storage usage request.
 func (loader *segmentLoader) freeRequestResource(requestResourceResult requestResourceResult) {
-	loader.mut.Lock()
-	defer loader.mut.Unlock()
-
 	resource := requestResourceResult.Resource
-	// logicalResource := requestResourceResult.LogicalResource
+	loader.mut.Lock()
+	loader.committedResource.Sub(resource)
+	loader.mut.Unlock()
 
 	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		C.ReleaseLoadingResource(C.CResourceUsage{
-			memory_bytes: C.int64_t(resource.MemorySize),
-			disk_bytes:   C.int64_t(resource.DiskSize),
-		})
+		releaseLoadingResource(resource)
 	}
 
-	loader.committedResource.Sub(resource)
-	// loader.committedLogicalResource.Sub(logicalResource)
 	loader.committedResourceNotifier.NotifyAll()
+}
+
+func tryReserveLoadingResource(resource LoadResource) bool {
+	return bool(C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+		memory_bytes: C.int64_t(resource.MemorySize),
+		disk_bytes:   C.int64_t(resource.DiskSize),
+	}, 1000))
+}
+
+func releaseLoadingResource(resource LoadResource) {
+	C.ReleaseLoadingResource(C.CResourceUsage{
+		memory_bytes: C.int64_t(resource.MemorySize),
+		disk_bytes:   C.int64_t(resource.DiskSize),
+	})
 }
 
 func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs []int64, version int64) error {
@@ -1816,28 +1850,7 @@ func (loader *segmentLoader) checkLoadingResource(
 		mlog.Int("mmapFieldCount", loadingUsage.MmapFieldCount),
 	)
 
-	var loadingResource C.CResourceUsage
-	reservedLoadingResource := false
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		loadingResource = C.CResourceUsage{
-			memory_bytes: C.int64_t(loadingUsage.MemorySize),
-			disk_bytes:   C.int64_t(loadingUsage.DiskSize),
-		}
-
-		// try to reserve loading resource from caching layer
-		if ok := C.TryReserveLoadingResourceWithTimeout(loadingResource, 1000); !ok {
-			return merr.WrapErrSegmentRequestResourceFailed("memory/disk",
-				fmt.Sprintf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
-					logutil.ToMB(float64(predictMemUsage)),
-					logutil.ToMB(float64(predictDiskUsage)),
-					logutil.ToMB(float64(memUsage)),
-					logutil.ToMB(float64(diskUsage)),
-					paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
-					paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
-				))
-		}
-		reservedLoadingResource = true
-	} else {
+	if !paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
 		// fallback to original segment loading logic
 		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 			mlog.Warn(context.TODO(), "load segment failed, OOM if load",
@@ -1863,15 +1876,7 @@ func (loader *segmentLoader) checkLoadingResource(
 		}
 	}
 
-	err := checkSegmentGpuMemSize(loadingUsage.FieldGpuMemorySize, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
-	if err != nil {
-		if reservedLoadingResource {
-			C.ReleaseLoadingResource(loadingResource)
-		}
-		return err
-	}
-
-	return nil
+	return checkSegmentGpuMemSize(loadingUsage.FieldGpuMemorySize, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
 }
 
 // this function is used to estimate the logical resource usage of a segment, which should only be used when tiered eviction is enabled

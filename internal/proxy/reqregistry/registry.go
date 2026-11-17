@@ -125,10 +125,13 @@ func (f Filter) matches(info *Info, now time.Time) bool {
 // registering goroutine, the scheduler (task linkage) and an operator's cancel
 // all touch it.
 type Entry struct {
-	mu       sync.Mutex // guards info, canceled, canceledAfter
+	mu       sync.Mutex // guards info, canceled, finished, canceledAfter
 	info     Info       // info.RequestID is left empty; snapshots fill it
 	cancel   context.CancelCauseFunc
 	canceled bool
+	// finished is set by Finish, when the RPC method fixes its answer. From
+	// then on Cancel no longer touches the request.
+	finished bool
 	// canceledAfter is when Cancel was first called, as an offset from
 	// info.StartTime: a Duration rather than a time.Time keeps Entry within
 	// one allocation size class.
@@ -200,17 +203,54 @@ func (e *Entry) MarkRunning(queued time.Duration) {
 // true. A later call does nothing more and returns the current snapshot, in
 // state Canceling, and false: the caller still learns what the id is, but
 // knows not to audit or count the cancellation a second time.
-func (e *Entry) Cancel(operator, reason string, now time.Time) (Info, bool) {
+//
+// held is false when the request was not canceled before it finished (see
+// Finish): its answer is already fixed and the client gets it, so the call
+// changes nothing and the caller reports the id as not held.
+func (e *Entry) Cancel(operator, reason string, now time.Time) (snapshot Info, first bool, held bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.canceled {
-		return e.snapshotLocked(now), false
+		return e.snapshotLocked(now), false, true
 	}
-	snapshot := e.snapshotLocked(now)
+	if e.finished {
+		return Info{}, false, false
+	}
+	snapshot = e.snapshotLocked(now)
 	e.canceled = true
 	e.canceledAfter = now.Sub(e.info.StartTime)
 	e.cancel(merr.WrapErrRequestCanceled(operator, reason))
-	return snapshot, true
+	return snapshot, true, true
+}
+
+// Finish marks the point where the RPC method fixes its answer. It and Cancel
+// take the same lock, so every cancel is on exactly one side of it:
+//
+//   - a Cancel that ran before Finish has ended the request's ctx with the
+//     operator's cause, and the RPC method, which reads CancelCause after
+//     Finish, answers merr.ErrRequestCanceled even when the result was
+//     already computed;
+//   - a Cancel that runs after Finish reports the id as not held and leaves
+//     the ctx alone, and the client gets the answer the request produced.
+//
+// Without it a Cancel that lands between the RPC method's last look at the
+// ctx and Unregister would be reported as canceled to the operator while the
+// client receives a normal result. Safe on a nil entry.
+func (e *Entry) Finish() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.finished = true
+	e.mu.Unlock()
+}
+
+// listable reports whether List shows the entry: a request that finished
+// without being canceled is on its way out and can no longer be canceled.
+func (e *Entry) listable() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.canceled || !e.finished
 }
 
 // CanceledAt returns when Cancel was first called and whether it was.
@@ -360,6 +400,9 @@ func (r *Registry) Len() int {
 func (r *Registry) List(filter Filter, now time.Time) []Info {
 	result := make([]Info, 0, r.entries.Len())
 	r.entries.Range(func(_ uint64, e *Entry) bool {
+		if !e.listable() {
+			return true
+		}
 		info := e.Snapshot(now)
 		if filter.matches(&info, now) {
 			result = append(result, info)
@@ -375,8 +418,9 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 // cancellation; repeated holds the requests an earlier call had already
 // stopped and that have not left yet, in state Canceling, so that canceling
 // twice still tells the caller what the id is; notFound holds the ids this
-// registry does not hold, including ids issued by another proxy and strings
-// that are not ids at all. The id in canceled and repeated is the one the
+// registry does not hold, including ids issued by another proxy, strings
+// that are not ids at all and requests that finished before this call (see
+// Entry.Finish). The id in canceled and repeated is the one the
 // caller gave.
 //
 // A non-empty owner restricts the cancel to requests issued by that user: the
@@ -389,7 +433,11 @@ func (r *Registry) Cancel(requestIDs []string, owner, operator, reason string, n
 			notFound = append(notFound, id)
 			continue
 		}
-		snapshot, first := e.Cancel(operator, reason, now)
+		snapshot, first, held := e.Cancel(operator, reason, now)
+		if !held {
+			notFound = append(notFound, id)
+			continue
+		}
 		snapshot.RequestID = id
 		if first {
 			canceled = append(canceled, snapshot)

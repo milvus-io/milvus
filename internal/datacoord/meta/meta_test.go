@@ -2654,6 +2654,8 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 }
 
 func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	startTime := time.Date(2026, time.May, 20, 12, 0, 0, 0, time.UTC).Unix()
 	expectedCreateTS := tsoutil.ComposeTSByTimeWithLogical(time.Unix(startTime, 0), 7)
@@ -2804,6 +2806,8 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 }
 
 func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	newMetaWithDataView := func(t *testing.T) (*Meta, dataviewpkg.Manager) {
 		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
@@ -2983,6 +2987,8 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 }
 
 func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	metaStore := metacache.NewMetaStore(nil)

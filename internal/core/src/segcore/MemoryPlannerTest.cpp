@@ -13,6 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <folly/futures/Future.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <atomic>
@@ -21,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <folly/executors/InlineExecutor.h>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -172,7 +174,7 @@ LoadedCellBatch
 CollectLoadedCells(std::vector<CellLoadFuture>& futures) {
     LoadedCellBatch loaded_cells;
     for (auto& future : futures) {
-        auto batch = future.get();
+        auto batch = std::move(future).get();
         for (auto& loaded_cell : batch) {
             loaded_cells.push_back(std::move(loaded_cell));
         }
@@ -421,7 +423,7 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
         budget.Release({2, 1});
     }
 
-    auto loaded_cells = futures[0].get();
+    auto loaded_cells = std::move(futures[0]).get();
     EXPECT_EQ(loaded_cells.size(), 2);
     EXPECT_TRUE(acquired) << "budget stayed held after cells were finalized";
 }
@@ -503,7 +505,7 @@ TEST(LoadCellBatchAsync, KeepsBudgetWhileSharedBatchTablesRemain) {
         finish_second_cell = true;
     }
     cv.notify_all();
-    EXPECT_EQ(futures[0].get().size(), 2);
+    EXPECT_EQ(std::move(futures[0]).get().size(), 2);
 }
 
 TEST(LoadCellBatchAsync, CompletedBatchDoesNotRequireResultConsumer) {
@@ -520,11 +522,13 @@ TEST(LoadCellBatchAsync, CompletedBatchDoesNotRequireResultConsumer) {
                                       MakeMockCellFinalizer());
     ASSERT_EQ(futures.size(), 1);
 
+    auto completion =
+        std::move(futures[0]).via(&folly::InlineExecutor::instance());
     auto completion_status =
-        futures[0].wait_for(std::chrono::milliseconds(100));
+        completion.wait(std::chrono::milliseconds(100)).isReady();
 
-    EXPECT_EQ(completion_status, std::future_status::ready);
-    auto loaded_cells = futures[0].get();
+    EXPECT_TRUE(completion_status);
+    auto loaded_cells = std::move(completion).get();
     EXPECT_EQ(loaded_cells.size(), 2);
 }
 
@@ -597,7 +601,7 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchFinalize) {
     ASSERT_EQ(futures.size(), 1);
 
     try {
-        futures[0].get();
+        std::move(futures[0]).get();
         FAIL() << "expected cancellation";
     } catch (const milvus::SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
@@ -663,10 +667,8 @@ TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
               std::future_status::ready);
     auto futures = load_future.get();
     ASSERT_EQ(futures.size(), 1);
-    ASSERT_EQ(futures[0].wait_for(std::chrono::seconds(2)),
-              std::future_status::ready);
     try {
-        futures[0].get();
+        std::move(futures[0]).get(std::chrono::seconds(2));
         FAIL() << "expected cancellation";
     } catch (const milvus::SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
@@ -686,8 +688,8 @@ TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
 
     auto priority = milvus::proto::common::LoadPriority::LOW;
     auto pool_priority = milvus::PriorityForLoad(priority);
-    auto& pool = milvus::ThreadPools::GetThreadPool(pool_priority);
-    auto old_max_threads = pool.GetMaxThreadNum();
+    auto& pool = milvus::ThreadPools::GetExecutor(pool_priority);
+    auto old_max_threads = pool.numThreads();
     auto cpu_num = std::max(1, milvus::CPU_NUM);
     milvus::ThreadPools::ResizeThreadPool(pool_priority,
                                           1.0F / static_cast<float>(cpu_num));
@@ -698,8 +700,8 @@ TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
                 static_cast<float>(old_max_threads) /
                     static_cast<float>(cpu_num));
         });
-    ASSERT_EQ(pool.GetMaxThreadNum(), 1);
-    if (pool.GetThreadNum() > 1) {
+    ASSERT_EQ(pool.numThreads(), 1);
+    if (pool.numActiveThreads() > 1) {
         GTEST_SKIP() << "load pool already has more than one worker";
     }
 
@@ -746,10 +748,8 @@ TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
               std::future_status::timeout);
     EXPECT_EQ(read_calls.load(), 0);
 
-    auto marker = pool.Submit([]() { return 42; });
-    ASSERT_EQ(marker.wait_for(std::chrono::seconds(2)),
-              std::future_status::ready);
-    EXPECT_EQ(marker.get(), 42);
+    auto marker = folly::via(&pool, []() { return 42; }).semi();
+    EXPECT_EQ(std::move(marker).get(std::chrono::seconds(2)), 42);
 
     source.requestCancellation();
 
@@ -757,10 +757,8 @@ TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
               std::future_status::ready);
     auto futures = load_future.get();
     ASSERT_EQ(futures.size(), 1);
-    ASSERT_EQ(futures[0].wait_for(std::chrono::seconds(2)),
-              std::future_status::ready);
     try {
-        futures[0].get();
+        std::move(futures[0]).get(std::chrono::seconds(2));
         FAIL() << "expected cancellation";
     } catch (const milvus::SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);

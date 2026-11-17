@@ -2689,8 +2689,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = statusIfCanceled(ctx, rsp.Status)
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -2938,8 +2939,9 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = statusIfCanceled(ctx, rsp.Status)
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -3705,7 +3707,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
-		return &milvuspb.QueryResults{Status: statusIfCanceled(ctx, merr.Status(err))}, nil
+		return &milvuspb.QueryResults{Status: finishRequest(ctx, entry, merr.Status(err))}, nil
+	}
+	// A cancel can land after the last cancellation check of the query task,
+	// while the result is being reduced or on the way out of this method. It
+	// was reported as canceled to the operator, so the client must not get
+	// the result.
+	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
+		return &milvuspb.QueryResults{Status: status}, nil
 	}
 	return result, nil
 }

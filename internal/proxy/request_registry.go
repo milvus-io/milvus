@@ -84,6 +84,17 @@ func statusIfCanceled(ctx context.Context, status *commonpb.Status) *commonpb.St
 	return status
 }
 
+// finishRequest fixes the answer of a registered request. It must be the last
+// thing the RPC method does before returning, on every path: after it an
+// operator cancel no longer applies to the request and is reported as not
+// found, and a cancel that came before it turns status into
+// merr.ErrRequestCanceled, so the operator and the client never disagree
+// about whether the request was canceled.
+func finishRequest(ctx context.Context, entry *reqregistry.Entry, status *commonpb.Status) *commonpb.Status {
+	entry.Finish()
+	return statusIfCanceled(ctx, status)
+}
+
 // listRunningRequests returns the requests registered on this proxy.
 func (node *Proxy) listRunningRequests(filter reqregistry.Filter) []reqregistry.Info {
 	if node.requests == nil {
