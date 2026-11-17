@@ -471,22 +471,16 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 				SchemeAzure, CloudProviderAzure, scheme, cp)
 		}
 		brokerIAM := extfs[ExtfsKeyUseIAM] == "true"
-		requiredFields := []struct {
-			key   string
-			value string
-		}{
-			{ExtfsKeyCredentialEndpoint, brokerEndpoint},
-			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
+		if brokerEndpoint == "" {
+			return merr.WrapErrParameterMissingMsg("extfs.%s is required for Azure credential broker mode", ExtfsKeyCredentialEndpoint)
 		}
+		required := []string{ExtfsKeyAccessKeyID}
 		if !brokerIAM {
-			for _, key := range []string{ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID, ExtfsKeyRegion} {
-				requiredFields = append(requiredFields, struct{ key, value string }{key, extfs[key]})
-			}
+			required = append(required, ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID, ExtfsKeyRegion)
 		}
-		for _, required := range requiredFields {
-			if required.value == "" {
-				return merr.WrapErrParameterMissingMsg(
-					"extfs.%s is required for Azure credential broker mode", required.key)
+		for _, key := range required {
+			if extfs[key] == "" {
+				return merr.WrapErrParameterMissingMsg("extfs.%s is required for Azure credential broker mode", key)
 			}
 		}
 		// Target mode predates Broker IAM, and refresh revalidates persisted
@@ -507,6 +501,17 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 		if raw := extfs[ExtfsKeyLoadFrequency]; brokerIAM && raw != "" && !isCredentialLifetime(raw) {
 			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for Azure credential broker IAM")
+		}
+		if bucket := extfs[ExtfsKeyBucketName]; bucket != "" && u != nil {
+			authority := azureStorageAuthorities[strings.ToLower(u.Host)]
+			container := u.Host
+			if authority {
+				container, _, _ = strings.Cut(strings.TrimPrefix(u.EscapedPath(), "/"), "/")
+			}
+			// A region-derived target-mode URI historically ignores bucket_name.
+			if (authority || brokerIAM) && bucket != container {
+				return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the Azure source container")
+			}
 		}
 		if brokerIAM {
 			if err := validateAzureBrokerIAMSource(u, externalSource, extfs); err != nil {

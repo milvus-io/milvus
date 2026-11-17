@@ -15,6 +15,7 @@
 #include <mutex>
 #include <regex>
 #include <cctype>
+#include <charconv>
 #include <arpa/inet.h>
 #include "arrow/util/uri.h"
 #include <nlohmann/json.hpp>
@@ -769,6 +770,7 @@ InjectExternalSpecProperties(
     std::string spec_cloud_provider;
     std::string spec_region;
     std::string spec_endpoint_url;
+    std::string spec_bucket_name;
     bool has_spec_endpoint_url = false;
     std::string broker_endpoint;
     bool legacy_broker = false;
@@ -830,7 +832,15 @@ InjectExternalSpecProperties(
                                             key == "azure_credential_endpoint";
                             continue;
                         }
-                        if (key == "cloud_provider") {
+                        if (key == "anonymous" && val == "false") {
+                            // Explicit false clears the override. The storage
+                            // property registry has no fs.anonymous entry.
+                            properties.erase(extfs_prefix + key);
+                            continue;
+                        }
+                        if (key == "bucket_name") {
+                            spec_bucket_name = val;
+                        } else if (key == "cloud_provider") {
                             spec_cloud_provider = val;
                         } else if (key == "region") {
                             spec_region = val;
@@ -884,22 +894,19 @@ InjectExternalSpecProperties(
         if (lifetime.empty()) {
             return arrow::Status::OK();
         }
-        // Match Go admission and milvus-storage's std::from_chars: plain
-        // decimal digits, without a sign, whitespace or an overflow through
-        // the native conversion.
-        if (lifetime.find_first_not_of("0123456789") != std::string::npos) {
+        // from_chars rejects whitespace and '+'. Reject '-' as well so
+        // the accepted spelling matches Go's unsigned decimal syntax.
+        int64_t seconds = 0;
+        const auto* end = lifetime.data() + lifetime.size();
+        const auto parsed = std::from_chars(lifetime.data(), end, seconds);
+        if (lifetime.front() == '-' || parsed.ec != std::errc{} ||
+            parsed.ptr != end) {
             return arrow::Status::Invalid(mode,
                                           " has an invalid token lifetime");
         }
-        try {
-            const auto seconds = std::stoll(lifetime);
-            if (seconds < 900 || seconds > 3600) {
-                return arrow::Status::Invalid(
-                    mode, " requires load_frequency in [900, 3600]");
-            }
-        } catch (const std::exception&) {
-            return arrow::Status::Invalid(mode,
-                                          " has an invalid token lifetime");
+        if (seconds < 900 || seconds > 3600) {
+            return arrow::Status::Invalid(
+                mode, " requires load_frequency in [900, 3600]");
         }
         return arrow::Status::OK();
     };
@@ -938,6 +945,15 @@ InjectExternalSpecProperties(
             }
         }
         if (spec_cloud_provider == "azure") {
+            if (!spec_bucket_name.empty()) {
+                const bool authority = IsAzureStorageAuthority(host);
+                if ((authority || use_iam == "true") &&
+                    spec_bucket_name != (authority ? path_bucket : host)) {
+                    return arrow::Status::Invalid(
+                        "extfs.bucket_name must match the Azure source "
+                        "container");
+                }
+            }
             if (value("access_key_id").empty()) {
                 return arrow::Status::Invalid(
                     "Azure broker requires access_key_id");

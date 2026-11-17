@@ -35,12 +35,17 @@ four Azure Storage authorities in lowercase without a port and the container
 is followed by `/`, and `azure://<container>/[<path>]` with a region. Container
 names follow the Broker's naming rule and are read from the raw source, as
 native injection splits it: a percent-encoded separator or letter is not the
-container. Admission errors name the host and container, never the source's
+container. A non-empty `extfs.bucket_name` must match this container in
+Broker IAM mode. Azure target mode also requires a match when the URI names
+a storage authority. Its region-derived form keeps taking the container from
+the URI host. The built-in Cloud Broker must be deployed for the target
+account's Azure cloud to issue a SAS in a sovereign cloud.
+Admission errors name the host and container, never the source's
 query or fragment, which may carry a signed token. When the source names an
 authority, that authority is the address;
 [#55484](https://github.com/milvus-io/milvus/pull/55484) makes native
 injection prefer it over a region-derived one. Target mode
-predates this change and keeps its existing source admission. Without a
+predates this change and retains its existing URI forms. Without a
 region, every Azure mode also admits a dotted host at a container root
 (`azure://<host>/<container>/`), which names the endpoint as a longer path
 already did. The account name is not a secret key. Both Azure modes return
@@ -48,8 +53,9 @@ SAS, not an account key.
 
 IAM mode rejects target fields rather than silently ignoring them. Both Azure
 modes reject `access_key_value`, `role_arn`, a GCP target, and anonymous mode.
-Azure IAM also rejects `external_id` and `session_name`. Azure target mode
-predates this change and keeps accepting those two fields without reading
+An explicit `anonymous=false` clears the native anonymous override, including
+when a caller reuses a properties map. Azure IAM also rejects `external_id` and
+`session_name`. Azure target mode predates this change and keeps accepting those two fields without reading
 them: refresh revalidates persisted specs, so a stricter rule would fail
 collections that load today. GCP Brokers reject access keys, S3 role/session
 fields and Azure identity fields. Go admission is the complete check. Native

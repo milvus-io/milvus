@@ -175,6 +175,8 @@ func TestAzureBrokerIAMSourceShapes(t *testing.T) {
 	withRegion := func(map[string]string) {}
 	withoutRegion := func(values map[string]string) { delete(values, ExtfsKeyRegion) }
 	plainHTTP := func(values map[string]string) { values[ExtfsKeyUseSSL] = "false" }
+	matching := func(values map[string]string) { values[ExtfsKeyBucketName] = "container" }
+	conflicting := func(values map[string]string) { values[ExtfsKeyBucketName] = "other" }
 	const authority = "lowercase Azure Storage authority"
 	const container = "valid container name followed by"
 	const containerHost = "an Azure Storage authority or a valid container name"
@@ -185,6 +187,13 @@ func TestAzureBrokerIAMSourceShapes(t *testing.T) {
 		edit   func(map[string]string)
 		want   string // empty when admitted
 	}{
+		{"true", "azure://core.windows.net/container/path", matching, ""},
+		{"true", "azure://core.windows.net/container/path", conflicting, "extfs.bucket_name"},
+		{"true", "azure://container/path", matching, ""},
+		{"true", "azure://container/path", conflicting, "extfs.bucket_name"},
+		{"false", "azure://core.windows.net/container/path", matching, ""},
+		{"false", "azure://core.windows.net/container/path", conflicting, "extfs.bucket_name"},
+		{"false", "azure://container/path", conflicting, ""},
 		// azure://<authority>/<container>/[<path>], with or without a region.
 		{"true", "azure://core.windows.net/container/path", withRegion, ""},
 		{"true", "azure://core.windows.net/container/", withRegion, ""},
@@ -219,14 +228,15 @@ func TestAzureBrokerIAMSourceShapes(t *testing.T) {
 		{"true", "azure://MyContainer/path", withRegion, containerHost},
 		{"true", "azure://localhost:10000/container/", withRegion, containerHost},
 		{"true", "azure://core.windows.net/container/path", plainHTTP, "extfs.use_ssl=false"},
-		// Target mode predates this rule and refresh revalidates persisted
-		// specs, so its source admission is unchanged.
+		// Refresh revalidates persisted target-mode specs, including legacy
+		// endpoint forms and TLS settings.
 		{"false", "azure://account.blob.core.windows.net/container/path", withRegion, ""},
 		{"", "azure://core.windows.net/container/path", plainHTTP, ""},
 	} {
 		_, values := brokerModeSpec(CloudProviderAzure, tc.iam)
 		tc.edit(values)
-		name := fmt.Sprintf("use_iam=%q region=%q use_ssl=%q %s", tc.iam, values[ExtfsKeyRegion], values[ExtfsKeyUseSSL], tc.source)
+		name := fmt.Sprintf("use_iam=%q region=%q use_ssl=%q bucket_name=%q %s",
+			tc.iam, values[ExtfsKeyRegion], values[ExtfsKeyUseSSL], values[ExtfsKeyBucketName], tc.source)
 		t.Run(name, func(t *testing.T) {
 			err := ValidateSourceAndSpec(tc.source, marshalBrokerSpec(t, FormatParquet, values), allowed)
 			if tc.want == "" {
