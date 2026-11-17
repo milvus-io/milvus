@@ -72,8 +72,9 @@ func CommitAttempt(ctx context.Context) bool {
 }
 
 type hedgeResult struct {
-	node int64
-	err  error
+	node    int64
+	latency time.Duration
+	err     error
 }
 
 // attemptFeedback serializes the two observations of a primary: its actual
@@ -149,7 +150,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				err = workload.Exec(attemptCtx, node.NodeID, client, workload.Channel)
 			}
 			feedback.complete(err)
-			results <- hedgeResult{node: node.NodeID, err: err}
+			results <- hedgeResult{node: node.NodeID, latency: time.Since(start), err: err}
 		}()
 		return feedback
 	}
@@ -262,7 +263,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 					primaryFeedback.overtaken()
 				}
 				settle(won)
-				lb.hedging.ObserveRequest(key, time.Since(primaryStart))
+				lb.hedging.ObserveRequest(key, r.latency)
 				return true, hedgeNode >= 0, nil
 			}
 			if errors.Is(r.err, ErrAttemptSuperseded) {
