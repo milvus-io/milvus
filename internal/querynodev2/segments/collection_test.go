@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -67,7 +68,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
-		s.Same(schema, s.cm.Get(1).Schema())
+		s.True(proto.Equal(schema, s.cm.Get(1).Schema()))
 	})
 
 	s.Run("not_exist_collection", func() {

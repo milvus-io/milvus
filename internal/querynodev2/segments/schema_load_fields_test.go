@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/util/collectionutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -120,7 +121,7 @@ func TestSchemaUpdateAddsLoadFieldsWithoutExpandingOldSelection(t *testing.T) {
 
 		// Retrying the exact schema and timestamp must apply both native parts.
 		require.NoError(t, apply(next, 100))
-		require.Same(t, next, collection.Schema())
+		require.True(t, proto.Equal(next, collection.Schema()))
 		require.Equal(t, typeutil.NewSet[int64](100, 101, 200), collection.loadFields)
 		requireNativeField(t, collection, 200)
 		require.NoError(t, apply(next, 5000))
@@ -134,18 +135,18 @@ func TestSchemaUpdateOrdersBySchemaVersionAcrossChannels(t *testing.T) {
 		second := addedFieldSchema(first, 200, "second")
 		// A2's per-channel tick can be below A1's max tick used at creation.
 		require.NoError(t, apply(second, 100))
-		require.Same(t, second, collection.Schema())
+		require.True(t, proto.Equal(second, collection.Schema()))
 		requireNativeField(t, collection, 200)
 
 		// A delayed older schema can carry a larger tick from another channel.
 		require.NoError(t, apply(first, 10000))
-		require.Same(t, second, collection.Schema())
+		require.True(t, proto.Equal(second, collection.Schema()))
 		require.Equal(t, typeutil.NewSet[int64](100, 101, 200), collection.loadFields)
 		requireNativeField(t, collection, 200)
 
 		third := addedFieldSchema(second, 201, "third")
 		require.NoError(t, apply(third, 50))
-		require.Same(t, third, collection.Schema())
+		require.True(t, proto.Equal(third, collection.Schema()))
 		require.Equal(t, typeutil.NewSet[int64](100, 101, 200, 201), collection.loadFields)
 		requireNativeField(t, collection, 201)
 	})
@@ -170,8 +171,99 @@ func TestSchemaUpdateFailureDoesNotAllowStaleSchemaToOverwrite(t *testing.T) {
 		// A later schema can supersede the failed attempt without retrying it.
 		require.NoError(t, apply(third, 50))
 		require.NoError(t, apply(second, 20000))
-		require.Same(t, third, collection.Schema())
+		require.True(t, proto.Equal(third, collection.Schema()))
 		require.Equal(t, typeutil.NewSet[int64](100, 101, 200, 201), collection.loadFields)
 		requireNativeField(t, collection, 201)
 	})
+}
+
+func TestCollectionSchemaSettingsAcrossDeliveryPaths(t *testing.T) {
+	paramtable.Init()
+	for key, value := range map[string]string{
+		paramtable.Get().QueryNodeCfg.MmapScalarField.Key:         "false",
+		paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key: common.WarmupDisable,
+	} {
+		require.NoError(t, paramtable.Get().Save(key, value))
+		t.Cleanup(func() { paramtable.Get().Reset(key) })
+	}
+	for _, path := range []string{"raw creation", "WAL then load", "sync then load", "load then WAL", "failed WAL retry"} {
+		t.Run(path, func(t *testing.T) {
+			base := mock_segcore.GenTestCollectionSchema("settings", schemapb.DataType_Int64, false)
+			base.Version = 1
+			base.Properties = []*commonpb.KeyValuePair{
+				{Key: common.MmapEnabledKey, Value: "true"},
+				{Key: common.WarmupScalarFieldKey, Value: common.WarmupSync},
+			}
+			raw := addedFieldSchema(base, 200, "text")
+			raw.Fields[len(raw.Fields)-1].DataType = schemapb.DataType_VarChar
+			raw.Fields[len(raw.Fields)-1].TypeParams = []*commonpb.KeyValuePair{{Key: "max_length", Value: "100"}}
+			raw.Fields = append(raw.Fields, &schemapb.FieldSchema{
+				FieldID: 201, Name: "cold_text", DataType: schemapb.DataType_VarChar, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "100"},
+					{Key: common.MmapEnabledKey, Value: "false"},
+					{Key: common.WarmupKey, Value: common.WarmupDisable},
+				},
+			})
+			original := proto.Clone(raw)
+			processed := collectionutil.ApplySettings(raw, raw.GetProperties())
+			manager := NewCollectionManager()
+			initial := base
+			if path == "raw creation" {
+				initial = raw
+			}
+			require.NoError(t, manager.PutOrRef(10, initial, nil, &querypb.LoadMetaInfo{}))
+			collection := manager.Get(10)
+			defer DeleteCollection(collection)
+			check := func() {
+				t.Helper()
+				// The loader builds its schema helper from Collection.Schema, then
+				// uses these same resolvers for LoadTextIndexInfo mmap and warmup.
+				helper, err := typeutil.CreateSchemaHelper(collection.Schema())
+				require.NoError(t, err)
+				text, err := helper.GetFieldFromID(200)
+				require.NoError(t, err)
+				require.True(t, isDataMmapEnable(text))
+				require.Equal(t, common.WarmupSync, getScalarDataWarmupPolicy(text))
+				cold, err := helper.GetFieldFromID(201)
+				require.NoError(t, err)
+				require.False(t, isDataMmapEnable(cold))
+				require.Equal(t, common.WarmupDisable, getScalarDataWarmupPolicy(cold))
+				require.True(t, proto.Equal(processed, collection.Schema()))
+				require.True(t, proto.Equal(original, raw), "raw message must remain unchanged")
+			}
+			var nativeUpdate func(*segcore.CCollection, *schemapb.CollectionSchema, []int64) error
+			failNext := path == "failed WAL retry"
+			patch := mockey.Mock((*segcore.CCollection).UpdateSchema).Origin(&nativeUpdate).To(func(c *segcore.CCollection, schema *schemapb.CollectionSchema, fields []int64) error {
+				require.True(t, proto.Equal(processed, schema), "native and Go must receive the same effective schema")
+				if failNext {
+					failNext = false
+					return merr.WrapErrServiceUnavailable("injected schema update failure")
+				}
+				return nativeUpdate(c, schema, fields)
+			}).Build()
+			defer patch.UnPatch()
+			switch path {
+			case "WAL then load", "failed WAL retry":
+				if failNext {
+					previous := collection.Schema()
+					require.Error(t, manager.UpdateSchema(10, raw, 100))
+					require.Same(t, previous, collection.Schema())
+					require.True(t, proto.Equal(original, raw))
+				}
+				require.NoError(t, manager.UpdateSchema(10, raw, 100))
+			case "sync then load":
+				require.NoError(t, manager.PutOrRef(10, raw, nil, &querypb.LoadMetaInfo{}))
+			case "load then WAL":
+				require.NoError(t, manager.PutOrRef(10, processed, nil, &querypb.LoadMetaInfo{}))
+			}
+			check()
+			// The second form at the same version is a no-op regardless of order.
+			snapshot := collection.Schema()
+			require.NoError(t, manager.PutOrRef(10, processed, nil, &querypb.LoadMetaInfo{SchemaVersion: 5000}))
+			require.NoError(t, manager.UpdateSchema(10, raw, 10000))
+			require.Same(t, snapshot, collection.Schema())
+			check()
+		})
+	}
 }

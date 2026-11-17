@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/collectionutil"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -202,6 +203,9 @@ func (c *Collection) updateSchema(schema *schemapb.CollectionSchema) error {
 	if schema.GetVersion() <= c.Schema().GetVersion() {
 		return nil
 	}
+	// WAL and SyncDistribution carry raw schemas; loads carry QueryCoord defaults.
+	// Normalize before publishing so equal versions have the same effective settings.
+	schema = collectionutil.ApplySettings(schema, schema.GetProperties())
 	loadFields := typeutil.NewSet(c.loadFields.Collect()...)
 	loadFields.Insert(common.GetAddedLoadFieldIDs(c.Schema(), schema)...)
 	if err := c.ccollection.UpdateSchema(schema, loadFields.Collect()); err != nil {
@@ -308,7 +312,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	*/
 
 	var loadFieldIDs typeutil.Set[int64]
-	loadSchema := typeutil.Clone(schema)
+	loadSchema := collectionutil.ApplySettings(schema, schema.GetProperties())
 	// if load fields is specified, do filtering logic
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {
@@ -357,7 +361,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.schema.Store(schema)
+	coll.schema.Store(loadSchema)
 
 	return coll, nil
 }
