@@ -63,8 +63,7 @@ OpenOneChunkReaderAsync(
         co_await folly::coro::co_current_cancellation_token;
     CheckOpenCancellation(
         cancellation_token, segment_id, "AsyncChunkReader::open");
-    auto lease = co_await storage::AcquireMetadataLoadSlotAsync(
-        priority, cancellation_token);
+    auto lease = co_await storage::AcquireMetadataLoadSlotAsync(priority);
     CheckOpenCancellation(
         cancellation_token, segment_id, "AsyncChunkReader::open");
     auto chunk_reader_result = co_await folly::coro::co_withCancellation(
