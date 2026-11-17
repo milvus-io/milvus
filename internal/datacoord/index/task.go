@@ -167,24 +167,23 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
-	var published bool
-	var err error
-	if it.indexMeta.UsesSegmentSummaries() && result.GetState() == commonpb.IndexState_Finished && len(result.GetIndexFileKeys()) == 0 {
-		published, err = it.meta.CompleteEmptyIndex(it.meta.Ctx, it.SegmentID, result)
-		if errors.Is(err, merr.ErrSegmentNotFound) {
-			published, err = false, nil
-		}
-		if err == nil {
-			it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
-		}
-	} else {
-		published, err = it.publishIndexToManifest(result)
-	}
+	published, err := it.publishIndexToManifest(result)
 	if err != nil {
 		return err
 	}
-	if !published && it.indexMeta.UsesSegmentSummaries() && result.GetState() == commonpb.IndexState_Finished && len(result.GetIndexFileKeys()) > 0 {
-		if segment := it.meta.GetSegment(it.meta.Ctx, it.SegmentID); meta.IsSegmentHealthy(segment) && it.indexMeta.IsIndexExist(it.CollectionID, it.IndexID) {
+	if !published && it.indexMeta.UsesSegmentSummaries() && result.GetState() == commonpb.IndexState_Finished {
+		if len(result.GetIndexFileKeys()) == 0 {
+			published, err = it.meta.CompleteEmptyIndex(it.meta.Ctx, it.SegmentID, result)
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				published, err = false, nil
+			}
+			if err != nil {
+				return err
+			}
+			if published {
+				it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
+			}
+		} else if segment := it.meta.GetSegment(it.meta.Ctx, it.SegmentID); meta.IsSegmentHealthy(segment) && it.indexMeta.IsIndexExist(it.CollectionID, it.IndexID) {
 			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode requires manifest publication for build %d", it.BuildID)
 		}
 	}

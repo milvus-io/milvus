@@ -73,28 +73,62 @@ func TestSummaryModeEmptyCompletion(t *testing.T) {
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3})))
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}))
+	record, ok := dm.IndexMeta.GetIndexJob(20)
+	require.True(t, ok)
+	task := NewIndexBuildTask(record, 1, mt, dm.IndexMeta, nil, nil, nil)
+	recorder := &indexDataViewRecorder{}
+	mt.DataViewManager = recorder
 	result := &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}
 	failure := mockey.Mock((*datacoord.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
 	defer failure.UnPatch()
-	_, err = mt.CompleteEmptyIndex(ctx, 3, result)
+	err = task.SetJobInfo(result)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
 	require.True(t, dm.IndexMeta.HasBuildInfo(20))
+	require.Empty(t, recorder.calls)
+	require.Equal(t, commonpb.IndexState_InProgress, task.IndexState)
 	failure.UnPatch()
-	handled, err := mt.CompleteEmptyIndex(ctx, 3, result)
-	require.NoError(t, err)
-	require.True(t, handled)
+	require.NoError(t, task.SetJobInfo(result))
+	require.Equal(t, []int64{1}, recorder.calls)
+	require.Equal(t, commonpb.IndexState_Finished, task.IndexState)
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))
 	require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
 	rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
 	require.NoError(t, err)
 	require.Empty(t, rows)
-	_, err = mt.CompleteEmptyIndex(ctx, 3, result)
-	require.NoError(t, err)
+	require.NoError(t, task.SetJobInfo(result))
 	persisted, err := mt.Catalog.ListSegments(ctx, 1)
 	require.NoError(t, err)
 	require.Len(t, persisted, 1)
 	require.Len(t, persisted[0].GetIndexSummaries(), 1)
+}
+
+func TestSummaryModeEmptyCompletionForRetiredSegment(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "dropped", true: "missing"}[missing], func(t *testing.T) {
+			ctx := t.Context()
+			mt, dm, err := NewMemoryMetaWithIndex(t)
+			require.NoError(t, err)
+			require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+			if !missing {
+				require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+					ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped, StorageVersion: storage.StorageV3,
+				})))
+			}
+			require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+			record := &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+			require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, record))
+			recorder := &indexDataViewRecorder{}
+			mt.DataViewManager = recorder
+			task := NewIndexBuildTask(record, 1, mt, dm.IndexMeta, nil, nil, nil)
+			require.NoError(t, task.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}))
+			require.Equal(t, []int64{1}, recorder.calls)
+			rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, commonpb.IndexState_Finished, rows[0].IndexState)
+		})
+	}
 }
 
 func TestSummaryModeRestartPreservesInventory(t *testing.T) {
