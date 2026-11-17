@@ -48,14 +48,19 @@ type shardViewQueryClient struct {
 // workerReduceStream retains worker identity for shard or Proxy replica reselection.
 type workerReduceStream[T any] struct {
 	reduce.ReduceStream[T]
-	node    qviews.WorkNode
-	shardID qviews.ShardID
+	node         qviews.WorkNode
+	shardID      qviews.ShardID
+	onFirstChunk func(T) // Adds attempt-local Search filter metadata exactly once.
 }
 
 func (s *workerReduceStream[T]) Recv() (T, error) {
 	chunk, err := s.ReduceStream.Recv()
 	if err != nil && !errors.Is(err, io.EOF) {
 		return chunk, &workNodeFailure{node: s.node, shardID: s.shardID, err: err}
+	}
+	if err == nil && s.onFirstChunk != nil {
+		s.onFirstChunk(chunk)
+		s.onFirstChunk = nil
 	}
 	return chunk, err
 }
@@ -254,6 +259,8 @@ func (s *shardViewQueryClient) SearchStreams(
 		children := make([][]searchreducestream.ReduceStream, len(requests))
 		var mu sync.Mutex
 		var plannedRequests []*internalpb.SearchRequest
+		// Holds filter-stage results and ANN options for the current shard attempt.
+		var stage twoStageSearch
 		// Each sub-search owns its worker context; all its workers share it.
 		var workerContexts []context.Context
 		var workerCancels []context.CancelFunc
@@ -291,7 +298,16 @@ func (s *shardViewQueryClient) SearchStreams(
 				}
 				return nil
 			},
-			beforeDispatch: func(context.Context, *viewpb.GetQueryPlanResponse, qviews.ShardID) error {
+			beforeDispatch: func(planCtx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID) error {
+				// Retry with fresh filter results; eligible searches prepare ANN parameters before opening streams.
+				stage = twoStageSearch{}
+				if err := s.prepareTwoStageSearch(planCtx, response, shardID, req.TotalChannelNum, &stage); err != nil {
+					return err
+				}
+				if !req.Req.GetIsAdvanced() {
+					// Preparation may replace the plan request captured by consumeResponse.
+					plannedRequests[0] = response.GetPlan().GetLegacySearchRequest()
+				}
 				// Workers of each sub-search share one context for this vchannel attempt.
 				workerContexts = make([]context.Context, len(requests))
 				workerCancels = make([]context.CancelFunc, len(requests))
@@ -320,7 +336,7 @@ func (s *shardViewQueryClient) SearchStreams(
 					workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
 					stream, err := s.queryServiceClient.SearchOnViewStream(workerContexts[index], node, &viewpb.SearchOnViewRequest{
 						LegacyReq: workerRequest, SegmentSelection: segmentSelection, ShardId: shardID.IntoProto(),
-						Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
+						Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes), ExecutionOptions: stage.options,
 					})
 					if err != nil {
 						return err
@@ -329,9 +345,16 @@ func (s *shardViewQueryClient) SearchStreams(
 						return merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
 					}
 					mu.Lock()
-					children[index] = append(children[index], &workerReduceStream[*internalpb.SearchResults]{
+					child := &workerReduceStream[*internalpb.SearchResults]{
 						ReduceStream: stream, node: node, shardID: shardID,
-					})
+					}
+					if stage.filters != nil {
+						// Include filter costs and feature bits once per worker, not once per Chunk.
+						child.onFirstChunk = func(chunk *internalpb.SearchResults) {
+							stage.mergeFeatures(node, &viewpb.SearchOnViewResponse{LegacyResults: chunk})
+						}
+					}
+					children[index] = append(children[index], child)
 					mu.Unlock()
 				}
 				return nil

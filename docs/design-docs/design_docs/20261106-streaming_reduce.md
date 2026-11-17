@@ -119,7 +119,9 @@ Unsupported reranking remains Batch, as does retained-plan requery. Exact gates:
 The target is Chunk-scale retained child input, not a hard process-memory bound:
 worker materialization, group maps, source Chunks referenced by output, final
 responses and gRPC run-ahead remain separate costs. Application credit control
-and Batch's optional two-stage Search optimization are not implemented here.
+is not implemented here. Eligible ordinary Search can reuse the Batch two-stage
+filter preparation before opening ANN streams; filter metadata is merged once
+per worker, including when the ANN result is empty.
 Validate Batch parity across Chunk boundaries, NQ, NULL/element fields, grouped
 partials, limits and empty results; test cancellation, retry isolation and config
 refresh with race detection. ARM package/build verification is recorded in
@@ -1062,6 +1064,6 @@ as implemented features.
 
 Deferred work includes segment-level streaming and stateful SDK iteration;
 terminal metadata through Interrupt; application credit/prefetch coordination;
-remaining function-chain/reranking paths; Batch's optional two-stage Search
-optimization; and live failure/performance qualification. Each requires its own
+remaining function-chain/reranking paths; and live failure/performance
+qualification. Each requires its own
 behavior contract and verification before changing the current path.
