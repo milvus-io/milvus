@@ -346,6 +346,8 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	defer c.finishCollection(id, slot)
 	next := *slot.value.Load()
 	previous := next
+	// AutoLoad-only publications retain the requirements version but replace
+	// cfg. Compare both so subsequent planning sees the latest scheduling input.
 	if next.config == cfg && next.configVersion == version {
 		return
 	}
@@ -507,9 +509,18 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		delete(c.replicas, id.ReplicaID)
 	}
 	c.mu.Unlock()
-	if old == nil || stats == nil || !sameVersion(old.stats.UpVersion, stats.UpVersion) || !sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
-		c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
+	if old != nil && stats != nil {
+		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
+			return
+		}
+		// An undesired shard's teardown is already driven by its manager and
+		// syncer. Publish the accounting without scheduling another release.
+		// Initial discovery, final removal and late Up/Preparing still notify.
+		if stats.UpVersion == nil && stats.PreparingVersion == nil && (next.config == nil || !hasReplica(next.config, id.ReplicaID)) {
+			return
+		}
 	}
+	c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
 }
 
 func sameVersion(a, b *qviews.QueryViewVersion) bool {

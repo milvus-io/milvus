@@ -147,7 +147,7 @@ func (s *Server) submitAutoLoad(ctx context.Context, collectionID int64) error {
 	if err != nil {
 		return err
 	}
-	status, err := s.LoadCollection(ctx, loadReq)
+	status, err := s.loadCollection(ctx, loadReq, true)
 	return merr.CheckRPCCall(status, err)
 }
 

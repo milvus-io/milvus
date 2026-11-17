@@ -45,6 +45,16 @@ Explore is a separate layout: local temporary manifests live under
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
 
+## Ordinary import source overrides
+
+Ordinary imports with `storage.*` options use an independent S3-compatible
+source bucket and credentials. Their file paths are complete bucket-relative
+keys: no scheme or leading slash, and no root prefix or path normalization.
+The cluster's internal-layout denylist applies only to imports using cluster
+storage; explicitly authenticated external sources use their own object
+permissions. All output writes retain the cluster chunk manager and layout.
+See [source storage design](../../design-docs/design_docs/20261110-external-import-storage.md).
+
 ## Manifest index artifacts
 
 When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3

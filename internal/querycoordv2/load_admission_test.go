@@ -182,7 +182,7 @@ func (f *admissionFixture) loadCollection(t *testing.T, req *querypb.LoadCollect
 	defer admission.UnPatch()
 	generate := mockey.Mock((*Server).generateAlterLoadConfigMessageForLoadCollection).Return(nil, nil).Build()
 	defer generate.UnPatch()
-	err = s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(), req)
+	err = s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(), false, req)
 	return checkedNodeNum, err
 }
 
