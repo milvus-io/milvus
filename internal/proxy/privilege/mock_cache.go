@@ -5,9 +5,9 @@ package privilege
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	typeutil "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -213,17 +213,17 @@ func (_c *MockPrivilegeCache_InitPolicyInfo_Call) RunAndReturn(run func([]string
 	return _c
 }
 
-// RefreshPolicyInfo provides a mock function with given fields: op
-func (_m *MockPrivilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
-	ret := _m.Called(op)
+// RefreshPolicyInfo provides a mock function with given fields: ctx, op
+func (_m *MockPrivilegeCache) RefreshPolicyInfo(ctx context.Context, op typeutil.CacheOp) error {
+	ret := _m.Called(ctx, op)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RefreshPolicyInfo")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(typeutil.CacheOp) error); ok {
-		r0 = rf(op)
+	if rf, ok := ret.Get(0).(func(context.Context, typeutil.CacheOp) error); ok {
+		r0 = rf(ctx, op)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -237,14 +237,15 @@ type MockPrivilegeCache_RefreshPolicyInfo_Call struct {
 }
 
 // RefreshPolicyInfo is a helper method to define mock.On call
+//   - ctx context.Context
 //   - op typeutil.CacheOp
-func (_e *MockPrivilegeCache_Expecter) RefreshPolicyInfo(op interface{}) *MockPrivilegeCache_RefreshPolicyInfo_Call {
-	return &MockPrivilegeCache_RefreshPolicyInfo_Call{Call: _e.mock.On("RefreshPolicyInfo", op)}
+func (_e *MockPrivilegeCache_Expecter) RefreshPolicyInfo(ctx interface{}, op interface{}) *MockPrivilegeCache_RefreshPolicyInfo_Call {
+	return &MockPrivilegeCache_RefreshPolicyInfo_Call{Call: _e.mock.On("RefreshPolicyInfo", ctx, op)}
 }
 
-func (_c *MockPrivilegeCache_RefreshPolicyInfo_Call) Run(run func(op typeutil.CacheOp)) *MockPrivilegeCache_RefreshPolicyInfo_Call {
+func (_c *MockPrivilegeCache_RefreshPolicyInfo_Call) Run(run func(ctx context.Context, op typeutil.CacheOp)) *MockPrivilegeCache_RefreshPolicyInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(typeutil.CacheOp))
+		run(args[0].(context.Context), args[1].(typeutil.CacheOp))
 	})
 	return _c
 }
@@ -254,7 +255,7 @@ func (_c *MockPrivilegeCache_RefreshPolicyInfo_Call) Return(_a0 error) *MockPriv
 	return _c
 }
 
-func (_c *MockPrivilegeCache_RefreshPolicyInfo_Call) RunAndReturn(run func(typeutil.CacheOp) error) *MockPrivilegeCache_RefreshPolicyInfo_Call {
+func (_c *MockPrivilegeCache_RefreshPolicyInfo_Call) RunAndReturn(run func(context.Context, typeutil.CacheOp) error) *MockPrivilegeCache_RefreshPolicyInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
