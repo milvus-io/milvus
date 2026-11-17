@@ -75,6 +75,14 @@ export OS_NAME=amazonlinux2023
 build/builder.sh make
 ```
 
+## Compiler version checks
+
+Linux CPU builds using GCC require version 15.3 or newer. The dependency build checks the selected C++ compiler before installing Conan packages; the core CMake configuration checks the actual compiler again, including cached or custom toolchains. Explicit Conan profiles and CMake compiler overrides defer the check to core CMake configuration. Clang and GPU builds retain their existing toolchain requirements. This check does not apply to Go-only targets or packaging existing binaries.
+
+For an unsupported GCC version, explicitly opt in with `MILVUS_ALLOW_UNSUPPORTED_GCC=1 make`. For direct CMake builds, prefix the CMake command with the same environment variable. The build will warn that build success and runtime correctness are not guaranteed. This only bypasses the version policy; it does not fix compiler bugs or incompatible dependencies.
+
+When switching compilers, use a clean CMake build directory and regenerate the Conan profile with `conan profile detect --force`. `scripts/install_deps.sh` installs distribution packages and does not guarantee GCC 15.3. CI must switch to the updated CPU builder tags before enabling this requirement without forcing an unsupported build.
+
 ## Dev Containers
 
 You can also get into the dev containers for development.

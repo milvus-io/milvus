@@ -225,6 +225,7 @@ tools/bin/revive: tools/check/go.mod
 cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
+	@bash $(PWD)/scripts/check_cpp_compiler_test.sh
 	@cmake -DWORK_DIR=$(PWD)/cmake_build/compile-checks -P $(PWD)/internal/core/unittest/check_compile_options.cmake
 
 rustfmt:
@@ -366,7 +367,7 @@ download-milvus-proto:
 
 build-3rdparty:
 	@echo "Build 3rdparty ..."
-	@(env bash $(PWD)/scripts/3rdparty_build.sh -t ${mode})
+	@(env WITH_GPU=$(WITH_GPU) bash $(PWD)/scripts/3rdparty_build.sh -t ${mode})
 
 generated-proto-without-cpp: download-milvus-proto get-proto-deps
 	@echo "Generate proto ..."

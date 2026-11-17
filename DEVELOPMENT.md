@@ -44,6 +44,14 @@ make
 
 The compiled binary will be at `bin/milvus`.
 
+Linux CPU builds using GCC require GCC 15.3 or newer. `install_deps.sh` installs
+distribution packages and does not guarantee this compiler version; use an updated
+CPU builder or install the required compiler before building. Clang and GPU builds
+retain their existing toolchain requirements. To try an older GCC at your own risk,
+run `MILVUS_ALLOW_UNSUPPORTED_GCC=1 make`; build success and runtime correctness are
+not guaranteed. See [the build instructions](build/README.md) for compiler switching
+and custom toolchain checks.
+
 ## Building Milvus with Docker
 
 Our official Milvus versions are releases as Docker images. To build Milvus Docker on your own, please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).

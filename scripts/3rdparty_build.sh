@@ -70,6 +70,7 @@ case "${BUILD_TYPE}" in
 esac
 
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
+bash "${ROOT_DIR}/scripts/check_cpp_compiler.sh" || exit 1
 CPP_SRC_DIR="${ROOT_DIR}/internal/core"
 BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
 CONAN_PROFILE_ARGS=()
