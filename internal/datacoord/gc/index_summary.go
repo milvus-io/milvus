@@ -29,7 +29,7 @@ func (gc *GarbageCollector) recycleSummaryIndexes(ctx context.Context, io *packe
 		if ctx.Err() != nil {
 			return
 		}
-		gc.recycleUnusedSegIndexesForSegment(ctx, io, segment.GetID(), gc.Option.IndexMeta.GetAllSegmentIndexes(segment.GetID()), signal)
+		gc.recycleUnusedSegIndexesForSegment(ctx, io, segment.GetID(), gc.Option.IndexMeta.GetAllSegmentIndexSummaries(segment.GetID()), signal)
 	}
 	// Tasks may outlive their segment row. Completed artifacts never enter this map.
 	for _, task := range gc.Option.IndexMeta.GetAllSegIndexes() {
@@ -37,12 +37,12 @@ func (gc *GarbageCollector) recycleSummaryIndexes(ctx context.Context, io *packe
 			return
 		}
 		if gc.Meta.GetSegment(ctx, task.SegmentID) == nil {
-			gc.recycleUnusedSegIndexesForSegment(ctx, io, task.SegmentID, []*model.SegmentIndex{task}, signal)
+			gc.recycleUnusedSegIndexesForSegment(ctx, io, task.SegmentID, []*model.SegmentIndexSummary{model.SummarizeSegmentIndex(task)}, signal)
 		}
 	}
 }
 
-func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record *model.SegmentIndex) error {
+func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record *model.SegmentIndexSummary) error {
 	if gc.Option.IndexMeta.UsesSegmentSummaries() {
 		return gc.Meta.RetireIndexSummaryLocked(ctx, record.SegmentID, record.BuildID)
 	}

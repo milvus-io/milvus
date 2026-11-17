@@ -98,3 +98,76 @@ func TestSummaryGCRefreshesSegmentAfterTaskRetirement(t *testing.T) {
 	gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm}))
 	require.False(t, gc.newIndexFileReclaimChecker(t.Context())(path.Join(entry.Path, "index"), 1, 3, 5))
 }
+
+func TestSummaryGCLoadsFileDetailsExplicitly(t *testing.T) {
+	for _, scenario := range []string{"read failure", "missing entry", "remove failure", "success", "empty completion"} {
+		t.Run(scenario, func(t *testing.T) {
+			mt, dm, err := newMemoryMetaWithSnapshot(t)
+			require.NoError(t, err)
+			root := t.TempDir()
+			hasArtifact := scenario != "empty completion"
+			base := path.Join(root, "insert_log/1/2/3")
+			require.NoError(t, mt.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(base, 1), ManifestHasIndex: hasArtifact,
+				IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 4, BuildId: 5, HasArtifact: hasArtifact, IndexVersion: 1}},
+			})))
+			require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+			gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+				Cli: storage.NewLocalChunkManager(objectstorage.RootPath(root)),
+			}))
+			entry := packed.ManifestIndexInfo{IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+				Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+			reads := 0
+			read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+				reads++
+				require.Equal(t, packed.MarshalManifestPath(base, 1), manifest)
+				if scenario == "read failure" {
+					return nil, merr.ErrServiceUnavailable
+				}
+				if scenario == "missing entry" {
+					return nil, nil
+				}
+				return []packed.ManifestIndexInfo{entry}, nil
+			}).Build()
+			defer read.UnPatch()
+			removed := 0
+			remove := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(func(_ *GarbageCollector, _ context.Context, files map[string]struct{}) error {
+				removed++
+				if hasArtifact {
+					require.Equal(t, map[string]struct{}{path.Join(entry.Path, "index"): {}}, files)
+				} else {
+					require.Empty(t, files)
+				}
+				if scenario == "remove failure" {
+					return merr.ErrServiceUnavailable
+				}
+				return nil
+			}).Build()
+			defer remove.UnPatch()
+			commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(packed.ManifestUpdateResult{
+				ManifestPath: packed.MarshalManifestPath(base, 2), HasIndexes: proto.Bool(false),
+			}, nil).Build()
+			defer commit.UnPatch()
+			meta.MockManifestUpdateSubmissions(t)
+			gc.RecycleUnusedSegIndexes(t.Context(), nil)
+			if hasArtifact {
+				require.Equal(t, 1, reads)
+			} else {
+				require.Zero(t, reads, "empty completion has no artifact details to load")
+			}
+			if scenario == "read failure" || scenario == "missing entry" {
+				require.Zero(t, removed)
+			} else {
+				require.Equal(t, 1, removed)
+			}
+			if scenario == "success" || scenario == "empty completion" {
+				require.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(3))
+			} else {
+				require.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(3), 1, "unresolved or undeleted files must retain inventory for retry")
+			}
+			require.False(t, dm.IndexMeta.HasBuildInfo(5))
+		})
+	}
+}
