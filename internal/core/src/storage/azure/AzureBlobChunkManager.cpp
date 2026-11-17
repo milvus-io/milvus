@@ -24,6 +24,7 @@
 #include <cstring>
 
 #include "AzureBlobChunkManager.h"
+#include "milvus-storage/filesystem/azure/refreshing_token_credential.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "azure/core/context.hpp"
@@ -116,7 +117,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
-                    workloadIdentityCredential);
+                    milvus_storage::fs::MakeRefreshingAzureCredential(
+                        workloadIdentityCredential));
             LOG_INFO("azure blob credential selected: WorkloadIdentity");
         } else if (has_client_secret) {
             const char* spn_client_id = std::getenv("AZURE_CLIENT_ID");
@@ -133,7 +135,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
-                    credential);
+                    milvus_storage::fs::MakeRefreshingAzureCredential(
+                        credential));
             LOG_INFO("azure blob credential selected: ServicePrincipal");
         } else {
             const char* client_id_env = std::getenv("AZURE_CLIENT_ID");
@@ -152,7 +155,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
-                    credential);
+                    milvus_storage::fs::MakeRefreshingAzureCredential(
+                        credential));
             LOG_INFO("azure blob credential selected: ManagedIdentity");
         }
     } else {

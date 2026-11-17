@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "storage/StsCredentials.h"
 #include "HuaweiCloudCredentialsProvider.h"
 
 #include <aws/core/client/SpecifiedRetryableErrorsRetryStrategy.h>
@@ -147,7 +148,9 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::GetAWSCredentials() {
     }
     RefreshIfExpired();
     Aws::Utils::Threading::ReaderLockGuard guard(m_reloadLock);
-    return m_credentials;
+    return milvus::storage::native_sts::IsUsable(m_credentials)
+               ? m_credentials
+               : Aws::Auth::AWSCredentials{};
 }
 
 void
@@ -203,12 +206,11 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
         return;
     }
 
-    if (creds.GetAWSAccessKeyId().empty() || creds.GetAWSSecretKey().empty() ||
-        creds.GetSessionToken().empty()) {
+    if (!milvus::storage::native_sts::IsUsable(creds)) {
         m_stsFailureCount++;
         LOG_WARN(
             "HuaweiCloud credential provider: STS returned incomplete "
-            "credentials (missing ak/sk/token), keeping existing credentials, "
+            "or expired credentials, keeping existing credentials, "
             "sts_success={}, sts_failure={}",
             m_stsSuccessCount.load(),
             m_stsFailureCount.load());
@@ -218,14 +220,11 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
     }
 
     m_stsSuccessCount++;
-    auto akId = creds.GetAWSAccessKeyId();
-    auto maskedAk = akId.length() > 4 ? akId.substr(0, 4) + "***" : akId;
     m_credentials = creds;
     m_lastReloadFailed = false;
     LOG_INFO(
         "HuaweiCloud credential provider: credentials retrieved successfully, "
-        "ak={}, expiration_diff_ms={}, sts_success={}, sts_failure={}",
-        maskedAk,
+        "expiration_diff_ms={}, sts_success={}, sts_failure={}",
         (creds.GetExpiration() - Aws::Utils::DateTime::Now()).count(),
         m_stsSuccessCount.load(),
         m_stsFailureCount.load());

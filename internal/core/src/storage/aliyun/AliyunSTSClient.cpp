@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "storage/StsCredentials.h"
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/platform/Environment.h>
 #include <aws/core/utils/HashingUtils.h>
@@ -172,49 +173,36 @@ AliyunSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
     //         <Expiration>2023-03-02T07:39:09Z</Expiration>
     //     </Credentials>
     // </AssumeRoleWithOIDCResponse>
-    const Utils::Xml::XmlDocument xmlDocument =
-        Utils::Xml::XmlDocument::CreateFromXmlString(credentialsStr);
-    Utils::Xml::XmlNode rootNode = xmlDocument.GetRootElement();
-    Utils::Xml::XmlNode resultNode = rootNode;
-    if (!rootNode.IsNull() &&
-        (rootNode.GetName() != "AssumeRoleWithOIDCResponse")) {
-        resultNode =
-            rootNode.FirstChild("AssumeRoleWithOIDCResponse");  // [aliyun]
+    const auto doc =
+        Aws::Utils::Xml::XmlDocument::CreateFromXmlString(credentialsStr);
+    if (!doc.WasParseSuccessful())
+        return {};
+    auto root = doc.GetRootElement();
+    auto resultNode = root;
+    if (!root.IsNull() && root.GetName() != "AssumeRoleWithOIDCResponse") {
+        resultNode = root.FirstChild("AssumeRoleWithOIDCResponse");
     }
-
-    if (!resultNode.IsNull()) {
-        Utils::Xml::XmlNode credentialsNode =
-            resultNode.FirstChild("Credentials");
-        if (!credentialsNode.IsNull()) {
-            Utils::Xml::XmlNode accessKeyIdNode =
-                credentialsNode.FirstChild("AccessKeyId");
-            if (!accessKeyIdNode.IsNull()) {
-                result.creds.SetAWSAccessKeyId(accessKeyIdNode.GetText());
-            }
-
-            Utils::Xml::XmlNode secretAccessKeyNode =
-                credentialsNode.FirstChild("AccessKeySecret");  // [aliyun]
-            if (!secretAccessKeyNode.IsNull()) {
-                result.creds.SetAWSSecretKey(secretAccessKeyNode.GetText());
-            }
-
-            Utils::Xml::XmlNode sessionTokenNode =
-                credentialsNode.FirstChild("SecurityToken");  // [aliyun]
-            if (!sessionTokenNode.IsNull()) {
-                result.creds.SetSessionToken(sessionTokenNode.GetText());
-            }
-
-            Utils::Xml::XmlNode expirationNode =
-                credentialsNode.FirstChild("Expiration");
-            if (!expirationNode.IsNull()) {
-                result.creds.SetExpiration(
-                    Aws::Utils::DateTime(Aws::Utils::StringUtils::Trim(
-                                             expirationNode.GetText().c_str())
-                                             .c_str(),
-                                         Aws::Utils::DateFormat::ISO_8601));
-            }
-        }
-    }
+    if (resultNode.IsNull())
+        return {};
+    auto credentials = resultNode.FirstChild("Credentials");
+    if (credentials.IsNull())
+        return {};
+    auto access = credentials.FirstChild("AccessKeyId");
+    auto secret = credentials.FirstChild("AccessKeySecret");
+    auto token = credentials.FirstChild("SecurityToken");
+    auto expiry = credentials.FirstChild("Expiration");
+    if (access.IsNull() || secret.IsNull() || token.IsNull() || expiry.IsNull())
+        return {};
+    Aws::Auth::AWSCredentials candidate(
+        Aws::Utils::StringUtils::Trim(access.GetText().c_str()),
+        Aws::Utils::StringUtils::Trim(secret.GetText().c_str()),
+        Aws::Utils::StringUtils::Trim(token.GetText().c_str()),
+        Aws::Utils::DateTime(
+            Aws::Utils::StringUtils::Trim(expiry.GetText().c_str()).c_str(),
+            Aws::Utils::DateFormat::ISO_8601));
+    if (!milvus::storage::native_sts::IsUsable(candidate))
+        return {};
+    result.creds = std::move(candidate);
     return result;
 }
 }  // namespace Internal

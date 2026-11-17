@@ -14,10 +14,46 @@
 #include "google/cloud/storage/retry_policy.h"
 #include "GcpNativeClientManager.h"
 #include "common/EasyAssert.h"
+#include "milvus-storage/filesystem/gcp/refreshing_credentials.h"
+#include "google/cloud/storage/oauth2/credentials.h"
 
 namespace gcs = google::cloud::storage;
 
 namespace gcpnative {
+namespace {
+// Adapt the fixed service-account identity and validated refresh cache to the
+// GCS client's credential interface, including signing/identity metadata.
+class RefreshingGcsCredentials final : public gcs::oauth2::Credentials {
+ public:
+    explicit RefreshingGcsCredentials(const std::string& json)
+        : credentials_(
+              milvus_storage::MakeRefreshingGcpServiceAccountCredentials(
+                  json)) {
+    }
+    google::cloud::StatusOr<std::string>
+    AuthorizationHeader() override {
+        return google::cloud::oauth2_internal::AuthorizationHeaderJoined(
+            *credentials_);
+    }
+    google::cloud::StatusOr<std::vector<std::uint8_t>>
+    SignBlob(const gcs::SigningAccount& account,
+             const std::string& value) const override {
+        return credentials_->SignBlob(
+            account.value_or(credentials_->AccountEmail()), value);
+    }
+    std::string
+    AccountEmail() const override {
+        return credentials_->AccountEmail();
+    }
+    std::string
+    KeyId() const override {
+        return credentials_->KeyId();
+    }
+
+ private:
+    std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials_;
+};
+}  // namespace
 
 GcpNativeClientManager::GcpNativeClientManager(
     const std::string& address,
@@ -41,8 +77,8 @@ GcpNativeClientManager::GcpNativeClientManager(
                     "missing."));
         }
         auto credentials =
-            google::cloud::MakeServiceAccountCredentials(gcp_credential_json);
-        options.set<google::cloud::UnifiedCredentialsOption>(credentials);
+            std::make_shared<RefreshingGcsCredentials>(gcp_credential_json);
+        options.set<gcs::Oauth2CredentialsOption>(std::move(credentials));
     }
     if (request_timeout_ms > 0) {
         options.set<gcs::RetryPolicyOption>(

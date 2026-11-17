@@ -99,7 +99,7 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		}
 	default: // aws, minio
 		if c.UseIAM {
-			creds = credentials.NewIAM("")
+			creds = newIAMCredentials()
 		} else {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
@@ -224,6 +224,7 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 			return nil, credErr
 		}
 		mlog.Info(ctx, "azure object storage credential selected", mlog.String("credentialType", credentialType))
+		cred, svcOpts.Transport = protectAzureTokenExpiry(cred, svcOpts.Transport)
 		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, svcOpts)
 	} else {
 		connectionString := ""
@@ -298,6 +299,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		if err != nil {
 			return nil, err
 		}
+		gcp.ProtectCredentials(ctx, creds, storage.ScopeReadWrite)
 		projectId, err = getProjectId(c.GcpCredentialJSON)
 		if err != nil {
 			return nil, err
@@ -323,6 +325,7 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		if err != nil {
 			return nil, err
 		}
+		gcp.ProtectCredentials(ctx, creds, storage.ScopeReadWrite)
 		if creds.ProjectID != "" {
 			projectId = creds.ProjectID
 		}

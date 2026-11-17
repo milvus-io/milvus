@@ -68,14 +68,16 @@ class HuaweiCloudSTSClientTest : public ::testing::Test {
 Aws::SDKOptions HuaweiCloudSTSClientTest::sdkOptions_;
 
 TEST_F(HuaweiCloudSTSClientTest,
-       CallHuaweiCloudSTSReturnsErrorWithHttpBodyOnNon200) {
+       CallHuaweiCloudSTSRejectsNon200WithoutEchoingBody) {
     const std::string body = R"({"error":"access denied"})";
     auto result =
         Helper::parseSTSResponse(Aws::Http::HttpResponseCode::FORBIDDEN, body);
 
     EXPECT_FALSE(result.success);
     EXPECT_THAT(result.errorMessage, testing::HasSubstr("HTTP code: 403"));
-    EXPECT_THAT(result.errorMessage, testing::HasSubstr("access denied"));
+    // Credential endpoint response bodies may contain credential material.
+    EXPECT_THAT(result.errorMessage,
+                testing::Not(testing::HasSubstr("access denied")));
 }
 
 TEST_F(HuaweiCloudSTSClientTest, CallHuaweiCloudSTSRejectsInvalidJson) {
@@ -118,7 +120,7 @@ TEST_F(HuaweiCloudSTSClientTest,
 
     EXPECT_FALSE(result.success);
     EXPECT_THAT(result.errorMessage,
-                testing::HasSubstr("invalid format: not-a-timestamp"));
+                testing::HasSubstr("expiration is invalid"));
 }
 
 TEST_F(HuaweiCloudSTSClientTest,
@@ -128,7 +130,7 @@ TEST_F(HuaweiCloudSTSClientTest,
             "access": "AKID_TEST",
             "secret": "SECRET_TEST",
             "securitytoken": "SESSION_TOKEN",
-            "expires_at": "2026-03-15T12:34:56Z"
+            "expires_at": "2099-03-15T12:34:56Z"
         }
     })";
     auto result =

@@ -3,6 +3,7 @@ package gcp
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
@@ -56,7 +57,7 @@ type mockTokenSource struct {
 }
 
 func (m *mockTokenSource) Token() (*oauth2.Token, error) {
-	return &oauth2.Token{AccessToken: m.token}, m.err
+	return &oauth2.Token{AccessToken: m.token, Expiry: time.Now().Add(time.Hour)}, m.err
 }
 
 func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
@@ -84,7 +85,7 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 
 	t.Run("invalid token, refresh ok", func(t *testing.T) {
 		ts.currentToken.Store(nil)
-		ts.tokenSrc = &mockTokenSource{err: nil}
+		ts.tokenSrc = &mockTokenSource{token: "refreshed", err: nil}
 		req, err := http.NewRequest("GET", "http://example.com", nil)
 		assert.NoError(t, err)
 		_, err = ts.RoundTrip(req)

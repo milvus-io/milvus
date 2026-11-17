@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "storage/StsCredentials.h"
 #include <aws/core/client/SpecifiedRetryableErrorsRetryStrategy.h>
 #include <aws/core/platform/Environment.h>
 #include <aws/core/utils/UUID.h>
@@ -149,7 +150,9 @@ AliyunSTSAssumeRoleWebIdentityCredentialsProvider::GetAWSCredentials() {
     }
     RefreshIfExpired();
     Aws::Utils::Threading::ReaderLockGuard guard(m_reloadLock);
-    return m_credentials;
+    return milvus::storage::native_sts::IsUsable(m_credentials)
+               ? m_credentials
+               : Aws::Auth::AWSCredentials{};
 }
 
 void
@@ -173,10 +176,12 @@ AliyunSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
             m_sessionName, m_roleArn, m_token};
 
     auto result = m_client->GetAssumeRoleWithWebIdentityCredentials(request);
-    AWS_LOGSTREAM_TRACE(
-        STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG,
-        "Successfully retrieved credentials with AWS_ACCESS_KEY: "
-            << result.creds.GetAWSAccessKeyId());
+    if (!milvus::storage::native_sts::IsUsable(result.creds)) {
+        AWS_LOGSTREAM_WARN(STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG,
+                           "STS refresh failed; retaining cached credentials "
+                           "until expiration");
+        return;
+    }
     m_credentials = result.creds;
 }
 

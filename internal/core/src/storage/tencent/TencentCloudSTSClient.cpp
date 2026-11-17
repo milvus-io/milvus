@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "storage/StsCredentials.h"
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/utils/StringUtils.h>
 #include <aws/core/utils/logging/LogMacros.h>
@@ -132,76 +133,29 @@ TencentCloudSTSCredentialsClient::STSParseResult
 TencentCloudSTSCredentialsClient::parseSTSResponse(
     const Aws::String& responseBody) {
     STSParseResult result;
-    if (responseBody.empty()) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get an empty credential from sts");
+    Aws::Utils::Json::JsonValue json(responseBody);
+    if (!json.WasParseSuccessful())
+        return result;
+    const auto response =
+        milvus::storage::native_sts::ObjectField(json.View(), "Response");
+    if (response.IsObject() && response.GetAllObjects().count("Error")) {
         return result;
     }
-
-    Aws::Utils::Json::JsonValue jsonValue(responseBody);
-    if (!jsonValue.WasParseSuccessful()) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to parse credential result json");
+    const auto fields =
+        milvus::storage::native_sts::ObjectField(response, "Credentials");
+    const auto expiration =
+        milvus::storage::native_sts::StringField(response, "Expiration");
+    if (expiration.empty())
         return result;
-    }
-
-    auto json = jsonValue.View();
-    if (!json.ValueExists("Response")) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get Response from credential result failed");
+    Aws::Auth::AWSCredentials candidate(
+        milvus::storage::native_sts::StringField(fields, "TmpSecretId"),
+        milvus::storage::native_sts::StringField(fields, "TmpSecretKey"),
+        milvus::storage::native_sts::StringField(fields, "Token"),
+        Aws::Utils::DateTime(expiration.c_str(),
+                             Aws::Utils::DateFormat::ISO_8601));
+    if (!milvus::storage::native_sts::IsUsable(candidate))
         return result;
-    }
-    auto rootNode = json.GetObject("Response");
-
-    if (!rootNode.ValueExists("Credentials")) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get Credentials from Response failed");
-        return result;
-    }
-    auto credentialsNode = rootNode.GetObject("Credentials");
-
-    if (!rootNode.ValueExists("Expiration")) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get Expiration from Response failed");
-        return result;
-    }
-    auto expiration =
-        Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str());
-    if (expiration.empty()) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get Expiration from Response failed");
-        return result;
-    }
-
-    if (!credentialsNode.ValueExists("TmpSecretId") ||
-        !credentialsNode.ValueExists("TmpSecretKey") ||
-        !credentialsNode.ValueExists("Token")) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get credential fields from Response failed");
-        return result;
-    }
-
-    auto accessKeyId = credentialsNode.GetString("TmpSecretId");
-    auto secretKey = credentialsNode.GetString("TmpSecretKey");
-    auto sessionToken = credentialsNode.GetString("Token");
-    if (accessKeyId.empty() || secretKey.empty() || sessionToken.empty()) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Get credential fields from Response failed");
-        return result;
-    }
-
-    auto parsedExpiration = Aws::Utils::DateTime(
-        expiration.c_str(), Aws::Utils::DateFormat::ISO_8601);
-    if (!parsedExpiration.WasParseSuccessful()) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to parse Expiration from Response");
-        return result;
-    }
-
-    result.credentials.SetAWSAccessKeyId(accessKeyId);
-    result.credentials.SetAWSSecretKey(secretKey);
-    result.credentials.SetSessionToken(sessionToken);
-    result.credentials.SetExpiration(parsedExpiration);
+    result.credentials = std::move(candidate);
     result.success = true;
     return result;
 }
