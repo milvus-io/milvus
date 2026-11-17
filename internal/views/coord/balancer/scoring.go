@@ -128,14 +128,20 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	// but cannot claim compatible resources in that case.
 	data := c.DataView()
 	key := coordview.ResourceKey{LoadInfoVersion: c.ConfigVersion()}
+	var placements []*balancercache.PlacementNode
 	if data != nil {
 		key.DataVersion = data.DataVersion
+		// Pin each eligible node once instead of looking it up for every segment.
+		placements = make([]*balancercache.PlacementNode, len(nodes))
+		for i, node := range nodes {
+			placements[i] = c.PlacementNode(node)
+		}
 	}
 	for _, segment := range entries {
 		ctx.segments[segment.SegmentID] = segment
 		if data != nil {
 			key.PartitionID, key.SegmentID = segment.PartitionID, segment.SegmentID
-			ctx.reusable[segment.SegmentID] = reusableResources(c, key, nodes)
+			ctx.reusable[segment.SegmentID] = reusableResources(placements, key)
 		}
 	}
 	return ctx
@@ -282,11 +288,11 @@ func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
 }
 
 // reusableResources only credits confirmed, protected, exact-compatible loads.
-func reusableResources(c *balancercache.CollectionEntry, key coordview.ResourceKey, nodes []int64) map[int64]bool {
+func reusableResources(placements []*balancercache.PlacementNode, key coordview.ResourceKey) map[int64]bool {
 	states := make(map[int64]bool)
-	for _, n := range nodes {
-		if resources := c.PlacementNode(n); resources != nil && resources.HasResource(key) {
-			states[n] = true
+	for _, node := range placements {
+		if node != nil && node.HasResource(key) {
+			states[node.ID()] = true
 		}
 	}
 	return states

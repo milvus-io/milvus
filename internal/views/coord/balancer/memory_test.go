@@ -112,12 +112,13 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 	c := balancercache.New(nil)
 	id := cacheShard(1, 10)
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	c.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
 	c.PublishDataView(1, cacheData(1, id.VChannel, 10, 20))
 	c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1},
 		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1001, 1, 1, coordview.SegmentStateUp)))
 	p := newPlanningContext(c)
-	p.targets[10] = []int64{1}
+	p.targets[10] = []int64{1, 2}
 	p.fanouts = make(map[qviews.ShardID]int)
 	pinned := p.GetCollection(1)
 	entries := pinned.DataView().Shard(id.VChannel).Partitions[0].Segments
@@ -127,6 +128,16 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 	next := *pinned.DataView()
 	next.DataVersion.StreamingVersion++
 	c.PublishDataView(1, &next)
+	c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1},
+		placement(1000, 1, 2, coordview.SegmentStateUp), placement(1001, 1, 2, coordview.SegmentStateUp)))
+	var lookup func(*balancercache.CollectionEntry, int64) *balancercache.PlacementNode
+	lookups := make(map[int64]int)
+	lookupPatch := mockey.Mock((*balancercache.CollectionEntry).PlacementNode).Origin(&lookup).To(func(c *balancercache.CollectionEntry, node int64) *balancercache.PlacementNode {
+		require.Same(t, pinned, c)
+		lookups[node]++
+		return lookup(c, node)
+	}).Build()
+	defer lookupPatch.UnPatch()
 	var original func(qviews.ShardID) (int64, bool)
 	calls := 0
 	patch := mockey.Mock(parseShardCollection).Origin(&original).To(func(id qviews.ShardID) (int64, bool) {
@@ -135,11 +146,13 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	ctx := newAllocationContext(p, id, map[int64]int64{}, entries)
+	lookupPatch.UnPatch()
 	require.Equal(t, 1, calls, "resolve the collection once, regardless of segment count")
+	require.Equal(t, map[int64]int{1: 1, 2: 1}, lookups, "resolve each eligible placement once, including absent placements")
 	require.Equal(t, map[int64]map[int64]bool{1000: {1: true}, 1001: {1: true}}, ctx.reusable)
 
 	fresh := newPlanningContext(c)
-	fresh.targets[10] = []int64{1}
+	fresh.targets[10] = []int64{1, 2}
 	fresh.fanouts = make(map[qviews.ShardID]int)
 	for _, reusable := range newAllocationContext(fresh, id, map[int64]int64{}, entries).reusable {
 		require.Empty(t, reusable, "a new context must reject the old materialization")

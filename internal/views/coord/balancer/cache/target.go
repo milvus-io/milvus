@@ -17,12 +17,13 @@ type (
 
 func (n *NodeEntry) TargetSize() int64 { return n.info.TargetLogicalSize }
 func (n *NodeEntry) TargetContribution(id qviews.ShardID) int64 {
-	v, _ := n.targets.get(shardKey(id))
+	v, _ := n.targets.getShard(id)
 	return v.rows
 }
 func (s *ShardEntry) Target() *coordview.ViewPlacement { return s.target }
 func (c *CollectionEntry) ReplicaSize(replica, node int64) int64 {
-	v, _ := c.targetLoads.get(replicaNodeKey(replica, node))
+	key := replicaNodeKey(replica, node)
+	v, _ := c.targetLoads.get(key[:])
 	return v.rows
 }
 
@@ -36,11 +37,11 @@ func (r *ResourceGroupEntry) Demand(nodes int) int64 {
 	return rows
 }
 
-func replicaNodeKey(replica, node int64) []byte {
+func replicaNodeKey(replica, node int64) [16]byte {
 	var key [16]byte
 	binary.BigEndian.PutUint64(key[:8], uint64(replica))
 	binary.BigEndian.PutUint64(key[8:], uint64(node))
-	return key[:]
+	return key
 }
 
 func demandGroups(c *CollectionEntry) (map[string]int64, int64) {
@@ -65,13 +66,14 @@ func (c *Cache) replaceDemand(old, next *CollectionEntry) {
 		}
 		for name, replicas := range groups {
 			group := c.groupLocked(name)
-			bucket, _ := group.demand.get(idKey(replicas))
+			key := idKey(replicas)
+			bucket, _ := group.demand.get(key[:])
 			bucket.replicas = replicas
 			bucket.rows += rows
 			if bucket.rows == 0 {
-				group.demand = group.demand.remove(idKey(replicas))
+				group.demand = group.demand.remove(key[:])
 			} else {
-				group.demand = group.demand.set(idKey(replicas), bucket)
+				group.demand = group.demand.set(key[:], bucket)
 			}
 			c.storeGroupLocked(name, group)
 		}
@@ -87,12 +89,14 @@ func (c *Cache) PublishReplicaActivity(collection int64, active map[int64]bool) 
 	var suspended immutableIndex[bool]
 	for replica, enabled := range active {
 		if !enabled {
-			suspended = suspended.set(idKey(replica), true)
+			key := idKey(replica)
+			suspended = suspended.set(key[:], true)
 		}
 	}
 	changed := suspended.len() != next.suspended.len()
 	for replica, enabled := range active {
-		old, _ := next.suspended.get(idKey(replica))
+		key := idKey(replica)
+		old, _ := next.suspended.get(key[:])
 		changed = changed || old == enabled
 	}
 	if !changed {
@@ -108,7 +112,8 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 	if stats == nil || entry.config == nil {
 		return nil
 	}
-	if suspended, _ := entry.suspended.get(idKey(id.ReplicaID)); suspended {
+	key := idKey(id.ReplicaID)
+	if suspended, _ := entry.suspended.get(key[:]); suspended {
 		return nil
 	}
 	group, found := "", false
@@ -224,12 +229,12 @@ func (c *Cache) replaceTargetContribution(entry *CollectionEntry, id qviews.Shar
 	slot.value.Store(&n)
 	c.finishNode(node, slot)
 	key := replicaNodeKey(id.ReplicaID, node)
-	load, _ := entry.targetLoads.get(key)
+	load, _ := entry.targetLoads.get(key[:])
 	load.rows += rows - previous
 	if load.rows == 0 {
-		entry.targetLoads = entry.targetLoads.remove(key)
+		entry.targetLoads = entry.targetLoads.remove(key[:])
 	} else {
-		entry.targetLoads = entry.targetLoads.set(key, load)
+		entry.targetLoads = entry.targetLoads.set(key[:], load)
 	}
 }
 

@@ -121,7 +121,8 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	policy := NewDefaultBalancePolicy()
 	require.Empty(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares, "unchanged recovery must not rebuild Up views")
 	key := coordview.ResourceKey{SegmentID: segment.SegmentID, PartitionID: segment.PartitionID, DataVersion: dv, LoadInfoVersion: oldVersion}
-	require.Contains(t, reusableResources(cache.GetCollection(1), key, []int64{1}), int64(1))
+	placements := []*balancercache.PlacementNode{cache.GetCollection(1).PlacementNode(1)}
+	require.Contains(t, reusableResources(placements, key), int64(1))
 	// A newly selected index changes only LoadInfoVersion, not Schema/DataVersion.
 	indexes = append(indexes, &indexpb.IndexInfo{FieldID: 200, IndexID: 301})
 	require.NoError(t, after.Put(t.Context(), cfg))
@@ -129,7 +130,7 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	require.Contains(t, plan.Prepares, id, "config change must be mandatory even with autoBalance disabled")
 	require.NotEqual(t, oldVersion, plan.Prepares[id].Build().Meta.LoadInfoVersion)
 	key.LoadInfoVersion = cache.GetCollection(1).ConfigVersion()
-	require.Empty(t, reusableResources(cache.GetCollection(1), key, []int64{1}), "old resources must not alias the new load identity")
+	require.Empty(t, reusableResources(placements, key), "old resources must not alias the new load identity")
 }
 
 func TestAutoLoadSourceUpdateDoesNotRebuildViews(t *testing.T) {
