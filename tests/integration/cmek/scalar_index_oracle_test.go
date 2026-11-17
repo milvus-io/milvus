@@ -53,6 +53,8 @@ func (s *scalarIndexSuite) assertOracle(cell scalarCell, collectionName string) 
 			continue
 		}
 		for _, id := range field.GetScalars().GetLongData().GetData() {
+			_, duplicate := actual[id]
+			s.Require().False(duplicate, "%s query %q returned duplicate primary key %d", cell.name, expr, id)
 			actual[id] = struct{}{}
 		}
 	}
