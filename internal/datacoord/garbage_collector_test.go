@@ -182,8 +182,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	// Mock newSnapshotMeta
 	smMeta := &snapshot.SnapshotMeta{}
 
-	// Mock newIndexMeta
-	idxMeta := &index.IndexMeta{}
+	// Supply task records for explicit file resolution.
+	idxMeta := &index.IndexMeta{SegmentBuildInfo: index.NewSegmentIndexBuildInfo()}
 
 	// Create meta
 	im := idxMeta
@@ -223,6 +223,9 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 		BuildID:      402,
 		NodeID:       502,
 	}
+
+	idxMeta.SegmentBuildInfo.Add(segIdx1)
+	idxMeta.SegmentBuildInfo.Add(segIdx2)
 
 	// Setup mocks
 	// New O(1) API: IsBuildIDGCBlocked encodes both "loaded state" and "is referenced".

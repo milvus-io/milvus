@@ -2205,7 +2205,7 @@ func (gc *GarbageCollector) getLatestSegmentIndexSummaryForGC(candidate *model.S
 		return nil, false
 	}
 	if gc.Option.IndexMeta == nil || gc.Option.IndexMeta.SegmentBuildInfo == nil {
-		return candidate, true
+		return nil, false
 	}
 	return gc.Option.IndexMeta.GetSegmentIndexSummary(candidate.SegmentID, candidate.BuildID)
 }
