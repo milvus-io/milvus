@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )
 
 // PartitionStatsPublication guards cache updates that accompany group publication.
@@ -35,6 +36,9 @@ type PartitionStatsPublication interface {
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
+	UsesSegmentSummaries() bool
+	IsIndexExist(collID, indexID UniqueID) bool
+	FinishTask(result *workerpb.IndexTaskInfo) error
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair

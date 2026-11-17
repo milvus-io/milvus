@@ -27,37 +27,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// CompleteEmptyIndex atomically publishes completion without an artifact or a
-// new manifest revision. It uses the same lock order as artifact publication.
-func (m *Meta) CompleteEmptyIndex(ctx context.Context, segmentID int64, result *workerpb.IndexTaskInfo) (bool, error) {
-	if result.GetState() != commonpb.IndexState_Finished || len(result.GetIndexFileKeys()) != 0 {
-		return false, merr.WrapErrServiceInternalMsg("empty index completion requires a finished result without files")
+// FinishTask persists a result not published through the manifest. Summary-mode
+// completions without files atomically publish the summary and retire the task.
+func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) error {
+	if !m.IndexCatalog.UsesSegmentSummaries() || result.GetState() != commonpb.IndexState_Finished {
+		return m.IndexCatalog.FinishTask(result)
 	}
-	m.segmentManifestLocks.Lock(segmentID)
-	defer m.segmentManifestLocks.Unlock(segmentID)
-	ids := []int64{result.GetBuildID()}
-	m.IndexCatalog.LockBuildIDs(ids)
-	defer m.IndexCatalog.UnlockBuildIDs(ids)
 	record, ok := m.IndexCatalog.GetIndexJob(result.GetBuildID())
 	if !ok {
-		return true, nil
+		return nil
 	}
-	if record.SegmentID != segmentID {
-		return false, merr.WrapErrServiceInternalMsg("empty index result belongs to another segment")
+	segmentID := record.SegmentID
+	locks := m.GetSegmentManifestLocks()
+	locks.Lock(segmentID)
+	defer locks.Unlock(segmentID)
+	if len(result.GetIndexFileKeys()) > 0 {
+		if segment := m.GetSegment(ctx, segmentID); IsSegmentHealthy(segment) && m.IndexCatalog.IsIndexExist(record.CollectionID, record.IndexID) {
+			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode requires manifest publication for build %d", result.GetBuildID())
+		}
+		return m.IndexCatalog.FinishTask(result)
 	}
-	fieldID := m.IndexCatalog.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
-	staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{Type: SegmentIndexUpsert, BuildID: result.GetBuildID(), FinishedTask: result})
-	if errors.Is(err, ErrSegmentIndexRecordGone) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !staged.PublishSummary {
-		return false, nil
-	}
-	var observe func()
-	err = func() error {
+	err := func() error {
+		ids := []int64{result.GetBuildID()}
+		m.IndexCatalog.LockBuildIDs(ids)
+		defer m.IndexCatalog.UnlockBuildIDs(ids)
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{Type: SegmentIndexUpsert, BuildID: result.GetBuildID(), FinishedTask: result})
+		if errors.Is(err, ErrSegmentIndexRecordGone) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		fieldID := m.IndexCatalog.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
+		var observe func()
+		defer func() {
+			if observe != nil {
+				observe()
+			}
+		}()
 		defer m.LockSegments(segmentID)()
 		segment := m.Segments.GetSegment(segmentID)
 		if !IsSegmentHealthy(segment) {
@@ -80,11 +87,8 @@ func (m *Meta) CompleteEmptyIndex(ctx context.Context, segmentID int64, result *
 		observe = staged.Install()
 		return nil
 	}()
-	if err != nil {
-		return false, err
+	if errors.Is(err, merr.ErrSegmentNotFound) {
+		return m.IndexCatalog.FinishTask(result)
 	}
-	if observe != nil {
-		observe()
-	}
-	return true, nil
+	return err
 }

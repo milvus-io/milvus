@@ -51,10 +51,7 @@ func TestEmptyCompletionKeepsLegacyPublication(t *testing.T) {
 		IndexState: commonpb.IndexState_InProgress,
 	}))
 	result := &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}
-	handled, err := mt.CompleteEmptyIndex(ctx, 3, result)
-	require.NoError(t, err)
-	require.False(t, handled)
-	require.NoError(t, dm.IndexMeta.FinishTask(result))
+	require.NoError(t, mt.FinishTask(ctx, result))
 	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
 	record, exists := dm.IndexMeta.GetIndexJob(20)
 	require.True(t, exists)
@@ -127,6 +124,52 @@ func TestSummaryModeEmptyCompletionForRetiredSegment(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			require.Equal(t, commonpb.IndexState_Finished, rows[0].IndexState)
+		})
+	}
+}
+
+func TestFinishTaskSummaryModeFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		state     commonpb.IndexState
+		files     []string
+		hasIndex  bool
+		wantErr   error
+		wantState commonpb.IndexState
+	}{
+		{name: "failed", state: commonpb.IndexState_Failed, hasIndex: true, wantState: commonpb.IndexState_Failed},
+		{name: "unpublished artifact", state: commonpb.IndexState_Finished, files: []string{"index.bin"}, hasIndex: true, wantErr: merr.ErrDataIntegrity, wantState: commonpb.IndexState_InProgress},
+		{name: "dropped definition", state: commonpb.IndexState_Finished, files: []string{"index.bin"}, wantState: commonpb.IndexState_Finished},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			mt, dm, err := NewMemoryMetaWithIndex(t)
+			require.NoError(t, err)
+			if tc.hasIndex {
+				require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+			}
+			require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			})))
+			require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+			require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+				CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 20,
+				IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			}))
+			err = mt.FinishTask(ctx, &workerpb.IndexTaskInfo{
+				BuildID: 20, State: tc.state, IndexFileKeys: tc.files,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			})
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+			require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
+			rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, tc.wantState, rows[0].IndexState)
 		})
 	}
 }
