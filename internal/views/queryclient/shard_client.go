@@ -296,7 +296,7 @@ func (s *shardViewQueryClient) SearchStreams(
 				workerContexts = make([]context.Context, len(requests))
 				workerCancels = make([]context.CancelFunc, len(requests))
 				for i := range requests {
-					workerContexts[i], workerCancels[i] = context.WithCancel(ctx)
+					workerContexts[i], workerCancels[i] = context.WithCancel(ctx) //nolint:gosec // G118: the shard stream owns the cancel after setup; failures cancel it earlier.
 					if registerCancel != nil {
 						registerCancel(workerCancels[i])
 					}

@@ -474,6 +474,7 @@ func TestShardStreamCloseFailureStopsRetryWithPrimaryError(t *testing.T) {
 	closeErr := errors.New("retry cleanup failed")
 	child := &fakeQueryStream{recv: []fakeQueryStreamRecv{{err: primaryErr}}, closeErr: closeErr}
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	stream := &shardReduceStream[*internalpb.RetrieveResults]{
 		stream: child, ctx: ctx, cancel: cancel,
 		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
