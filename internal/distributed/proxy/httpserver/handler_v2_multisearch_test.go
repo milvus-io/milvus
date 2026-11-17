@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -233,6 +235,8 @@ func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
 }
 
 func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
+	metrics.ProxyFunctionCall.Reset()
+	t.Cleanup(metrics.ProxyFunctionCall.Reset)
 	params := paramtable.Get()
 	for _, key := range []string{
 		params.CommonCfg.AuthorizationEnabled.Key,
@@ -368,6 +372,22 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 	body = post("", `{"search":{"collectionName":"current","data":[[1,0]]}}`)
 	require.Len(t, body.Data, 1)
 	require.Zero(t, body.Data[0].Search.Code, body.Data[0].Search.Message)
+	for _, expected := range []struct {
+		method, db, collection, outcome, cause string
+		count                                  float64
+	}{
+		{"Search", "default", "current", metrics.SuccessLabel, metrics.CauseNA, 3},
+		{"Search", "catalog", "current", metrics.SuccessLabel, metrics.CauseNA, 3},
+		{"Search", "archive", "papers", metrics.RejectedLabel, metrics.CauseUser, 1},
+		{"Search", "archive", "current", metrics.RejectedLabel, metrics.CauseUser, 1},
+		{"MultiSearch", "", "", metrics.SuccessLabel, metrics.CauseNA, 3},
+	} {
+		for _, labels := range [][2]string{{metrics.TotalLabel, metrics.CauseNA}, {expected.outcome, expected.cause}} {
+			require.Equal(t, expected.count, testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
+				paramtable.GetStringNodeID(), expected.method, labels[0], labels[1], expected.db, expected.collection, "")), "%+v", expected)
+		}
+	}
+	require.Equal(t, 10, testutil.CollectAndCount(metrics.ProxyFunctionCall))
 }
 
 func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {

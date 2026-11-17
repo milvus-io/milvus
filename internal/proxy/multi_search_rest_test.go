@@ -31,6 +31,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -44,6 +45,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -484,6 +487,8 @@ func (l *multiSearchQuotaLimiter) snapshot() []multiSearchQuotaCall {
 
 func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		metrics.ProxyFunctionCall.Reset()
+		t.Cleanup(metrics.ProxyFunctionCall.Reset)
 		var searched []string
 		p := newMultiSearchHTTPProxy(t, nil, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			searched = append(searched, req.GetDbName())
@@ -511,7 +516,166 @@ func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 		second := multiSearchQuotaCall{20, map[int64][]int64{21: {22}}, internalpb.RateType_DQLSearch, 3}
 		require.Equal(t, []multiSearchQuotaCall{first, first, second}, limiter.snapshot())
 		require.Equal(t, []string{"catalog_a", "catalog_b"}, searched)
+		for _, expected := range []struct {
+			method, db, collection, outcome, cause string
+			count                                  float64
+		}{
+			{"Search", "catalog_a", "ready", metrics.TotalLabel, metrics.CauseNA, 2},
+			{"Search", "catalog_a", "ready", metrics.RejectedLabel, metrics.CauseSystem, 1},
+			{"Search", "catalog_a", "ready", metrics.SuccessLabel, metrics.CauseNA, 1},
+			{"Search", "catalog_b", "ready", metrics.TotalLabel, metrics.CauseNA, 1},
+			{"Search", "catalog_b", "ready", metrics.SuccessLabel, metrics.CauseNA, 1},
+			{"MultiSearch", "", "", metrics.TotalLabel, metrics.CauseNA, 1},
+			{"MultiSearch", "", "", metrics.SuccessLabel, metrics.CauseNA, 1},
+		} {
+			require.Equal(t, expected.count, testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
+				paramtable.GetStringNodeID(), expected.method, expected.outcome, expected.cause, expected.db, expected.collection, "")), "%+v", expected)
+		}
+		require.Equal(t, 7, testutil.CollectAndCount(metrics.ProxyFunctionCall))
 	})
+}
+
+type multiSearchMetricsHook struct {
+	hookutil.DefaultHook
+	before func(context.Context, any) (context.Context, error)
+	after  func(context.Context) error
+}
+
+func (h multiSearchMetricsHook) Before(ctx context.Context, req any, _ string) (context.Context, error) {
+	return h.before(ctx, req)
+}
+
+func (h multiSearchMetricsHook) After(ctx context.Context, _ any, _ error, _ string) error {
+	if h.after != nil {
+		return h.after(ctx)
+	}
+	return nil
+}
+
+func TestMultiSearchRESTRequestMetricsIsolateConcurrentAttempts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		metrics.ProxyFunctionCall.Reset()
+		t.Cleanup(metrics.ProxyFunctionCall.Reset)
+		hookutil.InitOnceHook()
+		t.Cleanup(func() { hookutil.SetTestHook(hookutil.DefaultHook{}) })
+		var mu sync.Mutex
+		attempts := make(map[string]int)
+		hookutil.SetTestHook(multiSearchMetricsHook{before: func(ctx context.Context, req any) (context.Context, error) {
+			db := req.(*milvuspb.SearchRequest).GetDbName()
+			mu.Lock()
+			attempts[db]++
+			attempt := attempts[db]
+			mu.Unlock()
+			// The retry is unscoped: it must not inherit the first attempt's RG.
+			if attempt == 1 {
+				ctx = extension.WithQueryResourceGroup(ctx, "rg-"+db)
+			}
+			return ctx, nil
+		}})
+		entered := make(chan string, 2)
+		release := make(chan struct{})
+		releaseSearches := sync.OnceFunc(func() { close(release) })
+		defer releaseSearches()
+		p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			db := req.GetDbName()
+			group := extension.QueryResourceGroupFromContext(ctx)
+			if group != "" {
+				entered <- group
+				<-release
+				assert.Equal(t, "rg-"+db, extension.QueryResourceGroupFromContext(ctx))
+			}
+			// Target metrics belong to the request at entry, even if execution
+			// rewrites the private attempt's request.
+			req.DbName, req.CollectionName = "rewritten", "rewritten"
+			if db == "catalog_a" && group != "" {
+				return &milvuspb.SearchResults{Status: merr.Status(merr.ErrServiceRateLimit)}, nil
+			}
+			return successfulSearchResult(), nil
+		})
+		handler := newMultiSearchRESTHandler(p)
+		request := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(`{"maxConcurrency":2,"requests":[
+			{"search":{"collectionName":"ready","data":[[1,0]]}},
+			{"search":{"dbName":"catalog_b","collectionName":"ready","data":[[1,0]]}}]}`))
+		request.Header.Set(httpserver.HTTPHeaderDBName, "catalog_a")
+		response := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			handler.ServeHTTP(response, request)
+		}()
+		require.ElementsMatch(t, []string{"rg-catalog_a", "rg-catalog_b"}, []string{<-entered, <-entered})
+		releaseSearches()
+		<-done
+		require.Equal(t, http.StatusOK, response.Code)
+		var body multiSearchRESTResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Zero(t, body.Code)
+		require.Len(t, body.Data, 2)
+		for _, item := range body.Data {
+			require.Zero(t, item.Search.Code)
+		}
+		require.Equal(t, map[string]int{"catalog_a": 2, "catalog_b": 1}, attempts)
+		for _, expected := range []struct{ method, db, collection, group, outcome string }{
+			{"Search", "catalog_a", "ready", "rg-catalog_a", metrics.RetryLabel},
+			{"Search", "catalog_a", "ready", "", metrics.SuccessLabel},
+			{"Search", "catalog_b", "ready", "rg-catalog_b", metrics.SuccessLabel},
+			{"MultiSearch", "", "", "", metrics.SuccessLabel},
+		} {
+			for _, outcome := range []string{metrics.TotalLabel, expected.outcome} {
+				require.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
+					paramtable.GetStringNodeID(), expected.method, outcome, metrics.CauseNA, expected.db, expected.collection, expected.group)), "%+v", expected)
+			}
+		}
+		require.Equal(t, 8, testutil.CollectAndCount(metrics.ProxyFunctionCall), "no batch RG leakage or duplicate attempt counts")
+	})
+}
+
+func TestMultiSearchRESTRequestMetricsRecordRefusals(t *testing.T) {
+	for _, phase := range []string{"before", "after", "execution"} {
+		t.Run(phase, func(t *testing.T) {
+			metrics.ProxyFunctionCall.Reset()
+			t.Cleanup(metrics.ProxyFunctionCall.Reset)
+			hookutil.InitOnceHook()
+			t.Cleanup(func() { hookutil.SetTestHook(hookutil.DefaultHook{}) })
+			hookutil.SetTestHook(multiSearchMetricsHook{
+				before: func(ctx context.Context, _ any) (context.Context, error) {
+					if phase == "before" {
+						return ctx, merr.ErrPrivilegeNotPermitted
+					}
+					return extension.WithQueryResourceGroup(ctx, "rg-a"), nil
+				},
+				after: func(context.Context) error {
+					if phase == "after" {
+						return merr.ErrPrivilegeNotPermitted
+					}
+					return nil
+				},
+			})
+			p := newMultiSearchHTTPProxy(t, nil, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				assert.NotEqual(t, "before", phase)
+				return &milvuspb.SearchResults{Status: merr.Status(merr.ErrParameterInvalid)}, nil
+			})
+			_, body := recordMultiSearch(t, newMultiSearchRESTHandler(p), strings.NewReader(`{"requests":[`+readySearch+`]}`), "")
+			require.Zero(t, body.Code)
+			require.Len(t, body.Data, 1)
+			require.NotZero(t, body.Data[0].Search.Code)
+			group, outcome := "rg-a", metrics.RejectedLabel
+			if phase == "before" {
+				group = ""
+			} else if phase == "execution" {
+				outcome = metrics.FailLabel
+			}
+			for _, labels := range [][2]string{{metrics.TotalLabel, metrics.CauseNA}, {outcome, metrics.CauseUser}} {
+				require.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
+					paramtable.GetStringNodeID(), "Search", labels[0], labels[1], "default", "ready", group)))
+			}
+			for _, label := range []string{metrics.TotalLabel, metrics.SuccessLabel} {
+				require.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
+					paramtable.GetStringNodeID(), "MultiSearch", label, metrics.CauseNA, "", "", "")))
+			}
+			require.Equal(t, 4, testutil.CollectAndCount(metrics.ProxyFunctionCall))
+		})
+	}
 }
 
 type multiSearchTestShardPolicy struct {

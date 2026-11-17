@@ -168,7 +168,11 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 
 	options := proxy.MultiSearchOptions{MaxConcurrency: req.MaxConcurrency, ExecutionDeadline: deadline}
 	results, err := p.RunMultiSearch(ctx, options, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		return h.executeMultiSearchItem(ctx, search, username, token)
+		db, collection := search.GetDbName(), search.GetCollectionName()
+		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
+		result, err := h.executeMultiSearchItem(ctx, search, username, token)
+		requestMetrics.Record("Search", db, collection, result, err)
+		return result, err
 	})
 	if err != nil {
 		return fail(err)

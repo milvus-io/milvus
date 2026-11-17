@@ -506,36 +506,19 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
 			mlog.Any("url", gCtx.Request.URL.Path))
 
+		metricDBName := dbName
+		if _, batch := req.(*MultiSearchReqV2); batch {
+			// Batch counters omit the DB even when all items share one target.
+			// dbName remains the routing fallback for each child Search.
+			metricDBName = ""
+		}
 		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
 		resp, err := v2(ctx, gCtx, req, dbName)
-		if _, batch := req.(*MultiSearchReqV2); batch {
-			dbName = "" // The fallback DB header does not describe the batch's targets.
-		}
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
 		if !ok {
 			return
 		}
-		resourceGroup := requestMetrics.ResourceGroup()
-		metrics.ProxyFunctionCall.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			methodTag,
-			metrics.TotalLabel,
-			metrics.CauseNA,
-			dbName,
-			collectionName,
-			resourceGroup,
-		).Inc()
-		label, cause := requestutil.ParseMetricLabel(resp, err)
-		// set metrics for state code
-		metrics.ProxyFunctionCall.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			methodTag,
-			label,
-			cause,
-			dbName,
-			collectionName,
-			resourceGroup,
-		).Inc()
+		label, cause := requestMetrics.Record(methodTag, metricDBName, collectionName, resp, err)
 
 		// Mirror the metric's cause into the logs so a failed REST request can be
 		// filtered by error_type. System failures are logged at Warn (actionable);
