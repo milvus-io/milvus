@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/exp/slices"
 
@@ -45,10 +46,22 @@ import (
 // which on os.Args was invisible and on an exported API would hand the caller
 // back a shortened vector with a cleared tail, so it deletes from a copy.
 //
+// On a zero exit status, Main returns normally after session cleanup and
+// deferred checks complete. On a nonzero status (including a failed or
+// signal-terminated subprocess under --run-with-subprocess, a subprocess start
+// failure, or invalid --native-profile arguments), Main finishes cleanup and
+// deferred checks first and then calls os.Exit with the resulting status code.
+//
 // A distribution installs its compiled-in hook and coordinator engine
 // (pkg/extension) before calling Main; nothing runs earlier than the first
 // line here except package initialization.
 func Main(args []string) {
+	if code := runMain(args); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func runMain(args []string) int {
 	// after 2.6.0, we enable streaming service by default.
 	// TODO: after remove all streamingutil.IsStreamingServiceEnabled(), we can remove this code.
 	streamingutil.SetStreamingServiceEnabled()
@@ -57,70 +70,101 @@ func Main(args []string) {
 	args, profileEnv, err := prepareNativeProfile(args, os.Environ())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
 	if subArgs, runSubprocess := subprocessArgs(args); runSubprocess {
-		log.Println("run subprocess with cmd:", subArgs) //nolint:gosec // args are from os.Args, not user input
-
-		/* #nosec G204 */
-		cmd := exec.Command(subArgs[0], subArgs[1:]...) //nolint:gosec // args are from os.Args, not user input
-		cmd.Env = profileEnv
-
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Start(); err != nil {
-			// Command not found on PATH, not executable, &c.
-			log.Fatal(err)
-		}
-
-		// wait for the command to finish
-		waitCh := make(chan error, 1)
-		go func() {
-			waitCh <- cmd.Wait()
-			close(waitCh)
-		}()
-
-		sc := make(chan os.Signal, 1)
-		signal.Notify(sc)
-
-		// Need a for loop to handle multiple signals
-		for {
-			select {
-			case sig := <-sc:
-				if err := cmd.Process.Signal(sig); err != nil {
-					log.Println("error sending signal", sig, err)
-				}
-			case err := <-waitCh:
-				// clean session
-				paramtable.Init()
-				params := paramtable.Get()
-				if len(subArgs) >= 3 {
-					metaPath := params.EtcdCfg.MetaRootPath.GetValue()
-					endpoints := params.EtcdCfg.Endpoints.GetValue()
-					etcdEndpoints := strings.Split(endpoints, ",")
-
-					sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
-					defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
-
-					if err := CleanSession(metaPath, etcdEndpoints, sessionSuffix); err != nil {
-						log.Println("clean session failed", err.Error())
-					}
-				}
-
-				if err != nil {
-					log.Println("subprocess exit, ", err.Error())
-				} else {
-					log.Println("exit code:", cmd.ProcessState.ExitCode())
-				}
-				return
-			}
-		}
+		return superviseSubprocess(subArgs, profileEnv, defaultCleanChildSession)
 	}
 
 	RunMilvus(args)
+	return 0
+}
+
+func superviseSubprocess(subArgs, profileEnv []string, cleanChild func(pid int) error) int {
+	log.Println("run subprocess with cmd:", subArgs) //nolint:gosec // args are from os.Args, not user input
+
+	sc := make(chan os.Signal, 8)
+	signal.Notify(sc)
+	defer signal.Stop(sc)
+
+	/* #nosec G204 */
+	cmd := exec.Command(subArgs[0], subArgs[1:]...) //nolint:gosec // args are from os.Args, not user input
+	cmd.Env = profileEnv
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		// Command not found on PATH, not executable, &c.
+		log.Println(err)
+		return 1
+	}
+
+	// wait for the command to finish
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+		close(waitCh)
+	}()
+
+	// Need a for loop to handle multiple signals
+	for {
+		select {
+		case sig := <-sc:
+			if err := cmd.Process.Signal(sig); err != nil {
+				log.Println("error sending signal", sig, err)
+			}
+		case waitErr := <-waitCh:
+			// clean session
+			if len(subArgs) >= 3 && cleanChild != nil {
+				if cleanErr := cleanChild(cmd.Process.Pid); cleanErr != nil {
+					log.Println("clean session failed", cleanErr.Error())
+				}
+			}
+
+			if waitErr != nil {
+				log.Println("subprocess exit, ", waitErr.Error())
+			} else {
+				log.Println("exit code:", cmd.ProcessState.ExitCode())
+			}
+			return subprocessExitCode(waitErr, cmd.ProcessState)
+		}
+	}
+}
+
+func defaultCleanChildSession(pid int) error {
+	defer sessionutil.RemoveServerInfoFile(pid)
+	sessionSuffix := sessionutil.GetSessions(pid)
+	if len(sessionSuffix) == 0 {
+		return CleanSession("", nil, nil)
+	}
+	paramtable.Init()
+	params := paramtable.Get()
+	metaPath := params.EtcdCfg.MetaRootPath.GetValue()
+	endpoints := params.EtcdCfg.Endpoints.GetValue()
+	etcdEndpoints := strings.Split(endpoints, ",")
+	return CleanSession(metaPath, etcdEndpoints, sessionSuffix)
+}
+
+// subprocessExitCode maps the result of cmd.Wait() to a valid process exit
+// code. Signal-terminated children report ProcessState.ExitCode() == -1 in Go,
+// which is mapped to the POSIX convention 128 + signal rather than passed as a
+// negative value to os.Exit.
+func subprocessExitCode(waitErr error, state *os.ProcessState) int {
+	if waitErr == nil {
+		return 0
+	}
+	if state != nil {
+		if code := state.ExitCode(); code > 0 {
+			return code
+		}
+		if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() > 0 {
+			return 128 + int(ws.Signal())
+		}
+	}
+	return 1
 }
 
 // subprocessArgs returns args with the --run-with-subprocess marker removed,
