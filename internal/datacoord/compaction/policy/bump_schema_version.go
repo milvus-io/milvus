@@ -91,6 +91,9 @@ func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 	events := make(map[CompactionTriggerType][]view.CompactionView)
 
 	for _, collection := range collections {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if collection.Schema == nil {
 			continue
 		}
@@ -135,6 +138,9 @@ func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 				if collectionTriggerID == 0 {
 					id, err := policy.allocator.AllocID(ctx)
 					if err != nil {
+						if ctxErr := ctx.Err(); ctxErr != nil {
+							return nil, ctxErr
+						}
 						mlog.Warn(ctx, "Failed to allocate triggerID for schema version bump, skip remaining segments in current collection",
 							mlog.FieldCollectionID(collectionID),
 							mlog.Err(err))

@@ -70,6 +70,9 @@ func (policy *SingleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	invisibleSortViews := make([]view.CompactionView, 0)
 	visibleSortViews := make([]view.CompactionView, 0)
 	for _, collection := range collections {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if collection == nil {
 			continue
 		}
@@ -84,6 +87,9 @@ func (policy *SingleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 		}
 		collectionViews, collectionInvisibleSortViews, collectionVisibleSortViews, _, err := policy.TriggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			// not throw this error because no need to fail because of one collection
 			mlog.Warn(ctx, "fail to trigger single compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 		}
@@ -305,8 +311,14 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 	}))
 
 	for _, group := range partSegments {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, 0, err
+		}
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.Segments = index.FilterInIndexedSegments(ctx, policy.handler, policy.IndexMeta, false, group.Segments...)
+			if err := ctx.Err(); err != nil {
+				return nil, nil, nil, 0, err
+			}
 		}
 
 		for _, segment := range group.Segments {
