@@ -455,12 +455,12 @@ func (w *walAdaptorImpl) Close() {
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
+	w.forceCancelAfterGracefulTimeout()
 	if w.queryViewHandler != nil {
 		// Recovery waiters hold a lifetime reference. Wake them before waiting
 		// for in-flight operations, without releasing their query resources yet.
 		w.queryViewHandler.StopQueryAcquisition()
 	}
-	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 	if w.queryViewHandler != nil {
 		w.queryViewHandler.CloseForHandoff()
