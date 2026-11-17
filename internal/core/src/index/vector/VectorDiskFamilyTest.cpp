@@ -903,11 +903,27 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
 }
 
 TEST(VectorDiskFamilyTest, NullableElementLevelLoadsRowValidity) {
+    // EXPERIMENT BUILD ONLY, NOT FOR MERGE: knowhere is pinned to db95984
+    // (pre-#1940) to isolate the AISAQ disk-index load regression. That
+    // revision has no embedding_list field in knowhere::LoadOptions, so the
+    // row->element validity restore for element-level nullable VECTOR_ARRAY
+    // (#54899) is unavailable and MakeNullableLoadInput drops the flag. Skip
+    // until knowhere is restored to a revision that supports it.
+    GTEST_SKIP() << "embedding_list element-level validity unsupported by "
+                    "pinned knowhere db95984 (pre-#1940)";
     RunNullableElementLevelDiskSearch(false, false);
     RunNullableElementLevelDiskSearch(true, false);
 }
 
 TEST(VectorDiskFamilyTest, MmapNullableElementLevelLoadsRowValidity) {
+    // EXPERIMENT BUILD ONLY, NOT FOR MERGE: knowhere is pinned to db95984
+    // (pre-#1940) to isolate the AISAQ disk-index load regression. That
+    // revision has no embedding_list field in knowhere::LoadOptions, so the
+    // row->element validity restore for element-level nullable VECTOR_ARRAY
+    // (#54899) is unavailable and MakeNullableLoadInput drops the flag. Skip
+    // until knowhere is restored to a revision that supports it.
+    GTEST_SKIP() << "embedding_list element-level validity unsupported by "
+                    "pinned knowhere db95984 (pre-#1940)";
     RunNullableElementLevelDiskSearch(false, true);
     RunNullableElementLevelDiskSearch(true, true);
 }
