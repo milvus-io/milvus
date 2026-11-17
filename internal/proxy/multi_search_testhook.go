@@ -33,15 +33,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// NewMultiSearchTestProxy starts the batch scheduler for tests using the public transports.
+// NewMultiSearchTestProxy starts the real task scheduler for transport tests.
 func NewMultiSearchTestProxy(t *testing.T, queueCapacity, workers int) *Proxy {
 	t.Helper()
-	s := newMultiSearchScheduler(t.Context(), queueCapacity)
-	s.start(workers)
-	t.Cleanup(s.stop)
-	p := &Proxy{multiSearch: s}
+	s, err := scheduler.NewTaskScheduler(t.Context(), &multiSearchTestTSO{}, scheduler.WithMultiSearchQueue(queueCapacity, workers))
+	require.NoError(t, err)
+	require.NoError(t, s.Start())
+	t.Cleanup(s.Close)
+	p := &Proxy{sched: s}
+	p.setMetaCache(&multiSearchTestCache{})
 	p.UpdateStateCode(commonpb.StateCode_Healthy)
 	return p
+}
+
+// Batch task IDs use the cache allocator; ordinary DQL tasks still use TSO.
+type multiSearchTestCache struct {
+	Cache
+	id atomic.Int64
+}
+
+func (c *multiSearchTestCache) AllocID(context.Context) (int64, error) {
+	return c.id.Add(1), nil
 }
 
 type multiSearchTestTSO struct{ logical atomic.Int64 }
@@ -50,15 +62,10 @@ func (a *multiSearchTestTSO) AllocOne(context.Context) (taskmodel.Timestamp, err
 	return tsoutil.ComposeTSByTimeWithLogical(time.Now(), a.logical.Add(1)), nil
 }
 
-// AddMultiSearchDQLSchedulerForTest attaches the ordinary DQL scheduler, with
-// shard routing supplied by the test. The caller controls when it starts.
-func AddMultiSearchDQLSchedulerForTest(t *testing.T, p *Proxy, cache Cache, policy shardclient.LBPolicy) *scheduler.TaskScheduler {
-	t.Helper()
-	sched, err := scheduler.NewTaskScheduler(t.Context(), &multiSearchTestTSO{})
-	require.NoError(t, err)
-	t.Cleanup(sched.Close)
-	p.sched = sched
-	p.setMetaCache(cache)
+// SetMultiSearchSearchDependenciesForTest supplies metadata and shard routing
+// to ordinary Search on the same scheduler as the outer batch.
+func SetMultiSearchSearchDependenciesForTest(p *Proxy, cache Cache, policy shardclient.LBPolicy) *scheduler.TaskScheduler {
+	p.setMetaCache(&multiSearchTestCache{Cache: cache})
 	p.lbPolicy = policy
-	return sched
+	return p.sched
 }

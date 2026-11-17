@@ -56,13 +56,24 @@ the gRPC unimplemented-method status.
 
 ## Execution
 
-The Proxy admits the outer request into a bounded orchestration queue outside
-the DQL worker pool. REST checks this queue before decoding the body, and
+The Proxy models the outer request as a `MultiSearchTask` on the existing
+`TaskScheduler`. Its independent `MSearchQueue` has 64 waiting slots and eight
+workers outside the DQL worker pool. REST checks this queue before decoding the body, and
 admission checks it again atomically when enqueuing. Only the individual
 searches enter the ordinary DQL scheduler. Internal DQL work such as requery
 and lexical highlight can dispatch while the main DQL worker pool is busy.
 Using DQL workers for the outer request would let a saturated pool of waiting
 parents block their own searches.
+
+The batch reuses `BaseTaskQueue` admission and task ID allocation (without TSO),
+`processTask`, and `TaskCondition`. `PreExecute` checks the execution context and
+sets the batch concurrency; `Execute` prepares and dispatches items within that
+limit, retries, and records outcomes. `PostExecute` finalizes normal results.
+The caller also invokes the same once-only finalization on timeout or
+cancellation, since those paths may skip `PostExecute`. Canceled queued tasks
+release their waiting slot. A running task keeps its worker until outstanding
+searches exit, even if its response has already been delivered. Scheduler close
+cancels the batches and waits for those workers.
 
 An item takes its database from its request, the call's database header or
 metadata, and finally the default database, in that order. It then uses the

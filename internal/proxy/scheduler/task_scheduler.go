@@ -116,14 +116,16 @@ func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, er
 		return nil, queue.admissionQueueFull()
 	}
 	element := queue.unissuedTasks.PushBack(t)
-	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
-	// means "the unissued list is non-empty, wake the scheduler". Concurrent
-	// sends coalesce; the scheduler drains the list on each wake.
+	queue.notify()
+	return element, nil
+}
+
+// notify coalesces wakeups; consumers drain the list or wake the next worker.
+func (queue *BaseTaskQueue) notify() {
 	select {
 	case queue.utBufChan <- 1:
 	default:
 	}
-	return element, nil
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() taskmodel.Task {
@@ -367,14 +369,15 @@ func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
 	if t.IsSubTask() {
 		lane = queue.subTasks
 	}
-	element, err := lane.enqueue(t)
+	return lane.enqueueWithContext(t)
+}
+
+func (queue *BaseTaskQueue) enqueueWithContext(t taskmodel.Task) error {
+	element, err := queue.enqueue(t)
 	if err != nil {
 		return err
 	}
-
-	t.SetOnContextDone(func() {
-		lane.removeUnissuedTask(element)
-	})
+	t.SetOnContextDone(func() { queue.removeUnissuedTask(element) })
 	return nil
 }
 
@@ -469,9 +472,10 @@ func newDqTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DqTaskQueue {
 
 // TaskScheduler schedules the gRPC tasks.
 type TaskScheduler struct {
-	DdQueue *DdTaskQueue
-	DmQueue *DmTaskQueue
-	DqQueue *DqTaskQueue
+	DdQueue      *DdTaskQueue
+	DmQueue      *DmTaskQueue
+	DqQueue      *DqTaskQueue
+	MSearchQueue *MSearchTaskQueue
 
 	// data control queue, use for such as flush operation, which control the data status
 	DcQueue *DdTaskQueue
@@ -495,6 +499,12 @@ func NewTaskScheduler(ctx context.Context,
 	s.DdQueue = newDdTaskQueue(tsoAllocatorIns)
 	s.DmQueue = newDmTaskQueue(tsoAllocatorIns)
 	s.DqQueue = newDqTaskQueue(tsoAllocatorIns)
+	s.MSearchQueue = &MSearchTaskQueue{
+		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
+		ctx:           ctx1,
+		workers:       8,
+	}
+	s.MSearchQueue.SetMaxTaskNum(64)
 
 	s.DcQueue = newDdTaskQueue(tsoAllocatorIns)
 
@@ -679,8 +689,19 @@ func (sched *TaskScheduler) Start() error {
 	go sched.queryLoop(sched.DqQueue.BaseTaskQueue)
 	go sched.queryLoop(sched.DqQueue.subTasks)
 
+	// Fixed workers pop only when free: all waiting batches remain in the
+	// bounded queue, including while canceled execution is still unwinding.
+	sched.wg.Add(sched.MSearchQueue.workers)
+	for range sched.MSearchQueue.workers {
+		go sched.multiSearchLoop()
+	}
+
 	return nil
 }
+
+// Context bounds orchestration tasks by the scheduler's lifetime as well as
+// their caller's context. Close cancels it before waiting for workers.
+func (sched *TaskScheduler) Context() context.Context { return sched.ctx }
 
 func (sched *TaskScheduler) Close() {
 	sched.cancel()

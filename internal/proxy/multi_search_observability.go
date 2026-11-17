@@ -47,7 +47,7 @@ type multiSearchItemProgress struct {
 	deferrals    int
 }
 
-func (b *multiSearchBatch) startAttempt(ctx context.Context, index int, retryReason string) bool {
+func (b *MultiSearchTask) startAttempt(ctx context.Context, index int, retryReason string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.progress == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
@@ -63,7 +63,7 @@ func (b *multiSearchBatch) startAttempt(ctx context.Context, index int, retryRea
 	return true
 }
 
-func (b *multiSearchBatch) recordRejection(index int, reason string) {
+func (b *MultiSearchTask) recordRejection(index int, reason string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.progress == nil {
@@ -78,7 +78,7 @@ func (b *multiSearchBatch) recordRejection(index int, reason string) {
 	}
 }
 
-func (b *multiSearchBatch) startBackoff(ctx context.Context, index int) {
+func (b *MultiSearchTask) startBackoff(ctx context.Context, index int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.progress != nil && contextutil.ErrOrDeadlineExceeded(ctx) == nil {

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -359,11 +360,7 @@ func TestMultiSearchRetriesRateLimitedItem(t *testing.T) {
 func TestMultiSearchRetriesProxyDQLAdmissionOnly(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := NewMultiSearchTestProxy(t, 1, 1)
-		dql, err := scheduler.NewTaskScheduler(t.Context(), nil)
-		require.NoError(t, err)
-		t.Cleanup(dql.Close)
-		dql.DqQueue.SetMaxTaskNum(0)
-		p.sched = dql
+		p.sched.DqQueue.SetMaxTaskNum(0)
 
 		attempts := make(map[string]int)
 		items := []MultiSearchPrepare{
@@ -549,10 +546,15 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		synctest.Wait()
 		require.Equal(t, beforeSuccess+1, testutil.ToFloat64(success))
 		require.Equal(t, beforeTimeout+2, testutil.ToFloat64(timeout))
-		spans := recorder.Ended()
-		require.Len(t, spans, 1)
-		require.Len(t, spans[0].Events(), 3)
-		for i, event := range spans[0].Events() {
+		var batchSpan trace.ReadOnlySpan
+		for _, span := range recorder.Ended() {
+			if span.Name() == "Proxy-MultiSearch" {
+				batchSpan = span
+			}
+		}
+		require.NotNil(t, batchSpan)
+		require.Len(t, batchSpan.Events(), 3)
+		for i, event := range batchSpan.Events() {
 			values := make(map[string]any)
 			for _, attr := range event.Attributes {
 				values[string(attr.Key)] = attr.Value.AsInterface()
@@ -569,4 +571,197 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestMultiSearchTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		release := make(chan struct{})
+		releaseSearch := sync.OnceFunc(func() { close(release) })
+		defer releaseSearch()
+		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Second)},
+			[]MultiSearchPrepare{multiSearchTestPrepare("slow cancellation")},
+			func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				<-ctx.Done()
+				<-release
+				return &milvuspb.SearchResults{Status: merr.Success()}, nil
+			})
+		require.NoError(t, err)
+		require.Equal(t, merr.TimeoutCode, results[0].GetStatus().GetCode())
+
+		started := make(chan struct{}, 1)
+		execute := func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			started <- struct{}{}
+			return &milvuspb.SearchResults{Status: merr.Success()}, nil
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("waiting")}, execute)
+			done <- err
+		}()
+		synctest.Wait()
+		require.Empty(t, started, "a timed-out batch still owns its worker until execution exits")
+		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		_, err = p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("rejected")}, execute)
+		require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+		releaseSearch()
+		require.NoError(t, <-done)
+		require.Len(t, started, 1)
+		require.Equal(t, merr.TimeoutCode, results[0].GetStatus().GetCode())
+	})
+}
+
+func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		release := make(chan struct{})
+		releaseSearch := sync.OnceFunc(func() { close(release) })
+		defer releaseSearch()
+		started := make(chan struct{})
+		running := make(chan error, 1)
+		go func() {
+			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("running")},
+				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					close(started)
+					<-release
+					return &milvuspb.SearchResults{Status: merr.Success()}, nil
+				})
+			running <- err
+		}()
+		<-started
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		queued := make(chan error, 1)
+		prepare := func(context.Context) (*milvuspb.SearchRequest, error) {
+			t.Error("prepared canceled queued batch")
+			return nil, merr.ErrServiceInternal
+		}
+		execute := func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			return &milvuspb.SearchResults{Status: merr.Success()}, nil
+		}
+		go func() {
+			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{prepare}, execute)
+			if len(results) != 0 {
+				t.Error("returned results after parent cancellation")
+			}
+			queued <- err
+		}()
+		synctest.Wait()
+		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		cancel()
+		require.ErrorIs(t, <-queued, context.Canceled)
+		require.NoError(t, p.CheckMultiSearchAdmission())
+		go func() {
+			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("replacement")}, execute)
+			queued <- err
+		}()
+		synctest.Wait()
+		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		releaseSearch()
+		require.NoError(t, <-running)
+		require.NoError(t, <-queued)
+	})
+}
+
+func TestMultiSearchSchedulerCloseCancelsAndWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		release := make(chan struct{})
+		releaseSearch := sync.OnceFunc(func() { close(release) })
+		defer releaseSearch()
+		started := make(chan struct{})
+		canceled := make(chan error, 1)
+		finished := make(chan error, 2)
+		execute := func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			if req.GetCollectionName() != "running" {
+				t.Error("dispatched a queued batch during shutdown")
+				return nil, merr.ErrServiceInternal
+			}
+			close(started)
+			<-ctx.Done()
+			canceled <- ctx.Err()
+			<-release
+			return &milvuspb.SearchResults{Status: merr.Success()}, nil
+		}
+		run := func(name string) {
+			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare(name)}, execute)
+			finished <- err
+		}
+		go run("running")
+		<-started
+		go run("queued")
+		synctest.Wait()
+		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		closed := make(chan struct{})
+		go func() {
+			p.sched.Close()
+			close(closed)
+		}()
+		require.ErrorIs(t, <-canceled, context.Canceled)
+		for range 2 {
+			require.ErrorIs(t, <-finished, merr.ErrServiceUnavailable)
+		}
+		synctest.Wait()
+		require.Empty(t, closed, "Close must wait for canceled execution to exit")
+		require.NoError(t, p.CheckMultiSearchAdmission(), "queued capacity is reclaimed during shutdown")
+		_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("after shutdown")}, execute)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		releaseSearch()
+		<-closed
+	})
+}
+
+func TestMultiSearchTaskIDAllocation(t *testing.T) {
+	for _, outcome := range []string{"success", "allocator unavailable", "budget expires", "scheduler closes"} {
+		t.Run(outcome, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// A nil TSO allocator proves the batch uses the skip-timestamp path.
+				sched, err := scheduler.NewTaskScheduler(t.Context(), nil)
+				require.NoError(t, err)
+				require.NoError(t, sched.Start())
+				t.Cleanup(sched.Close)
+				cache := NewMockCache(t)
+				cache.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
+					switch outcome {
+					case "allocator unavailable":
+						return 0, merr.ErrServiceUnavailable
+					case "scheduler closes":
+						sched.Close()
+						<-ctx.Done()
+						return 0, ctx.Err()
+					case "budget expires":
+						<-ctx.Done()
+						return 0, ctx.Err()
+					default:
+						return 42, nil
+					}
+				}).Once()
+				p := &Proxy{sched: sched}
+				p.setMetaCache(cache)
+				p.UpdateStateCode(commonpb.StateCode_Healthy)
+				prepared := false
+				results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Second)},
+					[]MultiSearchPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
+						prepared = true
+						return &milvuspb.SearchRequest{}, nil
+					}}, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+						return &milvuspb.SearchResults{Status: merr.Success()}, nil
+					})
+				if outcome == "allocator unavailable" || outcome == "scheduler closes" {
+					require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+					require.Empty(t, results)
+				} else {
+					require.NoError(t, err)
+					require.Len(t, results, 1)
+					if outcome == "budget expires" {
+						require.Equal(t, merr.TimeoutCode, results[0].GetStatus().GetCode())
+					} else {
+						require.NoError(t, merr.Error(results[0].GetStatus()))
+					}
+				}
+				require.Equal(t, outcome == "success", prepared)
+				require.NoError(t, p.CheckMultiSearchAdmission())
+			})
+		})
+	}
 }

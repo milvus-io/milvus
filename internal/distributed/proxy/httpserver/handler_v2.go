@@ -98,18 +98,6 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() && h.dqlQueueFull() {
 			err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
-			// admission aborts before wrapperPost, the only ProxyFunctionCall
-			// site for v2 routes, so the rejection is recorded here. The
-			// method comes from the route; db and collection stay empty:
-			// neither authoritative value exists before decode, and a
-			// client-controlled header must not mint or shift per-database
-			// series.
-			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
-				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
-				label, cause := requestutil.ParseMetricLabel(nil, err)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
-			}
 			rejectQueueFullBeforeDecode(c, err)
 			return
 		}
@@ -117,14 +105,16 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 	}
 }
 
-// Admission runs before wrapperPost, so record the request here. Before
-// decoding, neither the database nor the collection is known.
+// Admission aborts before wrapperPost, the only ProxyFunctionCall site for v2
+// routes, so record the rejection here. The method comes from the route; db,
+// collection and resource group stay empty before decode. A client-controlled
+// header must not mint or shift per-database series.
 func rejectQueueFullBeforeDecode(c *gin.Context, err error) {
 	if methodTag, ok := routeToMethod[c.FullPath()]; ok {
 		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
 		label, cause := requestutil.ParseMetricLabel(nil, err)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
 	}
 	rejectQueueFull(c, err)
 }

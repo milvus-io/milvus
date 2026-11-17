@@ -300,7 +300,7 @@ func TestRESTSearchReportsOriginalVectorErrorCause(t *testing.T) {
 			return successfulSearchResult(), nil
 		})
 		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-		rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "default", "ready")
+		rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "default", "ready", "")
 		before := testutil.ToFloat64(rejected)
 		req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", strings.NewReader(
 			`{"collectionName":"ready","annsField":"absent","data":[[1,0]]}`))
@@ -461,16 +461,25 @@ type multiSearchQuotaCall struct {
 
 type multiSearchQuotaLimiter struct {
 	types.Limiter
+	mu        sync.Mutex
 	calls     []multiSearchQuotaCall
 	denyFirst bool
 }
 
 func (l *multiSearchQuotaLimiter) Check(dbID int64, parts map[int64][]int64, rateType internalpb.RateType, nq int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.calls = append(l.calls, multiSearchQuotaCall{dbID, parts, rateType, nq})
 	if l.denyFirst && len(l.calls) == 1 {
 		return merr.WrapErrServiceRateLimit(10)
 	}
 	return nil
+}
+
+func (l *multiSearchQuotaLimiter) snapshot() []multiSearchQuotaCall {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]multiSearchQuotaCall(nil), l.calls...)
 }
 
 func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
@@ -500,7 +509,7 @@ func TestMultiSearchRESTRetryChargesEachAttemptToItsTarget(t *testing.T) {
 		}
 		first := multiSearchQuotaCall{10, map[int64][]int64{11: {12}}, internalpb.RateType_DQLSearch, 2}
 		second := multiSearchQuotaCall{20, map[int64][]int64{21: {22}}, internalpb.RateType_DQLSearch, 3}
-		require.Equal(t, []multiSearchQuotaCall{first, first, second}, limiter.calls)
+		require.Equal(t, []multiSearchQuotaCall{first, first, second}, limiter.snapshot())
 		require.Equal(t, []string{"catalog_a", "catalog_b"}, searched)
 	})
 }
@@ -536,23 +545,27 @@ func (p multiSearchTestQueryNode) Search(_ context.Context, req *querypb.SearchR
 type pendingMultiSearchTestQuery struct {
 	taskmodel.BaseTask
 	*taskmodel.TaskCondition
-	id int64
-	ts uint64
+	id  int64
+	ts  uint64
+	run func(context.Context) error
 }
 
-func (t *pendingMultiSearchTestQuery) TraceCtx() context.Context { return t.Ctx() }
-func (*pendingMultiSearchTestQuery) Name() string                { return taskmodel.QueryTaskName }
-func (*pendingMultiSearchTestQuery) Type() commonpb.MsgType      { return commonpb.MsgType_Retrieve }
-func (t *pendingMultiSearchTestQuery) ID() int64                 { return t.id }
-func (t *pendingMultiSearchTestQuery) SetID(id int64)            { t.id = id }
-func (t *pendingMultiSearchTestQuery) BeginTs() uint64           { return t.ts }
-func (t *pendingMultiSearchTestQuery) EndTs() uint64             { return t.ts }
-func (t *pendingMultiSearchTestQuery) SetTs(ts uint64)           { t.ts = ts }
-func (*pendingMultiSearchTestQuery) OnEnqueue() error            { return nil }
-func (*pendingMultiSearchTestQuery) PreExecute(context.Context) error {
-	return merr.WrapErrServiceInternalMsg("queue filler should have been removed before starting the scheduler")
+func (t *pendingMultiSearchTestQuery) TraceCtx() context.Context      { return t.Ctx() }
+func (*pendingMultiSearchTestQuery) Name() string                     { return taskmodel.QueryTaskName }
+func (*pendingMultiSearchTestQuery) Type() commonpb.MsgType           { return commonpb.MsgType_Retrieve }
+func (t *pendingMultiSearchTestQuery) ID() int64                      { return t.id }
+func (t *pendingMultiSearchTestQuery) SetID(id int64)                 { t.id = id }
+func (t *pendingMultiSearchTestQuery) BeginTs() uint64                { return t.ts }
+func (t *pendingMultiSearchTestQuery) EndTs() uint64                  { return t.ts }
+func (t *pendingMultiSearchTestQuery) SetTs(ts uint64)                { t.ts = ts }
+func (*pendingMultiSearchTestQuery) OnEnqueue() error                 { return nil }
+func (*pendingMultiSearchTestQuery) PreExecute(context.Context) error { return nil }
+func (t *pendingMultiSearchTestQuery) Execute(ctx context.Context) error {
+	if t.run != nil {
+		return t.run(ctx)
+	}
+	return nil
 }
-func (*pendingMultiSearchTestQuery) Execute(context.Context) error     { return nil }
 func (*pendingMultiSearchTestQuery) PostExecute(context.Context) error { return nil }
 
 func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
@@ -561,6 +574,7 @@ func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
 		for key, value := range map[string]string{
 			params.QuotaConfig.QuotaAndLimitsEnabled.Key: "true",
 			params.CommonCfg.AuthorizationEnabled.Key:    "false",
+			params.ProxyCfg.MaxTaskNum.Key:               "1",
 			params.ProxyCfg.EnableAutoLoad.Key:           "false",
 			params.HTTPCfg.DQLAdmissionEnabled.Key:       "true",
 		} {
@@ -588,9 +602,30 @@ func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
 
 		p := proxy.NewMultiSearchTestProxy(t, 1, 1)
 		searched := make(chan *querypb.SearchRequest, 2)
-		sched := proxy.AddMultiSearchDQLSchedulerForTest(t, p, cache, multiSearchTestShardPolicy{node: multiSearchTestQueryNode{searched: searched}})
-		sched.DqQueue.SetMaxTaskNum(1)
-		require.NoError(t, sched.DqQueue.Enqueue(&pendingMultiSearchTestQuery{TaskCondition: taskmodel.NewTaskCondition(t.Context())}))
+		sched := proxy.SetMultiSearchSearchDependenciesForTest(p, cache, multiSearchTestShardPolicy{node: multiSearchTestQueryNode{searched: searched}})
+		started := make(chan struct{})
+		release := make(chan struct{})
+		releaseQueries := sync.OnceFunc(func() { close(release) })
+		defer releaseQueries()
+		running := &pendingMultiSearchTestQuery{
+			TaskCondition: taskmodel.NewTaskCondition(t.Context()),
+			run: func(ctx context.Context) error {
+				close(started)
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+		}
+		require.NoError(t, sched.DqQueue.Enqueue(running))
+		<-started
+		dispatching := &pendingMultiSearchTestQuery{TaskCondition: taskmodel.NewTaskCondition(t.Context())}
+		require.NoError(t, sched.DqQueue.Enqueue(dispatching))
+		synctest.Wait() // The DQL dispatcher is now waiting for its occupied worker.
+		queued := &pendingMultiSearchTestQuery{TaskCondition: taskmodel.NewTaskCondition(t.Context())}
+		require.NoError(t, sched.DqQueue.Enqueue(queued))
 		require.True(t, p.IsDQLQueueFull())
 		require.NoError(t, p.CheckMultiSearchAdmission())
 
@@ -610,16 +645,19 @@ func TestMultiSearchRESTRetriesFullDQLQueue(t *testing.T) {
 		// enqueue in the full queue and reached its backoff.
 		synctest.Wait()
 		charge := multiSearchQuotaCall{10, map[int64][]int64{11: {12}}, internalpb.RateType_DQLSearch, 2}
-		require.Equal(t, []multiSearchQuotaCall{charge}, limiter.calls)
+		require.Equal(t, []multiSearchQuotaCall{charge}, limiter.snapshot())
 		require.Empty(t, searched)
 		require.Empty(t, done)
 
-		require.EqualValues(t, 1, sched.ClearDQLQueue("query", "release the DQL queue").QueuedCleared)
+		releaseQueries()
+		synctest.Wait()
 		require.False(t, p.IsDQLQueueFull())
-		require.NoError(t, sched.Start())
 		<-done
+		for _, task := range []*pendingMultiSearchTestQuery{running, dispatching, queued} {
+			require.NoError(t, task.WaitToFinish())
+		}
 		require.Equal(t, 200*time.Millisecond, time.Since(start))
-		require.Equal(t, []multiSearchQuotaCall{charge, charge}, limiter.calls)
+		require.Equal(t, []multiSearchQuotaCall{charge, charge}, limiter.snapshot())
 		require.Len(t, searched, 1)
 		search := (<-searched).GetReq()
 		require.Equal(t, int64(11), search.GetCollectionID())

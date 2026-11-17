@@ -298,3 +298,124 @@ func TestTaskScheduler_QueryLoopContextDoneBeforeExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskScheduler_MultiSearchAndNestedDQLMakeProgress(t *testing.T) {
+	sched := newSingleWorkerDQLScheduler(t)
+	sched.MSearchQueue.workers = 1
+	sched.MSearchQueue.SetMaxTaskNum(1)
+	sched.DqQueue.SetMaxTaskNum(2)
+	require.NoError(t, sched.Start())
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	searchStarted := make(chan struct{})
+	batchDispatched := make(chan struct{})
+	nested := make(chan string, 2)
+	search := &queryLoopTestTask{
+		mockDqlTask: newMockDqlTask(ctx),
+		notified:    make(chan error, 1),
+		execute: func(ctx context.Context) error {
+			close(searchStarted)
+			select {
+			case <-batchDispatched:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			for _, name := range []string{taskmodel.QueryTaskName, "Highlight"} {
+				task := &queryLoopTestTask{
+					mockDqlTask: newMockDqlTask(ctx), subTask: true,
+					notified: make(chan error, 1),
+					execute:  func(context.Context) error { nested <- name; return nil },
+				}
+				task.name = name
+				if err := sched.DqQueue.Enqueue(task); err != nil {
+					return err
+				}
+				if err := task.WaitToFinish(); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	require.NoError(t, sched.DqQueue.Enqueue(search))
+	select {
+	case <-searchStarted:
+	case <-ctx.Done():
+		t.Fatal("ordinary Search did not occupy the DQL worker")
+	}
+	waiting := newMockDqlTask(ctx)
+	require.NoError(t, sched.DqQueue.Enqueue(waiting))
+	batch := &queryLoopTestTask{
+		mockDqlTask: newMockDqlTask(ctx),
+		notified:    make(chan error, 1),
+		execute: func(ctx context.Context) error {
+			child := newMockDqlTask(ctx)
+			if err := sched.DqQueue.Enqueue(child); err != nil {
+				return err
+			}
+			close(batchDispatched)
+			return child.WaitToFinish()
+		},
+	}
+	batch.name = "MultiSearchTask"
+	require.NoError(t, sched.MSearchQueue.Enqueue(batch))
+	require.NoError(t, batch.WaitToFinish(), "batch dispatch must not need the saturated DQL worker")
+	require.NoError(t, search.WaitToFinish())
+	require.NoError(t, waiting.WaitToFinish())
+	require.Equal(t, taskmodel.QueryTaskName, <-nested)
+	require.Equal(t, "Highlight", <-nested)
+	require.EqualValues(t, 1, batch.preExecuteCalls.Load())
+	require.EqualValues(t, 1, batch.executeCalls.Load())
+	require.EqualValues(t, 1, batch.postExecuteCalls.Load())
+}
+
+func TestTaskScheduler_MultiSearchWakesAllWorkers(t *testing.T) {
+	const workers, capacity = 3, 4
+	sched, err := NewTaskScheduler(t.Context(), newMockTsoAllocator(), WithMultiSearchQueue(capacity, workers))
+	require.NoError(t, err)
+	t.Cleanup(sched.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	releaseWorkers := sync.OnceFunc(func() { close(release) })
+	defer releaseWorkers()
+	started := make(chan struct{}, workers)
+	var tasks []taskmodel.Task
+	// Enqueue the burst before Start so the notifier has coalesced to one token.
+	for range workers {
+		task := &queryLoopTestTask{
+			mockDqlTask: newMockDqlTask(ctx),
+			notified:    make(chan error, 1),
+			execute: func(ctx context.Context) error {
+				started <- struct{}{}
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+		}
+		require.NoError(t, sched.MSearchQueue.Enqueue(task))
+		tasks = append(tasks, task)
+	}
+	require.NoError(t, sched.Start())
+	for range workers {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("coalesced notifications did not wake every available batch worker")
+		}
+	}
+	for range capacity {
+		task := newMockDqlTask(ctx)
+		require.NoError(t, sched.MSearchQueue.Enqueue(task))
+		tasks = append(tasks, task)
+	}
+	require.ErrorIs(t, sched.MSearchQueue.Enqueue(newMockDqlTask(ctx)), merr.ErrServiceTooManyRequests)
+	releaseWorkers()
+	for _, task := range tasks {
+		require.NoError(t, task.WaitToFinish())
+	}
+}
