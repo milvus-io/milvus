@@ -102,7 +102,8 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 			// historical WAL entries remain subject to normal WAL retention.
 			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
 			for _, option := range job.GetOptions() {
-				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI {
+				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI &&
+					!importutilv2.IsSourceStorageOption(option.GetKey()) {
 					options = append(options, option)
 				}
 			}
