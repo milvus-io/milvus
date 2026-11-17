@@ -315,5 +315,5 @@ func (c *viewQueryClientImpl) queryAllShards(
 }
 
 func (c *viewQueryClientImpl) Close() {
-	c.shardClient.replicas.Close()
+	c.shardClient.Close()
 }

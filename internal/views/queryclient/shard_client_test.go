@@ -14,7 +14,6 @@ import (
 )
 
 func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
-	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	mvcc := &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      100,
@@ -73,7 +72,6 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 }
 
 func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
-	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	planClient := &fakeQueryPlanClient{
 		plan: newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{
@@ -105,7 +103,6 @@ func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
 }
 
 func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
-	setupTestReplicaRouting(t)
 	vchannel := "by-dev-rootcoord-dml_0_100v0"
 	primaryShardID := qviews.ShardID{ReplicaID: 1, VChannel: vchannel}
 	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(primaryShardID, &viewpb.QueryPlanMVCC{
@@ -130,10 +127,9 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The client always targets the primary replica: the plan request carries
-	// the primary shard ID and strong consistency is satisfied by the primary's
-	// WAL directly, without a cross-replica MVCC round trip.
-	require.Equal(t, primaryShardID.IntoProto(), planClient.planReq.GetShardId())
+	// Strong consistency targets the WAL owner, which selects the replica;
+	// it needs no cross-replica MVCC round trip.
+	require.Equal(t, (qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}).IntoProto(), planClient.planReq.GetShardId())
 	require.Equal(t, commonpb.ConsistencyLevel_Strong, planClient.planReq.GetConsistencyLevel())
 	require.Nil(t, planClient.planReq.GetQueryPlanMvcc())
 	require.Equal(t, 0, planClient.mvccReqCount)

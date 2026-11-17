@@ -68,7 +68,7 @@ type legacyOnlyClient struct {
 	legacy *legacyClient
 }
 
-func (c *legacyOnlyClient) Close() { c.legacy.shardClient.replicas.Close() }
+func (c *legacyOnlyClient) Close() { c.legacy.shardClient.Close() }
 
 func (c *legacyOnlyClient) Legacy() LegacyClient {
 	return c.legacy

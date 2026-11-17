@@ -41,8 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -512,14 +510,8 @@ func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest
 }
 
 type dqlRetryPlanClient struct {
-	replicas wal.ReplicaWatchStream
-	ctx      context.Context
 	queryclient.QueryPlanClient
 	client viewpb.QueryPlanServiceClient
-}
-
-func (c *dqlRetryPlanClient) SubscribeReplicas(vc string, h wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
-	return c.replicas.Subscribe(c.ctx, vc, h)
 }
 
 func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
@@ -566,13 +558,9 @@ func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfo
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	directory := snview.NewReplicaDirectoryForTest()
-	directory.Set("v0", 1, &qviews.QueryViewVersion{}, false)
-	stream := directory.AcquireStream(t.Context(), funcutil.ToPhysicalChannel("v0"), nil)
-	t.Cleanup(func() { stream.Close(); directory.Close() })
 	client := &dqlRetryClient{server: server}
 	client.Client = queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{LoadInfoClient: loadInfo},
-		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn), replicas: stream, ctx: t.Context()},
+		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn)},
 		&dqlRetryServiceClient{client: viewpb.NewViewQueryServiceClient(conn)}, client)
 	t.Cleanup(client.Close)
 	return client

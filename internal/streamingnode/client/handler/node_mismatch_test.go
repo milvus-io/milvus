@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	streaminginterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -287,20 +286,6 @@ type recordingQueryPlanClient struct {
 	QueryViewClient
 	codes []codes.Code
 }
-
-func (c *recordingQueryPlanClient) SubscribeReplicas(_ string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
-	subscription := staticReplicaSubscription{}
-	handler(subscription.Snapshot())
-	return subscription, nil
-}
-
-type staticReplicaSubscription struct{}
-
-func (staticReplicaSubscription) Snapshot() qviews.ReplicaSnapshot {
-	return qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 22}}}
-}
-
-func (staticReplicaSubscription) Close() error { return nil }
 
 func (c *recordingQueryPlanClient) GetQueryPlan(ctx context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	resp, err := c.QueryViewClient.GetQueryPlan(ctx, shard, req)

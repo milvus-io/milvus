@@ -18,12 +18,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // shardViewQueryClient executes two-phase queries at the shard granularity.
-// It owns replica resolution, consistency routing, Phase 1 (GetQueryPlan),
+// It owns consistency routing, Phase 1 (GetQueryPlan),
 // Phase 2 (SearchOnView/QueryOnView) dispatch, and shard-level retry.
 //
 // Both Search and Query share the same executeShard framework, differing only
@@ -32,7 +33,8 @@ type shardViewQueryClient struct {
 	queryHook          optimizers.QueryHook
 	maxRetries         int
 	loadChecks         *collectionLoadChecks
-	replicas           *replicaRouter
+	ctx                context.Context
+	cancel             context.CancelFunc
 	queryPlanClient    QueryPlanClient
 	queryServiceClient ViewQueryServiceClient
 }
@@ -42,14 +44,20 @@ func newShardViewQueryClient(
 	queryPlanClient QueryPlanClient,
 	queryServiceClient ViewQueryServiceClient,
 ) *shardViewQueryClient {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &shardViewQueryClient{
 		maxRetries:         maxRetries,
 		loadChecks:         newCollectionLoadChecks(nil),
-		replicas:           newReplicaRouter(queryPlanClient),
+		ctx:                ctx,
+		cancel:             cancel,
 		queryPlanClient:    queryPlanClient,
 		queryServiceClient: queryServiceClient,
 	}
 }
+
+func (s *shardViewQueryClient) Close() { s.cancel() }
+
+const shardRetryInterval = 100 * time.Millisecond
 
 // ShardSearchRequest contains the parameters for a shard-level search execution.
 type ShardSearchRequest struct {
@@ -71,7 +79,7 @@ type ShardQueryRequest struct {
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
-// Replica resolution is handled internally. Results are fed into the provided reducer.
+// StreamingNode selects the replica. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
 	var stage twoStageSearch
@@ -115,7 +123,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 }
 
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
-// Replica resolution is handled internally. Results are fed into the provided reducer.
+// StreamingNode selects the replica. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
@@ -178,16 +186,20 @@ type shardExecParams struct {
 }
 
 // executeShard runs Phase 1 + Phase 2 for a single shard with retry.
-// Candidates come from the WAL owner directory. GetQueryPlan selects the
-// exact-schema View within the explicitly selected replica.
+// GetQueryPlan selects a replica and its exact-schema View on the WAL owner.
 //
 // Shard-level retry handles ViewErrors (view invalidated, not found, etc.).
-// Transport unavailability also restarts the shard on another candidate.
+// Transport unavailability also asks the WAL owner to replan the shard.
 func (s *shardViewQueryClient) executeShard(
 	ctx context.Context,
 	vchannel string,
 	params *shardExecParams,
 ) (*ShardPlan, error) {
+	if err := s.ctx.Err(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := contextutil.MergeContext(ctx, s.ctx)
+	defer cancel()
 	var lastErr error
 	var loadCheck *collectionLoadCheck
 	defer func() {
@@ -201,39 +213,50 @@ func (s *shardViewQueryClient) executeShard(
 		}
 		return loadCheck.check(ctx)
 	}
-	route, err := s.replicas.route(vchannel)
-	if err != nil {
-		return nil, err
-	}
-	tried := make(map[qviews.Replica]bool)
+	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
 	deadNodes := make(map[int64]struct{})
 	var sessionChanged <-chan struct{}
 	for attempt := 0; ; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if s.maxRetries > 0 && attempt >= s.maxRetries && !route.hasUntried(tried) {
+		if s.maxRetries > 0 && attempt >= s.maxRetries {
 			return nil, lastErr
 		}
-
-		candidate, sessionsUpdated, err := route.nextReplica(ctx, tried, sessionChanged, checkLoad)
-		if sessionsUpdated {
+		if lastErr != nil {
+			timer := time.NewTimer(shardRetryInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-sessionChanged:
+			case <-timer.C:
+			}
+			timer.Stop()
+		}
+		select {
+		case <-sessionChanged:
 			clear(deadNodes)
-			clear(tried)
 			sessionChanged = nil
-			attempt--
-			continue
+		default:
 		}
-		if err != nil {
-			return nil, err
-		}
-		tried[candidate] = false
-		targetShardID := qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: vchannel}
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
+			if viewerror.AsViewError(err).IsViewNotFound() {
+				// Absence of a usable View does not prove the collection is
+				// unloaded. Confirm current load intent with Coordinator.
+				if _, checkErr := checkLoad(ctx); checkErr != nil {
+					return nil, checkErr
+				}
+				// Loaded collections may still be preparing/recovering. Keep
+				// waiting under the caller deadline, with bounded polling.
+				lastErr = err
+				attempt--
+				continue
+			}
 			if retryableQueryError(err) {
 				lastErr = err
 				continue
@@ -245,8 +268,8 @@ func (s *shardViewQueryClient) executeShard(
 		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
 			return nil, err
 		}
-		// A newer advertised version does not certify removal of a dead QN.
-		// Recheck the actual exact-schema plan before accepting inline results.
+		// Replanning does not certify removal of a dead QN. Recheck the
+		// actual plan before accepting inline results or dispatching workers.
 		blocked := false
 		for _, worker := range plan.GetWorkNodes() {
 			if qn := worker.GetQueryNode(); qn != nil {
@@ -257,7 +280,6 @@ func (s *shardViewQueryClient) executeShard(
 			}
 		}
 		if blocked {
-			tried[candidate] = true
 			continue
 		}
 		if params.consumeResponse != nil {
@@ -287,7 +309,6 @@ func (s *shardViewQueryClient) executeShard(
 						if missingSession && sessionChanged == nil {
 							sessionChanged = sessionError.Changed
 						}
-						tried[candidate] = true
 					}
 				}
 				params.resetShard(shardID)

@@ -478,19 +478,6 @@ message QueryPayloadReuse {
     repeated QueryPayloadReuse sub_requests = 3;
 }
 
-message VChannelReplicas {
-    string vchannel = 1;
-    // Complete replacement, including an empty set. Does not certify QN health
-    // or the availability of a particular schema version.
-    repeated Replica replicas = 2;
-
-    // VChannel plus replica_id identifies the shard. No full View is replicated.
-    message Replica {
-        int64 replica_id = 1;
-        QueryViewVersion max_up_view_version = 2;
-    }
-}
-
 // Phase 1 response metadata used only for client-side payload restoration and
 // search optimization. Worker execution receives the restored/optimized request.
 message QueryPlanClientOptimizeInfo {

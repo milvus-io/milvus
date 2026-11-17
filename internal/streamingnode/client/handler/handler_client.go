@@ -119,8 +119,6 @@ type HandlerClient interface {
 	// AcquireTransformLogStream creates a PChannel-level transform event stream.
 	AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
 
-	AcquireReplicaWatchStream(ctx context.Context, pchannel string) (wal.ReplicaWatchStream, error)
-
 	// QueryViewSyncClient returns the QueryView sync domain client.
 	QueryViewSyncClient() QueryViewSyncClient
 	// QueryViewClient returns the QueryView domain client.
@@ -128,8 +126,7 @@ type HandlerClient interface {
 
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
-	// Close producers and consumers before closing the handler client. Replica discovery
-	// and its shared callback dispatchers are closed automatically.
+	// Close producers and consumers before closing the handler client.
 	Close()
 }
 
