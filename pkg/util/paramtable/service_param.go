@@ -488,6 +488,9 @@ type TiKVConfig struct {
 	TiKVTLSCert      ParamItem          `refreshable:"false"`
 	TiKVTLSKey       ParamItem          `refreshable:"false"`
 	TiKVTLSCACert    ParamItem          `refreshable:"false"`
+	GCEnabled        ParamItem          `refreshable:"true"`
+	GCLifeTime       ParamItem          `refreshable:"true"`
+	GCInterval       ParamItem          `refreshable:"true"`
 }
 
 func (p *TiKVConfig) Init(base *BaseTable) {
@@ -601,6 +604,34 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 		Export:      true,
 	}
 	p.TiKVTLSCACert.Init(base.mgr)
+
+	p.GCEnabled = ParamItem{
+		Key:          "tikv.gc.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether MixCoord advances the GC safe point of the TiKV cluster, so that TiKV reclaims old versions of metadata keys.
+Enable it only on a dedicated TiKV cluster whose garbage collection is managed by Milvus.`,
+		Export: true,
+	}
+	p.GCEnabled.Init(base.mgr)
+
+	p.GCLifeTime = ParamItem{
+		Key:          "tikv.gc.lifeTime",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc:          "seconds, how long TiKV keeps an overwritten or deleted version of a metadata key. A transaction that lasts longer fails.",
+		Export:       true,
+	}
+	p.GCLifeTime.Init(base.mgr)
+
+	p.GCInterval = ParamItem{
+		Key:          "tikv.gc.interval",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc:          "seconds, how often MixCoord advances the TiKV GC safe point",
+		Export:       true,
+	}
+	p.GCInterval.Init(base.mgr)
 }
 
 type LocalStorageConfig struct {
