@@ -30,6 +30,14 @@ getGlobalCPUExecutor();
 folly::CPUThreadPoolExecutor*
 getSearchCPUExecutor();
 
+// Search child work runs separately from SEARCH and storage load pools.
+folly::CPUThreadPoolExecutor*
+getSearchFanoutCPUExecutor();
+
+// Create the pool if needed, then resize it using CPU_NUM * coefficient.
+void
+setSearchFanoutThreadCoreCoefficient(float coefficient);
+
 folly::CPUThreadPoolExecutor*
 getLoadCPUExecutor();
 
