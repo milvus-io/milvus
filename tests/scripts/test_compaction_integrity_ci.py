@@ -180,6 +180,7 @@ def test_execution_guard_is_scoped_to_integrity_workloads(marked, opt_in, worker
                 "--tags",
                 "CompactionIntegrityUnit",
                 "--",
+                "common/compaction_index_readiness_helper_tests.py",
                 "milvus_client/compaction_integrity_helper_tests.py",
                 "milvus_client/test_milvus_client_data_integrity.py",
                 "milvus_client/test_milvus_client_continuous_data_integrity.py",

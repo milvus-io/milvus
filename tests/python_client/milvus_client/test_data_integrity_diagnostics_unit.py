@@ -32,6 +32,9 @@ def test_data_integrity_diagnostics_unit_default_entrypoint_emits_without_log_ov
     env.pop("DATA_INTEGRITY_DIAGNOSTICS_PATH", None)
     env.pop("PYTEST_ADDOPTS", None)
     env.pop("PYTHONPATH", None)
+    # The nested entrypoint runs serially and must generate its own final report.
+    for variable in ("PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"):
+        env.pop(variable, None)
     result = subprocess.run(
         [
             "bash",
