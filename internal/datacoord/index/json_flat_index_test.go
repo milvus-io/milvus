@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -137,7 +138,7 @@ func TestJSONFlatIndexColdTaskResolution(t *testing.T) {
 	for _, inProgress := range []bool{false, true} {
 		t.Run(map[bool]string{false: "dispatch", true: "poll"}[inProgress], func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+			catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(nil).Once()
 			m := NewSegmentIndexMeta(catalog)
 			putJSONFlatTestIndex(m, jsonFlatDefinition())
 			job := &model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, NodeID: 20, IndexState: commonpb.IndexState_Unissued}
@@ -148,16 +149,21 @@ func TestJSONFlatIndexColdTaskResolution(t *testing.T) {
 			handler := meta.NewNMockHandler(t)
 			handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{ID: 1, Schema: jsonFlatTestSchema()}, nil)
 			worker := session.NewMockCluster(t)
-			build := newIndexBuildTask(model.CloneSegmentIndex(job), 1, &meta.Meta{}, m, handler, nil, nil)
+			mt := &meta.Meta{IndexCatalog: m, Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](), Segments: meta.NewSegmentsInfo()}
+			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
+			build := newIndexBuildTask(model.CloneSegmentIndex(job), 1, mt, m, handler, nil, nil)
+			// Unissued retries can still own worker state; both paths must cancel it.
+			worker.EXPECT().DropIndex(int64(20), int64(1000)).Return(nil).Once()
 			if inProgress {
-				worker.EXPECT().DropIndex(int64(20), int64(1000)).Return(nil)
 				build.QueryTaskOnWorker(worker)
 			} else {
 				build.CreateTaskOnWorker(20, worker)
 			}
-			persisted, ok := m.GetIndexJob(1000)
-			require.True(t, ok)
-			assert.Equal(t, commonpb.IndexState_Failed, persisted.IndexState)
+			_, ok := m.GetIndexJob(1000)
+			require.False(t, ok)
+			assert.Empty(t, m.GetAllSegmentIndexes(100))
+			assert.Equal(t, commonpb.IndexState(indexpb.JobState_JobStateNone), build.IndexState)
+			assert.Len(t, m.GetIndexesForCollection(1, ""), 1)
 		})
 	}
 }
@@ -170,7 +176,9 @@ func TestJSONFlatIndexColdTaskDefersWhenSchemaUnavailable(t *testing.T) {
 	handler := meta.NewNMockHandler(t)
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(nil, merr.ErrServiceNotReady).Times(3)
 	worker := session.NewMockCluster(t)
-	build := newIndexBuildTask(model.CloneSegmentIndex(job), 1, &meta.Meta{}, m, handler, nil, nil)
+	mt := &meta.Meta{IndexCatalog: m, Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](), Segments: meta.NewSegmentsInfo()}
+	mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
+	build := newIndexBuildTask(model.CloneSegmentIndex(job), 1, mt, m, handler, nil, nil)
 	build.CreateTaskOnWorker(20, worker)
 	build.QueryTaskOnWorker(worker)
 	require.ErrorIs(t, build.setJobInfo(&workerpb.IndexTaskInfo{BuildID: 1000, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"late-file"}}), merr.ErrServiceNotReady)

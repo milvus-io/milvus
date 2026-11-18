@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -340,11 +339,7 @@ func (i *IndexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {
-			// Recover only the deprecation failure emitted by earlier revisions;
-			// ordinary build failures must retain their original meaning.
-			deprecatedFailure := segIndex.IndexState == commonpb.IndexState_Failed &&
-				segIndex.FailReason == indexparams.JSONFlatIndexDeprecationReason
-			if segIndex.IsDeleted || (!deprecatedFailure && segIndex.IndexState != commonpb.IndexState_Unissued &&
+			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {
 				continue
@@ -363,14 +358,8 @@ func (i *IndexInspector) reloadFromMeta() {
 			fieldSize := i.estimateIndexFieldSize(i.ctx, i.meta.GetCollection(segment.GetCollectionID()), segment, fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, segment.GetNumOfRows(), indexParams)
 
-			recovered := model.CloneSegmentIndex(segIndex)
-			if deprecatedFailure {
-				// Retry enters the polling queue, including when no worker has
-				// free slots. The guard waits for schema visibility before cleanup.
-				recovered.IndexState = commonpb.IndexState_Retry
-			}
 			i.scheduler.Enqueue(newIndexBuildTask(
-				recovered,
+				segIndex,
 				taskSlot,
 				i.meta,
 				i.indexMeta,

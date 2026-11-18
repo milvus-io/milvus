@@ -63,7 +63,7 @@ func TestJSONFlatRetirementRetriesAndRestarts(t *testing.T) {
 	for range 2 {
 		running.QueryTaskOnWorker(worker)
 		got, _ := m.GetIndexJob(1000)
-		assert.Equal(t, original, got)
+		assert.Equal(t, model.CloneSegmentIndex(original), got)
 		assert.Equal(t, commonpb.IndexState_InProgress, running.IndexState)
 	}
 	catalog.AssertNumberOfCalls(t, "DropSegmentIndex", 1)
@@ -99,40 +99,32 @@ func TestJSONFlatRetirementPreservesArtifactOwnership(t *testing.T) {
 			m.updateSegmentIndex(model.CloneSegmentIndex(original))
 			require.NoError(t, m.retireJSONFlatTask(1000))
 			got, _ := m.GetIndexJob(1000)
-			assert.Equal(t, original, got)
+			assert.Equal(t, model.CloneSegmentIndex(original), got)
 		})
 	}
 }
 
-func TestJSONFlatRecoversOnlyDeprecationFailure(t *testing.T) {
-	for _, reason := range []string{indexparams.JSONFlatIndexDeprecationReason, "real build failure"} {
-		t.Run(reason, func(t *testing.T) {
-			catalog := catalogmocks.NewDataCoordCatalog(t)
-			m := NewSegmentIndexMeta(catalog)
+func TestJSONFlatRetirementPreservesTerminalTasks(t *testing.T) {
+	for _, state := range []commonpb.IndexState{commonpb.IndexState_Finished, commonpb.IndexState_Failed} {
+		t.Run(state.String(), func(t *testing.T) {
+			m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
 			m.getCollectionSchema = func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() }
 			putJSONFlatTestIndex(m, jsonFlatDefinition())
-			m.updateSegmentIndex(&model.SegmentIndex{
+			original := &model.SegmentIndex{
 				CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
-				IndexState: commonpb.IndexState_Failed, FailReason: reason,
-			})
+				IndexState: state, FailReason: indexparams.JSONFlatIndexDeprecationReason,
+			}
+			m.updateSegmentIndex(model.CloneSegmentIndex(original))
 			mt := &meta.Meta{IndexCatalog: m, Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](), Segments: meta.NewSegmentsInfo()}
 			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
+			// Terminal records without files are neither recovered nor retired,
+			// even when their reason happens to match the API deprecation hint.
 			scheduler := task.NewMockGlobalScheduler(t)
-			var recovered *indexBuildTask
-			if reason == indexparams.JSONFlatIndexDeprecationReason {
-				scheduler.EXPECT().Enqueue(mock.Anything).Run(func(value task.Task) { recovered = value.(*indexBuildTask) }).Once()
-				catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(nil).Once()
-			}
-			(&IndexInspector{meta: mt, indexMeta: m, scheduler: scheduler}).reloadFromMeta()
-			if reason != indexparams.JSONFlatIndexDeprecationReason {
-				assert.Nil(t, recovered)
-				return
-			}
-			require.NotNil(t, recovered)
-			recovered.QueryTaskOnWorker(session.NewMockCluster(t))
-			_, ok := m.GetIndexJob(1000)
-			assert.False(t, ok)
-			assert.Equal(t, commonpb.IndexState(indexpb.JobState_JobStateNone), recovered.IndexState)
+			(&IndexInspector{ctx: context.Background(), meta: mt, indexMeta: m, scheduler: scheduler}).reloadFromMeta()
+			require.NoError(t, m.retireJSONFlatTask(1000))
+			got, ok := m.GetIndexJob(1000)
+			require.True(t, ok)
+			assert.Equal(t, model.CloneSegmentIndex(original), got)
 		})
 	}
 }
