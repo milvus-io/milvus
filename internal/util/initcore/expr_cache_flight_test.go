@@ -17,6 +17,7 @@
 package initcore
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -75,6 +77,69 @@ func TestExprCacheFlightConfigValidation(t *testing.T) {
 			require.NoError(t, pt.Save(pt.QueryNodeCfg.ExprResCacheSingleFlightMaxWaitMs.Key, value))
 			_, err := readExprCacheFlightConfig(pt)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestExprCacheFlightInvalidStartupConfig(t *testing.T) {
+	for _, cacheEnabled := range []string{"false", "true"} {
+		for _, flightEnabled := range []string{"false", "true"} {
+			for _, invalid := range []struct {
+				name, value string
+			}{
+				{"enabled", "bad"},
+				{"maxWaitMs", "0"},
+				{"maxWaitMs", "60001"},
+				{"maxFlights", "-1"},
+				{"maxWaiters", "bad"},
+				{"maxWaitersPerKey", "9223372036854775808"},
+			} {
+				t.Run(cacheEnabled+"/"+flightEnabled+"/"+invalid.name+"/"+invalid.value, func(t *testing.T) {
+					pt := &paramtable.ComponentParam{}
+					pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+					require.NoError(t, pt.Save(pt.QueryNodeCfg.ExprResCacheEnabled.Key, cacheEnabled))
+					enabledKey := pt.QueryNodeCfg.ExprResCacheSingleFlightEnabled.Key
+					require.NoError(t, pt.Save(enabledKey, flightEnabled))
+					key := "queryNode.exprCache.singleFlight." + invalid.name
+					require.NoError(t, pt.Save(key, invalid.value))
+
+					var applied []exprCacheFlightConfig
+					require.NoError(t, registerExprCacheFlightConfig(t.Context(), pt, func(cfg exprCacheFlightConfig) error {
+						applied = append(applied, cfg)
+						return nil
+					}))
+					require.Len(t, applied, 1)
+					assert.False(t, applied[0].enabled)
+					assert.Equal(t, cacheEnabled, pt.QueryNodeCfg.ExprResCacheEnabled.GetValue())
+
+					// Watchers remain registered after an invalid startup configuration.
+					require.NoError(t, pt.Remove(key))
+					require.Len(t, applied, 2)
+					assert.Equal(t, pt.QueryNodeCfg.ExprResCacheSingleFlightEnabled.GetAsBool(), applied[1].enabled)
+					assert.Equal(t, cacheEnabled, pt.QueryNodeCfg.ExprResCacheEnabled.GetValue())
+				})
+			}
+		}
+	}
+}
+
+func TestExprCacheFlightStartupApplyFailure(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		t.Run(strconv.FormatBool(invalid), func(t *testing.T) {
+			pt := &paramtable.ComponentParam{}
+			pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			if invalid {
+				require.NoError(t, pt.Save(pt.QueryNodeCfg.ExprResCacheSingleFlightMaxWaitMs.Key, "0"))
+			}
+			applyErr := merr.WrapErrServiceInternalMsg("configuration apply failed")
+			err := registerExprCacheFlightConfig(t.Context(), pt, func(cfg exprCacheFlightConfig) error {
+				return applyErr
+			})
+			require.ErrorIs(t, err, applyErr)
+			assert.Equal(t, merr.Code(applyErr), merr.Code(err))
+			if invalid {
+				assert.ErrorContains(t, err, "disable expression single-flight after invalid configuration")
+			}
 		})
 	}
 }

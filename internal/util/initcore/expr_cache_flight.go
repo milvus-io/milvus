@@ -89,11 +89,12 @@ func registerExprCacheFlightConfig(ctx context.Context, pt *paramtable.Component
 		defer mu.Unlock()
 		cfg, err := readExprCacheFlightConfig(pt)
 		if err != nil {
-			// Invalid refreshed settings must not leave old waiters enabled.
+			// Invalid settings disable coordination without failing startup or refresh.
 			if disableErr := apply(exprCacheFlightConfig{false, 1000, 1024, 64, 8}); disableErr != nil {
 				return merr.Wrap(disableErr, "disable expression single-flight after invalid configuration")
 			}
-			return err
+			mlog.Warn(ctx, "Disabled expression single-flight after invalid configuration", mlog.Err(err))
+			return nil
 		}
 		return apply(cfg)
 	}
