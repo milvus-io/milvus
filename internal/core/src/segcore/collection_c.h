@@ -29,8 +29,11 @@ CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,
-             const uint64_t version);
+             const int64_t* field_ids,
+             const int64_t field_count);
 
+// Initialize load hints before making a new collection visible to readers.
+// For an existing collection, publish schema and hints together via UpdateSchema.
 CStatus
 UpdateLoadFields(CCollection collection,
                  const int64_t* field_ids,

@@ -298,10 +298,10 @@ func isGrowingMmapEnable() bool {
 }
 
 // getFieldWarmupPolicy returns the warmup policy for field data loading.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
+// Priority: field TypeParams (propagated from collection-level by collectionutil.ApplySettings, including autoWarmupForNonPKIsolationCollection) > global config
 func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	// Check field TypeParams (collection-level warmup.scalarField/warmup.vectorField
-	// and autoWarmupForNonPKIsolationCollection are propagated to field TypeParams by QueryCoord)
+	// and autoWarmupForNonPKIsolationCollection are propagated to field TypeParams by collectionutil.ApplySettings)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 	if exist {
 		return policy
@@ -330,9 +330,9 @@ func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.
 }
 
 // getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
+// Priority: field TypeParams (propagated from collection-level by collectionutil.ApplySettings, including autoWarmupForNonPKIsolationCollection) > global config
 func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
-	// Check field TypeParams (collection-level warmup.scalarField and autoWarmupForNonPKIsolationCollection are propagated by QueryCoord)
+	// Check field TypeParams (collection-level warmup.scalarField and autoWarmupForNonPKIsolationCollection are propagated by collectionutil.ApplySettings)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 	if exist {
 		return policy

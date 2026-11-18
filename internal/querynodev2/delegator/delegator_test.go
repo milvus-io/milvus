@@ -65,14 +65,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-var delegatorTestSchemaVersion = atomic.NewUint64(tsoutil.ComposeTSByTime(time.Now().Add(24*time.Hour), 0))
-
-func nextSchemaVersionLoadMeta() *querypb.LoadMetaInfo {
-	return &querypb.LoadMetaInfo{
-		SchemaVersion: delegatorTestSchemaVersion.Inc(),
-	}
-}
-
 type DelegatorSuite struct {
 	suite.Suite
 
@@ -173,8 +165,7 @@ func (s *DelegatorSuite) SetupTest() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		PartitionIDs:  s.partitionIDs,
-		SchemaVersion: nextSchemaVersionLoadMeta().GetSchemaVersion(),
+		PartitionIDs: s.partitionIDs,
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -224,7 +215,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		}, nil, nil)
 
 		delegator, err := NewShardDelegator(context.Background(), collectionID, s.replicaID, vchannel, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
@@ -266,7 +257,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		}, nil, nil)
 
 		delegator, err := NewShardDelegator(context.Background(), collectionID, s.replicaID, vchannel, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
@@ -1521,6 +1512,17 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *DelegatorSuite) updateCollectionSchema(schema *schemapb.CollectionSchema) {
+	s.T().Helper()
+	collection := s.manager.Collection.Get(s.collectionID)
+	s.Require().NotNil(collection)
+	// Schema replacement is ordered by CollectionSchema.Version, not load metadata timestamps.
+	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+	schema.Version = collection.Schema().GetVersion() + 1
+	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, nil))
+	s.Require().True(proto.Equal(schema, collection.Schema()), "replacement schema must be installed before rebuilding the delegator")
+}
+
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()
@@ -1539,7 +1541,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("normal analyer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1570,7 +1572,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1582,8 +1584,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("standalone field analyzer", func() {
-		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, nextSchemaVersionLoadMeta())
-		s.Require().NoError(err)
+		s.updateCollectionSchema(newFunctionRuntimeTestSchema())
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1595,7 +1596,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1639,7 +1640,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1653,7 +1654,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 
 	s.Run("error multi analyzer but no analyzer name", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1697,7 +1698,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1725,7 +1726,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("normal highlight with single analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1756,7 +1757,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1778,8 +1779,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("highlight with standalone analyzer", func() {
-		err := s.manager.Collection.PutOrRef(s.collectionID, newFunctionRuntimeTestSchema(), nil, nextSchemaVersionLoadMeta())
-		s.Require().NoError(err)
+		s.updateCollectionSchema(newFunctionRuntimeTestSchema())
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
@@ -1801,7 +1801,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("highlight with multi analyzer", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1846,7 +1846,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		// two target with two analyzer
@@ -1867,7 +1867,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 	})
 
 	s.Run("empty target texts", func() {
-		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		s.updateCollectionSchema(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      200,
@@ -1898,7 +1898,7 @@ func (s *DelegatorSuite) TestGetHighlight() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nextSchemaVersionLoadMeta())
+		})
 		s.ResetDelegator()
 
 		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{

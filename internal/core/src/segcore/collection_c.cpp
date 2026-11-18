@@ -41,13 +41,18 @@ CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,
-             const uint64_t version) {
+             const int64_t* field_ids,
+             const int64_t field_count) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        col->parse_schema(proto_blob, length, version);
+        std::vector<int64_t> load_fields;
+        if (field_count > 0) {
+            load_fields.assign(field_ids, field_ids + field_count);
+        }
+        col->parse_schema(proto_blob, length, load_fields);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

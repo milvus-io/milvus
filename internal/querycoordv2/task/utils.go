@@ -19,11 +19,9 @@ package task
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -31,13 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/collectionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -107,25 +104,6 @@ func GetTaskType(task Task) Type {
 		return TaskTypeDropIndex
 	}
 	return 0
-}
-
-func mergeCollectionProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
-	// Merge the collectionProps and schemaProps maps, giving priority to the values in schemaProps if there are duplicate keys.
-	props := make(map[string]string)
-	for _, p := range collectionProps {
-		props[p.GetKey()] = p.GetValue()
-	}
-	for _, p := range schemaProps {
-		props[p.GetKey()] = p.GetValue()
-	}
-	var ret []*commonpb.KeyValuePair
-	for k, v := range props {
-		ret = append(ret, &commonpb.KeyValuePair{
-			Key:   k,
-			Value: v,
-		})
-	}
-	return ret
 }
 
 func packLoadSegmentRequest(
@@ -277,186 +255,23 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 	}
 }
 
-// applyCollectionSettings applies collection-level mmap and warmup settings to all fields.
-// It combines ApplyCollectionMmapSetting and applyCollectionWarmupSetting into a single call.
-func applyCollectionSettings(schema *schemapb.CollectionSchema,
-	collectionProperties []*commonpb.KeyValuePair,
-) *schemapb.CollectionSchema {
-	// first clone the schema then apply some settings to it
-	schemaCloned := typeutil.Clone(schema)
-	schemaCloned.Properties = mergeCollectionProps(schemaCloned.Properties, collectionProperties)
-
-	schemaCloned = ApplyCollectionMmapSetting(schemaCloned, collectionProperties)
-	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
-
-	// Carry auto-warmup to segcore even when a vector has no IndexInfo.
-	if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist &&
-		autoWarmupForNonPKIsolationCollection(collectionProperties) {
-		schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
-			Key:   common.WarmupVectorIndexKey,
-			Value: common.WarmupSync,
-		})
-	}
-	return schemaCloned
+// applyCollectionSettings produces the same effective schema as the QueryNode
+// WAL and SyncDistribution paths.
+func applyCollectionSettings(schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) *schemapb.CollectionSchema {
+	return collectionutil.ApplySettings(schema, collectionProperties)
 }
 
-// ApplyCollectionMmapSetting applies collection and struct mmap defaults in place,
-// preserving explicit field settings. Callers must pass an owned schema.
-func ApplyCollectionMmapSetting(schema *schemapb.CollectionSchema,
-	collectionProperties []*commonpb.KeyValuePair,
-) *schemapb.CollectionSchema {
-	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
-	for _, field := range schema.GetFields() {
-		if exist &&
-			// field-level mmap setting has higher priority than collection-level mmap setting, skip if field-level mmap enabled
-			!common.FieldHasMmapKey(schema, field.GetFieldID()) {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: strconv.FormatBool(collectionMmapEnabled),
-			})
-		}
-	}
-	for _, structField := range schema.GetStructArrayFields() {
-		structTypeParams := structField.GetTypeParams()
-		structMmapEnabled, structExist := common.IsMmapDataEnabled(structTypeParams...)
-
-		// If struct field itself doesn't have mmap setting, inherit from collection
-		if !structExist && exist &&
-			!common.FieldHasMmapKey(schema, structField.GetFieldID()) {
-			structField.TypeParams = append(structField.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: strconv.FormatBool(collectionMmapEnabled),
-			})
-			// Update struct's mmap state since we just set it
-			structMmapEnabled = collectionMmapEnabled
-			structExist = true
-		}
-
-		// Apply mmap setting to fields inside struct
-		for _, field := range structField.GetFields() {
-			// Skip if field already has mmap setting
-			if common.FieldHasMmapKey(schema, field.GetFieldID()) {
-				continue
-			}
-
-			// Priority: struct field setting > collection setting
-			if structExist {
-				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-					Key:   common.MmapEnabledKey,
-					Value: strconv.FormatBool(structMmapEnabled),
-				})
-			} else if exist {
-				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-					Key:   common.MmapEnabledKey,
-					Value: strconv.FormatBool(collectionMmapEnabled),
-				})
-			}
-		}
-	}
-	return schema
+// ApplyCollectionMmapSetting applies mmap defaults to an owned schema.
+func ApplyCollectionMmapSetting(schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) *schemapb.CollectionSchema {
+	return collectionutil.ApplyMmapSetting(schema, collectionProperties)
 }
 
-// autoWarmupForNonPKIsolationCollection checks if autoWarmupForNonPKIsolationCollection should be applied for a collection.
-// Returns true when the AutoWarmupForNonPKIsolationCollection config is enabled AND the collection
-// does NOT have partition key isolation.
 func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyValuePair) bool {
-	if !paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
-		return false
-	}
-	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
-	if isError != nil {
-		log.Warn("failed to parse partition key isolation, autowarmup is disabled", zap.Error(isError))
-		return false
-	}
-	if !isPKI {
-		log.Info("collection is not partition key isolated and autowarmup is enabled, force scalar field/index and vector index warmup to sync")
-	}
-	return !isPKI
+	return collectionutil.AutoWarmupEnabled(collectionProperties)
 }
 
-// applyCollectionWarmupSetting applies collection-level warmup setting to all fields
-// and propagates struct-level warmup to nested fields.
-// Priority: field-level > struct-level > collection-level > autoWarmupForNonPKIsolationCollection (scalar only)
-// Collection-level granular keys: warmup.scalarField, warmup.vectorField
-func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
-	collectionProperties []*commonpb.KeyValuePair,
-) *schemapb.CollectionSchema {
-	// Get collection-level granular warmup policies
-	scalarFieldWarmup, scalarFieldExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, collectionProperties...)
-	vectorFieldWarmup, vectorFieldExist := common.GetWarmupPolicyByKey(common.WarmupVectorFieldKey, collectionProperties...)
-	autoWarmup := autoWarmupForNonPKIsolationCollection(collectionProperties)
-
-	// Apply collection-level warmup to regular fields
-	for _, field := range schema.GetFields() {
-		// field-level warmup setting has higher priority, skip if field already has warmup setting
-		if common.FieldHasWarmupKey(schema, field.GetFieldID()) {
-			continue
-		}
-
-		isVector := typeutil.IsVectorType(field.GetDataType())
-		if isVector && vectorFieldExist {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.WarmupKey,
-				Value: vectorFieldWarmup,
-			})
-		} else if !isVector && scalarFieldExist {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.WarmupKey,
-				Value: scalarFieldWarmup,
-			})
-		} else if autoWarmup && !isVector {
-			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for scalar fields (not vector fields)
-			// vector fields are excluded from autowarmup due to its large size
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.WarmupKey,
-				Value: common.WarmupSync,
-			})
-		}
-	}
-
-	// Apply warmup to struct array fields and their nested fields
-	for _, structField := range schema.GetStructArrayFields() {
-		// Get struct field's warmup setting
-		structFieldWarmup, structHasWarmup := common.GetWarmupPolicy(structField.GetTypeParams()...)
-
-		// Apply warmup setting to fields inside struct
-		for _, field := range structField.GetFields() {
-			// Skip if field already has warmup setting
-			if common.FieldHasWarmupKey(schema, field.GetFieldID()) {
-				continue
-			}
-
-			// Priority: struct field setting > collection setting > autoWarmupForNonPKIsolationCollection
-			if structHasWarmup {
-				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-					Key:   common.WarmupKey,
-					Value: structFieldWarmup,
-				})
-			} else {
-				isVector := typeutil.IsVectorType(field.GetDataType())
-				if isVector && vectorFieldExist {
-					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-						Key:   common.WarmupKey,
-						Value: vectorFieldWarmup,
-					})
-				} else if !isVector && scalarFieldExist {
-					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-						Key:   common.WarmupKey,
-						Value: scalarFieldWarmup,
-					})
-				} else if autoWarmup && !isVector {
-					// autoWarmupForNonPKIsolationCollection fallback for struct nested scalar fields
-					// vector fields are excluded from autowarmup due to its large size
-					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-						Key:   common.WarmupKey,
-						Value: common.WarmupSync,
-					})
-				}
-			}
-		}
-	}
-	return schema
+func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) *schemapb.CollectionSchema {
+	return collectionutil.ApplyWarmupSetting(schema, collectionProperties)
 }
 
 // applyIndexWarmupSetting applies collection-level index warmup setting to segment index params

@@ -473,8 +473,8 @@ class Schema {
     std::unordered_set<FieldId> load_fields_;
     std::unordered_set<FieldId> bm25_function_output_fields_;
 
-    // schema_version_, currently marked with update timestamp
-    uint64_t schema_version_;
+    // RootCoord's CollectionSchema.version, independent of channel timeticks.
+    uint64_t schema_version_ = 0;
 
     // mmap settings
     bool has_mmap_setting_ = false;
