@@ -31,6 +31,12 @@ func UnmarshalComponentInfos(s string, infos ComponentInfos) error {
 	return json.Unmarshal([]byte(s), infos)
 }
 
+// NodeMemory is the node_memory response, in bytes.
+type NodeMemory struct {
+	Memory      uint64 `json:"memory"`
+	MemoryUsage uint64 `json:"memory_usage"`
+}
+
 // HardwareMetrics records the hardware information of nodes.
 type HardwareMetrics struct {
 	IP           string  `json:"ip"`

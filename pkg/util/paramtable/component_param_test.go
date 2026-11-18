@@ -422,7 +422,7 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
 	params := queryCoordConfig{}
 	params.init(base)
-	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseTTISeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency", "AutoReleaseLRUHighWatermark", "AutoReleaseLRULowWatermark", "AutoReleaseLRUMaxEvictions"} {
 		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
 		assert.True(t, ok)
 		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
@@ -430,30 +430,50 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 
 	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
 	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, "queryCoord.autoRelease.ttiSeconds", params.AutoReleaseTTISeconds.Key)
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.Equal(t, 85.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+	assert.Equal(t, 80.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	assert.Equal(t, 64, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseLRUHighWatermark.Key, "95"))
+	assert.Equal(t, 95.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+	assert.NoError(t, base.Save(params.AutoReleaseLRULowWatermark.Key, "85"))
+	assert.Equal(t, 85.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	assert.NoError(t, base.Save(params.AutoReleaseLRUMaxEvictions.Key, "7"))
+	assert.Equal(t, 7, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	for _, value := range []string{"invalid", "NaN", "+Inf", "0", "101"} {
+		assert.NoError(t, base.Save(params.AutoReleaseLRUHighWatermark.Key, value))
+		assert.Equal(t, 85.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+		assert.NoError(t, base.Save(params.AutoReleaseLRULowWatermark.Key, value))
+		assert.Equal(t, 80.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	}
+	for _, value := range []string{"invalid", "0", "-1"} {
+		assert.NoError(t, base.Save(params.AutoReleaseLRUMaxEvictions.Key, value))
+		assert.Equal(t, 64, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	}
 	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
 	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
-	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
 	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
 	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
 
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "0"))
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
 	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
 
 	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "9223372037"))
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 }
 
 func TestComponentParam_StorageIopsParams(t *testing.T) {

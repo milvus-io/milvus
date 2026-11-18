@@ -56,7 +56,7 @@ import (
 
 func TestGetCollectionProperties(t *testing.T) {
 	ctx := context.Background()
-	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}}
+	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "20"}}
 	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
 		1: {CollectionID: 1, DBID: 42, State: pb.CollectionState_CollectionCreated, Properties: properties},
 		2: {CollectionID: 2, State: pb.CollectionState_CollectionCreating, Properties: properties},
@@ -107,7 +107,7 @@ func TestGetCollectionPropertiesConcurrentUpdates(t *testing.T) {
 			mt.collID2Meta[1] = &model.Collection{
 				CollectionID: 1,
 				State:        pb.CollectionState_CollectionCreated,
-				Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}},
+				Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "20"}},
 			}
 			mt.ddLock.Unlock()
 		}
@@ -130,7 +130,7 @@ func BenchmarkCollectionProperties(b *testing.B) {
 	coll := &model.Collection{
 		CollectionID: 1,
 		State:        pb.CollectionState_CollectionCreated,
-		Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}},
+		Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "20"}},
 	}
 	for id := int64(100); id < 110; id++ {
 		coll.Fields = append(coll.Fields, &model.Field{FieldID: id, Name: "field", DataType: schemapb.DataType_Int64})
