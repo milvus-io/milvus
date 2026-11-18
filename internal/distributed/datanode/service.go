@@ -99,8 +99,12 @@ func (s *Server) startGrpc() error {
 	s.grpcWG.Add(1)
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
-	err := <-s.grpcErrChan
-	return err
+	select {
+	case err := <-s.grpcErrChan:
+		return err
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 // startGrpcLoop starts the grep loop of datanode component.
@@ -156,7 +160,10 @@ func (s *Server) startGrpcLoop() {
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		mlog.Warn(s.ctx, "DataNode failed to start gRPC")
-		s.grpcErrChan <- err
+		select {
+		case s.grpcErrChan <- err:
+		case <-s.ctx.Done():
+		}
 	}
 }
 

@@ -167,9 +167,13 @@ func (s *Server) init() error {
 	s.grpcWG.Add(1)
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
-	if err != nil {
-		return err
+	select {
+	case err = <-s.grpcErrChan:
+		if err != nil {
+			return err
+		}
+	case <-s.ctx.Done():
+		return s.ctx.Err()
 	}
 
 	s.querynode.UpdateStateCode(commonpb.StateCode_Initializing)
@@ -280,7 +284,10 @@ func (s *Server) startGrpcLoop() {
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		mlog.Debug(s.ctx, "QueryNode Start Grpc Failed!!!!")
-		s.grpcErrChan <- err
+		select {
+		case s.grpcErrChan <- err:
+		case <-s.ctx.Done():
+		}
 	}
 }
 

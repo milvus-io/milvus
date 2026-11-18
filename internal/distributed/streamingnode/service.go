@@ -140,7 +140,9 @@ func (s *Server) Stop() (err error) {
 
 // stop stops the server.
 func (s *Server) stop() {
-	s.componentState.OnStopping()
+	if s.componentState != nil {
+		s.componentState.OnStopping()
+	}
 
 	if s.listener != nil {
 		mlog.Info(context.TODO(), "streamingnode stop", mlog.String("Address", s.listener.Address()))
@@ -394,5 +396,10 @@ func (s *Server) startGPRCServer(ctx context.Context) error {
 		}
 	}()
 	funcutil.CheckGrpcReady(ctx, errCh)
-	return <-errCh
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
