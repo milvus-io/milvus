@@ -39,7 +39,11 @@ type ResultSet struct {
 	Fields       DataSet       // output field data
 	// AggregationBuckets contains search aggregation results for this query.
 	AggregationBuckets []AggregationBucket
-	Scores             []float32 // distance to the target vector
+	// Highlights maps field name to one Highlight per row in this ResultSet.
+	// Nil when the search request did not include a Highlighter, or when the
+	// server returned no highlight data for the matched rows.
+	Highlights map[string][]Highlight
+	Scores     []float32 // distance to the target vector
 	// ElementOffsets holds, for an element-level search, the offset of the matched struct element
 	// within its row, one per hit. It is nil for other searches.
 	ElementOffsets []int64
@@ -90,6 +94,31 @@ func (rs ResultSet) Slice(start, end int) ResultSet {
 	result.Scores = sliceResultRows(rs.Scores, start, end)
 	result.ElementOffsets = sliceResultRows(rs.ElementOffsets, start, end)
 	result.QueryElementOffsets = sliceResultRows(rs.QueryElementOffsets, start, end)
+
+	// Handle Highlights - one slice per field, slice in lockstep with the
+	// row window. Length may be < ResultCount when the server returned
+	// highlights for only a subset of rows; clamp the upper bound.
+	if len(rs.Highlights) > 0 && result.ResultCount > 0 {
+		result.Highlights = make(map[string][]Highlight, len(rs.Highlights))
+		rowEnd := start + result.ResultCount
+		for field, hs := range rs.Highlights {
+			hi := start
+			if hi < 0 {
+				hi = 0
+			}
+			if hi > len(hs) {
+				hi = len(hs)
+			}
+			he := rowEnd
+			if he > len(hs) {
+				he = len(hs)
+			}
+			if he < hi {
+				he = hi
+			}
+			result.Highlights[field] = hs[hi:he]
+		}
+	}
 
 	return result
 }
