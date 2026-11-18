@@ -58,7 +58,24 @@ func TestValidateInstanceSnapshotImportURI(t *testing.T) {
 		{"bucket_uri", "s3://source" + key, instance, false},
 		{"endpoint_uri", "minio://localhost:9000/source" + key, instance, false},
 		{"http_uri", "http://LOCALHOST:9000/source" + key, instance, false},
-		{"bare_key", "root/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key", "root/snapshots/1/metadata/2.json", instance, false},
+		{"bare_key_bucket_root", "snapshots/1/metadata/2.json", instance, false},
+		{"bare_key_timestamp_subpath", "backup/2026-11-17T10:00:00Z/snapshots/1/metadata/2.json", instance, false},
+		{"bare_key_timestamp_root", "2026-11-17T10:00:00Z/snapshots/1/metadata/2.json", instance, false},
+		{"bare_key_empty", "", instance, true},
+		{"bare_key_whitespace", "   ", instance, true},
+		{"bare_key_leading_slash", "/root/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_scheme_relative", "//other/root/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_empty_segment", "root//snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_trailing_slash", "root/snapshots/1/metadata/2.json/", instance, true},
+		{"bare_key_traversal", "root/../snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_dot_segment", "./snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_single_slash_s3", "s3:/other/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_single_slash_file", "file:/etc/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_opaque_scheme", "s3:other/snapshots/1/metadata/2.json", instance, true},
+		{"bare_key_query", "root/snapshots/1/metadata/2.json?signature=secret", instance, true},
+		{"bare_key_fragment", "root/snapshots/1/metadata/2.json#frag", instance, true},
+		{"bare_key_non_canonical", "root/other.json", instance, true},
 		{"missing_host", "s3:///root/metadata.json", instance, true},
 		{"unsupported_scheme", "file://source" + key, instance, true},
 		{"signed_uri", "s3://source" + key + "?signature=secret", instance, true},
@@ -89,6 +106,14 @@ func TestValidateInstanceSnapshotImportURI(t *testing.T) {
 			"gcp_native", "gs://source" + key,
 			&objectstorage.Config{BucketName: "source", CloudProvider: "gcpnative", UseSSL: true}, false,
 		},
+		{
+			"azure_bare_key", "root/snapshots/1/metadata/2.json",
+			&objectstorage.Config{Address: "core.windows.net", BucketName: "source", CloudProvider: "azure", AccessKeyID: "account", UseSSL: true}, false,
+		},
+		{
+			"gcp_native_bare_key", "root/snapshots/1/metadata/2.json",
+			&objectstorage.Config{BucketName: "source", CloudProvider: "gcpnative", UseSSL: true}, false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := *tc.cfg
@@ -102,6 +127,24 @@ func TestValidateInstanceSnapshotImportURI(t *testing.T) {
 			require.Equal(t, before, *tc.cfg, "admission must not reroute the instance client")
 		})
 	}
+
+	t.Run("nil_instance_config", func(t *testing.T) {
+		err := ValidateInstanceSnapshotImportURI(nil, "root/snapshots/1/metadata/2.json")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Equal(t, merr.InputError, merr.GetErrorType(err))
+	})
+
+	t.Run("local_storage_rejected", func(t *testing.T) {
+		localCfg := &objectstorage.Config{RootPath: "/var/lib/milvus/data"}
+		for _, uri := range []string{
+			"s3://source" + key,
+			"root/snapshots/1/metadata/2.json",
+		} {
+			err := ValidateInstanceSnapshotImportURI(localCfg, uri)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		}
+	})
 }
 
 func TestResolveSnapshotReadStorage(t *testing.T) {
