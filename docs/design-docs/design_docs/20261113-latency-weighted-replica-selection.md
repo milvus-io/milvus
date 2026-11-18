@@ -197,20 +197,31 @@ limit = min(maxQueueWait, maxQueueWaitRatio * time left until the deadline)
 ```
 
 `queryNode.scheduler.maxQueueWait` defaults to `1s` and is also the limit of a
-task without a deadline; the intended ratio is `0.1`. The scheduler keeps the
-decayed mean time between two tasks leaving the queue for a worker while
-tasks are waiting. A new task is expected to wait that long for each task
-ahead of it; when that is more than its limit, the task is refused at once
-with `ErrServiceTooManyRequests`, as a full queue refuses it. A task that
+task without a deadline; the intended ratio is `0.1`. A new task is judged by
+how long the task that leaves the queue next has waited so far: when that is
+more than half of the new task's limit, the new task is refused at once with
+`ErrServiceTooManyRequests`, as a full queue refuses it. This is a measured
+time. An estimate from the queue length and the pace of the workers was tried
+first and dropped: both numbers are noisy (canceled tasks still count, search
+tasks are merged, workers run in bursts under a CPU quota), their errors
+multiply, and a pace that was once judged too slow let no second task into
+the queue to correct it. Half of the limit rather than all of it: with the
+whole limit the head of the queue would wait for about the limit all the
+time, and nearly every task would be let in only to be refused when it
+leaves the queue. A task whose deadline has passed fails as expired, not as
+refused. A task that
 waited longer than its limit after all is refused when it leaves the queue,
 so the wait of an executed task is bounded. Merged search tasks are judged by
-the first task of the group. The estimate counts canceled tasks that still
-sit in the queue, so it errs towards refusing.
+the first task of the group. Refusing starts only once tasks have waited: the
+tasks let in during the first moments of a burst are covered by the check on
+leaving the queue.
 
-**The Proxy moves the request, once per replica.** With the policy on, a
-replica that refuses an attempt as overloaded is excluded for the request and
-the request goes to the next replica after the 10ms retry interval, without
-waiting for the hedge delay. The refusal is not recorded as a failure of the
+**The Proxy moves the request, once per replica.** Under every replica
+selection policy, a replica that refuses an attempt as overloaded is excluded
+for the request and the request goes to the next replica at once: not after
+the retry interval of the policy (200ms and growing by default, which also
+gives up when less than that is left of the request), and without waiting for
+the hedge delay. The refusal is not recorded as a failure of the
 replica (see the table in Rule 2). When every replica was tried and an
 attempt was refused as overloaded, the request ends with that error: the
 shard leaders are not refreshed to go around again, which would add to the
@@ -223,8 +234,8 @@ retriable error, and the gRPC client of a component sends a request again on
 a retriable status, up to 10 times with backoff. For a refused read that
 keeps the request in the client until its deadline, while the work done for
 its other shards is finished for nothing. `grpcclient.WithFailFastOnOverload`
-makes a call return the refusal instead; the Proxy sets it on reads under
-this policy, the delegator on reads of its workers.
+makes a call return the refusal instead; the Proxy sets it on every read, the
+delegator on reads of its workers.
 
 **A failed shard stops the others.** A request over several shards fails with
 its first failed shard. `LBPolicyImpl.Execute` now cancels the attempts on
@@ -322,6 +333,10 @@ Known issue, to fix before this is used:
 
 Limits:
 
+- The queue wait limit covers the wait in the scheduler queue only. A query
+  node that runs more read tasks at once than it has CPUs for
+  (`maxReadConcurrentRatio` above 1, or a CPU limit it does not see) does
+  not queue them: they wait while they run, where nothing bounds it.
 - The queue wait limit follows the deadline, so on one query node requests
   with a long timeout outlast requests with a short one: under overload the
   short ones are refused first. `maxQueueWait` bounds how far this goes.
@@ -329,8 +344,14 @@ Limits:
   them on its own. One refusal ends the attempt on that replica; the tasks
   already queued for it elsewhere are canceled, but one that has started is
   finished for nothing.
-- The queue wait limit is meant for this policy. Under another policy the RPC
-  client sends a refused read again, as it does for a full queue today.
+- The handling of a refusal changes what a full queue
+  (`unsolvedQueueSize`) does under the default policy too: the read moves to
+  the next replica instead of being sent again to the same one by the RPC
+  client.
+- A refusal leaves no trace in the statistics of the replica. A replica that
+  refuses most attempts returns fast and has few attempts in flight, so by
+  rule 1 it looks idle and draws first attempts, each of which is refused and
+  moved. Not measured; recording a refusal as a slow sample would close it.
 - A replica that is down keeps a share that grows with the latency of the
   others: its penalty is the attempt timeout, and replicas that queue come
   closer to it. Measured with two replicas under overload: 15 to 30% of the

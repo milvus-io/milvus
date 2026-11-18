@@ -314,23 +314,16 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	)
 	var lastErr error
 	excludeNodes := typeutil.NewUniqueSet()
-	// With the latency weighted policy, a replica that refuses the request as
-	// overloaded is not asked again, and does not end the request alone: the
-	// request moves to another replica, see isOverloadErr.
-	weighted := latencyWeighted(lb.getBalancer()) != nil
-	if weighted {
-		ctx = grpcclient.WithFailFastOnOverload(ctx)
-	}
+	// Under every policy, a replica that refuses the request as overloaded is
+	// not asked again by the RPC client, and does not end the request alone:
+	// the request moves to another replica, see isOverloadErr.
+	ctx = grpcclient.WithFailFastOnOverload(ctx)
 	// overloadErr is the refusal of an overloaded replica, when an attempt of
-	// this request met one.
+	// this request met one. refused tells whether the last attempt did.
 	var overloadErr error
-	tryExecute := func() (bool, error) {
-		if overloadErr != nil && lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
-			// Every replica was tried and the request was refused for
-			// overload: it ends here. Going around again would add to the
-			// queues that refused it.
-			return false, overloadErr
-		}
+	refused := false
+	tryOnce := func() (bool, error) {
+		refused = false
 		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
@@ -356,8 +349,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				shouldRetry, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
 				if err != nil {
 					lastErr = err
-					if weighted && isOverloadErr(err) {
-						overloadErr = err
+					if isOverloadErr(err) {
+						overloadErr, refused = err, true
 					}
 				}
 				return shouldRetry, err
@@ -395,8 +388,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
-			if weighted && isOverloadErr(err) {
-				overloadErr = lastErr
+			if isOverloadErr(err) {
+				overloadErr, refused = lastErr, true
 			}
 			return true, lastErr
 		}
@@ -405,6 +398,23 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			lw.ObserveRequest(statsKey(workload), time.Since(attemptStart))
 		}
 		return true, nil
+	}
+	tryExecute := func() (bool, error) {
+		for {
+			if overloadErr != nil && lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
+				// Every replica was tried and the request was refused for
+				// overload: it ends here. Refreshing the shard leaders to go
+				// around again would add to the queues that refused it.
+				return false, overloadErr
+			}
+			again, err := tryOnce()
+			if !again || !refused || ctx.Err() != nil {
+				return again, err
+			}
+			// Refused for overload: the replica is excluded for the request
+			// and there is nothing to wait for. Go on to the next replica at
+			// once, whatever the retry interval of the policy.
+		}
 	}
 
 	shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)

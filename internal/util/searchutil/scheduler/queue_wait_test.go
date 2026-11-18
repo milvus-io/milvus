@@ -97,50 +97,88 @@ func TestSchedulerKeepsWaitingTaskWithoutLimit(t *testing.T) {
 	assert.Same(t, task, next.Task)
 }
 
-func TestQueuePace(t *testing.T) {
-	now := time.Now()
-	waiting := func(since time.Time) *queuedTask {
-		return newQueuedTask(newMockTask(mockTaskConfig{executeCost: time.Millisecond}), since)
-	}
-	var p queuePace
-	// Nothing known: no wait expected.
-	assert.Zero(t, p.wait(10))
-
-	p.sent(waiting(now), now)
-	assert.Zero(t, p.wait(10))
-	// A task that waited since before the previous one left: a worker takes
-	// 10ms to come free.
-	p.sent(waiting(now), now.Add(10*time.Millisecond))
-	assert.Equal(t, 100*time.Millisecond, p.wait(10))
-	// A task that arrived after the previous one left tells nothing: the
-	// queue was empty in between.
-	p.sent(waiting(now.Add(5*time.Second)), now.Add(5*time.Second))
-	assert.Equal(t, 100*time.Millisecond, p.wait(10))
-	// The mean follows the pace.
-	p.sent(waiting(now), now.Add(5*time.Second+60*time.Millisecond))
-	assert.Equal(t, 200*time.Millisecond, p.wait(10))
+// add queues task at the time at, as the schedule loop does.
+func addAt(s *scheduler, task Task, at time.Time) error {
+	errCh := make(chan error, 1)
+	s.handleAddTaskRequest(addTaskReq{task: task, err: errCh}, 0, at)
+	return <-errCh
 }
 
-func TestSchedulerRefusesTaskThatWouldWaitTooLong(t *testing.T) {
+// A task is refused when it is queued if the task that leaves the queue next
+// has already waited for more than half of what the new task may wait.
+func TestSchedulerRefusesTaskBehindHeadThatWaitedLong(t *testing.T) {
 	setQueueWait(t, "0.1", "1s")
 	now := time.Now()
 	s := newScheduler(newFIFOPolicy()).(*scheduler)
 	defer s.Stop()
-	// A worker comes free every 50ms.
-	s.pace = queuePace{lastSent: now, interval: 50 * time.Millisecond}
 
-	add := func(timeout time.Duration) error {
-		errCh := make(chan error, 1)
-		s.handleAddTaskRequest(addTaskReq{task: taskWithTimeout(t, now, timeout), err: errCh}, 0, now)
-		return <-errCh
-	}
-	// May wait 200ms: accepted behind 0 .. 4 tasks, which is up to 200ms.
-	for i := 0; i < 5; i++ {
-		require.NoError(t, add(2*time.Second), i)
-	}
-	// Behind 5 tasks it would wait 250ms.
-	assert.ErrorIs(t, add(2*time.Second), merr.ErrServiceTooManyRequests)
-	assert.EqualValues(t, 5, s.GetWaitingTaskTotal())
-	// A request with more time may wait longer.
-	assert.NoError(t, add(10*time.Second))
+	// Nothing waits: let in.
+	require.NoError(t, addAt(s, taskWithTimeout(t, now, 2*time.Second), now))
+	// The schedule loop takes it from the policy and holds it for a worker.
+	head, _, _ := s.setupExecListener(nil, now)
+	require.True(t, head.valid())
+
+	// The head has waited 80ms; a task with 2s left may wait 200ms: let in.
+	at := now.Add(80 * time.Millisecond)
+	require.NoError(t, addAt(s, taskWithTimeout(t, at, 2*time.Second), at))
+	// The head has waited 120ms, more than half of 200ms: refused.
+	at = now.Add(120 * time.Millisecond)
+	assert.ErrorIs(t, addAt(s, taskWithTimeout(t, at, 2*time.Second), at), merr.ErrServiceTooManyRequests)
+	// A request with more time may wait longer, 1s at most.
+	assert.NoError(t, addAt(s, taskWithTimeout(t, at, time.Minute), at))
+	at = now.Add(600 * time.Millisecond)
+	assert.ErrorIs(t, addAt(s, taskWithTimeout(t, at, time.Minute), at), merr.ErrServiceTooManyRequests)
+
+	// The head left for a worker and a task queued later is next: let in
+	// again. Nothing has to be learned back, the judgment is on the task
+	// that waits now.
+	head, _, _ = s.setupExecListener(nil, at)
+	require.True(t, head.valid())
+	assert.NoError(t, addAt(s, taskWithTimeout(t, at, time.Minute), at))
+}
+
+// With the limit off, nothing is refused for the wait of the head.
+func TestSchedulerLetsTaskInWithoutLimit(t *testing.T) {
+	setQueueWait(t, "0", "1s")
+	now := time.Now()
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	defer s.Stop()
+	require.NoError(t, addAt(s, taskWithTimeout(t, now, time.Hour), now))
+	head, _, _ := s.setupExecListener(nil, now)
+	require.True(t, head.valid())
+	at := now.Add(10 * time.Minute)
+	assert.NoError(t, addAt(s, taskWithTimeout(t, at, time.Hour), at))
+}
+
+// A task whose deadline passed is out of time, not refused for the load on
+// the node, also when its context does not say so yet.
+func TestSchedulerFailsTaskOutOfTimeAsExpired(t *testing.T) {
+	setQueueWait(t, "0.1", "1s")
+	now := time.Now()
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	defer s.Stop()
+
+	// When it is queued: behind a head that waited for long, where it would
+	// be refused.
+	require.NoError(t, addAt(s, taskWithTimeout(t, now, time.Hour), now))
+	head, _, _ := s.setupExecListener(nil, now)
+	require.True(t, head.valid())
+	err := addAt(s, taskWithTimeout(t, now, time.Minute), now.Add(2*time.Minute))
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotErrorIs(t, err, merr.ErrServiceTooManyRequests)
+
+	// When it leaves the queue, where it has also waited for longer than it
+	// may.
+	s2 := newScheduler(newFIFOPolicy()).(*scheduler)
+	defer s2.Stop()
+	late := taskWithTimeout(t, now, 10*time.Minute)
+	errCh := make(chan error, 1)
+	s2.handleAddTaskRequest(addTaskReq{task: late, err: errCh}, 0, now)
+	require.NoError(t, <-errCh)
+	next, _, _ := s2.setupExecListener(nil, now.Add(30*time.Minute))
+	assert.False(t, next.valid())
+	assert.Zero(t, s2.GetWaitingTaskTotal())
+	err = late.Wait()
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotErrorIs(t, err, merr.ErrServiceTooManyRequests)
 }

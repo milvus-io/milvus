@@ -109,7 +109,8 @@ func maxQueueWait(task Task, now time.Time) time.Duration {
 	limit := cfg.MaxQueueWait.GetAsDurationByParse()
 	if deadline, ok := task.Context().Deadline(); ok {
 		// A task about to expire still gets a positive limit: zero would mean
-		// no limit.
+		// no limit. One that has expired is not queued, see
+		// handleAddTaskRequest.
 		byDeadline := max(time.Duration(float64(deadline.Sub(now))*ratio), time.Nanosecond)
 		if limit <= 0 || byDeadline < limit {
 			limit = byDeadline
@@ -118,34 +119,21 @@ func maxQueueWait(task Task, now time.Time) time.Duration {
 	return max(limit, 0)
 }
 
-// queuePace is how fast tasks leave the queue for a worker while tasks are
-// waiting, as the decayed mean time between two of them. A new task waits
-// about that long for each task ahead of it. It is not safe for concurrent
-// use.
-type queuePace struct {
-	lastSent time.Time
-	interval time.Duration
-}
+// queueWaitAdmitShare is the share of its queue wait limit that the task at
+// the head of the queue may have waited for a new task to be let in behind
+// it. With the whole limit the head would wait for about the limit all the
+// time, and nearly every new task would be let in only to be refused when it
+// leaves the queue, having waited for nothing.
+const queueWaitAdmitShare = 0.5
 
-// sent reports that task left the queue for a worker at now.
-func (p *queuePace) sent(task *queuedTask, now time.Time) {
-	// Only a task that was already waiting when the previous one left tells
-	// how long a worker takes to come free: for any other the time since
-	// then is partly idle time.
-	if task.valid() && !p.lastSent.IsZero() && !task.enqueueTime.After(p.lastSent) {
-		if sample := now.Sub(p.lastSent); p.interval == 0 {
-			p.interval = sample
-		} else {
-			p.interval = (4*p.interval + sample) / 5
-		}
-	}
-	p.lastSent = now
-}
-
-// wait returns how long a task queued behind waiting tasks is expected to
-// wait. Zero when nothing is known yet.
-func (p *queuePace) wait(waiting int64) time.Duration {
-	return time.Duration(waiting) * p.interval
+// mustWaitTooLong reports whether a task queued at now behind head, the task
+// that leaves the queue next, would wait for longer than it may. It is judged
+// by how long head has waited so far: a measured time, where an estimate from
+// the queue length and the pace of the workers would multiply the errors of
+// both.
+func (t *queuedTask) mustWaitTooLong(head *queuedTask, now time.Time) bool {
+	return t.valid() && t.maxWait > 0 && head.valid() &&
+		head.queueDuration(now) > time.Duration(float64(t.maxWait)*queueWaitAdmitShare)
 }
 
 // overloaded reports whether the task has waited in the queue for longer than

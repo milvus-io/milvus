@@ -546,3 +546,61 @@ func TestExecuteCancelsOtherChannelsOnFailure(t *testing.T) {
 	assert.True(t, canceled.Load())
 	assert.Less(t, time.Since(start), 5*time.Second)
 }
+
+// The handling of an overloaded replica does not depend on the replica
+// selection policy: the request moves to the next replica at once, also when
+// less than the retry interval of the policy is left of it, and ends when
+// every replica refused it.
+func TestOverloadUnderEveryPolicy(t *testing.T) {
+	paramtable.Init()
+	for name, newBalancer := range map[string]func(ShardClientMgr) LBBalancer{
+		"round_robin": func(ShardClientMgr) LBBalancer { return NewRoundRobinBalancer() },
+		"look_aside":  func(mgr ShardClientMgr) LBBalancer { return NewLookAsideBalancer(mgr) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var uncached atomic.Int32
+			mgr := NewMockShardClientManager(t)
+			mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Run(func(_ context.Context, withCache bool, _ string, _ string, _ int64, _ string) {
+					if !withCache {
+						uncached.Inc()
+					}
+				}).Return([]NodeInfo{
+				{NodeID: 1, Address: "localhost", Serviceable: true},
+				{NodeID: 2, Address: "localhost", Serviceable: true},
+			}, nil).Maybe()
+			mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(mocks.NewMockQueryNodeClient(t), nil).Maybe()
+			policy := NewLBPolicyImpl(mgr)
+			balancer := newBalancer(mgr)
+			policy.getBalancer = func() LBBalancer { return balancer }
+
+			run := func(refusals int) ([]int64, error) {
+				var nodes []int64
+				// less than the 200ms the policy waits before a retry
+				ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
+				defer cancel()
+				err := policy.ExecuteWithRetry(ctx, ChannelWorkload{
+					Channel: hedgeTestChannel, Nq: 1,
+					Exec: func(_ context.Context, node UniqueID, _ types.QueryNodeClient, _ string) error {
+						nodes = append(nodes, node)
+						if len(nodes) <= refusals {
+							return overloadErr()
+						}
+						return nil
+					},
+				})
+				return nodes, err
+			}
+
+			nodes, err := run(1)
+			require.NoError(t, err)
+			require.Len(t, nodes, 2)
+			assert.NotEqual(t, nodes[0], nodes[1])
+
+			nodes, err = run(2)
+			assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+			assert.Len(t, nodes, 2)
+			assert.Zero(t, uncached.Load())
+		})
+	}
+}
