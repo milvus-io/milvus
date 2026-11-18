@@ -71,6 +71,49 @@ func TestFlushWaitsForL1BeforeL0Completion(t *testing.T) {
 	}
 }
 
+func TestTruncateAckDoesNotWaitForPendingFlushPublication(t *testing.T) {
+	ctx := t.Context()
+	scheduler := &recordingVChannelScheduler{}
+	lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
+	commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithPublication")).Return(&viewpb.DataVersion{StreamingVersion: 1}, true, nil).Build()
+	defer commit.UnPatch()
+	meta := newMaterializationBlockerMeta(1, 100, false)
+	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1", VChannel: "v1", VChannelMeta: &streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{1: meta}, Runtime: moduleapi.Runtime{Scheduler: scheduler}, SegmentLifecycle: lifecycle,
+	})
+	require.NoError(t, err)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	observe := func(raw message.ImmutableMessage) {
+		t.Helper()
+		owner := tracker.Track(raw)
+		retained := owner.Clone()
+		require.True(t, module.ObserveMessage(ctx, retained))
+		retained.Release()
+		owner.Release()
+	}
+	flush := message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).
+		WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(200).
+		WithLastConfirmed(walimplstest.NewTestMessageID(199)).IntoImmutableMessage(walimplstest.NewTestMessageID(200))
+	observe(flush)
+	require.Len(t, scheduler.tasks, 2, "L1 registration and L0 materialization")
+	require.NoError(t, scheduler.tasks[0].Execute(ctx))
+	require.Zero(t, tracker.CompletedPoint().TimeTick, "L0 still owns the Flush ACK")
+	require.NoError(t, scheduler.tasks[1].Execute(ctx))
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+	require.Len(t, scheduler.tasks, 3, "query publication remains queued")
+	truncate := message.NewTruncateCollectionMessageBuilderV2().WithVChannel("v1").WithHeader(&message.TruncateCollectionMessageHeader{}).
+		WithBody(&message.TruncateCollectionMessageBody{}).MustBuildMutable().WithTimeTick(300).
+		WithLastConfirmed(walimplstest.NewTestMessageID(299)).IntoImmutableMessage(walimplstest.NewTestMessageID(300))
+	observe(truncate)
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+	require.Len(t, scheduler.tasks, 4, "Truncate only needs a new L0 boundary")
+	require.NoError(t, scheduler.tasks[3].Execute(ctx))
+	require.Equal(t, uint64(300), tracker.CompletedPoint().TimeTick, "Truncate can ACK before its callback retires the pending group")
+	require.Nil(t, module.segments[1].AssignmentMeta().GetSealedAtDataVersion(), "ACK cannot prematurely publish query handoff")
+}
+
 func TestManagerDefersIdleDeletesWhileL1IsGrowing(t *testing.T) {
 	params := paramtable.Get()
 	require.NoError(t, params.Save(params.DataNodeCfg.SyncPeriod.Key, "0"))

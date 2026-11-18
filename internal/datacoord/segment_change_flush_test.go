@@ -84,6 +84,12 @@ func TestStreamingFlushGroupSortIndexAndHandoff(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
 	ctx := t.Context()
+	assertRows := func() {
+		t.Helper()
+		require.EqualValues(t, 2000, s.meta.GetNumRowsOfCollection(ctx, 1))
+		require.EqualValues(t, 2000, s.meta.GetNumRowsOfPartition(ctx, 1, 1))
+		require.Zero(t, s.meta.GetNumRowsOfPartition(ctx, 1, 2))
+	}
 	before, err := s.dataViewManager.Latest(ctx, 1)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -96,6 +102,7 @@ func TestStreamingFlushGroupSortIndexAndHandoff(t *testing.T) {
 	through, pending, err := dataview.ParseStagedFlushResult(status)
 	require.NoError(t, err)
 	require.True(t, pending)
+	assertRows()
 	legacy := proto.CloneOf(req)
 	legacy.Base.Properties = nil
 	legacyStatus, legacyErr := s.SaveBinlogPaths(ctx, legacy)
@@ -114,6 +121,7 @@ func TestStreamingFlushGroupSortIndexAndHandoff(t *testing.T) {
 	}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{SegmentID: 2, NumOfRows: 2000, IsSorted: true, InsertLogs: req.Field2BinlogPaths}}})
 	require.NoError(t, err)
 	require.Equal(t, []int64{2}, s.meta.GetSegmentChangeGroup(ctx, 1, 1).NewSegmentIDs)
+	assertRows()
 	require.Equal(t, commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, 1).GetState(), "source stays recoverable while growing still serves")
 	require.Equal(t, int64(1), s.meta.SnapshotCandidateSegments(1)[0].GetID(), "snapshot pins the durable source instead of the private output")
 	scalar := s.indexMeta.Indexes[1][10]
@@ -134,11 +142,13 @@ func TestStreamingFlushGroupSortIndexAndHandoff(t *testing.T) {
 	cancel()
 	failure.UnPatch()
 	require.Equal(t, model.SegmentChangeStateReady, s.meta.GetSegmentChangeGroup(ctx, 1, 1).State)
+	assertRows()
 	require.Nil(t, s.meta.GetSegment(ctx, 1).GetSealedAtDataVersion(), "failed publication cannot hand off growing data")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	inspector.checkAllGroups(ctx)
 	g := s.meta.GetSegmentChangeGroup(ctx, 1, 1)
 	require.Equal(t, model.SegmentChangeStateCommitted, g.State)
+	assertRows()
 	require.EqualValues(t, before.Version().GetStreamingVersion()+1, g.StreamingDataVersion.GetStreamingVersion())
 	require.EqualValues(t, before.Version().GetCompactVersion(), g.StreamingDataVersion.GetCompactVersion())
 	require.True(t, proto.Equal(g.StreamingDataVersion, s.meta.GetSegment(ctx, 1).GetSealedAtDataVersion()))
@@ -226,6 +236,8 @@ func TestStreamingFlushInterruptedRegistrationRecovery(t *testing.T) {
 	require.True(t, pending)
 	require.True(t, s.meta.GetSegment(ctx, 1).GetIsInvisible())
 	require.Equal(t, commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, 1).GetState())
+	require.EqualValues(t, 2000, s.meta.GetNumRowsOfCollection(ctx, 1))
+	require.EqualValues(t, 2000, s.meta.GetNumRowsOfPartition(ctx, 1, 1))
 }
 
 func TestStreamingFlushInterruptedPublishRecovery(t *testing.T) {
@@ -251,6 +263,8 @@ func TestStreamingFlushInterruptedPublishRecovery(t *testing.T) {
 	require.NoError(t, s.meta.ReconcileSegmentChangeGroups(ctx, nil, func(context.Context, int64) (bool, error) { return true, nil }))
 	s.meta.DataViewManager = manager
 	require.True(t, s.meta.GetSegment(ctx, 2).GetIsInvisible())
+	require.EqualValues(t, 2000, s.meta.GetNumRowsOfCollection(ctx, 1))
+	require.EqualValues(t, 2000, s.meta.GetNumRowsOfPartition(ctx, 1, 1))
 	require.Nil(t, s.meta.GetSegment(ctx, 1).GetSealedAtDataVersion())
 	require.Equal(t, model.SegmentChangeStateReady, s.meta.GetSegmentChangeGroup(ctx, 1, 1).State)
 }
@@ -317,6 +331,8 @@ func TestStreamingFlushRetiredByDDL(t *testing.T) {
 			g := s.meta.GetSegmentChangeGroup(ctx, 1, 1)
 			require.Equal(t, model.SegmentChangeStateAborted, g.State)
 			require.True(t, g.StreamingDataRetired)
+			require.Zero(t, s.meta.GetNumRowsOfCollection(ctx, 1))
+			require.Zero(t, s.meta.GetNumRowsOfPartition(ctx, 1, 1))
 			require.Equal(t, commonpb.SegmentState_Dropped, s.meta.GetSegment(ctx, 1).GetState())
 			require.Equal(t, commonpb.SegmentState_Dropped, s.meta.GetSegment(ctx, 2).GetState())
 			status, err = s.SaveBinlogPaths(ctx, proto.CloneOf(req))

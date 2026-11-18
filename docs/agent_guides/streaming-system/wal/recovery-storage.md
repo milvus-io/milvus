@@ -72,11 +72,13 @@ for another Commit attempt on the cancelled writer. See
 
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
-Materialization through T waits for final DataCoord publication of every L1
+Materialization through T waits for durable DataCoord registration of every L1
 created before T, across all partitions of the VChannel. Growing registration or
-object output alone is insufficient; an in-flight final Flush remains a blocker.
-Final L1 publication does not wait for L0 completion. An explicit Flush joins
-both sides through message handles and consuming-side acknowledgements, avoiding
+object output alone is insufficient: the closed source and its flush group must
+be durable. Query publication and versioned handoff may still be pending.
+Later Flush/Truncate messages do not retain new L1 handles for such a closed,
+durable source. Final query publication does not wait for L0 completion. An explicit Flush joins
+L1 durability and L0 completion through message handles and consuming-side acknowledgements, avoiding
 a circular wait; it does not wait for global checkpoint publication. The global
 checkpoint is persisted by RecoveryStorage, without periodic reporting to
 DataCoord. The Summary reader materializer is retained for

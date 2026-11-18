@@ -1092,15 +1092,19 @@ Replay safety:
 - **DataView snapshot GC**: `GarbageCollect(retainLatest)` is independent of the
   group table; after a publish, old snapshots (without the new members) should
   become recyclable promptly, `retainLatest ≥ 1` suffices.
-- **Snapshot export** (`handler.GenSnapshot`): export contains only published
-  members. The candidate projection excludes unpublished group outputs while
-  retaining their still-visible parents; restore therefore cannot copy both.
+- **Snapshot export** (`handler.GenSnapshot`): the candidate projection excludes
+  unpublished group outputs while retaining their still-visible parents. Pending
+  streaming flushes retain their original durable source instead of the private
+  sorted replacement; restore therefore cannot copy both.
   Candidate segments and exclusions are read under one `segMu.RLock`. A
   compaction group rechecks snapshot protection under the commit's `segMu`
   write lock, so a snapshot starting after the first publish check cannot
   race the final SegmentMeta write.
 - **Row-count statistics**: collection and partition statistics exclude
-  unpublished group members and retain their still-visible parents. Segment
+  unpublished group members and retain their still-visible parents. Pending
+  streaming-flush groups count their durable original source, including after
+  a private Sort rewrite; publication switches to the final output exactly once.
+  Query handoff readiness does not delay these durability-based statistics. Segment
   states and group exclusions are read under one metadata lock, including
   after opt-out while existing groups drain.
 - **Terminal group cleanup**: the inspector sweeps terminal groups after each
