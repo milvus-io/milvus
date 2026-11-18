@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -202,6 +203,33 @@ func TestStoreWriteReadChunk(t *testing.T) {
 	})))
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
+}
+
+func TestStoreWriteChunkRetryRewritesPayloadWhoseDurabilityFailed(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	sections := writeSections(map[string][]uint64{"v1": {100}})
+	writes := 0
+	var original func(*storage.LocalChunkManager, context.Context, string, []byte) error
+	patch := mockey.Mock((*storage.LocalChunkManager).Write).Origin(&original).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, key string, data []byte) error {
+			writes++
+			if err := original(cm, ctx, key, data); err != nil {
+				return err
+			}
+			if writes == 1 {
+				// The complete payload is at the key, but its durability step failed.
+				return syscall.EIO
+			}
+			return nil
+		}).Build()
+	defer patch.UnPatch()
+
+	_, _, err := store.WriteChunk(ctx, 0, sections, testRecordCoverage(sections))
+	require.ErrorIs(t, err, syscall.EIO)
+	_, _, err = store.WriteChunk(ctx, 0, sections, testRecordCoverage(sections))
+	require.NoError(t, err)
+	require.Equal(t, 2, writes, "a retry must rewrite the payload, not trust the object it finds")
 }
 
 func TestStoreWriteChunkRewriteIsIdempotent(t *testing.T) {

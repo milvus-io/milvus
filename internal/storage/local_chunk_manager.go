@@ -29,25 +29,49 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
+//
+// Like the C++ DurableLocalChunkManager, it prepares localPath once at
+// construction (see localstorage.PrepareRoot) and bounds directory
+// synchronization of durable writes by that physical boundary. The root must
+// stay in place afterwards; GC may recreate descendants, not the root. An
+// empty localPath has no provisioned root: each file is bounded by its parent.
 type LocalChunkManager struct {
 	localPath string
+	boundary  string
 }
 
 var _ ChunkManager = (*LocalChunkManager)(nil)
 
-// NewLocalChunkManager create a new local manager object.
+// NewLocalChunkManager creates a local manager and panics if its root cannot be
+// prepared. Production code constructs it through ChunkManagerFactory, which
+// returns that failure instead.
 func NewLocalChunkManager(opts ...objectstorage.Option) *LocalChunkManager {
+	lcm, err := newLocalChunkManager(opts...)
+	if err != nil {
+		panic(err)
+	}
+	return lcm
+}
+
+func newLocalChunkManager(opts ...objectstorage.Option) (*LocalChunkManager, error) {
 	c := objectstorage.NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
-	return &LocalChunkManager{
-		localPath: c.RootPath,
+	lcm := &LocalChunkManager{localPath: c.RootPath}
+	if c.RootPath != "" {
+		boundary, err := localstorage.PrepareRoot(c.RootPath)
+		if err != nil {
+			return nil, merr.WrapErrIoFailed(c.RootPath, err)
+		}
+		lcm.boundary = boundary
 	}
+	return lcm, nil
 }
 
 // RootPath returns lcm root path.
@@ -96,20 +120,13 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 	return reader, nil
 }
 
-// Write writes the data to local storage.
+// Write atomically publishes the data, like an object store PUT (see
+// localstorage.Write).
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	dir := path.Dir(filePath)
-	exist, err := lcm.Exist(ctx, dir)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !exist {
-		err := os.MkdirAll(dir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(filePath, err)
-		}
-	}
-	return WriteFile(filePath, content, os.ModePerm)
+	return merr.WrapErrIoFailed(filePath, localstorage.WriteFile(filePath, content, os.ModePerm, lcm.boundary))
 }
 
 // MultiWrite writes the data to local storage.
@@ -155,6 +172,9 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	return results, el
 }
 
+// WalkWithPrefix skips unpublished writes (see localstorage.IsTemp), as object
+// stores do not list in-progress uploads, so RemoveWithPrefix leaves files a
+// crash interrupted before publication.
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 	logger.Info(ctx, "start walk through objects")
@@ -171,6 +191,11 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 		return filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			// Unpublished writes are hidden, including one renamed away between
+			// reading its directory and stating it.
+			if localstorage.IsTemp(filePath) {
+				return nil
 			}
 			// A missing scan root is an empty listing, including repeated GC.
 			if filePath == dir && os.IsNotExist(err) {
@@ -204,6 +229,9 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 	for _, filePath := range globPaths {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if localstorage.IsTemp(filePath) {
+			continue
 		}
 
 		f, err := os.Stat(filePath)
@@ -308,6 +336,9 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {
@@ -315,33 +346,16 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// Create destination directory if not exists
-	dstDir := path.Dir(dstFilePath)
-	exist, err := lcm.Exist(ctx, dstDir)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		err := os.MkdirAll(dstDir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(dstFilePath, err)
+	// The destination is published by rename, so the open source keeps its
+	// content even when both name the same file.
+	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-	}
-
-	// Create destination file
-	dstFile, err := os.Create(dstFilePath)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-
-	return nil
+		_, err := io.Copy(dst, srcFile)
+		return err
+	}, lcm.boundary)
+	return merr.WrapErrIoFailed(dstFilePath, err)
 }
 
 type LocalReader struct {

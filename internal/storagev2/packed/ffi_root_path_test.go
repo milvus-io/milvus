@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -43,6 +44,9 @@ func TestMakePropertiesFromStorageConfig_RootPath(t *testing.T) {
 			defer FreeProperties(props)
 			assert.Equal(t, tc.expected, loonPropertyString(props, PropertyFSRootPath))
 			assert.Equal(t, "false", loonPropertyString(props, PropertyFSS3UseCRT))
+			if tc.storageType == "local" {
+				assert.Equal(t, tc.rootPath, loonPropertyString(props, storagev2.PropertyFSLocalDurabilityRoot))
+			}
 		})
 	}
 }

@@ -21,6 +21,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"testing"
 
@@ -98,8 +99,10 @@ func SeedLegacyBackfillRecord(t *testing.T, m *meta.Meta, segmentID, buildID int
 		State:          commonpb.SegmentState_Flushed,
 		NumOfRows:      1000,
 		StorageVersion: storage.StorageV3,
-		ManifestPath: packed.MarshalManifestPath(
-			fmt.Sprintf("/tmp/test-backfill/insert_log/%d/%d/%d", meta.RestartCollID, RestartPartID, segmentID), 1),
+		// Segment objects live under the meta's chunk-manager root, which also
+		// bounds local durable writes of their index artifacts.
+		ManifestPath: packed.MarshalManifestPath(path.Join(m.ChunkManager.RootPath(),
+			fmt.Sprintf("insert_log/%d/%d/%d", meta.RestartCollID, RestartPartID, segmentID)), 1),
 	})))
 	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, &model.SegmentIndex{
 		CollectionID:          meta.RestartCollID,

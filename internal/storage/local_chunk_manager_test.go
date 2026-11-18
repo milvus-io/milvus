@@ -21,13 +21,108 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	source := filepath.Join(root, "source")
+	destination := filepath.Join(root, "new", "parents", "copy")
+	require.NoError(t, cm.Write(ctx, source, []byte("complete")))
+	require.NoError(t, cm.Copy(ctx, source, destination))
+	// Publication by rename keeps the open source intact.
+	require.NoError(t, cm.Copy(ctx, source, source))
+	data, err := cm.Read(ctx, source)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+	data, err = cm.Read(ctx, destination)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+
+	patch := mockey.Mock(localstorage.SyncDirectories).Return(syscall.EIO).Build()
+	defer patch.UnPatch()
+	require.Error(t, cm.Write(ctx, source, []byte("new")))
+	require.Error(t, cm.Copy(ctx, source, destination))
+	require.Error(t, cm.MultiWrite(ctx, map[string][]byte{source: []byte("batch")}))
+}
+
+func TestLocalChunkManagerRootPreparationFailureFailsConstruction(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing", "root")
+	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
+	defer patch.UnPatch()
+	// As in the C++ DurableLocalChunkManager, a root that cannot be prepared
+	// never yields a manager: the factory returns the failure, the
+	// convenience constructor panics.
+	factory := NewChunkManagerFactory("local", objectstorage.RootPath(root))
+	cm, err := factory.NewPersistentStorageChunkManager(t.Context())
+	require.ErrorIs(t, err, merr.ErrIoFailed)
+	require.Nil(t, cm)
+	require.Panics(t, func() { NewLocalChunkManager(objectstorage.RootPath(root)) })
+}
+
+func TestLocalChunkManagerPreparesRootAtConstruction(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "new", "root")
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	// Steady writes reuse the boundary prepared at construction.
+	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
+	defer patch.UnPatch()
+	require.NoError(t, cm.Write(t.Context(), filepath.Join(root, "object"), []byte("data")))
+}
+
+func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	ancestor := filepath.Join(t.TempDir(), "search")
+	root := ancestor + "/data"
+	require.NoError(t, os.MkdirAll(root+"/actual/child", 0o700))
+	require.NoError(t, os.Symlink(root+"/actual/child", root+"/link"))
+	require.NoError(t, os.Chmod(ancestor, 0o111))
+	defer func() { require.NoError(t, os.Chmod(ancestor, 0o700)) }()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	name := root + "/link/../source"
+	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
+	// "link/../source" aliases root/actual/source, not root/source.
+	require.NoError(t, cm.Copy(t.Context(), name, root+"/actual/source"))
+	_, err := os.Stat(root + "/source")
+	require.True(t, os.IsNotExist(err))
+	require.NoError(t, cm.Copy(t.Context(), name, root+"/new/copy"))
+	data, err := os.ReadFile(root + "/actual/source")
+	require.NoError(t, err)
+	require.Equal(t, "data", string(data))
+}
+
+func TestLocalChunkManagerWalkWithPrefixSkipsUnpublishedWrites(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	dir := filepath.Join(root, "segment")
+	require.NoError(t, cm.Write(ctx, filepath.Join(dir, "object"), []byte("data")))
+	// What a crash between creating and publishing a write leaves behind.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".milvus-tmp-0123456789abcdef"), []byte("partial"), 0o600))
+	for _, recursive := range []bool{false, true} {
+		var listed []string
+		require.NoError(t, cm.WalkWithPrefix(ctx, dir+"/", recursive, func(info *ChunkObjectInfo) bool {
+			listed = append(listed, info.FilePath)
+			return true
+		}))
+		require.Equal(t, []string{filepath.Join(dir, "object")}, listed, "recursive=%v", recursive)
+	}
+}
 
 var localPath string
 
@@ -116,6 +211,25 @@ func TestLocalChunkManagerWalkWithPrefixKeepsStringPrefixSemantics(t *testing.T)
 		}))
 		require.ElementsMatch(t, keys[:4], found)
 	})
+}
+
+func TestLocalChunkManagerWithoutRootIsNotBoundedByWorkingDirectory(t *testing.T) {
+	// A manager without a root has no provisioned boundary; the working
+	// directory must not become one, or absolute keys elsewhere fail.
+	t.Chdir(t.TempDir())
+	ctx := t.Context()
+	cm := NewLocalChunkManager()
+	first := filepath.Join(t.TempDir(), "a", "object")
+	second := filepath.Join(t.TempDir(), "b", "object")
+	require.NoError(t, cm.Write(ctx, first, []byte("one")))
+	require.NoError(t, cm.MultiWrite(ctx, map[string][]byte{first: []byte("1"), second: []byte("2")}))
+	copied := filepath.Join(t.TempDir(), "c", "copy")
+	require.NoError(t, cm.Copy(ctx, second, copied))
+	for name, expected := range map[string]string{first: "1", second: "2", copied: "2"} {
+		data, err := os.ReadFile(name)
+		require.NoError(t, err)
+		require.Equal(t, expected, string(data))
+	}
 }
 
 func TestLocalChunkManagerEmptyKeyDoesNotDeleteRoot(t *testing.T) {
