@@ -571,19 +571,27 @@ func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 		auto     bool
 		want     float64
 		wantErr  string
+		codec    string
 	}{
-		{"shipped defaults preserve common", "", true, false, 0.25, ""},
-		{"SDK overrides both server settings", "0.0625", true, false, 0.0625, ""},
-		{"SDK with generic config disabled", "0.0625", false, false, 0.0625, ""},
-		{"common with generic config disabled", "", false, false, 0.25, ""},
-		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875, ""},
-		{"numeric string remains valid", `"0.1"`, true, false, 0.1, ""},
-		{"positive ratio above 0.25 remains valid", "0.5", true, false, 0.5, ""},
-		{"zero ratio rejected", "0", true, false, 0, "PQ navigation requires positive"},
-		{"zero ratio rejected with generic config disabled", "0", false, false, 0, "PQ navigation requires positive"},
-		{"negative ratio rejected", "-0.1", true, false, 0, "should be in range"},
-		{"boolean ratio rejected", "true", true, false, 0, "invalid float value"},
-		{"null ratio rejected", "null", true, false, 0, "invalid float value"},
+		{"shipped defaults preserve common", "", true, false, 0.25, "", ""},
+		{"SDK overrides both server settings", "0.0625", true, false, 0.0625, "", ""},
+		{"SDK with generic config disabled", "0.0625", false, false, 0.0625, "", ""},
+		{"common with generic config disabled", "", false, false, 0.25, "", ""},
+		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875, "", ""},
+		{"AutoIndex ignores invalid SDK ratio", "true", true, true, 0.1875, "", ""},
+		{"numeric string remains valid", `"0.1"`, true, false, 0.1, "", ""},
+		{"positive ratio above 0.25 remains valid", "0.5", true, false, 0.5, "", ""},
+		{"zero ratio rejected", "0", true, false, 0, "PQ navigation requires positive", ""},
+		{"zero ratio rejected with generic config disabled", "0", false, false, 0, "PQ navigation requires positive", ""},
+		{"negative ratio rejected", "-0.1", true, false, 0, "should be in range", ""},
+		{"boolean ratio rejected", "true", true, false, 0, "invalid float value", ""},
+		{"null ratio rejected", "null", true, false, 0, "invalid float value", ""},
+		{"RaBitQ boolean ratio rejected", "true", true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ null ratio rejected", "null", true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ nonnumeric string rejected", `"abc"`, true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ invalid ratio with generic config disabled", "true", false, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ zero ratio remains unused", "0", true, false, 0, "", "RABITQ"},
+		{"RaBitQ numeric string remains valid", `"0.1"`, true, false, 0.1, "", "RABITQ"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params := paramtable.Get()
@@ -606,10 +614,15 @@ func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 			require.NoError(t, params.Save(params.AutoIndexConfig.ExtraParams.Key,
 				`{"build_ratio":"{\"pq_code_budget_gb\":0.1875,\"num_threads\":1}"}`))
 
-			requestParams := "{}"
+			requestParams := map[string]any{}
 			if tc.request != "" {
-				requestParams = `{"pq_code_budget_gb_ratio":` + tc.request + `}`
+				requestParams[indexparams.PQCodeBudgetRatioKey] = json.RawMessage(tc.request)
 			}
+			if tc.codec != "" {
+				requestParams["quant_type"] = tc.codec
+			}
+			requestJSON, err := json.Marshal(requestParams)
+			require.NoError(t, err)
 			task := &CreateIndexTask{
 				fieldSchema: &schemapb.FieldSchema{
 					DataType: schemapb.DataType_FloatVector,
@@ -620,10 +633,10 @@ func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 				req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "DISKANN"},
 					{Key: common.MetricTypeKey, Value: "L2"},
-					{Key: common.ParamsKey, Value: requestParams},
+					{Key: common.ParamsKey, Value: string(requestJSON)},
 				}},
 			}
-			err := task.parseIndexParams(context.Background())
+			err = task.parseIndexParams(context.Background())
 			if tc.wantErr != "" {
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.Contains(t, err.Error(), indexparams.PQCodeBudgetRatioKey)

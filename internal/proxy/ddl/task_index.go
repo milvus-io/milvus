@@ -19,6 +19,7 @@ package ddl
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -445,6 +446,11 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 			// Preserve only an explicit request value; keep server-side precedence unchanged.
 			if pqBudgetFromSDK && !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+				// The build-parameter bridge parses this value for every DISKANN codec.
+				if _, err := strconv.ParseFloat(pqBudget, 64); err != nil {
+					return merr.WrapErrParameterInvalidMsg("invalid float value, key: '%s', value: '%s'",
+						indexparams.PQCodeBudgetRatioKey, pqBudget)
+				}
 				indexParamsMap[indexparams.PQCodeBudgetRatioKey] = pqBudget
 			}
 		}
