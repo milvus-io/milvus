@@ -331,6 +331,9 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 
 	collection, err := m.handler.GetCollection(ctx, collectionID)
 	if err != nil {
+		if lifecycleCtx.Err() != nil {
+			return 0, merr.WrapErrServiceUnavailable("compaction trigger manager is stopped")
+		}
 		return 0, err
 	}
 	if collection == nil {
@@ -341,7 +344,11 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 			"compaction is not supported for external collection")
 	}
 	if IsTargetBasedManualRewriteCompactionRequest(req) {
-		return m.saveManualRewriteCompactionTarget(ctx, req)
+		id, err := m.saveManualRewriteCompactionTarget(ctx, req)
+		if err != nil && lifecycleCtx.Err() != nil {
+			return 0, merr.WrapErrServiceUnavailable("compaction trigger manager is stopped")
+		}
+		return id, err
 	}
 
 	var triggerID UniqueID
@@ -359,12 +366,21 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		events[policy.TriggerTypeClustering] = views
 	}
 	if err != nil {
+		if lifecycleCtx.Err() != nil {
+			return 0, merr.WrapErrServiceUnavailable("compaction trigger manager is stopped")
+		}
 		return 0, err
 	}
 	if len(events) > 0 {
 		for triggerType, views := range events {
 			m.notify(ctx, triggerType, views, false)
 		}
+	}
+	if lifecycleCtx.Err() != nil {
+		return 0, merr.WrapErrServiceUnavailable("compaction trigger manager is stopped")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	return triggerID, nil
 }

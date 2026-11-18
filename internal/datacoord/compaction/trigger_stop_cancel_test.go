@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
@@ -560,4 +561,114 @@ func TestCompactionTriggerManagerStopCancelsPolicySweepAndManualTrigger(t *testi
 		L0Compaction: true,
 	})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+func TestCompactionTriggerManagerStopDuringInFlightManualTriggerAfterViewGeneration(t *testing.T) {
+	paramtable.Init()
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	metaStore := metacache.NewMetaStore(catalog)
+
+	const collID = int64(2001)
+	collInfo := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: &schemapb.CollectionSchema{},
+	}
+	metaStore.PutCollection(collInfo)
+
+	l0Seg := &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            6001,
+			CollectionID:  collID,
+			PartitionID:   1,
+			InsertChannel: "ch-l0",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+			NumOfRows:     10,
+			DmlPosition:   &msgpb.MsgPosition{Timestamp: 50},
+		},
+	}
+	growingSeg := &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            6002,
+			CollectionID:  collID,
+			PartitionID:   1,
+			InsertChannel: "ch-l0",
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		},
+	}
+	m := &meta.Meta{
+		Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+			6001: l0Seg,
+			6002: growingSeg,
+		}),
+		MetaStore: metaStore,
+	}
+
+	handler := newFuncHandler(t, func(ctx context.Context, _ UniqueID) (*meta.CollectionInfo, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return collInfo, nil
+	})
+
+	var allocCalls atomic.Int32
+	enteredSubmitAlloc := make(chan struct{})
+	var enteredOnce sync.Once
+	mc := rootmocks.NewMixCoord(t)
+	mc.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, _ *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+		call := allocCalls.Add(1)
+		// Call 1 allocates triggerID in l0Policy.TriggerOneCollection (generating the L0 view).
+		// Call 2 runs inside notify() -> SubmitL0ViewToScheduler after views are generated.
+		if call == 1 {
+			return &rootcoordpb.AllocIDResponse{
+				Status: merr.Success(),
+				ID:     9001,
+				Count:  1,
+			}, nil
+		}
+		enteredOnce.Do(func() {
+			close(enteredSubmitAlloc)
+		})
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	alloc := allocator.NewRootCoordAllocator(mc)
+	inspector := &recordingInspector{}
+	mgr := NewCompactionTriggerManager(alloc, handler, inspector, m, nil, nil, nil, nil, index.NewTestVersionManager())
+
+	type manualResult struct {
+		triggerID int64
+		err       error
+	}
+	resCh := make(chan manualResult, 1)
+	go func() {
+		// Keep the caller's own RPC ctx alive so only Stop() cancels the merged ctx.
+		id, err := mgr.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+			CollectionID: collID,
+			L0Compaction: true,
+		})
+		resCh <- manualResult{triggerID: id, err: err}
+	}()
+
+	select {
+	case <-enteredSubmitAlloc:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for SubmitL0ViewToScheduler AllocID entry barrier")
+	}
+
+	mgr.Stop()
+
+	select {
+	case res := <-resCh:
+		require.ErrorIs(t, res.err, merr.ErrServiceUnavailable)
+		require.Zero(t, res.triggerID)
+	case <-time.After(1 * time.Second):
+		t.Fatal("ManualTrigger did not return after Stop()")
+	}
+
+	require.Empty(t, inspector.snapshot())
 }
