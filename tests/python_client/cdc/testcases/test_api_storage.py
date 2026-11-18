@@ -9,7 +9,7 @@ from pymilvus import DataType, MilvusException
 from pymilvus.client.types import LoadState
 from pymilvus.grpc_gen import milvus_pb2
 
-from .contract_helpers import assert_index_sync, rows_equal, rpc
+from .contract_helpers import assert_index_sync, logical_index, rows_equal, rpc
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -207,7 +207,8 @@ class TestCDCStorageAPI:
         c.assert_rows(canary, c.data())
         assert [state(client) for client in (c.upstream, c.downstream)] == before
 
-    def test_snapshot_export_and_external_restore_data_stay_local(self, cdc_contract, storage):
+    def test_external_snapshot_restore_does_not_replicate_destination(self, cdc_contract, storage):
+        """Export and restore on the primary; keep the destination local while source DML replicates."""
         c = cdc_contract
         configs, _, prefix = storage
         name = c.collection()
@@ -257,19 +258,26 @@ class TestCDCStorageAPI:
             assert info.state == "RestoreSnapshotCompleted", info
 
         c.wait(restored_complete, "external snapshot restore")
-        c.sync_schema(restored)
-        assert_index_sync(c.upstream, c.downstream, restored, "vector", c.timeout)
+        source = c.upstream.describe_collection(name)
+        target = c.upstream.describe_collection(restored)
+        assert target["fields"] == source["fields"]
+        assert logical_index(c.upstream.describe_index(restored, "vector")) == logical_index(
+            c.upstream.describe_index(name, "vector")
+        )
         c.upstream.load_collection(restored)
         c.control_barrier()
         c.wait(lambda: rows_equal(c.upstream, restored, c.data()), "primary external restore rows")
-        c.wait(lambda: rows_equal(c.downstream, restored, []), "secondary externally restored collection remains empty")
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
+        assert not c.downstream.has_collection(restored, timeout=10)
+        assert response.job_id not in [info.job_id for info in c.downstream.list_restore_snapshot_jobs(timeout=10)]
         assert any(
             info.job_id == response.job_id
             for info in c.upstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
         )
         new_rows = c.data(100)
-        c.upstream.insert(restored, new_rows)
-        c.wait(lambda: rows_equal(c.downstream, restored, new_rows), "DML after local external restore")
-        rows_equal(c.upstream, restored, c.data() + new_rows)
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
+        # The entire restore recipe is local, including destination creation.
+        # Exercise continued CDC on the independently replicated source collection.
+        c.upstream.insert(name, new_rows)
+        c.assert_rows(name, c.data() + new_rows)
+        rows_equal(c.upstream, restored, c.data())
+        assert not c.downstream.has_collection(restored, timeout=10)
+        assert response.job_id not in [info.job_id for info in c.downstream.list_restore_snapshot_jobs(timeout=10)]
