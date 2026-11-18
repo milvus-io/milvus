@@ -1131,15 +1131,20 @@ A flight transitions once from `Computing` to either `Ready` or `Aborted`.
 Registration returns an RAII handle that owns cleanup on every return or
 exception. The leader checks the cache again after registration to close the
 race with another completed writer. A second hit can satisfy the flight through
-an immutable copy without another insertion. A second lookup failure or lack
-of sharing budget aborts coordination and wakes followers before normal
-computation continues.
+an immutable copy without another insertion. A second lookup failure aborts
+coordination and wakes followers before normal computation continues.
 
 The leader computes synchronously on its current query thread. It does not
 queue work back onto the same worker pool. Only a complete result/validity pair
 with both sizes equal to `active_count` may become `Ready`. Shape mismatch,
 copy failure, cancellation, or computation failure aborts sharing without
 changing the expression's normal result handling or error classification.
+
+The leader reserves shared-result memory only after computation finishes,
+immediately before constructing the immutable pair. Pending computations do
+not reserve this budget, so ordinary cache hits can still use it for decoding.
+If the reservation fails, the leader aborts sharing and wakes followers before
+optional cache insertion, while retaining its own computed result.
 
 `Ready` is published before optional cache insertion. Followers need not wait
 for compression, disk writes, or admission. Late followers may reuse a Ready

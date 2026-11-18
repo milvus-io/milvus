@@ -335,14 +335,6 @@ class ExprCacheHelper {
             }
         }
 
-        std::optional<ExprResCacheManager::MaterializationLease> shared_lease;
-        if (can_share) {
-            RunExprCacheBestEffort([&] {
-                shared_lease = manager.TryAcquireMaterialization(active_count);
-            });
-            if (!shared_lease)
-                coordinator.Abort(handle);
-        }
         CheckFlightCancellation(options);
         const auto start = std::chrono::steady_clock::now();
         // Deliberately outside best-effort handling: preserve compute errors.
@@ -355,21 +347,27 @@ class ExprCacheHelper {
         auto owned = OwnResult(std::move(out));
         if (handle) {
             RunExprCacheBestEffort([&] {
-                if (shared_lease && current() &&
+                if (can_share && current() &&
                     owned.result->size() == static_cast<size_t>(active_count) &&
                     owned.valid->size() == static_cast<size_t>(active_count)) {
-                    coordinator.Complete(handle,
-                                         std::make_shared<Coordinator::Bitmaps>(
-                                             std::move(*shared_lease),
-                                             *owned.result,
-                                             *owned.valid));
+                    // Reserve only when the shared copy is ready to be made;
+                    // computation must not hold budget needed by cache hits.
+                    auto lease =
+                        manager.TryAcquireMaterialization(active_count);
+                    if (lease) {
+                        coordinator.Complete(
+                            handle,
+                            std::make_shared<Coordinator::Bitmaps>(
+                                std::move(*lease),
+                                *owned.result,
+                                *owned.valid));
+                    }
                 }
             });
             // If sharing failed, wake followers before any potentially slow Put.
             coordinator.Abort(handle);
             ticket = coordinator.TakeAdmission(handle);
         }
-        shared_lease.reset();
         if (enable_cache_write && current()) {
             ExprResCacheManager::Value value;
             value.result = owned.result;

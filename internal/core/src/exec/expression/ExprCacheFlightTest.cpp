@@ -447,6 +447,119 @@ TEST_P(ExprCacheFlightTest, ResourceLimitDoesNotJoinFlight) {
     EXPECT_EQ(flights.GetStats().waiters, 0);
 }
 
+TEST_P(ExprCacheFlightTest, ColdComputeDoesNotReserveWarmHitBudget) {
+    const size_t pair_bytes = 2 * ((rows + 63) / 64) * 8;
+    cache_config.materialization_max_bytes = pair_bytes;
+    ASSERT_TRUE(manager.SetConfig(cache_config));
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<TargetBitmap>(rows, true);
+    value.valid_result = std::make_shared<TargetBitmap>(rows, true);
+    value.active_count = rows;
+    manager.Put(Key("warm").cache_key, value);
+    ASSERT_EQ(manager.GetEntryCount(), 1);
+
+    std::promise<void> entered, resume;
+    auto resumed = resume.get_future().share();
+    std::future<ExprCacheHelper::CachedBitmaps> leader;
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    leader = std::async(std::launch::async, [&] {
+        return Compute([&] {
+            entered.set_value();
+            resumed.wait();
+            return Full();
+        });
+    });
+    ASSERT_EQ(entered.get_future().wait_for(3s), std::future_status::ready);
+    EXPECT_EQ(flights.GetStats().flights, 1);
+    EXPECT_EQ(flights.GetStats().waiters, 0);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+
+    int fallback = 0;
+    {
+        auto warm = ExprCacheHelper::GetOrCompute(
+            segment.get(),
+            snapshot.get(),
+            [] { return "warm"; },
+            rows,
+            [&] {
+                ++fallback;
+                return Full();
+            },
+            true,
+            nullptr,
+            &options);
+        EXPECT_EQ(fallback, 0);
+        EXPECT_EQ(warm.result->count(), rows);
+        EXPECT_EQ(warm.valid->count(), rows);
+        EXPECT_EQ(manager.GetMaterializationBytes(), pair_bytes);
+    }
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+    resume.set_value();
+    release.dismiss();
+    auto result = leader.get();
+    EXPECT_EQ(result.result->count(), rows);
+    EXPECT_EQ(result.valid->count(), rows);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+}
+
+TEST_P(ExprCacheFlightTest,
+       SharedBudgetExhaustedDuringComputeWakesFollowerBeforePut) {
+    const size_t pair_bytes = 2 * ((rows + 63) / 64) * 8;
+    cache_config.materialization_max_bytes = pair_bytes;
+    ASSERT_TRUE(manager.SetConfig(cache_config));
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<TargetBitmap>(rows, true);
+    value.valid_result = std::make_shared<TargetBitmap>(rows, true);
+    value.active_count = rows;
+    manager.Put(Key("warm").cache_key, value);
+
+    std::promise<void> entered, resume;
+    auto resumed = resume.get_future().share();
+    std::future<ExprCacheHelper::CachedBitmaps> leader, follower;
+    std::atomic<int> fallback{0};
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    leader = std::async(std::launch::async, [&] {
+        return Compute([&] {
+            entered.set_value();
+            resumed.wait();
+            return Full();
+        });
+    });
+    ASSERT_EQ(entered.get_future().wait_for(3s), std::future_status::ready);
+    follower = std::async(std::launch::async, [&] {
+        return Compute([&] {
+            ++fallback;
+            return Full();
+        });
+    });
+    ASSERT_TRUE(Waiters(1));
+
+    // A real cache hit consumes the budget after the leader starts computing.
+    ExprResCacheManager::Value warm;
+    warm.active_count = rows;
+    ASSERT_EQ(manager.GetWithStatus(Key("warm").cache_key, warm),
+              ExprResCacheManager::LookupResult::Hit);
+    EXPECT_EQ(manager.GetMaterializationBytes(), pair_bytes);
+    auto backend_lock = ExprCacheFlightTestPeer::HoldBackend(manager);
+    resume.set_value();
+    release.dismiss();
+    // Failed sharing must wake the follower before the leader's blocked Put.
+    EXPECT_EQ(follower.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(leader.wait_for(0ms), std::future_status::timeout);
+    backend_lock.unlock();
+    auto follower_result = follower.get();
+    auto leader_result = leader.get();
+    EXPECT_EQ(fallback, 1);
+    EXPECT_EQ(follower_result.result->count(), rows);
+    EXPECT_EQ(follower_result.valid->count(), rows);
+    EXPECT_EQ(leader_result.result->count(), rows);
+    EXPECT_EQ(leader_result.valid->count(), rows);
+    EXPECT_EQ(manager.GetEntryCount(), 2);
+    EXPECT_EQ(manager.GetMaterializationBytes(), pair_bytes);
+    warm = {};
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+}
+
 TEST_P(ExprCacheFlightTest,
        NativeSwitchDoesNotClearCacheAndDisabledHelperDoesNotJoin) {
     auto value = ExprResCacheManager::Value{};
