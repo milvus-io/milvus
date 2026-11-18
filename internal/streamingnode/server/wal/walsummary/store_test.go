@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -269,6 +271,35 @@ func TestStoreManifestCorrupted(t *testing.T) {
 	_, _, err = store.ReadManifest(ctx)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
+}
+
+func TestStoreManifestInterruptedRewriteKeepsPrevious(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	previous := &streamingpb.PChannelSummaryManifest{
+		Coverage: &streamingpb.SummaryCoverage{Generation: 1, Term: 1},
+	}
+	require.NoError(t, store.WriteManifest(ctx, previous))
+	// The rewrite stops halfway, as a crash or a full disk would leave it.
+	var original func(*os.File, []byte) (int, error)
+	patch := mockey.Mock((*os.File).Write).Origin(&original).To(func(f *os.File, b []byte) (int, error) {
+		if f == os.Stdout || f == os.Stderr {
+			return original(f, b)
+		}
+		n, _ := original(f, b[:len(b)/2])
+		return n, syscall.ENOSPC
+	}).Build()
+	err := store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
+		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1},
+	})
+	patch.UnPatch()
+	require.Error(t, err)
+	// The manifest is the only index into the chunk set: the previous one must
+	// stay readable instead of failing recovery as corrupted.
+	loaded, found, err := store.ReadManifest(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, proto.Equal(previous.GetCoverage(), loaded.GetCoverage()))
 }
 
 func TestStoreProbeChunkForward(t *testing.T) {

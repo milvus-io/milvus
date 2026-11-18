@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +29,43 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 )
+
+func TestLocalChunkManagerWriteReplacesAtomically(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	name := filepath.Join(root, "manifest", "00000000000000000001")
+	require.NoError(t, cm.Write(ctx, name, []byte("previous")))
+	reader, err := os.Open(name)
+	require.NoError(t, err)
+	defer reader.Close()
+	require.NoError(t, cm.Write(ctx, name, []byte("next")))
+	data, err := cm.Read(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, "next", string(data))
+	// A reader of the previous object keeps its content, as with a PUT.
+	data, err = io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Equal(t, "previous", string(data))
+}
+
+func TestLocalChunkManagerWalkWithPrefixSkipsUnpublishedWrites(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	dir := filepath.Join(root, "manifest")
+	require.NoError(t, cm.Write(ctx, filepath.Join(dir, "object"), []byte("data")))
+	// What a crash between creating and publishing a write leaves behind.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".milvus-tmp-0123456789abcdef"), []byte("partial"), 0o600))
+	for _, recursive := range []bool{false, true} {
+		var listed []string
+		require.NoError(t, cm.WalkWithPrefix(ctx, dir+"/", recursive, func(info *ChunkObjectInfo) bool {
+			listed = append(listed, info.FilePath)
+			return true
+		}))
+		require.Equal(t, []string{filepath.Join(dir, "object")}, listed, "recursive=%v", recursive)
+	}
+}
 
 var localPath string
 
