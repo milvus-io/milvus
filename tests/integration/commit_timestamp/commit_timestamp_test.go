@@ -88,6 +88,9 @@ func (s *CommitTimestampSuite) listDataSegments(ctx context.Context, collectionI
 		if seg.GetNumOfRows() == 0 {
 			continue
 		}
+		if seg.GetIsInvisible() || seg.GetIsImporting() {
+			continue
+		}
 		segments[string(kv.Key)] = seg
 	}
 	return segments

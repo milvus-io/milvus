@@ -151,7 +151,11 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 				(meta.GetFlushDataDurable() && (meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED || meta.GetSealedAtDataVersion() != nil)) {
 				// Migration may recover the encoding version even when the schema
 				// at the original allocation timetick is no longer retained.
-				schema = module.vchannelView.restoreSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick(), meta.GetSchemaVersion())
+				if meta.GetFlushDataDurable() {
+					schema = module.vchannelView.restoreFlushedSegmentSchema(meta.GetStat().GetCreateSegmentTimeTick(), meta.GetSchemaVersion())
+				} else {
+					schema = module.vchannelView.restoreSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick(), meta.GetSchemaVersion())
+				}
 				if meta.GetFlushDataDurable() && schema == nil {
 					return nil, merr.WrapErrDataIntegrityMsg("missing encoding schema version %d for streaming flush source %d", meta.GetSchemaVersion(), id)
 				}

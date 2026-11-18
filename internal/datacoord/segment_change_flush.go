@@ -29,6 +29,42 @@ import (
 
 // A flush group is a local physical realization of WAL data. Its source ID
 // remains stable through private sorts and retries; no group ID is replicated.
+func (s *Server) progressStreamingFlushPublication(ctx context.Context, segmentID int64) {
+	g := s.meta.GetSegmentChangeGroup(ctx, 0, segmentID)
+	if g == nil || g.Source != model.SegmentChangeSourceStreamingFlush || g.IsTerminal() {
+		return
+	}
+	source := s.meta.GetSegment(ctx, g.StreamingSegmentID)
+	if source == nil || !meta.IsFlushState(source.GetState()) {
+		return
+	}
+	if g.State == model.SegmentChangeStateStaged && meta.EnableSortCompaction() {
+		// Notifications are best effort. Re-issue required sort work on polling
+		// after queue saturation or a restart between registration and postFlush.
+		candidates := s.meta.GroupSortCandidates(g.CollectionID)
+		for _, id := range g.NewSegmentIDs {
+			if candidates[id] {
+				select {
+				case meta.GetStatsTaskChSingleton() <- id:
+				default:
+				}
+			}
+		}
+	}
+	// Only a retry of an already durable registration reaches this path. The
+	// first receipt stays independent of readiness; subsequent publication polls
+	// can complete ready groups without waiting for two inspector timer ticks.
+	inspector := newSegmentChangeInspector(ctx, s.meta, s.allocator)
+	defer inspector.Stop()
+	if g.State == model.SegmentChangeStateStaged {
+		inspector.evaluateStaged(ctx, g)
+		g = s.meta.GetSegmentChangeGroup(ctx, g.CollectionID, g.GroupID)
+	}
+	if g != nil && g.State == model.SegmentChangeStateReady {
+		inspector.tryPublish(ctx, g)
+	}
+}
+
 func (s *Server) streamingFlushResult(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, bool) {
 	segmentID := req.GetSegmentID()
 	g := s.meta.GetSegmentChangeGroup(ctx, 0, segmentID)
@@ -107,6 +143,14 @@ func (s *Server) stageStreamingFlush(ctx context.Context, req *datapb.SaveBinlog
 	}
 	if group == nil {
 		return dataview.FlushResultStatus(nil), nil
+	}
+	// Preserve the ordinary post-flush path: it wakes required sort work even
+	// when the automatic compaction sweep is configured with a long interval.
+	select {
+	case s.flushCh <- req.GetSegmentID():
+	default:
+		// Publication polling retries required preparation; a full notification
+		// queue must not delay the durable registration receipt.
 	}
 	meta.NotifySegmentIndexBuild(req.GetSegmentID())
 	result, handled := s.streamingFlushResult(ctx, req)

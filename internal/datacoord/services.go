@@ -614,6 +614,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 	if req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		s.progressStreamingFlushPublication(ctx, req.GetSegmentID())
 		if result, handled := s.streamingFlushResult(ctx, req); handled {
 			return result, nil
 		}

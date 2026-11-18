@@ -253,6 +253,11 @@ func (s *rawDataSuite) rawFlushedSegments(collection string, flushed []int64) []
 			return false
 		}
 		segments = selectFlushSegments(flushed, current)
+		for _, segment := range segments {
+			if segment.GetIsInvisible() || segment.GetIsImporting() {
+				return false
+			}
+		}
 		return len(segments) > 0
 	}, 2*time.Minute, 500*time.Millisecond, "no inspectable Segment was found for flush %v", flushed)
 	return segments
