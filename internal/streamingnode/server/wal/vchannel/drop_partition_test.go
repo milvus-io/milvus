@@ -59,11 +59,13 @@ func TestDropPartitionAckDoesNotWaitForOtherPartitionPublication(t *testing.T) {
 			}
 			module, err := NewModule(ModuleConfig{
 				PChannel: "p1", VChannel: "v1",
-				VChannelMeta: &streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				VChannelMeta: &streamingpb.VChannelMeta{
+					Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{CollectionId: 1, Partitions: []*streamingpb.PartitionInfoOfVChannel{
 						{PartitionId: 1, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
 						{PartitionId: 2, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
-					}}},
+					}},
+				},
 				Segments: metas, SegmentLifecycle: lifecycle, Runtime: moduleapi.Runtime{Scheduler: scheduler},
 			})
 			require.NoError(t, err)
