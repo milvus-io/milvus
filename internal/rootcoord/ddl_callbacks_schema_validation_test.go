@@ -285,7 +285,7 @@ func TestMappedFieldAdditionAdmission(t *testing.T) {
 	}
 }
 
-func TestMilvusTableRejectsStructDDL(t *testing.T) {
+func TestMilvusTableAdmitsStructDDL(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
 		name          string
@@ -342,8 +342,8 @@ func TestMilvusTableRejectsStructDDL(t *testing.T) {
 				}
 				err = core.broadcastAlterCollectionSchema(context.Background(), buildAlterSchemaAddFieldSchemaReq("db", coll.Name, field, false))
 			}
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.Zero(t, cacheCalls, "unsupported Struct DDL must fail before publication")
+			require.ErrorIs(t, err, boundary)
+			require.Equal(t, 1, cacheCalls, "supported Struct DDL must reach publication preparation")
 			require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()))
 		})
 	}

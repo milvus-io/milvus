@@ -3847,7 +3847,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 	})
 }
 
-func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
+func TestProxyAdmitsMilvusTableStructSubField(t *testing.T) {
 	node := createTestProxy()
 	defer node.sched.Close()
 	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
@@ -3880,8 +3880,8 @@ func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrOperationNotSupported)
-	require.Zero(t, enqueueCalls)
+	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrServiceUnavailable)
+	require.Equal(t, 1, enqueueCalls)
 }
 
 func TestProxy_AlterCollectionSchema(t *testing.T) {

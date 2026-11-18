@@ -30,6 +30,7 @@
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
 #include "common/VirtualPK.h"
+#include "common/Utils.h"
 #include "milvus-storage/common/constants.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
@@ -103,6 +104,14 @@ ResolvePhysicalColumnMapping(
         mapping.is_external_column = true;
     } else if (!field_schema.external_field().empty()) {
         mapping.storage_column_name = field_schema.external_field();
+        if ((field_schema.data_type() == proto::schema::DataType::Array ||
+             field_schema.data_type() ==
+                 proto::schema::DataType::ArrayOfVector) &&
+            IsStructSubField(field_schema.name()) &&
+            field_schema.external_field() == field_schema.name()) {
+            mapping.storage_column_name =
+                field_schema.name().substr(0, field_schema.name().find('['));
+        }
         mapping.is_external_column = true;
     }
     return mapping;
@@ -131,6 +140,8 @@ Schema::Schema(const Schema& other)
       mmap_enabled_(other.mmap_enabled_),
       mmap_fields_(other.mmap_fields_),
       struct_array_field_cache_(other.struct_array_field_cache_),
+      struct_field_ids_(other.struct_field_ids_),
+      struct_field_children_(other.struct_field_children_),
       warmup_vector_index_(other.warmup_vector_index_),
       warmup_scalar_index_(other.warmup_scalar_index_),
       warmup_scalar_field_(other.warmup_scalar_field_),
@@ -166,6 +177,8 @@ Schema::operator=(const Schema& other) {
     std::swap(mmap_enabled_, copied.mmap_enabled_);
     std::swap(mmap_fields_, copied.mmap_fields_);
     std::swap(struct_array_field_cache_, copied.struct_array_field_cache_);
+    std::swap(struct_field_ids_, copied.struct_field_ids_);
+    std::swap(struct_field_children_, copied.struct_field_children_);
     std::swap(warmup_vector_index_, copied.warmup_vector_index_);
     std::swap(warmup_scalar_index_, copied.warmup_scalar_index_);
     std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);
@@ -238,6 +251,8 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             auto field = sub_field;
             field.set_nullable(field.nullable() || child.nullable());
             process_field(field);
+            schema->struct_field_children_[child.name()].emplace_back(
+                field.fieldid());
         }
     }
 
@@ -409,7 +424,11 @@ Schema::GetExternalColumnNames() const {
         if (it == fields_.end())
             continue;
         if (IsExternalManifestStoredField(field_id)) {
-            columns->push_back(GetPhysicalColumnName(field_id));
+            auto column = GetPhysicalColumnName(field_id);
+            if (std::find(columns->begin(), columns->end(), column) ==
+                columns->end()) {
+                columns->push_back(std::move(column));
+            }
         }
     }
     return columns;
@@ -457,6 +476,17 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
         return std::to_string(field_id.get());
     }
     if (meta.is_external_field()) {
+        if (auto parent = GetStructNameForArrayField(meta);
+            parent.has_value() &&
+            meta.get_external_field() == meta.get_name().get()) {
+            const auto children = struct_field_children_.find(parent.value());
+            if (children != struct_field_children_.end() &&
+                std::find(children->second.begin(),
+                          children->second.end(),
+                          field_id) != children->second.end()) {
+                return parent.value();
+            }
+        }
         return meta.get_external_field();
     }
     return std::to_string(field_id.get());
@@ -480,7 +510,7 @@ Schema::ResolveColumnFieldIds(const std::string& column_name) const {
         for (const auto fid : field_ids_) {
             const auto& meta = fields_.at(fid);
             if (meta.is_external_field() &&
-                meta.get_external_field() == column_name) {
+                GetPhysicalColumnName(fid) == column_name) {
                 field_ids.emplace_back(fid);
             }
         }
@@ -502,6 +532,48 @@ Schema::ResolveColumnFieldIds(const std::string& column_name) const {
     ThrowInfo(ErrorCode::DataFormatBroken,
               "column '{}' is not a valid field id",
               column_name);
+}
+
+OrdinaryStructProjections
+Schema::GetOrdinaryStructProjections(
+    const std::vector<FieldId>& selected_fields) const {
+    OrdinaryStructProjections result;
+    if (!is_external_collection() || is_milvus_table_external_collection() ||
+        selected_fields.empty()) {
+        return result;
+    }
+    const std::unordered_set<FieldId> selected(selected_fields.begin(),
+                                               selected_fields.end());
+    std::unordered_set<FieldId> registered_ids;
+    for (const auto& [name, children] : struct_field_children_) {
+        const auto parent_id = struct_field_ids_.at(name);
+        AssertInfo(
+            !has_field(parent_id) && registered_ids.insert(parent_id).second,
+            "invalid or duplicate Struct parent field id {}",
+            parent_id.get());
+        OrdinaryStructProjection projection{parent_id, {}};
+        for (const auto id : children) {
+            AssertInfo(registered_ids.insert(id).second,
+                       "duplicate Struct child field id {}",
+                       id.get());
+            if (!selected.count(id)) {
+                continue;
+            }
+            const auto& meta = (*this)[id];
+            AssertInfo(
+                GetStructNameForArrayField(meta) ==
+                        std::optional<std::string>(name) &&
+                    meta.get_external_field() == meta.get_name().get(),
+                "invalid ordinary external Struct child {} for parent {}",
+                id.get(),
+                name);
+            projection.child_field_ids.push_back(id);
+        }
+        if (!projection.child_field_ids.empty()) {
+            result.emplace(name, std::move(projection));
+        }
+    }
+    return result;
 }
 
 std::pair<bool, bool>

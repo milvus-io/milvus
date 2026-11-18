@@ -68,8 +68,8 @@ live in the target PK space.
 - Changing the definitions or field IDs of mapped source fields between refreshes.
 - Reading mapped columns that are physically absent from historical source segments.
 - Reusing source primary-key bloom filters for virtual primary key targets.
-- Supporting dynamic fields, partition keys, clustering keys,
-  text match, or auto ID for external collections.
+- Adding partition keys, clustering keys, text match, or auto ID through
+  external field additions.
 - Reading target function output fields from external source data. Target
   function outputs are target-owned fields and are regenerated during refresh.
 
@@ -124,11 +124,11 @@ only the resulting target schema is persisted and replayed.
 
 Every newly imported segment carries the refresh task's schema version.
 
-The target may omit ordinary non-key source fields. Struct fields and Struct
-sub-field additions are not supported in the target external schema. Unmapped
-Struct fields in the source snapshot do not prevent a top-level projection.
-Every mapped source column must physically exist in each live source segment.
-Adding an unmapped ordinary source field does not prevent refresh.
+The target may omit ordinary non-key source fields and select a subset of a
+Struct's children. Struct parents and selected children retain source names and
+shape; each selected child has an independent target ID. Every mapped source
+column must physically exist in each live source segment. Adding an unmapped
+ordinary source field does not prevent refresh.
 
 ## Manifest Field Binding
 
@@ -179,7 +179,7 @@ it does not query the source collection or reconstruct IDs from current schema.
 
 ## Online Field Addition
 
-`AddCollectionField` and top-level field additions through
+`AddCollectionField` and ordinary/Struct-child additions through
 `AlterCollectionSchema` only validate, allocate, and publish the logical target
 schema through the existing ALTER path. They do not read source data, submit a
 refresh job, or prepare manifests. No preparation job ID or frozen projection is
@@ -413,6 +413,9 @@ manifest columns with the same rule as the query path:
 
 This keeps index build consistent with load/search/query/take and avoids a
 separate schema mutation path for indexes.
+A raw index read with no external binding or physical column fails instead of
+synthesizing NULL/default rows. The index task fails for that immutable manifest;
+the query-side field-not-loaded error remains retryable across replicas.
 
 ## Compatibility and Failure Behavior
 

@@ -57,6 +57,14 @@ struct PhysicalColumnMapping {
     bool is_external_column = false;
 };
 
+// Expansion is restricted to children registered under an actual Struct parent.
+struct OrdinaryStructProjection {
+    FieldId parent_field_id;
+    std::vector<FieldId> child_field_ids;
+};
+using OrdinaryStructProjections =
+    std::unordered_map<std::string, OrdinaryStructProjection>;
+
 PhysicalColumnMapping
 ResolvePhysicalColumnMapping(
     bool is_milvus_table,
@@ -545,6 +553,19 @@ class Schema {
     std::vector<FieldId>
     ResolveColumnFieldIds(const std::string& column_name) const;
 
+    bool
+    IsOrdinaryExternalStruct(const std::string& parent_name) const {
+        return is_external_collection() &&
+               !is_milvus_table_external_collection() &&
+               struct_field_children_.count(parent_name) != 0;
+    }
+
+    // An empty selection produces no projections. Only selected, registered
+    // children of ordinary external Struct fields are included.
+    OrdinaryStructProjections
+    GetOrdinaryStructProjections(
+        const std::vector<FieldId>& selected_fields) const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
@@ -745,6 +766,8 @@ class Schema {
 
     // struct_name -> field ID of the struct array field (built in ParseFrom)
     std::unordered_map<std::string, FieldId> struct_field_ids_;
+    std::unordered_map<std::string, std::vector<FieldId>>
+        struct_field_children_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

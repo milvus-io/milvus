@@ -147,6 +147,11 @@ class SealedFieldLayout {
                              : schema_->CollectionWarmupPolicy(vector, index);
     }
     bool
+    HasManifestBinding(FieldId id) const {
+        return !mapping_ || !schema_->IsExternalDataField(id) ||
+               mapping_->physical_columns.count(id.get()) != 0;
+    }
+    bool
     has_field(FieldId id) const {
         return schema_->has_field(id) && HasManifestBinding(id) &&
                (!scope_.IsExplicit() || scope_.Requires(id));
@@ -228,6 +233,22 @@ class SealedFieldLayout {
         }
         return schema_->GetPhysicalColumnName(id);
     }
+    bool
+    IsOrdinaryExternalStruct(const std::string& parent_name) const {
+        return schema_->IsOrdinaryExternalStruct(parent_name);
+    }
+    OrdinaryStructProjections
+    GetOrdinaryStructProjections(
+        const std::vector<FieldId>& selected_fields) const {
+        std::vector<FieldId> selected;
+        selected.reserve(selected_fields.size());
+        for (const auto id : selected_fields) {
+            if (has_field(id)) {
+                selected.push_back(id);
+            }
+        }
+        return schema_->GetOrdinaryStructProjections(selected);
+    }
     std::vector<FieldId>
     ResolveColumnFieldIds(const std::string& name) const {
         if (mapping_) {
@@ -302,12 +323,6 @@ class SealedFieldLayout {
     }
 
  private:
-    bool
-    HasManifestBinding(FieldId id) const {
-        return !mapping_ || !schema_->IsExternalDataField(id) ||
-               mapping_->physical_columns.count(id.get()) != 0;
-    }
-
     std::shared_ptr<const Schema> schema_;
     IndexMetaPtr index_meta_;
     std::shared_ptr<const MilvusTableFieldIdMapping> mapping_;
