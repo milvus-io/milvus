@@ -2,18 +2,29 @@ package handler
 
 import (
 	"context"
+	"net"
+	"path"
+	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/json"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -30,7 +41,8 @@ func TestClientSearchOnViewRoutesByQueryNodeID(t *testing.T) {
 		},
 	}
 	client := &clientImpl{
-		lifetime: typeutil.NewLifetime(),
+		availability: balancer.NewNodeAvailability(),
+		lifetime:     typeutil.NewLifetime(),
 	}
 	client.queryViewClient = &queryViewClient{
 		owner:   client,
@@ -51,7 +63,8 @@ func TestClientPreservesViewQueryRPCError(t *testing.T) {
 		},
 	}
 	client := &clientImpl{
-		lifetime: typeutil.NewLifetime(),
+		availability: balancer.NewNodeAvailability(),
+		lifetime:     typeutil.NewLifetime(),
 	}
 	client.queryViewClient = &queryViewClient{
 		owner:   client,
@@ -93,17 +106,12 @@ func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewp
 	return c.queryOnView(ctx, req)
 }
 
-func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
-	changed := make(chan struct{})
-	owner := &clientImpl{lifetime: typeutil.NewLifetime(), sessionChanges: &sessionChanges{changed: changed}}
+func TestMissingSessionCarriesPickerRevision(t *testing.T) {
+	owner := &clientImpl{lifetime: typeutil.NewLifetime(), availability: balancer.NewNodeAvailability()}
+	_, changed := owner.UnavailableNodes()
 	service := &fakeViewQueryServiceClient{}
 	patch := mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, _ *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 		require.True(t, contextutil.IsFailFastPick(ctx))
-		// An update before the RPC returns must wake the consumer of this error.
-		owner.sessionChanges.mu.Lock()
-		close(changed)
-		owner.sessionChanges.changed = make(chan struct{})
-		owner.sessionChanges.mu.Unlock()
 		return nil, picker.ErrSubConnNotExist
 	}).Build()
 	defer patch.UnPatch()
@@ -115,11 +123,6 @@ func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
 	require.True(t, picker.IsErrSubConnNoExist(unavailable.Cause))
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	require.NotEmpty(t, err.Error())
-	select {
-	case <-unavailable.Changed:
-	default:
-		t.Fatal("resolver update lost")
-	}
 }
 
 // Local admission failures must not be attributed to the selected remote node.
@@ -143,4 +146,78 @@ func TestClientAdmissionFailureHasNoRPCContext(t *testing.T) {
 			require.Same(t, context.Canceled, err)
 		}
 	}
+}
+
+// A ready peer keeps the ClientConn ready while the other QN connects. Its
+// SubConn transition must update routing without another resolver publication.
+func TestQueryNodePickerReportsReadinessByNodeID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	etcd, root := kvfactory.GetEtcdAndPath()
+	prefix := path.Join(root, "picker-test", funcutil.RandomString(12))
+	patch := mockey.Mock(sessionutil.GetSessionPrefixByRole).Return(prefix).Build()
+	defer patch.UnPatch()
+	register := func(id int64) (net.Listener, string) {
+		t.Helper()
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = listener.Close() })
+		key := path.Join(prefix, strconv.FormatInt(id, 10))
+		data, err := json.Marshal(sessionutil.SessionRaw{ServerID: id, Address: listener.Addr().String(), Version: "3.0.0"})
+		require.NoError(t, err)
+		_, err = etcd.Put(ctx, key, string(data))
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			cleanup, done := context.WithTimeout(context.Background(), 5*time.Second)
+			defer done()
+			_, err := etcd.Delete(cleanup, key)
+			require.NoError(t, err)
+		})
+		return listener, key
+	}
+	serve := func(listener net.Listener) *grpc.Server {
+		server := grpc.NewServer()
+		go func() { _ = server.Serve(listener) }()
+		t.Cleanup(server.Stop)
+		return server
+	}
+	qn11, key11 := register(11)
+	qn22, _ := register(22)
+	serve(qn11)
+	client := NewClient(etcd)
+	t.Cleanup(client.Close)
+	waitFor := func(want []int64) {
+		t.Helper()
+		for {
+			unavailable, changed := client.UnavailableNodes()
+			if slices.Equal(unavailable, want) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("unavailable %v, want %v", unavailable, want)
+			case <-changed:
+			}
+		}
+	}
+	waitFor([]int64{22})
+	server22 := serve(qn22)
+	waitFor(nil)
+	// Deleting QN11 changes membership even though both snapshots have no
+	// unready nodes. A failed pick can now confirm this exact session is gone.
+	_, revision := client.UnavailableNodes()
+	_, err := etcd.Delete(ctx, key11)
+	require.NoError(t, err)
+	select {
+	case <-revision:
+	case <-ctx.Done():
+		t.Fatal("picker missed node removal")
+	}
+	require.Eventually(t, func() bool {
+		_, err := client.QueryViewClient().SearchOnView(ctx, 11, &viewpb.SearchOnViewRequest{})
+		var missing *viewerror.NodeSessionUnavailable
+		return errors.As(err, &missing) && missing.Gone
+	}, 5*time.Second, 10*time.Millisecond)
+	server22.Stop()
+	waitFor([]int64{22})
 }

@@ -37,7 +37,7 @@ func TestShardRoutingUsesServerSelectedReplicaAndSkipsKnownDeadNode(t *testing.T
 	rpcPatch := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 		calls++
 		if node.(qviews.QueryNode).ID == 11 {
-			return nil, picker.ErrSubConnNotExist
+			return nil, &viewerror.NodeSessionUnavailable{Cause: picker.ErrSubConnNotExist}
 		}
 		require.EqualValues(t, 3, req.GetShardId().GetReplicaId())
 		require.EqualValues(t, 10, req.GetVersion().GetQueryVersion())
@@ -69,7 +69,9 @@ func TestShardRoutingReconsidersNodeAfterSessionUpdate(t *testing.T) {
 	defer patch.UnPatch()
 	client := newShardViewQueryClient(2, plans, &fakeViewQueryServiceClient{})
 	defer client.Close()
-	_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: id.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 }
@@ -152,7 +154,6 @@ func TestPlanningFailuresDoNotCreateExclusions(t *testing.T) {
 					return &viewpb.GetQueryPlanRequest{Vchannel: channel}
 				},
 			}, permit)
-			permit.release()
 			require.ErrorIs(t, err, failure)
 			require.Nil(t, plan)
 			require.Empty(t, client.breaker.nodes)
@@ -234,7 +235,16 @@ func TestShardRoutingRefreshesConstraintsAfterWireExclusion(t *testing.T) {
 		client := newShardViewQueryClient(1, plans, &fakeViewQueryServiceClient{})
 		defer client.Close()
 		client.breaker = NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{MaxRoutingWait: 3 * time.Second})
-		client.breaker.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(2 * time.Second), expires: time.Now().Add(time.Minute)}
+		changed := make(chan struct{})
+		client.unavailableNodes = func() ([]int64, <-chan struct{}) {
+			select {
+			case <-changed:
+				return nil, nil
+			default:
+				return []int64{11}, changed
+			}
+		}
+		time.AfterFunc(30*time.Millisecond, func() { close(changed) })
 		calls := 0
 		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			calls++
@@ -247,110 +257,9 @@ func TestShardRoutingRefreshesConstraintsAfterWireExclusion(t *testing.T) {
 		started := time.Now()
 		_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
 		require.NoError(t, err)
-		require.Equal(t, 2*time.Second, time.Since(started))
-		require.Equal(t, 3, calls)
-		require.True(t, client.breaker.nodes[11].retryAt.IsZero())
-	})
-}
-
-func TestSlowPlanningDoesNotReserveAnotherShardsProbe(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		entered := make(chan struct{})
-		resume := make(chan struct{})
-		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, ctx context.Context, channel string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-			plan := newTestSearchQueryPlan(qviews.ShardID{ReplicaID: 1, VChannel: channel}, &viewpb.QueryPlanMVCC{})
-			if channel == "slow_1v0" {
-				close(entered)
-				select {
-				case <-resume:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-				plan.WorkNodes[0].GetQueryNode().NodeId = 12
-			}
-			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
-		}).Build()
-		defer patch.UnPatch()
-		client := newShardViewQueryClient(1, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
-		defer client.Close()
-		client.breaker.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute)}
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		done := make(chan error, 1)
-		go func() {
-			_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "slow_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
-			done <- err
-		}()
-		<-entered
-		started := time.Now()
-		_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "fast_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
-		require.NoError(t, err)
-		require.Equal(t, started, time.Now(), "the slow plan must not delay the other shard's probe")
-		require.Empty(t, done)
-		require.True(t, client.breaker.nodes[11].retryAt.IsZero())
-		close(resume)
-		require.NoError(t, <-done)
-	})
-}
-
-func TestPlanProbeContentionReplansBeforeDispatch(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		client := newShardViewQueryClient(1, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
-		defer client.Close()
-		key := breakerTestKey("p_1v0", 1, 1, 1)
-		b := client.breaker
-		b.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute)}
-		_, rival := beginBreakerTest(t, b, "another_1v0")
-		defer rival.release()
-		calls := 0
-		patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-			calls++
-			plan := newTestSearchQueryPlan(qviews.ShardID{ReplicaID: 1, VChannel: channel}, &viewpb.QueryPlanMVCC{})
-			if calls == 1 {
-				require.Empty(t, req.GetRoutingConstraints().GetExcludedQueryNodeIds())
-				require.True(t, rival.acquireProbes(breakerTestPlan(key, 11)))
-			} else {
-				require.Equal(t, []int64{11}, req.GetRoutingConstraints().GetExcludedQueryNodeIds())
-				plan.WorkNodes[0].GetQueryNode().NodeId = 12
-			}
-			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
-		}).Build()
-		defer patch.UnPatch()
-		dispatches := 0
-		rpc := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-			dispatches++
-			require.Equal(t, qviews.NewQueryNode(12), node)
-			return &viewpb.SearchOnViewResponse{}, nil
-		}).Build()
-		defer rpc.UnPatch()
-		_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: key.ShardID.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
-		require.NoError(t, err)
+		require.Equal(t, 30*time.Millisecond, time.Since(started))
 		require.Equal(t, 2, calls)
-		require.Equal(t, 1, dispatches)
-		require.Same(t, rival, b.nodes[11].probe)
 	})
-}
-
-func TestCanceledExecutionReleasesSelectedProbe(t *testing.T) {
-	client := newShardViewQueryClient(1, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
-	defer client.Close()
-	b := client.breaker
-	b.nodes[11] = &nodeCircuit{retryAt: time.Now().Add(-time.Second), expires: time.Now().Add(time.Minute), backoff: time.Second}
-	plan := newTestSearchQueryPlan(qviews.ShardID{ReplicaID: 1, VChannel: "p_1v0"}, &viewpb.QueryPlanMVCC{})
-	patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).Return(&viewpb.GetQueryPlanResponse{Plan: plan}, nil).Build()
-	defer patch.UnPatch()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	rpc := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(*fakeViewQueryServiceClient, context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-		cancel()
-		return nil, context.Canceled
-	}).Build()
-	defer rpc.UnPatch()
-	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
-	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, b.nodes[11].probe)
-	require.Equal(t, time.Second, b.nodes[11].backoff)
-	require.Zero(t, b.nodes[11].failures)
 }
 
 func TestShardRoutingReturnsSchemaMismatchOnFirstAttempt(t *testing.T) {
@@ -362,4 +271,41 @@ func TestShardRoutingReturnsSchemaMismatchOnFirstAttempt(t *testing.T) {
 	_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
 	require.ErrorIs(t, toMilvusError(err), merr.ErrQueryViewSchemaMismatch)
 	require.Equal(t, 1, patch.Times())
+}
+
+func TestPickerChangesDuringPlanning(t *testing.T) {
+	client := newShardViewQueryClient(1, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{})
+	defer client.Close()
+	changed := make(chan struct{})
+	client.unavailableNodes = func() ([]int64, <-chan struct{}) {
+		select {
+		case <-changed:
+			return []int64{11}, nil
+		default:
+			return nil, changed
+		}
+	}
+	plans := 0
+	patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, channel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		plans++
+		plan := newTestSearchQueryPlan(qviews.ShardID{ReplicaID: 1, VChannel: channel}, &viewpb.QueryPlanMVCC{})
+		if plans == 1 {
+			require.Empty(t, req.GetRoutingConstraints().GetExcludedQueryNodeIds())
+			close(changed)
+		} else {
+			require.Equal(t, []int64{11}, req.GetRoutingConstraints().GetExcludedQueryNodeIds())
+			plan.WorkNodes[0].GetQueryNode().NodeId = 12
+		}
+		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+	}).Build()
+	defer patch.UnPatch()
+	dispatch := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		require.Equal(t, qviews.NewQueryNode(12), node)
+		return &viewpb.SearchOnViewResponse{}, nil
+	}).Build()
+	defer dispatch.UnPatch()
+	_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
+	require.NoError(t, err)
+	require.Equal(t, 2, plans)
+	require.Equal(t, 1, dispatch.Times())
 }

@@ -52,7 +52,13 @@ type sessionDiscoverer struct {
 	revision        int64
 	peerSessions    map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
 	forcePort       int                                // force the port to use when resolving.
+	stateAttributes *attributes.Attributes
 	sessionFilter   func(*sessionutil.SessionRaw) bool
+}
+
+// OptSDStateAttributes passes client-local metadata to the gRPC balancer.
+func OptSDStateAttributes(attrs *attributes.Attributes) SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) { sw.stateAttributes = attrs }
 }
 
 // OptSDForcePort forces the port to use when resolving.
@@ -250,7 +256,7 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 	// TODO: service config should be sent by resolver in future to achieve dynamic configuration for grpc.
 	return VersionedState{
 		Version: typeutil.VersionInt64(sw.revision),
-		State:   resolver.State{Addresses: addrs},
+		State:   resolver.State{Addresses: addrs, Attributes: sw.stateAttributes},
 	}
 }
 

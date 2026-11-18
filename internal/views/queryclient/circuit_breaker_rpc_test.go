@@ -26,7 +26,7 @@ func TestCircuitBreakingRPCObservesOnlyQueryNodes(t *testing.T) {
 				{"success", nil},
 			} {
 				t.Run(method+"/"+node.String()+"/"+scenario.name, func(t *testing.T) {
-					b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{NodeFailureThreshold: 1})
+					b := NewQueryViewCircuitBreaker(QueryViewCircuitBreakerConfig{})
 					key := breakerTestKey("p_1v0", 1, 1, 1)
 					ctx, attempt := beginBreakerTest(t, b, key.ShardID.VChannel)
 					client := &circuitBreakingViewClient{owner: &shardViewQueryClient{breaker: b}, inner: &fakeViewQueryServiceClient{}}
@@ -58,16 +58,10 @@ func TestCircuitBreakingRPCObservesOnlyQueryNodes(t *testing.T) {
 						require.Equal(t, 1, patch.Times())
 					}
 					require.ErrorIs(t, err, scenario.err)
-					if node.NodeType() == qviews.NodeTypeQueryNode && scenario.err != nil {
-						if scenario.err == io.EOF {
-							require.Contains(t, b.nodes, int64(11))
-							require.Contains(t, attempt.failedNodes, int64(11))
-							require.Empty(t, b.views)
-						} else {
-							require.Contains(t, b.views[key.ShardID.VChannel], key)
-							require.Contains(t, attempt.failedViews, key)
-							require.Empty(t, b.nodes)
-						}
+					if node.NodeType() == qviews.NodeTypeQueryNode && viewUnavailable(scenario.err) {
+						require.Contains(t, b.views[key.ShardID.VChannel], key)
+						require.Contains(t, attempt.failedViews, key)
+						require.Empty(t, b.nodes)
 					} else {
 						require.Empty(t, b.nodes)
 						require.Empty(t, b.views)

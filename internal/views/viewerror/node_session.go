@@ -1,7 +1,7 @@
 package viewerror
 
 // NodeSessionUnavailable is client-local metadata, never a wire error. Changed
-// belongs to the QN session watch captured before dispatch, so a resolver update
+// belongs to the QN picker revision captured before dispatch, so a picker update
 // racing with an RPC failure cannot be missed. Unwrap preserves the RPC cause.
 type NodeSessionUnavailable struct {
 	Cause   error

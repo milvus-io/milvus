@@ -25,6 +25,8 @@ type ViewQueryClientConfig struct {
 	MaxRetries     int // Maximum per-shard execution attempts; zero defaults to 3.
 	// CircuitBreaker can be shared by multiple clients in the same Proxy.
 	CircuitBreaker *QueryViewCircuitBreaker
+	// UnavailableNodes snapshots the QN picker and its next change notification.
+	UnavailableNodes func() ([]int64, <-chan struct{})
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
@@ -60,18 +62,10 @@ func NewViewQueryClient(
 	retrieveReducerBuilder reducer.RetrieveResultReducerBuilder,
 	requeryRunner RequeryRunner,
 ) ViewQueryClient {
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = defaultMaxRetries
-	}
-	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
-	if cfg.CircuitBreaker != nil {
-		shardClient.breaker = cfg.CircuitBreaker
-	}
-	shardClient.queryHook = cfg.QueryHook
-	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
+	legacy := newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver)
 	return &viewQueryClientImpl{
-		shardClient:            shardClient,
-		legacyClient:           &legacyClient{shardClient: shardClient, shardResolver: shardResolver},
+		shardClient:            legacy.shardClient,
+		legacyClient:           legacy,
 		shardResolver:          shardResolver,
 		fieldFetchPlanner:      fieldFetchPlanner,
 		rerankerBuilder:        rerankerBuilder,

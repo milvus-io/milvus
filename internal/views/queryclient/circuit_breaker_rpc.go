@@ -24,12 +24,7 @@ func observeViewRPC[T any](ctx context.Context, c *circuitBreakingViewClient, no
 		return call()
 	}
 	b := c.owner.breaker
-	token := b.observeStart(ctx, qn)
-	// Retained calls have no planning attempt, but must still fence stale TTL
-	// observations by the time execution actually began.
-	if token.attempt == nil {
-		token.attempt = &routingAttempt{started: time.Now(), failedNodes: make(map[int64]time.Time), failedViews: make(map[qviews.QueryViewKey]time.Time)}
-	}
+	started := time.Now()
 	resp, err := call()
 	observed := err
 	if observed == nil {
@@ -45,7 +40,7 @@ func observeViewRPC[T any](ctx context.Context, c *circuitBreakingViewClient, no
 		}
 	}
 	key := qviews.QueryViewKey{ShardID: qviews.FromProtoShardID(shard), QueryViewVersion: qviews.FromProtoQueryViewVersion(version)}
-	b.observe(ctx, qn, key, token, observed)
+	b.observe(ctx, qn, key, started, observed)
 	return resp, err
 }
 

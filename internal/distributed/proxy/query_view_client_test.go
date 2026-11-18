@@ -103,6 +103,7 @@ func (*startupWAL) QueryViewClient() streaming.QueryViewClient { return nil }
 type startupQueryNodeClient struct{}
 
 func (*startupQueryNodeClient) QueryViewClient() querynodehandler.QueryViewClient { return nil }
+func (*startupQueryNodeClient) UnavailableNodes() ([]int64, <-chan struct{})      { return []int64{11}, nil }
 func (*startupQueryNodeClient) Close()                                            {}
 
 func TestDefaultProxyViewQueryClientHookInitFailure(t *testing.T) {
@@ -120,6 +121,8 @@ func TestDefaultProxyViewQueryClientHookInitFailure(t *testing.T) {
 		mockey.Mock(querynodehandler.NewClient).Return(&startupQueryNodeClient{}).Build()
 		mockey.Mock(queryclient.NewLegacyViewQueryClient).To(func(cfg queryclient.ViewQueryClientConfig, _ queryclient.QueryPlanClient, _ queryclient.ViewQueryServiceClient, _ resolver.ShardResolver) queryclient.Client {
 			require.Nil(t, cfg.QueryHook)
+			nodes, _ := cfg.UnavailableNodes()
+			require.Equal(t, []int64{11}, nodes)
 			return &fakeViewQueryClient{}
 		}).Build()
 

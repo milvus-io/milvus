@@ -103,6 +103,7 @@ func newLegacyClient(
 	if cfg.CircuitBreaker != nil {
 		shardClient.breaker = cfg.CircuitBreaker
 	}
+	shardClient.unavailableNodes = cfg.UnavailableNodes
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{

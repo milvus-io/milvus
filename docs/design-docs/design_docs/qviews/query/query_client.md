@@ -16,10 +16,9 @@ branch. The generic staged client API is not the production entry.
 
 The injected QN transport must opt into `contextutil.WithFailFastPick`, disable
 hidden same-node gRPC retries, and wrap a missing session with
-`viewerror.NodeSessionUnavailable`. Capture its `Changed` channel before dispatch
-so a racing resolver update cannot be lost. The QN session observer/transport
-implementation and Proxy ownership wiring remain in the parent integration;
-this branch supplies their contracts and verifies retry behavior through injection.
+`viewerror.NodeSessionUnavailable`. The QN handler captures the picker revision before
+dispatch. Proxy wires the same picker's availability snapshot into planning so
+a racing connectivity update can wake the shard.
 Inject `streaming.WAL().QueryViewClient()` as QueryPlanClient for owner-routed
 query RPCs. `HandlerClient.QueryViewClient()` implements the same planning
 contract. Clients own no replica discovery subscriptions and do not close the
@@ -94,16 +93,15 @@ The attempt budget defaults to three. Without a replica directory the client
 cannot extend the budget to guarantee one visit to every replica; server-side
 selection is shared by concurrent requests. Exhausting the budget preserves the
 last failure for Proxy's outer recovery. Waiting for a loaded collection with no
-usable plan does not consume attempts. Replanning after an execution failure waits 100 ms. Request cancellation bounds all waits.
+usable plan does not consume attempts. Execution retries normally wait 100 ms. A picker update can wake a retry after an unconfirmed target miss. Request cancellation bounds all waits.
 
 QueryViewCircuitBreaker observes raw worker RPC results before reduction.
-Connection failures accumulate per QN across VChannels and recover with exclusive
-probes. Confirmed session deletion and exact ViewNotFound/ViewInvalidated failures
+The QN balancer supplies the unready server IDs and wakes routing when its picker changes. Confirmed session deletion and exact ViewNotFound/ViewInvalidated failures
 are TTL exclusions, without probes. Local picker absence alone does not confirm
 session deletion. Every retry carries a fresh bounded exclusion snapshot to SN;
 retained requery observes results but never substitutes a new plan.
 ALL_CANDIDATES_EXCLUDED does not trigger load-info/AutoLoad: admission retries
-poll at most once per second, wake on breaker transitions, and have a separate
+poll at most once per second, wake on picker or breaker transitions, and have a separate
 five-second total wait budget in addition to the caller deadline.
 See [circuit breaker](query_view_circuit_breaker.md).
 

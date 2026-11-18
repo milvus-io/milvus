@@ -24,8 +24,8 @@ type QueryPlanClient interface {
 // WorkNode is used as the routing key to locate the target node.
 // QN implementations must return connection failures promptly, without hidden
 // same-node retries. Missing sessions carry viewerror.NodeSessionUnavailable
-// with the resolver change channel captured before dispatch. This lets shard
-// orchestration retry other replicas and reconsider a racing session update.
+// with the picker change channel captured before dispatch. This lets shard
+// orchestration retry other replicas and reconsider a racing connectivity update.
 type ViewQueryServiceClient interface {
 	StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 

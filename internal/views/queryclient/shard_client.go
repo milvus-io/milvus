@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,6 +29,7 @@ import (
 // Both Search and Query share the same executeShard framework, differing only
 // in what request goes into the GetQueryPlanRequest and which Phase 2 RPC is called.
 type shardViewQueryClient struct {
+	unavailableNodes   func() ([]int64, <-chan struct{})
 	queryHook          optimizers.QueryHook
 	maxRetries         int
 	loadChecks         *collectionLoadChecks
@@ -206,7 +208,7 @@ func (s *shardViewQueryClient) executeShard(
 			loadCheck.release()
 		}
 	}()
-	failedNodes := make(map[int64]time.Time)
+	failedNodes := make(map[int64]localNodeExclusion)
 	failedViews := make(map[qviews.QueryViewKey]time.Time)
 	var lastErr error
 	var exclusionStarted time.Time
@@ -218,17 +220,23 @@ func (s *shardViewQueryClient) executeShard(
 			return nil, lastErr
 		}
 		if lastErr != nil && !viewerror.AsViewError(lastErr).IsAllCandidatesExcluded() {
+			var pickerChanged <-chan struct{}
+			var missing *viewerror.NodeSessionUnavailable
+			if errors.As(lastErr, &missing) && !missing.Gone {
+				pickerChanged = missing.Changed
+			}
 			timer := time.NewTimer(shardRetryInterval)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return nil, ctx.Err()
+			case <-pickerChanged:
+				timer.Stop()
 			case <-timer.C:
 			}
 		}
-		attemptCtx, permit := s.breaker.begin(ctx, vchannel, failedNodes, failedViews)
-		plan, err := s.executeRoutingAttempt(attemptCtx, vchannel, params, permit)
-		permit.release()
+		attemptCtx, routing := s.breaker.begin(ctx, vchannel, failedNodes, failedViews, s.unavailableNodes)
+		plan, err := s.executeRoutingAttempt(attemptCtx, vchannel, params, routing)
 		if err == nil {
 			return plan, nil
 		}
@@ -238,12 +246,12 @@ func (s *shardViewQueryClient) executeShard(
 			if exclusionStarted.IsZero() {
 				exclusionStarted = time.Now()
 			}
-			remaining := s.breaker.cfg.MaxRoutingWait - time.Since(exclusionStarted)
-			if remaining <= 0 {
+			remainingWait := s.breaker.cfg.MaxRoutingWait - time.Since(exclusionStarted)
+			if remainingWait <= 0 {
 				return nil, err
 			}
-			waitCtx, waitCancel := context.WithTimeout(ctx, remaining)
-			waitErr := permit.wait(waitCtx)
+			waitCtx, waitCancel := context.WithTimeout(ctx, remainingWait)
+			waitErr := routing.wait(waitCtx)
 			waitCancel()
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -274,10 +282,10 @@ func (s *shardViewQueryClient) executeShard(
 
 // A non-nil result on failure distinguishes an executed View from a Phase 1
 // failure. All worker goroutines have joined before this function returns.
-func (s *shardViewQueryClient) executeRoutingAttempt(ctx context.Context, vchannel string, params *shardExecParams, permit *routingAttempt) (*ShardPlan, error) {
+func (s *shardViewQueryClient) executeRoutingAttempt(ctx context.Context, vchannel string, params *shardExecParams, routing *routingAttempt) (*ShardPlan, error) {
 	target := qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}
 	planReq := params.buildPlanReq(vchannel)
-	planReq.RoutingConstraints = permit.constraints
+	planReq.RoutingConstraints = routing.constraints
 	response, err := s.executeGetQueryPlan(ctx, target, planReq, params)
 	if err != nil {
 		return nil, err
@@ -288,11 +296,15 @@ func (s *shardViewQueryClient) executeRoutingAttempt(ctx context.Context, vchann
 	plan := response.GetPlan()
 	// Defensive against a stale/local provider: never dispatch a known excluded
 	// worker. SN itself filters before executing any inline growing work.
-	if qviews.NewQueryRoutingExclusions(vchannel, permit.constraints).ExcludesPlan(plan) {
+	if qviews.NewQueryRoutingExclusions(vchannel, routing.constraints).ExcludesPlan(plan) {
 		return nil, viewerror.NewAllCandidatesExcluded()
 	}
-	if !permit.acquireProbes(plan) {
-		return nil, viewerror.NewAllCandidatesExcluded()
+	// Only rebuild if observations changed while the SN was planning.
+	if routing.stale() {
+		_, latest := s.breaker.begin(ctx, vchannel, routing.failedNodes, routing.failedViews, s.unavailableNodes)
+		if qviews.NewQueryRoutingExclusions(vchannel, latest.constraints).ExcludesPlan(plan) {
+			return nil, viewerror.NewAllCandidatesExcluded()
+		}
 	}
 	if params.consumeResponse != nil {
 		if err := params.consumeResponse(response); err != nil {

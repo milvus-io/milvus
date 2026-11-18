@@ -20,7 +20,7 @@ func (*sessionTestResolver) Watch(context.Context, func(resolver.VersionedState)
 }
 
 func TestSessionGoneRequiresObservedRemoval(t *testing.T) {
-	s := &sessionChanges{changed: make(chan struct{}), members: make(map[int64]struct{}), gone: make(map[int64]time.Time)}
+	s := &sessionChanges{members: make(map[int64]struct{}), gone: make(map[int64]time.Time)}
 	empty := resolver.VersionedState{}
 	s.update(empty)
 	require.False(t, s.Gone(11), "initial absence is not confirmed deletion")
@@ -37,38 +37,18 @@ func TestSessionGoneRequiresObservedRemoval(t *testing.T) {
 	require.Empty(t, s.gone)
 }
 
-func TestSessionChangesBroadcastAndJoin(t *testing.T) {
-	updates := make(chan struct{})
-	patch := mockey.Mock((*sessionTestResolver).Watch).To(func(_ *sessionTestResolver, ctx context.Context, cb func(resolver.VersionedState) error) error {
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-updates:
-				if err := cb(resolver.VersionedState{}); err != nil {
-					return err
-				}
-			}
-		}
+func TestSessionChangesCloseJoinsWatcher(t *testing.T) {
+	started := make(chan struct{})
+	patch := mockey.Mock((*sessionTestResolver).Watch).To(func(_ *sessionTestResolver, ctx context.Context, _ func(resolver.VersionedState) error) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
 	}).Build()
 	defer patch.UnPatch()
 	changes := newSessionChanges(&sessionTestResolver{})
-	first := changes.Changed()
-	updates <- struct{}{}
-	select {
-	case <-first:
-	case <-time.After(time.Second):
-		t.Fatal("missed revision")
-	}
-	second := changes.Changed()
-	require.NotEqual(t, first, second)
+	<-started
 	changes.Close()
 	changes.Close()
-	select {
-	case <-second:
-	default:
-		t.Fatal("close must wake waiters")
-	}
 	select {
 	case <-changes.done:
 	default:
