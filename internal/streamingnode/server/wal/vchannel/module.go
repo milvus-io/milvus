@@ -637,7 +637,18 @@ func (m *VChannelRecoveryModule) completeDropsLocked() []message.RetainedImmutab
 		if handle.IsPoisoned() || m.vchannelView.MaterializedTimeTick() < through {
 			break
 		}
+		var partitionID int64
+		partitionDrop := handle.Message().MessageType() == message.MessageTypeDropPartition
+		if partitionDrop {
+			partitionID = message.MustAsImmutableDropPartitionMessageV1(handle.Message()).Header().GetPartitionId()
+		}
 		for _, view := range m.segments {
+			// Only children of the retiring owner need durable tombstones.
+			// Other partitions were flushed for the VChannel-wide L0 boundary,
+			// but their durable sources can still await query publication.
+			if partitionDrop && view.PartitionID() != partitionID {
+				continue
+			}
 			// Catalog's chunked write publishes VChannel ownership first. Wait
 			// for child tombstones to be durable before retiring that owner, so
 			// a crash cannot leave a terminal parent with unfinished children.

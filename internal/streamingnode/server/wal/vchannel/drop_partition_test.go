@@ -33,7 +33,74 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+func TestDropPartitionAckDoesNotWaitForOtherPartitionPublication(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		name := "nonempty"
+		if empty {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			scheduler := &recordingVChannelScheduler{}
+			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
+			patch := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithPublication")).To(func(_ context.Context, meta *streamingpb.SegmentAssignmentMeta, _ uint64) (*viewpb.DataVersion, bool, error) {
+				return &viewpb.DataVersion{StreamingVersion: 1}, meta.GetPartitionId() == 2, nil
+			}).Build()
+			defer patch.UnPatch()
+			metas := map[int64]*streamingpb.SegmentAssignmentMeta{2: newMaterializationBlockerMeta(2, 50, false)}
+			if !empty {
+				metas[1] = newMaterializationBlockerMeta(1, 40, false)
+			}
+			for _, meta := range metas {
+				meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+			}
+			module, err := NewModule(ModuleConfig{
+				PChannel: "p1", VChannel: "v1",
+				VChannelMeta: &streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{CollectionId: 1, Partitions: []*streamingpb.PartitionInfoOfVChannel{
+						{PartitionId: 1, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
+						{PartitionId: 2, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
+					}}},
+				Segments: metas, SegmentLifecycle: lifecycle, Runtime: moduleapi.Runtime{Scheduler: scheduler},
+			})
+			require.NoError(t, err)
+			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+			observe := func(raw message.ImmutableMessage) {
+				t.Helper()
+				owner := tracker.Track(raw)
+				retained := owner.Clone()
+				require.True(t, module.ObserveMessage(ctx, retained))
+				retained.Release()
+				owner.Release()
+			}
+			drop := message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+				WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 1}).WithBody(&message.DropPartitionRequest{}).
+				MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(99)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+			observe(drop)
+			tasks := append([]nodescheduler.Task(nil), scheduler.tasks...)
+			for _, task := range tasks {
+				require.NoError(t, task.Execute(ctx))
+			}
+			if !empty {
+				require.Zero(t, tracker.CompletedPoint().TimeTick, "the dropped partition still needs durable child tombstones")
+			}
+			persistDirtySnapshots(module)
+			require.Equal(t, uint64(100), tracker.CompletedPoint().TimeTick, "another partition's query publication cannot hold the Drop ACK")
+			require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, module.vchannelView.AssignmentMeta().GetCollectionInfo().GetPartitions()[0].GetState())
+			require.Nil(t, module.segments[2].AssignmentMeta().GetSealedAtDataVersion())
+			require.True(t, module.segments[2].AssignmentMeta().GetFlushDataDurable())
+			truncate := message.NewTruncateCollectionMessageBuilderV2().WithVChannel("v1").
+				WithHeader(&message.TruncateCollectionMessageHeader{CollectionId: 1}).WithBody(&message.TruncateCollectionMessageBody{}).
+				MustBuildMutable().WithTimeTick(200).WithLastConfirmed(walimplstest.NewTestMessageID(199)).IntoImmutableMessage(walimplstest.NewTestMessageID(200))
+			observe(truncate)
+			require.NoError(t, scheduler.tasks[len(scheduler.tasks)-1].Execute(ctx))
+			require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+		})
+	}
+}
 
 func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) {
 	for _, tc := range []struct {
@@ -118,7 +185,9 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			require.Len(t, scheduler.tasks, len(expectedCommits)+1)
 			require.NoError(t, scheduler.tasks[len(expectedCommits)].Execute(ctx))
 			if !tc.snapshot {
-				require.Zero(t, tracker.CompletedPoint().TimeTick, "Drop waits for child tombstone publication")
+				if !tc.emptyPartition {
+					require.Zero(t, tracker.CompletedPoint().TimeTick, "Drop waits for its own child tombstone publication")
+				}
 				for _, snapshot := range module.ConsumeDirtySnapshots() {
 					snapshot.MarkPersisted()
 				}

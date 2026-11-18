@@ -34,7 +34,7 @@ The module owns:
 - collection, partition, schema, lifecycle, and tombstone state;
 - one continuous VChannel metadata `checkpoint_time_tick`;
 - SegmentView creation, lookup, routing, and snapshot aggregation;
-- the VChannel WALMaterializer and its final-L1-publication prerequisite;
+- the VChannel WALMaterializer and its L1 durability prerequisite;
 - DataVersion summaries, QueryRuntime preparation and ordered live-event
   forwarding through `queryresource.Manager`.
 
@@ -54,7 +54,7 @@ ObserveMessage(Retained)
 
 RecoveryStorage first installs the message's Summary records and readable
 coverage, then dispatches to this module. L0Materializer observation follows
-Segment state changes, so it knows all earlier L1 final-publication dependencies.
+Segment state changes, so it knows all earlier L1 durability dependencies.
 
 There is no mode argument. Metadata and Segment effects use their loaded
 `checkpoint_time_tick` to choose apply versus no-op. L0Materializer uses its own
@@ -104,9 +104,13 @@ A closing Collection accepts no new business work; a closing Partition accepts
 no new writes while other Partitions continue. Existing tasks and completion
 callbacks continue normally, including L0 materialization progress.
 
-The module retains each Drop message until all Segments created before its
-boundary have completed their final commits and persisted their Segment
-tombstones, and L0 has completed through that boundary. The child-snapshot
+The module retains each Drop message until the retiring owner's Segments created
+before its boundary have completed their final commits and persisted their Segment
+tombstones, and L0 has completed through that boundary. For DropPartition, only
+the target partition's children must be tombstoned. Earlier segments in other
+partitions must be durable for the VChannel-wide L0 boundary, but their query
+publication does not block the Drop ACK or later conflicting broadcasts.
+DropCollection still joins every earlier child. The child-snapshot
 publication dependency is required because the catalog's chunked fallback saves
 VChannel ownership before Segment metadata: a terminal parent must never become
 recoverable before its terminal children. It does not wait for child GC or a
@@ -198,7 +202,7 @@ own handle. Successful Tracker completion requires the entire graph to reach
 zero without poison. Summary copies Txn records separately; its `LastAcked`
 additionally bounds checkpoint publication. The retained Summary materializer reads those records without joining this
 reference graph. The currently wired WAL consumer retains Delete handles and
-uses only the final-L1-publication prerequisite described in
+uses the L1 durability prerequisite described in
 [WAL L0 Materializer](l0_materializer.md).
 
 When the Summary consumer is reconnected, the VChannel module computes the L0 materialization safety bound across
