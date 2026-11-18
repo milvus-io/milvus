@@ -384,7 +384,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 				require.False(t, importutilv2.IsSnapshotPreparation(got.GetFiles()))
 				require.Len(t, got.GetFiles(), 2)
 				require.EqualValues(t, 100, got.GetFiles()[0].Id)
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
+				require.NoError(t, importutilv2.ValidateImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
 			}
 			require.Empty(t, m.tasks.listTasks(), "preparation must not create tasks before durable publication")
 		})
@@ -786,7 +786,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				return nil
 			}).Build()
 			defer validate.UnPatch()
-			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig) ([]string, error) {
+			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig, _ ...uint32) ([]string, error) {
 				require.Same(t, foreignCfg, cfg)
 				return []string{"root/files/l0/delete"}, nil
 			}).Build()
@@ -1345,7 +1345,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 	}
 	// Pending preparation persists the expanded plan directly to the catalog;
 	// only the metadata URI and options cross the WAL/CDC boundary.
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, sources))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, options, sources))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, Files: files, Options: options, Schema: SnapshotImportTestSchema(),
 		PartitionIDs: []int64{20}, Vchannels: []string{"target"}, DataTs: 100, SnapshotL0Sources: sources,
@@ -1514,7 +1514,7 @@ func TestSnapshotPartitionMappingTasksAndRecovery(t *testing.T) {
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100,
 		}})
 	}
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, opts, nil))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, opts, nil))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, CollectionID: 2, Files: files, Options: opts,
 		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: SnapshotImportTestSchema(), DataTs: 100, AutoCommit: false,
@@ -2527,7 +2527,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 				if tc.deletes {
 					paths = []string{"root/files/delta"}
 				}
-				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig) ([]string, error) {
+				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig, ...uint32) ([]string, error) {
 					manifestChecks++
 					return paths, nil
 				}).Build()
@@ -2732,7 +2732,7 @@ func TestExpandSnapshotV2References(t *testing.T) {
 					files, normalized, l0, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(), uri, opts, metadata)
 					require.NoError(t, err)
 					require.Len(t, files, 2)
-					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, normalized, l0))
+					require.NoError(t, importutilv2.ValidateImportPlan(files, normalized, l0))
 					for _, file := range files {
 						require.Empty(t, file.Paths)
 						version := uint32(10)
@@ -2882,7 +2882,7 @@ func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
 				require.NoError(t, err)
 				files, options, l0, err := expandSnapshotImportFiles(ctx, nil, cm, SnapshotImportTestSchema(), uri, SnapshotImportTestOptions(), metadata)
 				require.NoError(t, err)
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+				require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
 				require.Len(t, files, 2)
 				require.NotNil(t, files[1].SnapshotSource.V2Reference)
 				require.Empty(t, files[1].SnapshotSource.ManifestPath)
@@ -2961,7 +2961,7 @@ func TestSnapshotImportBucketOnlyRelocation(t *testing.T) {
 					files, options, l0, err := expandSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(), uri, options, metadata)
 					require.NoError(t, err)
 					require.Len(t, files, len(versions))
-					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+					require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
 					require.Len(t, l0, 1)
 					require.Equal(t, []string{deltaKey}, l0[0].LegacyL0Deltalogs)
 					for i, file := range files {

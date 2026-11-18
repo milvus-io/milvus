@@ -351,12 +351,13 @@ TEST_P(SealedJsonTakeTest, GetBorrowsMaterializedJsonWithoutAnotherCopy) {
 TEST_P(SealedJsonTakeTest, FullCandidateMaskKeepsEveryInputPosition) {
     const int64_t offsets[]{7, 3, 4, 0, 7};
     TargetBitmap candidates(5, true);
+    const auto candidate_view = candidates.view();
     auto take = column_->Take(nullptr,
                               {OffsetView::From(offsets, 5),
                                TargetType::Json,
                                nullptr,
                                TakePinPolicy::Batch,
-                               &candidates});
+                               &candidate_view});
     ASSERT_NE(take, nullptr);
     EXPECT_EQ(take->Size(), 5);
     for (int64_t i = 0; i < 5; ++i) {
@@ -376,7 +377,9 @@ TEST_P(SealedJsonTakeTest, FullCandidateMaskKeepsEveryInputPosition) {
 
 TEST_P(SealedJsonTakeTest, CandidateMaskExcludesFilesBeforePlanningAndDecode) {
     const int64_t offsets[]{3, 7, -1, 0, 3, 4};
-    TargetBitmap candidates(6, false);
+    TargetBitmap backing(6 + 13, false);
+    auto candidates = backing.view(7, 6);
+    const auto candidate_view = candidates.view();
     candidates.set(0);
     candidates.set(3);
     candidates.set(4);
@@ -390,7 +393,7 @@ TEST_P(SealedJsonTakeTest, CandidateMaskExcludesFilesBeforePlanningAndDecode) {
                                TargetType::Json,
                                nullptr,
                                TakePinPolicy::Batch,
-                               &candidates});
+                               &candidate_view});
     ASSERT_NE(take, nullptr);
     EXPECT_EQ(take->Size(), 6);
     for (const auto i : {0, 3, 4}) {
@@ -414,6 +417,7 @@ TEST_P(SealedJsonTakeTest, CandidateMaskExcludesFilesBeforePlanningAndDecode) {
 TEST_P(SealedJsonTakeTest, EmptyCandidateMaskDoesNotReadAnyOffsetOrFile) {
     const int64_t offsets[]{-1, 100};
     TargetBitmap candidates(2, false);
+    const auto candidate_view = candidates.view();
     if (backend() == 2) {
         ASSERT_TRUE(std::filesystem::remove(dir_ / "0.vx"));
         ASSERT_TRUE(std::filesystem::remove(dir_ / "4.vx"));
@@ -422,13 +426,14 @@ TEST_P(SealedJsonTakeTest, EmptyCandidateMaskDoesNotReadAnyOffsetOrFile) {
                                TargetType::Json,
                                nullptr,
                                TakePinPolicy::Batch,
-                               &candidates};
+                               &candidate_view};
     auto take = column_->Take(nullptr, options);
     ASSERT_NE(take, nullptr);
     EXPECT_EQ(take->GetOwn().size, 2);
     EXPECT_THROW(take->Get<Json>(0), SegcoreError);
     TargetBitmap wrong_size(1, true);
-    options.candidate_mask = &wrong_size;
+    const auto wrong_size_view = wrong_size.view();
+    options.candidate_mask = &wrong_size_view;
     EXPECT_THROW(column_->Take(nullptr, options), SegcoreError);
 }
 

@@ -92,7 +92,7 @@ func TestProgress(t *testing.T) {
 		}
 	}
 	check(t, 100)
-	for _, action := range []string{"update", "identical_update", "release", "release_reload"} {
+	for _, action := range []string{"update", "identical_update", "source_update", "release", "release_reload"} {
 		t.Run(action, func(t *testing.T) {
 			require.NoError(t, store.Put(ctx, cfg))
 			version := store.GetConfigVersion(1)
@@ -105,6 +105,9 @@ func TestProgress(t *testing.T) {
 				if action == "release" || action == "release_reload" {
 					store.StopPlanning(1)
 					require.NoError(t, store.Remove(ctx, 1))
+				}
+				if action == "source_update" {
+					cfg.AutoLoad = !cfg.AutoLoad
 				}
 				if action == "update" {
 					cfg.LoadFields = append(cfg.LoadFields, &viewpb.LoadFieldConfig{FieldId: 200})
@@ -119,14 +122,17 @@ func TestProgress(t *testing.T) {
 				}
 			}
 			want := int64(0)
-			if action == "identical_update" {
+			if action == "identical_update" || action == "source_update" {
 				want = 100
 			}
 			p := check(t, want)
 			require.Equal(t, action == "release", p.Config == nil)
+			if action == "source_update" {
+				require.Equal(t, cfg.AutoLoad, p.Config.AutoLoad)
+			}
 			duringSnapshot = nil
 			if action != "release" {
-				if action == "identical_update" {
+				if action == "identical_update" || action == "source_update" {
 					require.Equal(t, version, store.GetConfigVersion(1))
 					check(t, 100)
 				} else {

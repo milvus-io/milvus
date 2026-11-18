@@ -87,6 +87,8 @@ class PhyElementFilterBitsNode : public Operator {
     }
 
  private:
+    friend class ElementFilterBitsNodeCandidateTest;
+
     std::pair<TargetBitmap, TargetBitmap>
     EvaluateElementExpression(
         const TargetBitmapView& doc_bitset,
@@ -95,6 +97,7 @@ class PhyElementFilterBitsNode : public Operator {
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
+    int64_t batch_size_;
     std::string struct_name_;
     bool is_finished_{false};
 };
