@@ -74,6 +74,14 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
     bool
+    CanUseOffsetsForSequentialBatch() override {
+        return std::all_of(
+            inputs_.begin(), inputs_.end(), [](const auto& input) {
+                return input->CanUseOffsetsForSequentialBatch();
+            });
+    }
+
+    bool
     SupportOffsetInput() override {
         for (auto& input : inputs_) {
             if (!(input->SupportOffsetInput())) {

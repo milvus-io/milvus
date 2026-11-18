@@ -200,7 +200,7 @@ TEST(JsonNumericTest, BinaryRangeUint64OutsideSmallRange) {
          N,
          TargetBitmapView(res_bm),
          TargetBitmapView(valid_res_bm),
-         empty_bitmap,
+         empty_bitmap.view(),
          0);
 
     EXPECT_FALSE(res_bm[0]) << "INT64_MAX+1 as double not in [-1000, 1000]";
@@ -236,7 +236,7 @@ TEST(JsonNumericTest, BinaryRangeUint64WithMaxRange) {
          N,
          TargetBitmapView(res_bm),
          TargetBitmapView(valid_res_bm),
-         empty_bitmap,
+         empty_bitmap.view(),
          0);
 
     // Double precision edge case: double(INT64_MAX+1) == double(INT64_MAX),
@@ -268,7 +268,7 @@ TEST(JsonNumericTest, DoubleValuesStillWorkInBinaryRange) {
          N,
          TargetBitmapView(res_bm),
          TargetBitmapView(valid_res_bm),
-         empty_bitmap,
+         empty_bitmap.view(),
          0);
 
     EXPECT_TRUE(res_bm[0]) << "1.5 in [0, 100]";
@@ -302,7 +302,7 @@ TEST(JsonNumericTest, MixedTypeBinaryRange) {
          N,
          TargetBitmapView(res_bm),
          TargetBitmapView(valid_res_bm),
-         empty_bitmap,
+         empty_bitmap.view(),
          0);
 
     EXPECT_TRUE(res_bm[0]) << "50 in [0,100]";
@@ -349,7 +349,7 @@ TEST(JsonNumericTest, Int64PrecisionPreservedInBinaryRange) {
          N,
          TargetBitmapView(res_bm),
          TargetBitmapView(valid_res_bm),
-         empty_bitmap,
+         empty_bitmap.view(),
          0);
 
     // at_numeric() preserves int64 precision: these are compared as int64.

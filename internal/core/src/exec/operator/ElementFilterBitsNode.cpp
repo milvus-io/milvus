@@ -62,11 +62,14 @@ PhyElementFilterBitsNode::PhyElementFilterBitsNode(
       struct_name_(element_filter_bits_node->struct_name()) {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
+    // Expressions retain their batch size at compilation. Keep the same row
+    // window even if the global default changes before execution.
+    batch_size_ = query_context_->query_config()->get_expr_batch_size();
 
     // Build expression set from element-level expression
     std::vector<expr::TypedExprPtr> exprs;
     exprs.emplace_back(element_filter_bits_node->element_filter());
-    element_exprs_ = std::make_unique<ExprSet>(exprs, exec_context);
+    element_exprs_ = std::make_unique<ExprSet>(exprs, exec_context, true);
 }
 
 void
@@ -226,6 +229,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         auto col_vec_size = col_vec->size();
         TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+        TargetBitmapView validview(col_vec->GetValidRawData(), col_vec_size);
 
         AssertInfo(col_vec_size == element_offsets.size(),
                    "ElementFilterBitsNode result size mismatch: {} vs {}",
@@ -236,7 +240,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         TargetBitmap bitset(total_elements, false);
         TargetBitmap valid_bitset(total_elements, true);
         for (size_t i = 0; i < element_offsets.size(); ++i) {
-            if (bitsetview[i]) {
+            if (bitsetview[i] && validview[i]) {
                 bitset[element_offsets[i]] = true;
             }
         }
@@ -250,17 +254,41 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
 
         return std::make_pair(std::move(bitset), std::move(valid_bitset));
     } else {
-        // Full mode: evaluate on all elements, then AND with doc_bitset
+        // Keep sequential/index execution, but expose parent candidates in
+        // the flattened element coordinates of each expression batch.
         tracer::AddEvent(
             fmt::format("full_mode, total_elements: {}", total_elements));
 
         EvalCtx eval_ctx(operator_context_->get_exec_context());
 
+        // The input is an already-normalized row selection, not a predicate
+        // result. In particular, MVCC source nodes leave validity unused.
+        const bool all_parents = count == doc_bitset.size();
+        TargetBitmap elem_bitset;
+        if (!all_parents) {
+            elem_bitset =
+                struct_element_offsets->RowBitsetToElementBitset(doc_bitset, 0);
+        }
+
         TargetBitmap eval_bitset;
         int64_t num_processed_elements = 0;
+        int64_t num_processed_rows = 0;
         std::vector<VectorPtr> results;
 
         while (num_processed_elements < total_elements) {
+            const auto next_row = std::min(num_processed_rows + batch_size_,
+                                           query_context_->get_active_count());
+            eval_ctx.clear_bitmap_input();
+            if (!all_parents) {
+                const auto element_end =
+                    struct_element_offsets->ElementIDRangeOfRow(next_row).first;
+                const auto candidates =
+                    elem_bitset.view(num_processed_elements,
+                                     element_end - num_processed_elements);
+                if (!candidates.all()) {
+                    eval_ctx.set_bitmap_input(candidates);
+                }
+            }
             element_exprs_->Eval(0, 1, true, eval_ctx, results);
 
             AssertInfo(results.size() == 1 && results[0] != nullptr,
@@ -282,7 +310,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             eval_bitset.append(view);
+            TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                        col_vec_size);
+            auto hits = eval_bitset.view(num_processed_elements, col_vec_size);
+            hits.inplace_and(valid_view, col_vec_size);
             num_processed_elements += col_vec_size;
+            num_processed_rows = next_row;
         }
 
         AssertInfo(eval_bitset.size() == total_elements,
@@ -290,15 +323,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                    eval_bitset.size(),
                    total_elements);
 
-        // Convert doc_bitset to element bitset
-        auto [elem_bitset, _] =
-            struct_element_offsets->RowBitsetToElementBitset(
-                doc_bitset, doc_bitset_valid, 0);
-
         // AND expression result with element bitset from doc filter
         // eval_bitset: true means element matches expression
         // elem_bitset: true means element's doc passed predicate filter
-        eval_bitset &= elem_bitset;
+        if (!all_parents) {
+            eval_bitset &= elem_bitset;
+        }
 
         eval_bitset.flip();
 
@@ -307,9 +337,8 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                         total_elements,
                         total_elements));
 
-        // Only TRUE elements are selected: an UNKNOWN element (e.g. a null
-        // sub-field value) has its data bit cleared and is filtered out like
-        // FALSE, so the element-level valid_bitset is all true.
+        // Only definite TRUE elements are selected. UNKNOWN is filtered out
+        // regardless of its data bit, so output validity is all true.
         TargetBitmap valid_bitset(total_elements, true);
         return std::make_pair(std::move(eval_bitset), std::move(valid_bitset));
     }

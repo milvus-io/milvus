@@ -612,7 +612,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                   &offsets,
                   TargetBitmapView(result),
                   TargetBitmapView(valid),
-                  candidate_mask),
+                  candidate_mask.view()),
               static_cast<int64_t>(offsets.size()));
     EXPECT_EQ(processed_cursor, static_cast<int64_t>(offsets.size()));
     EXPECT_TRUE(valid[0])
@@ -1044,7 +1044,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                                     skip_first_cell,
                                                     TargetBitmapView(result),
                                                     TargetBitmapView(valid),
-                                                    candidate_mask),
+                                                    candidate_mask.view()),
         20);
     EXPECT_EQ(processed_cursor, 20);
     EXPECT_TRUE(valid[0])
@@ -2252,6 +2252,7 @@ TEST(ScanValidityMaskTest, CandidateMaskUsesBatchRelativeWordRanges) {
         }
     }
 
+    const auto candidate_view = candidates.view();
     const auto verify = [&](ValidityView validity) {
         TargetBitmap result(destination_pos + size + 2, true);
         TargetBitmap valid(destination_pos + size + 2, true);
@@ -2259,7 +2260,7 @@ TEST(ScanValidityMaskTest, CandidateMaskUsesBatchRelativeWordRanges) {
                                     result.view(destination_pos, size),
                                     valid.view(destination_pos, size),
                                     size,
-                                    &candidates,
+                                    &candidate_view,
                                     candidate_pos);
         for (int64_t i = 0; i < size; ++i) {
             const bool expected =
@@ -2276,7 +2277,7 @@ TEST(ScanValidityMaskTest, CandidateMaskUsesBatchRelativeWordRanges) {
                                     destination,
                                     destination,
                                     size,
-                                    &candidates,
+                                    &candidate_view,
                                     candidate_pos);
         for (int64_t i = 0; i < size; ++i) {
             const bool expected =

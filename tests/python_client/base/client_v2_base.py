@@ -257,7 +257,7 @@ class TestMilvusClientV2Base(Base):
         **kwargs,
     ):
         timeout = TIMEOUT if timeout is None else timeout
-        # kwargs.update({"timeout": timeout})
+        kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request(

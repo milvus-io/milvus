@@ -76,6 +76,8 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 func NewRocksdbKVWithOpts(name string, opts *gorocksdb.Options) (*RocksdbKV, error) {
 	ro := gorocksdb.NewDefaultReadOptions()
 	wo := gorocksdb.NewDefaultWriteOptions()
+	// Persist the WAL before reporting a successful metadata write.
+	wo.SetSync(true)
 
 	// only has one columnn families
 	db, err := gorocksdb.OpenDb(opts, name)
