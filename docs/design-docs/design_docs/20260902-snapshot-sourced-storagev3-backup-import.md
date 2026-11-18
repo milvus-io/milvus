@@ -318,14 +318,19 @@ configuration used by external RestoreSnapshot, for example
 `{"extfs":{"access_key_id":"...","access_key_value":"..."}}`.
 It is accepted only with `source_type=snapshot`, must be nonempty and at most
 64 KiB, and requires a complete metadata URI identifying the source bucket.
-Without this option reads still use the instance storage, and the metadata URI
-must match its provider, bucket, effective endpoint and transport. A URI naming
+Without this option reads still use the instance storage: callers may pass
+either a complete metadata URI matching the instance provider, bucket,
+effective endpoint and transport, or a bucket-relative object key ending with
+`snapshots/{collectionID}/metadata/{snapshotID}.json` (without URI scheme,
+leading slash, empty path segments, traversal, query or fragment) so that
+multi-cluster CDC topologies with per-cluster buckets can resolve the same
+replicated `ImportMsg` against each cluster's own bucket. A URI naming
 another endpoint is rejected even if that endpoint is permitted by the snapshot
-cross-storage policy. URI validation occurs before metadata IO. This admission
-rule only applies to new snapshot Import requests: shared snapshot readers,
-bare object references inside snapshots and already-expanded persisted tasks
-keep their existing representation. Callers that used bare metadata keys must
-switch to complete URIs, such as the location returned by DescribeSnapshot.
+cross-storage policy, and bare metadata keys reject non-relocated internal
+snapshot references carrying any URI scheme. URI/key validation occurs before
+metadata IO. This admission rule only applies to new snapshot Import requests:
+shared snapshot readers, bare object references inside snapshots and
+already-expanded persisted tasks keep their existing representation.
 The coordinator-owned `_snapshot_source_uri` and
 `_snapshot_layout` options are rejected in public requests; after validation
 DataCoord persists the original URI and layout with the job.
@@ -534,8 +539,8 @@ It adds option validation for the snapshot-source contract:
   rejecting a simultaneous partition name or a partition-key target; and
 - forward the request through the normal Import broadcast path.
 
-Proxy does not read snapshot objects. DataCoord enforces complete URI and
-storage-identity validation before metadata I/O. Explicit mapping adds a
+Proxy does not read snapshot objects. DataCoord enforces metadata URI /
+bucket-relative key and storage-identity validation before metadata I/O. Explicit mapping adds a
 target-resolution branch to the existing Import API; automatic L0 folding adds
 no public toggle.
 
@@ -544,7 +549,9 @@ no public toggle.
 DataCoord extends the existing snapshot expansion without introducing another
 public source kind:
 
-1. Require a complete metadata URI and validate its storage identity. Resolve
+1. Require a complete metadata URI when `external_spec` is set, or either a
+   matching complete metadata URI or a canonical bucket-relative metadata key
+   when `external_spec` is absent. Resolve
    source storage using `external_spec` when supplied; otherwise reuse the
    instance ChunkManager. Open metadata through that source reader.
 2. Call `SnapshotReader.ReadMetadata` once. Validate the metadata with
@@ -1289,7 +1296,8 @@ defined by the snapshot layout. Logs and user-visible errors must redact
 credentials and signed URL query strings.
 
 Without `external_spec`, source reads use the configured target Milvus storage;
-the complete metadata URI must match that storage identity before reading.
+the metadata reference must be either a complete metadata URI matching that
+storage identity or a canonical bucket-relative object key before reading.
 With it, source reads use the request-scoped foreign storage; target writes
 always use the target instance configuration. Ordinary file and legacy backup
 imports reject this option. External jobs use empty legacy paths and select
@@ -1452,7 +1460,8 @@ ignore that metadata and succeed without applying L0 deletes.
 ### 18.1 Unit Tests
 
 - Parse and validate `source_type=snapshot` option combinations.
-- Require exactly one complete metadata URI, reject bare metadata keys and
+- Require a complete metadata URI when `external_spec` is set, accept canonical
+  bucket-relative metadata keys when `external_spec` is absent, reject
   `storage_version`, and reject URI/instance identity mismatches without extfs
   before metadata IO.
 - Read both referenced and self-contained snapshot layouts.
