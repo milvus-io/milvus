@@ -161,7 +161,7 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if flat {
-		it.SetState(indexpb.JobState_JobStateNone, indexparams.JSONFlatIndexDeprecationReason)
+		// The polling guard cancels and removes this task before unscheduling it.
 		return nil
 	}
 
@@ -195,21 +195,21 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		return
 	}
 
+	// Check segment health and index existence
+	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
+	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
+		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
+		it.abortForDroppedTarget(ctx, reason)
+		return
+	}
+
 	flat, err := it.jsonFlatTarget(ctx)
 	if err != nil {
 		log.Warn(ctx, "defer index task until collection schema is ready", mlog.Err(err))
 		return
 	}
 	if flat {
-		it.abortForDroppedTarget(ctx, indexparams.JSONFlatIndexDeprecationReason)
-		return
-	}
-
-	// Check segment health and index existence
-	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
-	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
-		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
-		it.abortForDroppedTarget(ctx, reason)
+		it.retireJSONFlatTask(ctx, cluster)
 		return
 	}
 
@@ -690,21 +690,21 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	// The index or the segment may have been dropped while the task is in
+	// flight. Abort it now instead of letting the worker finish useless work.
+	if reason, dropped := it.droppedTargetReason(it.meta.GetSegment(ctx, segIndex.SegmentID), segIndex); dropped {
+		log.Info(ctx, "index task target dropped while in progress, aborting", mlog.String("reason", reason))
+		it.abortInflightTask(ctx, cluster, reason)
+		return
+	}
+
 	flat, err := it.jsonFlatTarget(ctx)
 	if err != nil {
 		log.Warn(ctx, "defer index task until collection schema is ready", mlog.Err(err))
 		return
 	}
 	if flat {
-		it.abortInflightTask(ctx, cluster, indexparams.JSONFlatIndexDeprecationReason)
-		return
-	}
-
-	// The index or the segment may have been dropped while the task is in
-	// flight. Abort it now instead of letting the worker finish useless work.
-	if reason, dropped := it.droppedTargetReason(it.meta.GetSegment(ctx, segIndex.SegmentID), segIndex); dropped {
-		log.Info(ctx, "index task target dropped while in progress, aborting", mlog.String("reason", reason))
-		it.abortInflightTask(ctx, cluster, reason)
+		it.retireJSONFlatTask(ctx, cluster)
 		return
 	}
 
@@ -818,6 +818,24 @@ func (it *indexBuildTask) abortForDroppedTarget(ctx context.Context, reason stri
 		mlog.Warn(ctx, "failed to persist aborted index task state, will retry",
 			mlog.Int64("taskID", it.BuildID), mlog.String("reason", reason), mlog.Err(err))
 	}
+}
+
+// retireJSONFlatTask cancels assigned work before removing its pending record.
+// Do not infer "never dispatched" from Unissued: retries may retain a NodeID.
+// Leave failures scheduled for retry; remove the scheduler entry only after
+// catalog deletion and in-memory cleanup succeed. Any unreported uploads are
+// reclaimed by the existing orphan-file GC, including its snapshot guards.
+func (it *indexBuildTask) retireJSONFlatTask(ctx context.Context, cluster session.Cluster) {
+	if it.NodeID != 0 {
+		if err := it.tryDropTaskOnWorker(cluster); err != nil {
+			return
+		}
+	}
+	if err := it.indexMeta.retireJSONFlatTask(it.BuildID); err != nil {
+		mlog.Warn(ctx, "failed to retire JSON flat task, will retry", mlog.FieldBuildID(it.BuildID), mlog.Err(err))
+		return
+	}
+	it.SetState(indexpb.JobState_JobStateNone, indexparams.JSONFlatIndexDeprecationReason)
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
