@@ -28,6 +28,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -100,7 +101,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     const MmapChunkWritebackMode writeback_mode,
-    const bool enable_async_load)
+    const bool enable_async_load,
+    OrdinaryStructProjections struct_projections)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -113,6 +115,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              cache_key_suffix)),
       field_metas_(field_metas),
       physical_column_field_ids_(std::move(physical_column_field_ids)),
+      struct_projections_(std::move(struct_projections)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -158,6 +161,29 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       enable_async_load_(enable_async_load),
       async_read_window_bytes_(
           milvus::storage::LoadFieldDataReadWindowSizeBytes()) {
+    std::unordered_set<FieldId> projected_ids;
+    for (const auto& [parent, projection] : struct_projections_) {
+        AssertInfo(
+            !projection.child_field_ids.empty() &&
+                projected_ids.insert(projection.parent_field_id).second &&
+                field_metas_.count(projection.parent_field_id) == 0,
+            "invalid Struct projection parent {}",
+            parent);
+        for (const auto id : projection.child_field_ids) {
+            const auto it = field_metas_.find(id);
+            AssertInfo(
+                it != field_metas_.end() && projected_ids.insert(id).second,
+                "missing or duplicate Struct projection child {}",
+                id.get());
+            AssertInfo(GetStructNameForArrayField(it->second) ==
+                               std::optional<std::string>(parent) &&
+                           it->second.get_external_field() ==
+                               it->second.get_name().get(),
+                       "invalid Struct projection child {} for parent {}",
+                       id.get(),
+                       parent);
+        }
+    }
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -182,6 +208,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     bool used_total_estimate = false;
     const bool full_projection = projected_columns == column_group_columns;
     auto materialized_field_count = [&](const std::string& column_name) {
+        const auto projection = struct_projections_.find(column_name);
+        if (projection != struct_projections_.end()) {
+            return std::max<size_t>(1,
+                                    projection->second.child_field_ids.size());
+        }
         const auto mapping = physical_column_field_ids_.find(column_name);
         AssertInfo(mapping != physical_column_field_ids_.end(),
                    "physical column {} has no logical field mapping",
@@ -796,21 +827,29 @@ ManifestGroupTranslator::load_group_chunk(
     field_metas.reserve(schema->num_fields());
     std::vector<arrow::ArrayVector> array_vecs;
     array_vecs.reserve(schema->num_fields());
+    std::vector<std::string> physical_columns;
 
     // Iterate through physical fields and expand each to the logical fields
     // that map to it. The reader projects a physical column once; aliases get
     // their own normalized Raw chunks below.
     for (int i = 0; i < schema->num_fields(); ++i) {
         const auto column_name = schema->field(i)->name();
-        const auto mapping = physical_column_field_ids_.find(column_name);
-        if (mapping == physical_column_field_ids_.end()) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "[StorageV2] translator {} physical column {} has no "
-                      "logical field mapping",
-                      key_,
-                      column_name);
+        const auto projection = struct_projections_.find(column_name);
+        const std::vector<FieldId>* resolved_ids = nullptr;
+        if (projection != struct_projections_.end()) {
+            resolved_ids = &projection->second.child_field_ids;
+        } else {
+            const auto mapping = physical_column_field_ids_.find(column_name);
+            if (mapping == physical_column_field_ids_.end()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "[StorageV2] translator {} physical column {} has no "
+                          "logical field mapping",
+                          key_,
+                          column_name);
+            }
+            resolved_ids = &mapping->second;
         }
-        const auto& logical_field_ids = mapping->second;
+        const auto& logical_field_ids = *resolved_ids;
         if (logical_field_ids.size() == 1 &&
             logical_field_ids.front() == RowFieldID) {
             continue;
@@ -838,6 +877,7 @@ ManifestGroupTranslator::load_group_chunk(
             field_ids.push_back(fid);
             field_metas.push_back(it->second);
             array_vecs.push_back(merged_array_vec);
+            physical_columns.push_back(column_name);
         }
     }
 
@@ -846,7 +886,7 @@ ManifestGroupTranslator::load_group_chunk(
     // arrays, vector arrays, JSON, geometry.
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
         array_vecs[idx] = storage::NormalizeArrowForChunkWriter(
-            array_vecs[idx], field_metas[idx]);
+            array_vecs[idx], field_metas[idx], physical_columns[idx]);
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;

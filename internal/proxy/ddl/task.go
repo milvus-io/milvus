@@ -1170,6 +1170,14 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *s
 	}
 	newField := proto.Clone(field).(*schemapb.FieldSchema)
 	newField.Name = rawName
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		if field.GetExternalField() != "" && field.GetExternalField() != storedName {
+			return merr.WrapErrParameterInvalidMsg("struct %q child %q must retain its source name; external_field=%q", structPath, rawName, field.GetExternalField())
+		}
+		// Mapping is validated above. Keep the common protected-role checks
+		// unchanged, and preserve the mapping on the actual request field.
+		newField.ExternalField = ""
+	}
 	if err := validateAddStructSubFieldProperties(&schemapb.StructArrayFieldSchema{Fields: []*schemapb.FieldSchema{newField}}); err != nil {
 		return err
 	}
