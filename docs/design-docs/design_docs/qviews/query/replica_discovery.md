@@ -34,7 +34,9 @@ and never acquires a shard mutex while holding the handler mutex.
 
 The rotation is shared across concurrent requests; it is not a per-request
 promise to visit every replica before the client's retry budget expires.
-Node/View exclusions are applied before acquiring a serving lease. Each replica
+SN checks exact View exclusions during selection. With node exclusions it pins
+the candidate until it can check the optimized plan’s actual QN workers. A
+rejected plan releases its reference before SN tries another replica. Each replica
 still contributes only its normally selected newest eligible View; exclusions
 never authorize a fallback to an older data/load generation. A candidate touching
 an excluded QN is skipped as a whole, never returned with missing workers.

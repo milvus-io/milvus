@@ -489,14 +489,9 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 		if exclusions.ExcludesView(qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: selectedVersion}) {
 			return nil, nil, viewerror.NewAllCandidatesExcluded()
 		}
-		if exclusions != nil {
-			for _, node := range selected.sm.queryNodes {
-				if exclusions.ExcludesNode(node.GetNodeId()) {
-					return nil, nil, viewerror.NewAllCandidatesExcluded()
-				}
-			}
-		}
-		return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil, nil
+		// Pin this candidate while planning. Only a plan that passes worker
+		// admission may extend the serving deadline for an excluded-node request.
+		return s.newQueryViewLeaseLocked(selectedVersion, selected, true, !exclusions.HasExcludedNodes()), nil, nil
 	}
 	if recovering {
 		return nil, s.recoveryChangedLocked(), nil

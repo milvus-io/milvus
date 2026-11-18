@@ -35,10 +35,10 @@ func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
 }
 
 func TestPlanningAllExcludedDoesNotExecuteInlineStatistics(t *testing.T) {
-	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).To(func(_ *snview.SNQueryViewHandler, _ context.Context, channel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*snview.QueryViewLease, error) {
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).To(func(_ *snview.SNQueryViewHandler, _ context.Context, channel string, schema *int32, exclusions *qviews.QueryRoutingExclusions, skipped map[int64]struct{}) (*snview.QueryViewLease, error) {
 		require.Equal(t, "p_1v0", channel)
 		require.Nil(t, schema)
-		require.Equal(t, []int64{11}, constraints.ExcludedQueryNodeIds)
+		require.True(t, exclusions.ExcludesNode(11))
 		return nil, viewerror.NewAllCandidatesExcluded()
 	}).Build()
 	defer patch.UnPatch()
@@ -79,8 +79,9 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 		w := &walAdaptorImpl{param: &interceptors.InterceptorBuildParam{MVCCManager: manager}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		plan, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
 			CollectionId: 1, Vchannel: "p_1v0",
-			Mvcc:    &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 99},
-			Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{10}}},
+			RoutingConstraints: &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{12}},
+			Mvcc:               &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 99},
+			Request:            &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{10}}},
 		})
 		require.NoError(t, err)
 		require.True(t, released)
@@ -91,6 +92,43 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 		require.EqualValues(t, 23, plan.GetGrowingInlineResponse().GetStatisticsResponse().GetRowCount())
 		require.Len(t, plan.GetPlan().GetWorkNodes(), 1)
 		require.EqualValues(t, 11, plan.GetPlan().GetWorkNodes()[0].GetQueryNode().GetNodeId())
+	})
+}
+
+func TestQueryPlanTriesOtherReplicaBeforeInlineStatistics(t *testing.T) {
+	patchQueryReadRuntime(t)
+	mockey.PatchConvey("only admitted replicas count growing rows", t, func() {
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		var released, renewed, counted []int64
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).To(func(_ *snview.SNQueryViewHandler, _ context.Context, vc string, _ *int32, _ *qviews.QueryRoutingExclusions, skipped map[int64]struct{}) (*snview.QueryViewLease, error) {
+			for _, replica := range []int64{1, 2} {
+				if _, ok := skipped[replica]; ok {
+					continue
+				}
+				meta := &viewpb.QueryViewMeta{Vchannel: vc, ReplicaId: replica, Version: &viewpb.QueryViewVersion{QueryVersion: 1}}
+				view := &viewpb.QueryViewOfShard{Meta: meta, QueryNode: []*viewpb.QueryViewOfQueryNode{{NodeId: replica + 10, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 20, SegmentIds: []int64{1}}}}}}
+				return &snview.QueryViewLease{Meta: meta, View: view, Version: qviews.FromProtoQueryViewVersion(meta.Version), Renew: func() { renewed = append(renewed, replica) }, Release: func() { released = append(released, replica) }}, nil
+			}
+			return nil, viewerror.NewAllCandidatesExcluded()
+		}).Build()
+		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{20}, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).Statistics).To(func(_ *snview.SNQueryViewHandler, _ context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
+			counted = append(counted, req.GetShardId().GetReplicaId())
+			return 9, nil
+		}).Build()
+		req := &viewpb.GetQueryPlanRequest{Vchannel: "p_1v0", RoutingConstraints: &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{11}}, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}, Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{20}}}}
+		resp, err := w.GetQueryPlan(t.Context(), req)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, resp.GetPlan().GetShardId().GetReplicaId())
+		require.EqualValues(t, 12, resp.GetPlan().GetWorkNodes()[0].GetQueryNode().GetNodeId())
+		require.Equal(t, []int64{1, 2}, released)
+		req.RoutingConstraints.ExcludedQueryNodeIds = append(req.RoutingConstraints.ExcludedQueryNodeIds, 12)
+		resp, err = w.GetQueryPlan(t.Context(), req)
+		require.Nil(t, resp)
+		require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded())
+		require.Equal(t, []int64{1, 2, 1, 2}, released)
+		require.Equal(t, []int64{2}, counted)
+		require.Equal(t, []int64{2}, renewed)
 	})
 }
 
@@ -372,6 +410,7 @@ func TestQueryPlanMergesOptimizerAndPartitionSummary(t *testing.T) {
 				w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 				for _, search := range []bool{false, true} {
 					req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}}}
+					req.RoutingConstraints = &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{12}}
 					if search {
 						req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{10}}}
 					} else {
@@ -413,6 +452,7 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 			Mvcc:     &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}},
 			Request:  &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{Nq: 2, Topk: 3}, {Nq: 2, Topk: 4}}}},
 		}
+		req.RoutingConstraints = &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{11}}
 		before := proto.Clone(req)
 		response, err := w.GetQueryPlan(t.Context(), req)
 		require.NoError(t, err)

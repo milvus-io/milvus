@@ -153,24 +153,32 @@ func TestReplicaRoutingExcludesBeforeLeaseAndNeverFallsBackToOldVersion(t *testi
 	publishReplicaView(t, h, resources, 11, testVChannel, 1, 0, 101)
 	latest := publishReplicaView(t, h, resources, 11, testVChannel, 2, 0, 101)
 	publishReplicaView(t, h, resources, 22, testVChannel, 3, 0, 102)
-	constraints := &viewpb.QueryRoutingConstraints{ExcludedQueryViews: []*viewpb.QueryViewIdentity{{ReplicaId: 11, Version: latest.QueryViewVersion.IntoProto()}}}
+	constraints := &viewpb.QueryRoutingConstraints{ExcludedQueryNodeIds: []int64{102}, ExcludedQueryViews: []*viewpb.QueryViewIdentity{{ReplicaId: 11, Version: latest.QueryViewVersion.IntoProto()}}}
+	exclusions := qviews.NewQueryRoutingExclusions(testVChannel, constraints)
 	schema := int32(0)
 	for range 3 {
-		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, exclusions, nil)
 		require.NoError(t, err)
 		require.EqualValues(t, 22, lease.Meta.ReplicaId)
 		lease.Release()
 	}
+	// Selecting a candidate for planning must not extend the deadline until
+	// the requested partitions and final workers have been checked.
+	candidate := h.shards[qviews.ShardID{VChannel: testVChannel, ReplicaID: 22}]
+	for _, entry := range candidate.views {
+		require.True(t, entry.leaseExpireAt.IsZero())
+		require.Zero(t, entry.queryRefs)
+	}
 	entry := h.shards[latest.ShardID].views[latest.QueryViewVersion]
 	require.Zero(t, entry.queryRefs)
 	require.True(t, entry.leaseExpireAt.IsZero(), "excluded View must not receive a serving lease")
-	constraints.ExcludedQueryNodeIds = []int64{102}
-	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+	// The planner already evaluated replica 22 and rejected its actual workers.
+	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, exclusions, map[int64]struct{}{22: {}})
 	require.True(t, viewerror.AsViewError(err).IsAllCandidatesExcluded())
 	require.False(t, viewerror.AsViewError(err).IsViewNotFound())
 	// A newer exact-schema View in the excluded replica is a separate identity.
 	publishReplicaView(t, h, resources, 11, testVChannel, 4, 0, 103)
-	lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, constraints)
+	lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, exclusions, map[int64]struct{}{22: {}})
 	require.NoError(t, err)
 	require.EqualValues(t, 11, lease.Meta.ReplicaId)
 	require.EqualValues(t, 4, lease.Version.QueryVersion)
@@ -182,11 +190,11 @@ func TestRoutingStaleSchemaAcrossReplicas(t *testing.T) {
 	h := recoverSNQueryViewHandler(t.Context(), testPChannel, newMockCatalog(), resources, nil)
 	schema := int32(0)
 	publishReplicaView(t, h, resources, 11, testVChannel, 1, 1)
-	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil)
+	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil, nil)
 	require.True(t, viewerror.AsViewError(err).IsSchemaMismatch())
 	publishReplicaView(t, h, resources, 22, testVChannel, 2, schema)
 	for range 2 {
-		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil)
+		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil, nil)
 		require.NoError(t, err)
 		require.EqualValues(t, 22, lease.Meta.GetReplicaId())
 		lease.Release()

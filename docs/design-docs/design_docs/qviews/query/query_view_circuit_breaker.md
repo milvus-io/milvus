@@ -12,8 +12,11 @@ identities scoped to the request's vchannel. Versions include DataVersion.
 This unpublished protocol replaces GetQueryPlanRequest.shard_id with string
 vchannel at field 2. QueryPlan and execution RPCs retain actual ShardID.
 
-SN applies exclusions to each replica's normally selected exact-schema Up View,
-before granting/renewing a serving lease or executing inline statistics. It does
+SN checks the selected exact-schema Up View against the excluded View identities.
+When node exclusions are present, a call reference pins the View while SN builds
+the plan. After partition resolution and optimization, SN checks its actual QN
+workers before inline statistics or timed lease renewal. A rejected plan releases
+its reference and selection continues with another replica. It does
 not fall back to arbitrary historical versions or omit failed workers. Filtering
 all serving candidates yields ALL_CANDIDATES_EXCLUDED, distinct from absent or
 not-yet-ready Views. Its gRPC status is Aborted: neither transparent gRPC retries

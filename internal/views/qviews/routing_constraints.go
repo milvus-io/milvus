@@ -26,6 +26,10 @@ func NewQueryRoutingExclusions(vchannel string, constraints *viewpb.QueryRouting
 	return e
 }
 
+func (e *QueryRoutingExclusions) HasExcludedNodes() bool {
+	return e != nil && len(e.nodes) > 0
+}
+
 func (e *QueryRoutingExclusions) ExcludesNode(id int64) bool {
 	if e == nil {
 		return false

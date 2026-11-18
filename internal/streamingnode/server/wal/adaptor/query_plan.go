@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -96,7 +97,6 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
 	}
 
-	shardID := qviews.ShardID{VChannel: req.GetVchannel(), ReplicaID: qviews.UnknownReplicaID}
 	var schemaVersion int32
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
@@ -108,10 +108,26 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	if req.GetStatisticsRequest() == nil {
 		schema = &schemaVersion
 	}
-	lease, err := w.queryViewHandler.AcquireUpViewForRouting(ctx, req.GetVchannel(), schema, req.GetRoutingConstraints())
-	if err != nil {
-		return nil, err
+	exclusions := qviews.NewQueryRoutingExclusions(req.GetVchannel(), req.GetRoutingConstraints())
+	var skipped map[int64]struct{}
+	for {
+		lease, err := w.queryViewHandler.AcquireUpViewForRouting(ctx, req.GetVchannel(), schema, exclusions, skipped)
+		if err != nil {
+			return nil, err
+		}
+		response, err := w.buildQueryPlan(ctx, req, schema, lease, exclusions)
+		if err == nil || !viewerror.AsViewError(err).IsAllCandidatesExcluded() {
+			return response, err
+		}
+		// Each replica contributes at most one plan to this planning request.
+		if skipped == nil {
+			skipped = make(map[int64]struct{})
+		}
+		skipped[lease.Meta.GetReplicaId()] = struct{}{}
 	}
+}
+
+func (w *walAdaptorImpl) buildQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest, schema *int32, lease *snview.QueryViewLease, exclusions *qviews.QueryRoutingExclusions) (*viewpb.GetQueryPlanResponse, error) {
 	defer lease.Release()
 	if schema != nil && *schema != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewSchemaMismatch("requested schema %d, selected schema %d", *schema, lease.Meta.GetSchemaVersion())
@@ -126,7 +142,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	viewShardID := qviews.NewShardIDFromQVMeta(lease.Meta)
 	w.queryViewHandler.RecordShardAccess(viewShardID)
 
-	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, shardID.VChannel)
+	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, viewShardID.VChannel)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +168,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		ShardId: viewShardID.IntoProto(),
 		Mvcc:    mvcc,
 	}
-	response = &viewpb.GetQueryPlanResponse{Plan: plan}
+	response := &viewpb.GetQueryPlanResponse{Plan: plan}
 	var partitionFiltered bool
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_StatisticsRequest:
@@ -160,20 +176,6 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		statistics.PartitionIds, err = runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), statistics.GetPartitionIds())
 		if err != nil {
 			return nil, err
-		}
-		// Count growing data while the chosen View is still leased. The returned
-		// routing contains QNs only, so no second SN request is necessary.
-		rows, countErr := w.queryViewHandler.Statistics(ctx, &viewpb.StatisticsOnViewRequest{
-			ShardId: viewShardID.IntoProto(), Version: lease.Version.IntoProto(),
-			Mvcc: mvcc, PartitionIds: statistics.PartitionIds,
-		})
-		if countErr != nil {
-			return nil, countErr
-		}
-		response.GrowingInlineResponse = &viewpb.GrowingInlineResponse{
-			Response: &viewpb.GrowingInlineResponse_StatisticsResponse{
-				StatisticsResponse: &viewpb.StatisticsOnViewResponse{RowCount: rows},
-			},
 		}
 		plan.Request = &viewpb.QueryPlan_StatisticsRequest{StatisticsRequest: statistics}
 		plan.WorkNodes, _ = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
@@ -254,6 +256,25 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			response.ExecutionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: summary}
 		}
 	}
+	if exclusions.ExcludesPlan(plan) {
+		return nil, viewerror.NewAllCandidatesExcluded()
+	}
+	if statistics := plan.GetStatisticsRequest(); statistics != nil {
+		// Count growing data while the chosen View is still leased. The returned
+		// routing contains QNs only, so no second SN request is necessary.
+		rows, countErr := w.queryViewHandler.Statistics(ctx, &viewpb.StatisticsOnViewRequest{
+			ShardId: viewShardID.IntoProto(), Version: lease.Version.IntoProto(),
+			Mvcc: mvcc, PartitionIds: statistics.GetPartitionIds(),
+		})
+		if countErr != nil {
+			return nil, countErr
+		}
+		response.GrowingInlineResponse = &viewpb.GrowingInlineResponse{
+			Response: &viewpb.GrowingInlineResponse_StatisticsResponse{
+				StatisticsResponse: &viewpb.StatisticsOnViewResponse{RowCount: rows},
+			},
+		}
+	}
 	search := plan.GetLegacySearchRequest()
 	if search != nil && !search.GetIsAdvanced() && optimizers.ShouldUseTwoStageSearch(&querypb.SearchRequest{Req: search}, math.MaxInt) {
 		count := queryPlanSealedSegmentCount(plan, lease.View)
@@ -267,8 +288,8 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
-		mlog.FieldVChannel(shardID.VChannel),
-		mlog.Int64("replicaID", shardID.ReplicaID),
+		mlog.FieldVChannel(viewShardID.VChannel),
+		mlog.Int64("replicaID", viewShardID.ReplicaID),
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
