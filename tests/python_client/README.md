@@ -255,3 +255,67 @@ assert self.partition_wrap.is_empty
 - Add global methods or tools under **utils** directory.
 
 - Add corresponding configurations under **config** directory.
+
+## Paimon external collections
+
+`milvus_client/test_milvus_client_external_table_paimon.py` contains 2 L0,
+24 L1 and 131 L2 cases. Install `requirements.txt` and provide a Milvus
+instance with its existing MinIO service and bucket.
+
+Each pytest run generates real Paimon tables and snapshots locally, then
+reads the selected snapshots through the independent Paimon Java batch reader
+to produce ground truth. Writer input rows and Milvus output are not used as
+the oracle. The generation configuration and pinned JAR hashes live in
+`scripts/paimon/build_fixtures.py`; the Java writer/reader and Vortex physical
+converter live beside it. The format-library versions are pinned in
+`requirements.txt`. Vortex conversion verifies Arrow equality for every
+physical file and retains the Java reader's logical ground truth.
+
+The runner needs JDK17, including `javac`. The Python-client test Dockerfiles
+install it. `PAIMON_JAVA_HOME` can select an existing JDK17. Linux x86_64 and
+aarch64 runners without a suitable JDK automatically provision a fixed,
+SHA256-verified Corretto JDK dependency. JDK/JAR downloads are cached under
+`~/.cache/milvus-paimon-dependencies`; `PAIMON_DEPENDENCY_CACHE` overrides that
+location for a prewarmed or offline runner. Cached JAR hashes are revalidated.
+
+The session fixture generates once in a fresh pytest run-owned temporary
+workspace. Local xdist workers synchronize on a file lock and only read the
+bundle after complete snapshot/provenance/blob/GT validation and atomic
+publication. Generation failures, interrupted preparation and missing or
+invalid dependencies fail setup explicitly for all workers. Each new run
+regenerates the tables and reader GT; no previously generated data bundle
+is reused. `generation.log` and `status.json` in that run's `paimon-*`
+workspace record preparation output, duration and the generated content hash.
+The hash protects sharing within this run and is not tied to an older ZIP.
+
+Run from `tests/python_client`:
+
+```sh
+pytest milvus_client/test_milvus_client_external_table_paimon.py \
+  --uri http://milvus:19530 --token root:Milvus \
+  --minio_host minio:9000 --minio_bucket milvus-bucket \
+  --tags L0 L1 -n 2 --dist loadgroup --timeout 600
+```
+
+PR CI selects `--tags L0 L1` (26 cases). Use `--tags L2` for the 131 boundary
+cases or `--tags L0 L1 L2` for all 157. All levels use the same runtime
+preparation path. TextEmbedding cases use the existing `--tei_endpoint`;
+an unavailable endpoint is reported as a Blocked skip.
+
+`--minio_host` is the test runner's upload endpoint;
+`MILVUS_EXTERNAL_SOURCE_MINIO_HOST` can supply a different address for Milvus
+to reach the same store. Each mutable case uploads to an isolated object
+prefix, publishing dependencies before snapshots and hints. Cases create
+and refresh external collections, build/load indexes and check full rows,
+search distances/recall and reload behavior against the independent reader
+GT. Incremental cases publish the next newly generated snapshot and check
+updates/deletes. Shared read-only cases reuse class-owned data and loaded
+collections. Collection cleanup precedes source-prefix cleanup; the bucket
+is retained.
+
+API operations and polling use `base/client_v2_base.py` wrappers and response
+checks, in addition to the full-row/search oracle. Local schema/index builders
+(including `schema.add_function`) and iterator `next()`/`close()` are direct
+SDK calls because the client_v2 base has no corresponding wrappers. Iterator
+rejection checks accept SDK failures from the first page and propagate local
+assertion/adapter failures.

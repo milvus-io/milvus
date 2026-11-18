@@ -226,7 +226,7 @@
         {
           "refId": "A",
           "expr": "sum by (component,operation,stage) (milvus_qv_stage_inflight{instance=~\"$instance\"})",
-          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "legendFormat": "{{component}} / {{operation}} / {{stage}}",
           "range": true
         }
       ],
@@ -889,7 +889,7 @@
         {
           "refId": "A",
           "expr": "histogram_quantile(0.99,sum by(le,data_type,location)(rate(internal_cache_load_latency_microseconds_bucket{instance=~\"$instance\"}[$__rate_interval])))/1e6",
-          "legendFormat": "{{stage}} {{result}} {{kind}}",
+          "legendFormat": "{{data_type}} / {{location}}",
           "range": true
         }
       ],

@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "common/Vector.h"
@@ -59,24 +60,59 @@ class EvalCtx {
         offset_input_ = offset_input;
     }
 
-    inline void
-    set_bitmap_input(TargetBitmap&& bitmap_input) {
-        bitmap_input_ = std::move(bitmap_input);
+    // Candidate masks are read-only. A borrowed view must outlive Eval and
+    // must not be resized or mutated while it is installed in the context.
+    // Keep ownership with saved masks when AND/OR temporarily replaces them.
+    class BitmapInput {
+     public:
+        BitmapInput() = default;
+        explicit BitmapInput(TargetBitmap&& bitmap)
+            : storage_(std::move(bitmap)) {
+        }
+        explicit BitmapInput(TargetBitmapView view) : storage_(view) {
+        }
+        BitmapInput(BitmapInput&&) = default;
+        BitmapInput&
+        operator=(BitmapInput&&) = default;
+
+        const TargetBitmapView
+        view() const {
+            return std::visit([](const auto& bitmap) { return bitmap.view(); },
+                              storage_);
+        }
+
+     private:
+        std::variant<TargetBitmap, TargetBitmapView> storage_;
+    };
+
+    void
+    set_bitmap_input(TargetBitmap&& bitmap) {
+        bitmap_input_ = BitmapInput(std::move(bitmap));
     }
 
-    inline TargetBitmap
+    void
+    set_bitmap_input(TargetBitmapView view) {
+        bitmap_input_ = BitmapInput(view);
+    }
+
+    void
+    set_bitmap_input(BitmapInput&& bitmap) {
+        bitmap_input_ = std::move(bitmap);
+    }
+
+    BitmapInput
     take_bitmap_input() {
-        return std::exchange(bitmap_input_, TargetBitmap{});
+        return std::exchange(bitmap_input_, BitmapInput{});
     }
 
-    inline const TargetBitmap&
+    const TargetBitmapView
     get_bitmap_input() const {
-        return bitmap_input_;
+        return bitmap_input_.view();
     }
 
     void
     clear_bitmap_input() {
-        bitmap_input_.clear();
+        bitmap_input_ = BitmapInput{};
     }
 
  private:
@@ -85,7 +121,7 @@ class EvalCtx {
     OffsetVector* offset_input_ = nullptr;
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
-    TargetBitmap bitmap_input_;
+    BitmapInput bitmap_input_;
 };
 
 }  // namespace exec

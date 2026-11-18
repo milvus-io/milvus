@@ -18,12 +18,62 @@ import (
 	"path"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
+
+func TestManifestEntrypointsPreserveStageThroughTiming(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	manifest := MarshalManifestPath(path.Join(cfg.RootPath, "stage/segment"), 1)
+	stages := []uint32{common.TalonStageLoadOpen, common.TalonStageManifest}
+	for _, tc := range []struct {
+		name string
+		read func() error
+	}{
+		{"stats", func() error {
+			_, err := GetManifestStats(manifest, cfg, stages...)
+			return err
+		}},
+		{"handle", func() error {
+			_, err := GetManifestHandle(manifest, cfg, stages...)
+			return err
+		}},
+		{"external_handle", func() error {
+			_, err := GetManifestHandleWithExtfs(manifest, cfg, ExternalSpecContext{}, stages...)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			failure := errors.New("injected property failure")
+			patch := mockey.Mock(MakePropertiesFromStorageConfig).When(func(config *indexpb.StorageConfig, _ map[string]string, requested ...uint32) bool {
+				calls++
+				require.Same(t, cfg, config)
+				require.Equal(t, stages, requested)
+				return true
+			}).Return(nil, failure).Build()
+			defer patch.UnPatch()
+			before := make(map[string]uint64)
+			for _, phase := range manifestReadPhaseNames {
+				before[phase] = manifestHistogram(t, "manifest_other", phase, "error").GetSampleCount()
+			}
+			require.ErrorIs(t, tc.read(), failure)
+			require.Equal(t, 1, calls)
+			if tc.name == "stats" {
+				for _, phase := range manifestReadPhaseNames {
+					require.Equal(t, before[phase]+1, manifestHistogram(t, "manifest_other", phase, "error").GetSampleCount(), phase)
+				}
+			}
+		})
+	}
+}
 
 func manifestHistogram(t *testing.T, operation, phase, result string) *dto.Histogram {
 	t.Helper()

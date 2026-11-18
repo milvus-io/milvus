@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -39,6 +40,7 @@ type StatsResolver struct {
 	// Manifest-based (V3)
 	manifestPath  string
 	storageConfig *indexpb.StorageConfig
+	talonStage    uint32
 
 	// Legacy (V2)
 	statslogs     []*datapb.FieldBinlog
@@ -64,10 +66,12 @@ func NewStatsResolver(manifestPath string, storageConfig *indexpb.StorageConfig)
 
 // NewStatsResolverFromLoadInfo creates a fully-populated StatsResolver from a
 // SegmentLoadInfo. This is the preferred constructor for QueryNode call sites.
+// The Talon stage applies only to the manifest lookup, not the returned stats files.
 func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResolver {
 	return &StatsResolver{
 		manifestPath:  loadInfo.GetManifestPath(),
 		storageConfig: CreateStorageConfig(),
+		talonStage:    common.TalonStageManifest,
 		statslogs:     loadInfo.GetStatslogs(),
 		bm25Logs:      loadInfo.GetBm25Logs(),
 		textStatsLogs: loadInfo.GetTextStatsLogs(),
@@ -402,7 +406,7 @@ func (r *StatsResolver) loadManifest() error {
 	r.manifestLoaded = true
 
 	statsTimer := manifestStats.Begin()
-	stats, err := getManifestStats(r.manifestPath, r.storageConfig, r.manifestOrigin)
+	stats, err := getManifestStats(r.manifestPath, r.storageConfig, r.manifestOrigin, r.talonStage)
 	statsTimer.End(err)
 	if err != nil {
 		r.manifestErr = merr.Wrap(err, "failed to get manifest stats")

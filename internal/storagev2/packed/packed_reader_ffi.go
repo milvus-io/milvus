@@ -288,6 +288,7 @@ func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, 
 		tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
 		use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
 		talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
+		talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
 		talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
 		talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
 		talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
@@ -427,8 +428,8 @@ func (r *FFIPackedReader) Release() {
 	r.Close()
 }
 
-func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
-	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig, talonStages ...uint32) (loonManifestHandle *C.LoonManifest, err error) {
+	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 }
 
 // GetManifestHandleWithExtfs opens a StorageV3 manifest with optional extfs
@@ -438,8 +439,9 @@ func GetManifestHandleWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
-	return getManifestHandleWithTiming(manifestPath, storageConfig, extfs, nil)
+	return getManifestHandleWithTiming(manifestPath, storageConfig, extfs, nil, talonStages...)
 }
 
 func getManifestHandleWithTiming(
@@ -447,6 +449,7 @@ func getManifestHandleWithTiming(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 	timing *manifestReadTiming,
+	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
 	totalTimer := manifestTotal.Begin()
 	defer totalTimer.EndError(&err)
@@ -458,7 +461,7 @@ func getManifestHandleWithTiming(
 
 	propertiesTimer := manifestProperties.Begin()
 	propertiesStartedAt := time.Now()
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if timing != nil {
 		timing.durations[manifestReadProperties] = time.Since(propertiesStartedAt)
 	}

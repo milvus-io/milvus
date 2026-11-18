@@ -146,8 +146,9 @@ func addDeltaLogsToManifest(
 func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	talonStages ...uint32,
 ) ([]string, error) {
-	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,13 +202,14 @@ func GetDeltaLogsFromManifestWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
 ) ([]*datapb.FieldBinlog, error) {
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to create properties")
 	}

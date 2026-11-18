@@ -130,18 +130,19 @@ func UpdateTransactionStat(
 func GetManifestStats(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	talonStages ...uint32,
 ) (map[string]ManifestStat, error) {
-	return getManifestStats(manifestPath, storageConfig, ManifestReadOther)
+	return getManifestStats(manifestPath, storageConfig, ManifestReadOther, talonStages...)
 }
 
-func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig, origin ManifestReadOrigin) (_ map[string]ManifestStat, err error) {
+func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig, origin ManifestReadOrigin, talonStages ...uint32) (_ map[string]ManifestStat, err error) {
 	startedAt := time.Now()
 	timing := manifestReadTiming{}
 	defer func() {
 		timing.durations[manifestReadTotal] = time.Since(startedAt)
 		timing.observe(origin, err)
 	}()
-	cManifest, err := getManifestHandleWithTiming(manifestPath, storageConfig, ExternalSpecContext{}, &timing)
+	cManifest, err := getManifestHandleWithTiming(manifestPath, storageConfig, ExternalSpecContext{}, &timing, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}

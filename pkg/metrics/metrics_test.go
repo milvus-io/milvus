@@ -301,22 +301,19 @@ func proxyCollectionCollectors() []prometheus.Collector {
 func observeProxyCollection(nodeID, db, collection string) {
 	for _, queryType := range []string{SearchLabel, HybridSearchLabel, QueryLabel, UpsertQueryLabel} {
 		ProxyReceivedNQ.WithLabelValues(nodeID, queryType, db, collection).Add(1)
-		ProxySQLatency.WithLabelValues(nodeID, queryType, db, collection).Observe(1)
+		ProxySQLatency.WithLabelValues(nodeID, queryType, db, collection, "").Observe(1)
 		ProxyRetrySearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxyRecallSearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, db, collection, queryType, "1").Observe(1)
-		ProxyResourceGroupSQLatency.WithLabelValues(nodeID, queryType, db, collection, "rg").Observe(1)
 	}
-	ProxyResourceGroupFunctionCall.WithLabelValues(nodeID, "Search", SuccessLabel, CauseNA, db, collection, "rg").Inc()
-	ProxyResourceGroupSearchVectors.WithLabelValues(nodeID, db, collection, "rg").Add(1)
 	for _, msgType := range []string{InsertLabel, DeleteLabel, UpsertLabel, SearchLabel, HybridSearchLabel, QueryLabel} {
 		ProxyMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
 		ProxyReceiveBytes.WithLabelValues(nodeID, msgType, db, collection).Add(1)
 		ProxyScannedRemoteMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)
 		ProxyScannedTotalMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)
 	}
-	ProxySearchVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxySearchVectors.WithLabelValues(nodeID, db, collection, "").Add(1)
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertWriteConditionRows.WithLabelValues(nodeID, db, collection, "written").Add(1)
@@ -325,7 +322,7 @@ func observeProxyCollection(nodeID, db, collection string) {
 		ProxyPathReplaceParentOperations.WithLabelValues(nodeID, db, collection, parentType).Add(1)
 	}
 	ProxyPathReplaceMergeLatency.WithLabelValues(nodeID, db, collection).Observe(1)
-	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
+	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection, "").Add(1)
 	ProxyFunctionlatency.WithLabelValues(nodeID, db, collection, "x", "x", "x").Observe(1)
 }
 

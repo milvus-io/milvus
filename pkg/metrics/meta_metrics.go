@@ -55,6 +55,14 @@ var (
 			Name:      "op_count",
 			Help:      "count of meta operation",
 		}, []string{metaOpType, statusLabelName})
+
+	MetaTiKVGCSafePoint = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "meta",
+			Name:      "tikv_gc_safe_point_unix_seconds",
+			Help:      "physical time of the TiKV GC safe point that MixCoord last advanced, in unix seconds",
+		})
 )
 
 // RegisterMetaMetrics registers meta metrics
@@ -62,4 +70,5 @@ func RegisterMetaMetrics(registry *prometheus.Registry) {
 	registry.MustRegister(MetaKvSize)
 	registry.MustRegister(MetaRequestLatency)
 	registry.MustRegister(MetaOpCounter)
+	registry.MustRegister(MetaTiKVGCSafePoint)
 }
