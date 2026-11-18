@@ -21,10 +21,12 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -34,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-// DroppedVChannelTimeTick releases all transform records after durable cleanup.
+// DroppedVChannelTimeTick marks a VChannel whose durable Drop is cleanup-ready.
 const DroppedVChannelTimeTick = math.MaxUint64
 
 // Manager is the pchannel-scoped WALSummary runtime. A summary is one
@@ -52,8 +54,8 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
-	chunkIndex     *chunkIndex
-	queryRetention map[string]uint64 // exclusive lower bound required by query snapshots
+	chunkIndex        *chunkIndex
+	dataViewRetention map[string]uint64 // per-VChannel exclusive starts; unknown channels stay at zero
 
 	mu sync.Mutex
 	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
@@ -75,6 +77,7 @@ type Manager struct {
 	manifestTask          *manifestWriteTask
 	pressureThrough       uint64
 	gcTask                *summaryGCTask
+	orphanGCTask          *summaryOrphanGCTask
 	lastAcked             uint64
 	lastObserved          uint64
 	sealedThrough         uint64
@@ -94,6 +97,9 @@ type Manager struct {
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
 type ManagerConfig struct {
+	// FetchDataViewRetention pulls the oldest retained DataView frontier before
+	// each GC round. An unavailable frontier must not authorize retirement.
+	FetchDataViewRetention func(context.Context) (map[string]uint64, error)
 	// CacheMaxBytes bounds cached encoded chunk buffers per PChannel; zero disables residency.
 	CacheMaxBytes uint64
 	Runtime       moduleapi.Runtime
@@ -103,14 +109,13 @@ type ManagerConfig struct {
 	Term          int64
 	// Store is the object storage layer of the summary store.
 	Store *Store
-	// RetentionMaxBytes is the soft budget of the retained chunk objects. GC
-	// releases the oldest chunks above the budget. Zero disables that bound.
-	RetentionMaxBytes uint64
-	// MaxRetainedChunks caps how many chunk objects stay retained, whatever
-	// their size. It bounds what the byte budget cannot: the manifest entry
-	// count and the number of object reads recovery pays. Zero disables it.
-	MaxRetainedChunks int
-	Logger            *mlog.Logger
+	// MaxRetentionBytes is the minimum retained object capacity after prefix GC.
+	MaxRetentionBytes    uint64
+	MaxRetentionDuration time.Duration
+	GCInterval           time.Duration
+	OrphanGCInterval     time.Duration
+	IdempotencyRetention idempotencyview.RetentionConfig
+	Logger               *mlog.Logger
 	// OnFatal marks the owning WAL unavailable. It must not close or wait for
 	// this manager's tasks; the callback runs on the failing task's goroutine.
 	OnFatal func(error)
@@ -743,11 +748,15 @@ func (m *Manager) ReadTransformEntries(ctx context.Context, vchannel string, fro
 	return batch.Entries, err
 }
 
-// AdvanceGCTimeTick reports a durable transform materialization or cleanup frontier.
+// AdvanceGCTimeTick reports durable materialization for backlog accounting,
+// and removes query barriers and retention after durable VChannelMeta deletion.
+// Despite the historical name, it does not authorize Summary GC; the retention
+// pin must already have been released before final VChannel cleanup.
 func (m *Manager) AdvanceGCTimeTick(vchannel string, timetick uint64) {
 	m.mu.Lock()
 	if timetick == DroppedVChannelTimeTick {
 		delete(m.queryBarriers, vchannel)
+		delete(m.dataViewRetention, vchannel)
 	}
 	if timetick > m.gcFrontiers[vchannel] {
 		m.gcFrontiers[vchannel] = timetick

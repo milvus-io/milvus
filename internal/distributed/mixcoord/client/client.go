@@ -2434,3 +2434,15 @@ func (c *Client) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 		return client.GetQueryViewSegmentLoadInfo(ctx, req, opts...)
 	})
 }
+
+func (c *Client) GetDataViewRetention(ctx context.Context, req *datapb.GetDataViewRetentionRequest, opts ...grpc.CallOption) (*datapb.GetDataViewRetentionResponse, error) {
+	req = typeutil.Clone(req)
+	if req.Base == nil {
+		req.Base = commonpbutil.NewMsgBase()
+	}
+	req.Base = commonpbutil.UpdateMsgBase(req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)))
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetDataViewRetentionResponse, error) {
+		return client.GetDataViewRetention(ctx, req, opts...)
+	})
+}

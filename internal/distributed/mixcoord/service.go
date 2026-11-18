@@ -1283,3 +1283,7 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
 	return s.mixCoord.GetQueryViewSegmentLoadInfo(ctx, req)
 }
+
+func (s *Server) GetDataViewRetention(ctx context.Context, req *datapb.GetDataViewRetentionRequest) (*datapb.GetDataViewRetentionResponse, error) {
+	return s.mixCoord.GetDataViewRetention(ctx, req)
+}

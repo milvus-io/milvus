@@ -2,7 +2,6 @@ package vchannel
 
 import (
 	"context"
-	"math"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -174,7 +173,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		OnMaterialized:         module.markL0Materialized,
 		EarlierSegmentsFlushed: module.earlierSegmentsFlushed,
 	})
-	module.refreshQueryRetentionLocked()
+	module.initializeDataViewRetentionLocked()
 	return module, nil
 }
 
@@ -370,13 +369,14 @@ func (m *VChannelRecoveryModule) requestPersistThrough(targetTimeTick uint64, un
 func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) {
 	if m.vchannelView == nil {
 		m.vchannelView = NewVChannelViewFromCreateCollectionMessage(msg)
+		m.initializeDataViewRetentionLocked()
 	} else {
 		replacement, _ := m.vchannelView.ObserveCreateCollectionMessageV1(msg)
 		if replacement != nil {
 			m.vchannelView = replacement
+			m.initializeDataViewRetentionLocked()
 		}
 	}
-	m.refreshQueryRetentionLocked()
 }
 
 func (m *VChannelRecoveryModule) handleCreatePartitionMessage(msg message.ImmutableCreatePartitionMessageV1) {
@@ -472,7 +472,6 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
 		}
 		view = segment.NewSegmentViewFromCreateSegmentMessageWithConfig(raw, schema, m.segmentViewConfig())
 		m.segments[id] = view
-		m.refreshQueryRetentionLocked()
 		created = true
 	}
 	if view.ObserveCreateSegmentMessageV2(ctx, msg) || created {
@@ -723,10 +722,10 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		)
 		dropReady := dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced
 		if dropReady && m.summaryManager != nil {
-			// A durable collection tombstone forbids new query references. All
-			// existing references and Segment recovery state are gone, so release
-			// the collection-origin pin before waiting for Summary retirement.
-			m.summaryManager.SetQueryRetention(m.vchannel, math.MaxUint64)
+			// The durable tombstone rejects new query references, and all existing
+			// references and Segment recovery state are gone. Release Summary's
+			// pin before waiting for SummaryRetired to avoid a cleanup cycle.
+			m.summaryManager.SetDataViewRetention(m.vchannel, walsummary.DroppedVChannelTimeTick)
 		}
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
@@ -817,7 +816,6 @@ func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *s
 	delete(m.pendingCleanup, segmentID)
 	delete(m.segments, segmentID)
 	delete(m.querySealed, segmentID)
-	m.refreshQueryRetentionLocked()
 	m.dirtyMu.Lock()
 	delete(m.dirtySegments, segmentID)
 	m.dirtyMu.Unlock()

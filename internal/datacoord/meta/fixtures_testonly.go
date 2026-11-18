@@ -1925,3 +1925,7 @@ func NewMetaWithDatabases(dbs ...*metacache.DatabaseInfo) *Meta {
 	}
 	return m
 }
+
+func (*MockMixCoord) GetDataViewRetention(context.Context, *datapb.GetDataViewRetentionRequest) (*datapb.GetDataViewRetentionResponse, error) {
+	return nil, merr.Wrap(merr.ErrServiceUnimplemented, "GetDataViewRetention is not configured by this test")
+}

@@ -99,8 +99,8 @@ func TestQueryStreamResumesAfterGC(t *testing.T) {
 	manager, store := newTestManagerWithStore(t)
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 10, 1, 10))
 	require.NoError(t, persistSummary(ctx, manager))
-	manager.AdvanceGCTimeTick("v1", 10)
-	manager.cfg.RetentionMaxBytes = 1
+	manager.SetDataViewRetention("v1", 10)
+	manager.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, manager))
 	// Exercise the durable GC boundary, not only an in-memory notification.
 	restored := newTestManager(t, nextTermStore(store), 1<<30)
@@ -125,12 +125,12 @@ func TestQueryStreamResumesAfterGC(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestQueryRetentionPinsMaterializedDeletes(t *testing.T) {
-	manager := NewManager(ManagerConfig{RetentionMaxBytes: 1})
+func TestDataViewRetentionPinsMaterializedDeletes(t *testing.T) {
+	manager := NewManager(ManagerConfig{MaxRetentionBytes: 0})
 	manager.manifest.Chunks = []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 1, ObjectSize: 10, Vchannels: []*streamingpb.VChannelSummaryChunkIndex{{Vchannel: "v1", Transform: &streamingpb.VChannelSummaryTransformIndex{EndTimeTick: 20}}}}}
 	manager.gcFrontiers["v1"] = 100
-	manager.SetQueryRetention("v1", 9)
+	manager.SetDataViewRetention("v1", 9)
 	require.Empty(t, manager.computeRetention(), "materialized deletes still belong to the old growing view")
-	manager.SetQueryRetention("v1", math.MaxUint64)
+	manager.SetDataViewRetention("v1", math.MaxUint64)
 	require.Len(t, manager.computeRetention(), 1)
 }

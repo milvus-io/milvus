@@ -61,11 +61,13 @@ func TestTransformStatisticsAcrossStorageAndGC(t *testing.T) {
 	// Restored records are skipped on replay, including their statistics.
 	restored.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 6))
 	require.Equal(t, want, restored.TransformStats("v1", 0, 400))
-	restored.cfg.RetentionMaxBytes = 1
+	restored.cfg.MaxRetentionBytes = 0
 	restored.AdvanceGCTimeTick("v1", 100)
+	restored.SetDataViewRetention("v1", 100)
 	require.NoError(t, gcSummary(ctx, restored))
 	require.Equal(t, want.Bytes-uint64(proto.Size(batch.Entries[0])), restored.TransformStats("v1", 100, 400).Bytes)
 	restored.AdvanceGCTimeTick("v1", 400)
+	restored.SetDataViewRetention("v1", 400)
 	require.NoError(t, gcSummary(ctx, restored))
 	require.Equal(t, TransformStats{}, restored.TransformStats("v1", 400, 500))
 	restored.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 500, 10, 7))
@@ -102,10 +104,11 @@ func TestMaterializationBacklogSurvivesPersistenceAndRestart(t *testing.T) {
 	restored.ReportMaterialized("v1", first)
 	restored.requestMaterializationBacklog(context.Background(), now, time.Minute)
 	require.Empty(t, requests)
-	restored.cfg.RetentionMaxBytes = 1
+	restored.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, restored))
 	require.Len(t, restored.Manifest().GetChunks(), 1)
 	restored.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{"v1": {TransformMaterializedTimeTick: last}})
+	restored.SetDataViewRetention("v1", last)
 	require.NoError(t, gcSummary(ctx, restored))
 	require.Empty(t, restored.Manifest().GetChunks())
 }
@@ -121,7 +124,7 @@ func TestRetentionBacklogRequestsOnlyOldestBlockingChunk(t *testing.T) {
 		require.Positive(t, m.TransformStats(vc, 0, tt).Bytes)
 		requests[vc] = tt
 	}
-	m.cfg.RetentionMaxBytes = 1
+	m.cfg.MaxRetentionBytes = 0
 	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Equal(t, uint64(100), requests["v1"])
 	clear(requests)
@@ -129,6 +132,7 @@ func TestRetentionBacklogRequestsOnlyOldestBlockingChunk(t *testing.T) {
 	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Empty(t, requests, "wait for metadata/GC instead of draining later chunks")
 	m.AdvanceGCTimeTick("v1", 100)
+	m.SetDataViewRetention("v1", 100)
 	require.NoError(t, gcSummary(context.Background(), m))
 	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Equal(t, uint64(200), requests["v1"])
@@ -164,7 +168,7 @@ func TestRestoredLifecycleStillPinsUnfinishedMaterialization(t *testing.T) {
 			m, store := newTransformTestManagerWithStore(t)
 			var unused bool
 			flushTransform(t, m, "v1", 100, &unused)
-			recovered := newTestManager(t, store, 1)
+			recovered := newTestManager(t, store, 0)
 			require.NoError(t, recovered.Restore(context.Background()))
 			recovered.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{"v1": {State: state, CheckpointTimeTick: 200, TransformMaterializedTimeTick: 50}})
 			require.NoError(t, gcSummary(context.Background(), recovered))
@@ -177,6 +181,7 @@ func TestRestoredLifecycleStillPinsUnfinishedMaterialization(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, batch.Entries, 1)
 			recovered.AdvanceGCTimeTick("v1", 200)
+			recovered.SetDataViewRetention("v1", 200)
 			require.NoError(t, gcSummary(context.Background(), recovered))
 			require.Empty(t, recovered.Manifest().GetChunks())
 		})

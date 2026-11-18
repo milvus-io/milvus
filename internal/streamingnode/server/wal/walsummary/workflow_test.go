@@ -99,7 +99,12 @@ func TestPublishedTermConfirmsAndRecoversUnpublishedTail(t *testing.T) {
 	require.False(t, successor.HasPendingWork())
 	_, found, err := store.ReadManifest(ctx)
 	require.NoError(t, err)
-	require.False(t, found, "old manifests are released even while their chunks remain")
+	require.True(t, found, "publication alone does not collect old manifests")
+	successor.OrphanGCOnce()
+	require.NoError(t, drainSummary(ctx, successor))
+	_, found, err = store.ReadManifest(ctx)
+	require.NoError(t, err)
+	require.False(t, found, "orphan GC releases old manifests while inherited chunks remain")
 	records, err := successor.ReadIdempotencyEntries(ctx, "v1", 0, 100)
 	require.NoError(t, err)
 	require.Len(t, records.Inserts, 1)
@@ -219,7 +224,7 @@ func TestRecoveryEmptyManifestAndGenerationGap(t *testing.T) {
 	require.NoError(t, stageChunk(t, successor, 200).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, successor))
 	// GC may remove the complete retained set; coverage must survive it.
-	successor.cfg.RetentionMaxBytes = 1
+	successor.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, successor))
 	require.Empty(t, successor.Manifest().Chunks)
 	latest := newTestManager(t, nextTermStore(successor.cfg.Store), 1<<30)
@@ -285,7 +290,7 @@ func TestGCWaitsForPublicationAndReaders(t *testing.T) {
 		readDone <- err
 	}()
 	<-entered
-	m.cfg.RetentionMaxBytes = 1
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, m.GCOnce(ctx))
 	require.NoError(t, m.manifestTask.Execute(ctx))
 	requireSummaryError(t, m.gcTask.Execute(ctx), nodescheduler.ErrDelay)
@@ -306,7 +311,7 @@ func TestSlowGCDoesNotBlockReadersOrPublication(t *testing.T) {
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, stageChunk(t, m, 200).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
-	m.cfg.MaxRetainedChunks = 1
+	m.cfg.MaxRetentionBytes = m.Manifest().Chunks[1].ObjectSize
 	require.NoError(t, m.GCOnce(ctx))
 	require.NoError(t, m.manifestTask.Execute(ctx))
 
@@ -355,7 +360,7 @@ func TestSlowGCDoesNotBlockReadersOrPublication(t *testing.T) {
 	unblock()
 	// Wait for the actual delete loop to finish before checking object safety.
 	<-done
-	require.ErrorIs(t, gcErr, nodescheduler.ErrDelay, "new publications require another sweep snapshot")
+	require.NoError(t, gcErr, "the frozen normal deletion list is unaffected by new uploads")
 	for generation := uint64(1); generation <= 3; generation++ {
 		exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(generation))
 		require.NoError(t, err)
@@ -367,12 +372,12 @@ func TestSummaryTasksYieldOnPublicationLock(t *testing.T) {
 	ctx := context.Background()
 	m, _ := newTestManagerWithStore(t)
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
-	require.NoError(t, m.GCOnce(ctx))
+	m.OrphanGCOnce()
 	func() {
 		m.publishMu.Lock()
 		defer m.publishMu.Unlock()
 		require.ErrorIs(t, m.manifestTask.Execute(ctx), nodescheduler.ErrDelay)
-		require.ErrorIs(t, m.gcTask.Execute(ctx), nodescheduler.ErrDelay)
+		require.ErrorIs(t, m.orphanGCTask.Execute(ctx), nodescheduler.ErrDelay)
 	}()
 	require.True(t, m.readMu.TryLock(), "delayed GC must release the reader lock")
 	m.readMu.Unlock()
@@ -384,7 +389,7 @@ func TestGCDeletionFailureIsRediscoveredAfterRestart(t *testing.T) {
 	m, store := newTestManagerWithStore(t)
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
-	m.cfg.RetentionMaxBytes = 1
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, m.GCOnce(ctx))
 	requireSummaryError(t, m.gcTask.Execute(ctx), nodescheduler.ErrDelay, "unpublished removal cannot authorize deletion")
 	require.NoError(t, m.manifestTask.Execute(ctx))
@@ -395,7 +400,8 @@ func TestGCDeletionFailureIsRediscoveredAfterRestart(t *testing.T) {
 	patch.UnPatch()
 	successor := newTestManager(t, nextTermStore(store), 1<<30)
 	require.NoError(t, successor.Restore(ctx))
-	require.NoError(t, gcSummary(ctx, successor))
+	successor.OrphanGCOnce()
+	require.NoError(t, drainSummary(ctx, successor))
 	exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(0))
 	require.NoError(t, err)
 	require.False(t, exists)
@@ -448,7 +454,7 @@ func TestSweepProtectsFutureTermAndCurrentTail(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	n, finished, err := store.sweepGarbage(ctx, store.Term(), &streamingpb.SummaryCoverage{Generation: 0, Term: store.Term()}, nil, 1)
+	n, finished, err := store.sweepGarbage(ctx, store.Term(), &streamingpb.SummaryCoverage{Generation: 0, Term: store.Term()}, nil, time.Now(), 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.False(t, finished)
@@ -465,34 +471,24 @@ func requireSummaryError(t *testing.T, err, target error, args ...any) {
 	require.True(t, errors.Is(err, target), "expected %v in %v: %v", target, err, args)
 }
 
-func TestGCRetainsWorkArrivingDuringSweep(t *testing.T) {
-	ctx := context.Background()
-	m, _ := newTestManagerWithStore(t)
+func TestNormalGCDoesNotSweepUnrelatedObjects(t *testing.T) {
+	ctx := t.Context()
+	m, store := newTestManagerWithStore(t)
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
-	require.NoError(t, m.GCOnce(ctx))
-	entered, release := make(chan struct{}), make(chan struct{})
-	var original func(*Store, context.Context, int64, *streamingpb.SummaryCoverage, map[ChunkRef]struct{}, int) (int, bool, error)
-	patch := mockey.Mock((*Store).sweepGarbage).Origin(&original).To(func(s *Store, ctx context.Context, term int64, last *streamingpb.SummaryCoverage, refs map[ChunkRef]struct{}, budget int) (int, bool, error) {
-		deleted, finished, err := original(s, ctx, term, last, refs, budget)
-		close(entered)
-		<-release
-		return deleted, finished, err
-	}).Build()
-	defer patch.UnPatch()
-	done := make(chan error, 1)
-	go func() { done <- m.gcTask.Execute(ctx) }()
-	<-entered
-	m.cfg.RetentionMaxBytes = 1
-	require.NoError(t, m.GCOnce(ctx))
-	close(release)
-	requireSummaryError(t, <-done, nodescheduler.ErrDelay)
-	patch.UnPatch()
-	require.NoError(t, drainSummary(ctx, m))
-	require.False(t, m.HasPendingWork())
-	exists, err := m.cfg.Store.chunkManager.Exist(ctx, m.cfg.Store.ChunkKey(0))
+	old := NewStore(store.chunkManager, store.PChannel(), 0)
+	_, _, err := old.WriteChunk(ctx, 10, writeSections(map[string][]uint64{"v1": {1}}), TimeTickRange{Start: 1, End: 1})
 	require.NoError(t, err)
-	require.False(t, exists, "GC requests arriving during sweep must not be lost")
+	m.cfg.MaxRetentionBytes = 0
+	require.NoError(t, gcSummary(ctx, m))
+	exists, err := store.chunkManager.Exist(ctx, old.ChunkKey(10))
+	require.NoError(t, err)
+	require.True(t, exists, "normal GC only deletes its planned prefix")
+	m.OrphanGCOnce()
+	require.NoError(t, drainSummary(ctx, m))
+	exists, err = store.chunkManager.Exist(ctx, old.ChunkKey(10))
+	require.NoError(t, err)
+	require.False(t, exists)
 }
 
 func TestObsoleteManifestCleanupRetriesWithoutNewChunk(t *testing.T) {
@@ -502,10 +498,12 @@ func TestObsoleteManifestCleanupRetriesWithoutNewChunk(t *testing.T) {
 	require.NoError(t, drainSummary(ctx, m))
 	successor := newTestManager(t, nextTermStore(store), 1<<30)
 	require.NoError(t, successor.Restore(ctx))
+	require.NoError(t, drainSummary(ctx, successor))
+	successor.OrphanGCOnce()
 	failure := errors.New("manifest delete unavailable")
 	patch := mockey.Mock((*Store).DeleteManifestsBelowTerm).Return(failure).Build()
 	defer patch.UnPatch()
-	requireSummaryError(t, successor.manifestTask.Execute(ctx), nodescheduler.ErrDelay)
+	requireSummaryError(t, successor.orphanGCTask.Execute(ctx), nodescheduler.ErrDelay)
 	require.True(t, successor.HasPendingWork())
 	patch.UnPatch()
 	require.NoError(t, drainSummary(ctx, successor))
@@ -532,7 +530,7 @@ func TestChunkCoverageIncludesMessagesWithoutSummaryRecords(t *testing.T) {
 	require.Equal(t, uint64(150), manifest.Chunks[0].EndTimetick)
 	require.Equal(t, manifest.Chunks[0].EndTimetick+1, manifest.Chunks[1].StartTimeTick)
 	require.Equal(t, uint64(100), manifest.Chunks[0].Vchannels[0].EndTimetick)
-	m.cfg.RetentionMaxBytes = 1
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, m))
 	require.Empty(t, m.Manifest().Chunks)
 	require.Equal(t, manifest.Coverage, m.Manifest().Coverage)

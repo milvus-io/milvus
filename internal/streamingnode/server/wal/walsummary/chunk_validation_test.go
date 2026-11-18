@@ -62,11 +62,11 @@ func TestChunkValidationLifecycle(t *testing.T) {
 			current = payload
 			_, err = c.read(ctx, store, leaf)
 			require.NoError(t, err)
-			retained.remove(index.GetGeneration())
+			retained.removePrefix(1)
 			require.Nil(t, leaf.verified)
 			require.Nil(t, leaf.payload)
 			require.Empty(t, retained.chunks)
-			retained.remove(index.GetGeneration())
+			retained.removePrefix(0)
 		})
 	}
 }
@@ -110,7 +110,7 @@ func TestChunkValidationRetireInFlight(t *testing.T) {
 		done := make(chan error, 1)
 		go func() { _, err := retained.cache.read(ctx, &Store{}, leaf); done <- err }()
 		<-entered
-		retained.remove(index.GetGeneration())
+		retained.removePrefix(1)
 		close(resume)
 		require.NoError(t, <-done)
 		require.True(t, leaf.retired)

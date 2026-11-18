@@ -366,6 +366,9 @@ func (s *dispatchSubscription) catchupPage() (bool, error) {
 				return false, err
 			}
 		}
+		// TODO(#55573): Retention must keep the history required by query bases
+		// across preparation, reload and reconnect. Skipping a prematurely GC'd
+		// prefix here cannot reconstruct its Deletes; prevent that loss in GC.
 		s.replayAfter = max(batch.CoveredThrough, min(batch.FastForwardTimeTick, target))
 		if s.replayAfter < target {
 			return false, nil
