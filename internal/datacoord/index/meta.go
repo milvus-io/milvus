@@ -1446,10 +1446,6 @@ func (m *IndexMeta) retireJSONFlatTask(buildID UniqueID) error {
 	}
 	switch segIdx.IndexState {
 	case commonpb.IndexState_Unissued, commonpb.IndexState_Retry, commonpb.IndexState_InProgress:
-	case commonpb.IndexState_Failed:
-		if segIdx.FailReason != indexparams.JSONFlatIndexDeprecationReason {
-			return nil
-		}
 	default:
 		return nil
 	}
