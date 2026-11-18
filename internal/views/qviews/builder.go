@@ -21,6 +21,9 @@ func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryVie
 		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
 		streamingNode: proto.Clone(view.GetStreamingNode()).(*viewpb.QueryViewOfStreamingNode),
 	}
+	if m.Control != nil {
+		b.control = proto.Clone(m.Control).(*viewpb.QueryViewControl)
+	}
 	for _, node := range view.GetQueryNode() {
 		partitions := make(map[int64][]int64)
 		for _, p := range node.GetPartitions() {
@@ -44,6 +47,7 @@ func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
 
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {
+	control                     *viewpb.QueryViewControl
 	collectionID                int64
 	replicaID                   int64
 	vchannel                    string
@@ -93,6 +97,30 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	}
 }
 
+// QueryViewBuilderMetadata is the native metadata needed to materialize a view.
+// Maps are immutable after handing them to the builder; the builder only reads
+// them and never exposes them in the resulting protobuf.
+type QueryViewBuilderMetadata struct {
+	CollectionID                int64
+	DataVersion                 DataVersion
+	SchemaVersion               int32
+	TransformStartAfterTimetick uint64
+	SegmentManifestVersions     map[int64]int64
+	PartitionStatsVersions      map[int64]int64
+}
+
+// NewQueryViewAtCoordBuilderFromMetadata avoids a temporary DataView protobuf
+// when a planner already owns native immutable metadata.
+func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilderMetadata) *QueryViewAtCoordBuilder {
+	return &QueryViewAtCoordBuilder{
+		collectionID: metadata.CollectionID, replicaID: id.ReplicaID, vchannel: id.VChannel,
+		dataVersion: metadata.DataVersion, queryVersion: 1, schemaVersion: metadata.SchemaVersion,
+		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
+		segmentManifestVersions:     metadata.SegmentManifestVersions,
+		partitionStatsVersions:      metadata.PartitionStatsVersions,
+	}
+}
+
 func (b *QueryViewAtCoordBuilder) DataVersion() DataVersion {
 	return b.dataVersion
 }
@@ -109,6 +137,18 @@ func (b *QueryViewAtCoordBuilder) SetLoadInfoVersion(version uint64) *QueryViewA
 
 func (b *QueryViewAtCoordBuilder) SetSchemaVersion(version int32) *QueryViewAtCoordBuilder {
 	b.schemaVersion = version
+	return b
+}
+
+// SetPreparationPriority fixes the priority of the new view before publication.
+// Replaying or recovering an existing view never calls this setter.
+func (b *QueryViewAtCoordBuilder) SetPreparationPriority(priority int32) *QueryViewAtCoordBuilder {
+	if b.control != nil || priority != 0 {
+		if b.control == nil {
+			b.control = &viewpb.QueryViewControl{}
+		}
+		b.control.PreparationPriority = priority
+	}
 	return b
 }
 
@@ -130,6 +170,9 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
 		LoadInfoVersion:             b.loadInfoVersion,
 		SchemaVersion:               b.schemaVersion,
+	}
+	if b.control != nil {
+		meta.Control = proto.Clone(b.control).(*viewpb.QueryViewControl)
 	}
 
 	nodeIDs := make([]int64, 0, len(b.assignments))

@@ -1370,6 +1370,33 @@ func (m *IndexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 	return nil
 }
 
+// retireJSONFlatTask removes an artifact-free pending build after its worker
+// has been cancelled. Keep completed/history records and their file ownership.
+// Downgrade recreates missing builds from the retained collection definition.
+func (m *IndexMeta) retireJSONFlatTask(buildID UniqueID) error {
+	m.KeyLock.Lock(buildID)
+	defer m.KeyLock.Unlock(buildID)
+	segIdx, ok := m.SegmentBuildInfo.Get(buildID)
+	if !ok || segIdx.IsDeleted {
+		return nil
+	}
+	switch segIdx.IndexState {
+	case commonpb.IndexState_Unissued, commonpb.IndexState_Retry, commonpb.IndexState_InProgress:
+	case commonpb.IndexState_Failed:
+		if segIdx.FailReason != indexparams.JSONFlatIndexDeprecationReason {
+			return nil
+		}
+	default:
+		return nil
+	}
+	// Never remove the ownership record of an artifact, even if its state is
+	// unexpected. Normal pending tasks have no published file list.
+	if len(segIdx.IndexFileKeys) != 0 || segIdx.ManifestPublished {
+		return nil
+	}
+	return m.removeSegmentIndex(m.ctx, segIdx)
+}
+
 func (m *IndexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 	m.KeyLock.Lock(taskInfo.GetBuildID())
 	defer m.KeyLock.Unlock(taskInfo.GetBuildID())
@@ -1470,6 +1497,13 @@ func (m *IndexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	if !ok {
 		return nil
 	}
+
+	return m.removeSegmentIndex(ctx, segIdx)
+}
+
+// removeSegmentIndex requires the caller to hold KeyLock for this build.
+func (m *IndexMeta) removeSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
+	buildID := segIdx.BuildID
 
 	err := m.Catalog.DropSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, buildID)
 	if err != nil {

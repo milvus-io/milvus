@@ -4227,20 +4227,24 @@ TEST(InjectExtfsAllowlist, AnonymousLayer0SkippedWithStalePreseed) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "true");
 }
 
-TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
+TEST(InjectExtfsAllowlist, TableSnapshotID) {
     for (
         const std::string spec : {
             R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
             R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+            R"({"format":"lance-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"lance-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
         }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;
         ::InjectExternalSpecProperties(
             props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
 
-        // Read the same typed property as IcebergFormat::explore so a stale
+        // Read the same typed property as the format's explore() so a stale
         // property key cannot silently fall back to the latest snapshot.
         const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
             std::make_shared<const milvus_storage::api::Properties>(props),
@@ -4250,13 +4254,17 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
     }
 }
 
-TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
+TEST(InjectExtfsAllowlist, TableSnapshotIDCAbiRoundTrip) {
     for (
         const std::string spec : {
             R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
             R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+            R"({"format":"lance-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"lance-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
         }) {
         SCOPED_TRACE(spec);
         LoonProperties properties{};
@@ -4288,12 +4296,16 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
     }
 }
 
-TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
+TEST(InjectExtfsAllowlist, InvalidTableSnapshotIDIsRejected) {
     for (const std::string spec : {
              R"({"format":"iceberg-table","snapshot_id":-2})",
              R"({"format":"iceberg-table","snapshot_id":"-2"})",
              R"({"snapshot_id":-2,"format":"iceberg-table"})",
              R"({"snapshot_id":"-2","format":"iceberg-table"})",
+             R"({"format":"lance-table","snapshot_id":-2})",
+             R"({"format":"lance-table","snapshot_id":"-2"})",
+             R"({"snapshot_id":-2,"format":"lance-table"})",
+             R"({"snapshot_id":"-2","format":"lance-table"})",
          }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;
@@ -4366,17 +4378,17 @@ TEST(InjectExtfsAllowlist, PaimonSnapshotIDSurvivesCABIConversion) {
     loon_properties_free(&props);
 }
 
-TEST(InjectExtfsAllowlist, PaimonSnapshotIDOptional) {
-    // Without snapshot_id the property must stay absent so the paimon
-    // planner falls back to the latest snapshot.
-    milvus_storage::api::Properties props;
-    const int64_t coll_id = 42;
-    std::string spec = R"({"format":"paimon-table"})";
+TEST(InjectExtfsAllowlist, TableSnapshotIDOptional) {
+    // Without snapshot_id the format must keep its latest-snapshot default.
+    for (const std::string spec :
+         {R"({"format":"paimon-table"})", R"({"format":"lance-table"})"}) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    ::InjectExternalSpecProperties(
-        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
-
-    EXPECT_EQ(props.count(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID), 0u);
+        EXPECT_EQ(props.count(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID), 0u);
+    }
 }
 
 TEST(InjectExtfsAllowlist, PaimonScanModeIsInjected) {

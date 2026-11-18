@@ -1652,7 +1652,9 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
             spec.dense_nullable_payload = true;
             auto fx = TypeParam::Create(spec);
             const int64_t offsets[]{4, -1, 0, 5, 4, 2};
-            TargetBitmap candidates(6, false);
+            TargetBitmap backing(6 + 13, false);
+            auto candidates = backing.view(7, 6);
+            const auto candidate_view = candidates.view();
             for (const auto i : {0, 2, 3, 4}) {
                 candidates.set(i);
             }
@@ -1661,7 +1663,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                                          TargetType::Int32,
                                          nullptr,
                                          policy,
-                                         &candidates});
+                                         &candidate_view});
             ASSERT_NE(take, nullptr);
             EXPECT_EQ(take->Size(), 6);
             EXPECT_THROW(take->template Get<int32_t>(1), SegcoreError);
@@ -1694,6 +1696,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest, TakeEmptyCandidateMaskNeverPlansOrPins) {
         auto fx = TypeParam::Create(spec);
         const int32_t offsets[]{-1, 100};
         TargetBitmap candidates(2, false);
+        const auto candidate_view = candidates.view();
         auto filter = std::make_shared<const detail::ColumnFilter>(
             detail::ColumnFilter::MetricsSource::PreloadedStatistics,
             [](int64_t) {
@@ -1704,13 +1707,14 @@ TYPED_TEST(ChunkedColumnInterfaceTest, TakeEmptyCandidateMaskNeverPlansOrPins) {
                                    TargetType::Int32,
                                    filter,
                                    policy,
-                                   &candidates};
+                                   &candidate_view};
         auto take = fx.column->Take(nullptr, options);
         ASSERT_NE(take, nullptr);
         EXPECT_EQ(take->GetOwn().size, 2);
         EXPECT_TRUE(fx.pin_requests->empty());
         TargetBitmap wrong_size(1, true);
-        options.candidate_mask = &wrong_size;
+        const auto wrong_size_view = wrong_size.view();
+        options.candidate_mask = &wrong_size_view;
         EXPECT_THROW(fx.column->Take(nullptr, options), SegcoreError);
         EXPECT_TRUE(fx.pin_requests->empty());
     }
@@ -1729,6 +1733,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
             auto fx = TypeParam::Create(spec);
             const int32_t offsets[]{1, -1, 4, 2};
             TargetBitmap candidates(4, false);
+            const auto candidate_view = candidates.view();
             candidates.set(0);
             candidates.set(2);
             auto filter = std::make_shared<const detail::ColumnFilter>(
@@ -1742,7 +1747,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                                          TargetType::Int32,
                                          filter,
                                          policy,
-                                         &candidates});
+                                         &candidate_view});
             ASSERT_NE(take, nullptr);
             const auto skipped = take->template Get<int32_t>(0);
             EXPECT_TRUE(skipped.data_skipped);
@@ -2141,6 +2146,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         auto fx = TypeParam::Create(spec);
         const Offset offsets[]{12, 0, 5, 3, 12, 8, 2, masked ? -1 : 1, 5, 10};
         TargetBitmap candidates(std::size(offsets), true);
+        const auto candidate_view = candidates.view();
         candidates.set(7, !masked);
         auto filter = std::make_shared<const detail::ColumnFilter>(
             detail::ColumnFilter::MetricsSource::PreloadedStatistics,
@@ -2151,7 +2157,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                              TargetType::Int32,
                              filter,
                              TakePinPolicy::Batch,
-                             masked ? &candidates : nullptr});
+                             masked ? &candidate_view : nullptr});
         ASSERT_NE(take, nullptr);
         ASSERT_EQ(fx.pin_requests->size(), 1u);
         EXPECT_EQ(fx.pin_requests->front(),

@@ -4,7 +4,6 @@ import io
 import json
 import os
 import random
-import re
 import tempfile
 import time
 
@@ -53,13 +52,13 @@ from common.external_table_common import (
     gen_parquet_bytes_with_codec,
     gen_timestamptz_parquet_bytes,
     gen_vector_variant_parquet_bytes,
-    get_minio_config,
-    new_minio_client,
     upload_basic_data,
     upload_parquet,
     write_basic_format_dataset,
     write_vortex_table,
 )
+from common.external_table_fixtures import external_prefix as external_prefix
+from common.external_table_fixtures import minio_env as minio_env
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 from pymilvus.grpc_gen import schema_pb2
 from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
@@ -375,35 +374,6 @@ def _assert_external_failure_reason(reason, reason_terms, context):
         assert any(term.lower() in lowered for term in reason_terms), (
             f"{context} reason {reason!r} did not contain any of {reason_terms}"
         )
-
-
-# ============================================================
-# Fixtures
-# ============================================================
-
-
-@pytest.fixture(scope="module")
-def minio_env(request):
-    """Shared MinIO client + config for the module."""
-    cfg = get_minio_config(
-        minio_host=request.config.getoption("--minio_host"),
-        minio_bucket=request.config.getoption("--minio_bucket"),
-    )
-    mc = new_minio_client(cfg)
-    assert mc.bucket_exists(cfg["bucket"]), f"MinIO bucket {cfg['bucket']} not accessible at {cfg['address']}"
-    return mc, cfg
-
-
-@pytest.fixture(scope="function")
-def external_prefix(minio_env, request):
-    """Per-test MinIO prefix bundled with the resolved external_source URL."""
-    mc, cfg = minio_env
-    # Sanitize node.name aggressively — parametrize IDs can contain chars MinIO or
-    # Milvus's S3 URI parser rejects. Keep only [A-Za-z0-9_-].
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", request.node.name)
-    key = f"external-e2e-core/{safe}-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
-    yield {"key": key, "url": build_external_source(cfg, key)}
-    cleanup_minio_prefix(mc, cfg["bucket"], f"{key}/")
 
 
 class ExternalTableTestBase(TestMilvusClientV2Base):

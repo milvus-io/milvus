@@ -55,9 +55,9 @@ func jsonFlatDefinition() *model.Index {
 	}}
 }
 
-func TestJSONFlatIndexRecoveryCancelsAndTerminalizesBuild(t *testing.T) {
+func TestJSONFlatIndexRecoveryRemovesPendingBuildForDowngrade(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(nil).Once()
 	m := NewSegmentIndexMeta(catalog)
 	m.getCollectionSchema = func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() }
 	m.updateCollectionIndex(jsonFlatDefinition())
@@ -76,26 +76,29 @@ func TestJSONFlatIndexRecoveryCancelsAndTerminalizesBuild(t *testing.T) {
 	cluster := session.NewMockCluster(t)
 	cluster.EXPECT().DropIndex(int64(20), int64(1000)).Return(nil)
 	recovered.QueryTaskOnWorker(cluster)
-	persisted, ok := m.GetIndexJob(1000)
-	require.True(t, ok)
-	assert.Equal(t, commonpb.IndexState_Failed, persisted.IndexState)
-	assert.Contains(t, persisted.FailReason, "deprecated")
+	_, ok := m.GetIndexJob(1000)
+	require.False(t, ok)
+	assert.Empty(t, m.GetAllSegmentIndexes(100))
+
 	// A late completion cannot publish files even after recovery retired the worker.
 	require.NoError(t, recovered.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: 1000, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"late-file"}}))
-	persisted, _ = m.GetIndexJob(1000)
-	assert.Empty(t, persisted.IndexFileKeys)
-	assert.Equal(t, commonpb.IndexState_Failed, persisted.IndexState)
+	_, ok = m.GetIndexJob(1000)
+	assert.False(t, ok, "late completion must not recreate the retired record")
 }
 
-func TestJSONFlatIndexRecoveryRetiresUndispatchedBuilds(t *testing.T) {
+func TestJSONFlatIndexRecoveryRemovesUndispatchedBuilds(t *testing.T) {
 	for _, state := range []commonpb.IndexState{commonpb.IndexState_Unissued, commonpb.IndexState_Retry} {
 		t.Run(state.String(), func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+			catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(nil).Once()
 			m := NewSegmentIndexMeta(catalog)
 			m.getCollectionSchema = func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() }
 			m.updateCollectionIndex(jsonFlatDefinition())
-			m.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, IndexState: state})
+			nodeID := int64(0)
+			if state == commonpb.IndexState_Retry {
+				nodeID = 20
+			}
+			m.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, NodeID: nodeID, IndexState: state})
 			store := metacache.NewMetaStore(nil)
 			mt := &meta.Meta{IndexCatalog: m, MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
 			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed, IsSorted: true}})
@@ -104,11 +107,14 @@ func TestJSONFlatIndexRecoveryRetiresUndispatchedBuilds(t *testing.T) {
 			scheduler.EXPECT().Enqueue(mock.Anything).Run(func(value task.Task) { recovered = value.(*indexBuildTask) })
 			(&IndexInspector{meta: mt, indexMeta: m, scheduler: scheduler}).reloadFromMeta()
 			require.NotNil(t, recovered)
-			recovered.CreateTaskOnWorker(20, session.NewMockCluster(t))
-			persisted, ok := m.GetIndexJob(1000)
-			require.True(t, ok)
-			assert.Equal(t, commonpb.IndexState_Failed, persisted.IndexState)
-			assert.Contains(t, persisted.FailReason, "deprecated")
+			worker := session.NewMockCluster(t)
+			if nodeID != 0 {
+				worker.EXPECT().DropIndex(nodeID, int64(1000)).Return(nil).Once()
+			}
+			recovered.CreateTaskOnWorker(20, worker)
+			_, ok := m.GetIndexJob(1000)
+			require.False(t, ok)
+			assert.Empty(t, m.GetAllSegmentIndexes(100))
 		})
 	}
 }

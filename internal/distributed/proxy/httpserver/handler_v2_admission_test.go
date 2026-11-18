@@ -56,8 +56,8 @@ func TestDQLAdmissionRejectsBeforeDecode(t *testing.T) {
 	receiveBytesBefore := testutil.ToFloat64(receiveBytes)
 	for _, action := range []string{QueryAction, GetAction, SearchAction, AdvancedSearchAction, HybridSearchAction} {
 		methodTag := routeToMethod[versionalV2(EntityCategory, action)]
-		total := metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "")
-		rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.RejectedLabel, metrics.CauseSystem, "", "")
+		total := metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "")
+		rejected := metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.RejectedLabel, metrics.CauseSystem, "", "", "")
 		totalBefore, rejectedBefore := testutil.ToFloat64(total), testutil.ToFloat64(rejected)
 
 		// "{" is not decodable JSON: a decoded request would fail with
@@ -121,8 +121,8 @@ func TestDQLAdmissionDBLabelStaysEmpty(t *testing.T) {
 	// rejection counts between databases
 	server := initHTTPServerV2(&dqlFullProxy{full: true}, false)
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-	headerDB := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "my_db", "")
-	empty := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "", "")
+	headerDB := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "my_db", "", "")
+	empty := metrics.ProxyFunctionCall.WithLabelValues(nodeID, "Search", metrics.RejectedLabel, metrics.CauseSystem, "", "", "")
 	headerDBBefore, emptyBefore := testutil.ToFloat64(headerDB), testutil.ToFloat64(empty)
 
 	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), strings.NewReader("{"))
