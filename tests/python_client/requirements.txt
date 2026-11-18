@@ -89,6 +89,8 @@ python-dotenv<=2.0.0
 shapely==2.1.1
 
 # for external table formats
+fastavro==1.13.1
+backports.zstd==1.8.0
 pylance==6.0.0
 vortex-data==0.56.0; python_version >= "3.11"
 substrait==0.26.0; python_version >= "3.11"
