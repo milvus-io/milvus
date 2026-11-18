@@ -30,15 +30,8 @@ clusters.
 | `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection probability among eligible replicas |
 | `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `proxy.replicaSelectionPolicy` |
 | `proxy.hedging.minDelay` | `200ms` | Minimum wait before looking for a hedge target |
-| `proxy.hedging.maxInflightRatio` | `0.1` | Proxy-level cap on concurrent in-flight hedged attempts relative to concurrent in-flight hedgeable primary attempts |
 
-`maxInflightRatio` defaults to `0.1` (10%), referencing gRPC's `retryThrottling`
-(`tokenRatio = 0.1`, gRFC A6), to bound worst-case speculative fan-out under
-cluster-wide tail latency spikes without requiring per-cluster tuning. A
-built-in floor of `2` concurrent hedges preserves hedging at low QPS, and
-`inflightHedges` is held until the hedged RPC goroutine actually returns (so
-un-canceled lingering losers count against the budget). Internally,
-`hedgeOutcomes` retains a `0.3` win-rate threshold (`defaultHedgeMinWinRate`) to
+Internally, `hedgeOutcomes` retains a `0.3` win-rate threshold (`defaultHedgeMinWinRate`) to
 throttle ineffective hedges to a 10% probe rate.
 
 ## Selection and failure feedback
