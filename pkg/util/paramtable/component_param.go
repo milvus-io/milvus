@@ -2203,7 +2203,6 @@ type proxyConfig struct {
 	LatencyWeightedMinShare ParamItem `refreshable:"true"`
 	HedgingEnabled          ParamItem `refreshable:"true"`
 	HedgingMinDelay         ParamItem `refreshable:"true"`
-	HedgingMaxInflightRatio ParamItem `refreshable:"true"`
 }
 
 func positiveProxyLimitFormatter(defaultValue string) func(string) string {
@@ -2644,15 +2643,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).",
 	}
 	p.HedgingMinDelay.Init(base.mgr)
-
-	p.HedgingMaxInflightRatio = ParamItem{
-		Key:          "proxy.hedging.maxInflightRatio",
-		Version:      "2.6.28",
-		DefaultValue: "0.1",
-		Export:       true,
-		Doc:          "Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.",
-	}
-	p.HedgingMaxInflightRatio.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
