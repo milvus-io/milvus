@@ -119,6 +119,17 @@ if [[ ! -f "$("$CONAN" config home)/profiles/default" ]]; then
     "$CONAN" profile detect
 fi
 
+# Use Cloudian's RDMA-enhanced SDK on Linux.
+CONAN_AWS_SDK_ARGS=""
+if [[ "$(uname -s)" == "Linux" ]]; then
+    CUOBJ_INCLUDE_DIR="${CPP_SRC_DIR}/thirdparty/cuobj/include"
+    if [[ ! -f "${CUOBJ_INCLUDE_DIR}/cuobjclient.h" ]]; then
+        bash "${ROOT_DIR}/scripts/download_cuobj.sh"
+    fi
+    "$CONAN" export "${CPP_SRC_DIR}/thirdparty/aws-sdk-cpp"
+    CONAN_AWS_SDK_ARGS="-c user.aws-sdk-cpp:cuobj_include_dir=${CUOBJ_INCLUDE_DIR}"
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
 # Unset LD_PRELOAD and LD_LIBRARY_PATH to prevent jemalloc and other shared
@@ -289,7 +300,7 @@ def post_package(conanfile, **kwargs):
         conanfile.output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
 HOOK_EOF
 
-    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} "${CONAN_PROFILE_ARGS[@]}" ${CONAN_AWS_SDK_ARGS} || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -308,11 +319,11 @@ HOOK_EOF
     fi
     if [[ -n "${CONAN_HOST_PROFILE:-}" ]]; then
       # An explicit profile owns compiler/ABI selection (including Clang).
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" ${CONAN_AWS_SDK_ARGS} || { echo 'conan install failed'; exit 1; }
     elif [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" ${CONAN_AWS_SDK_ARGS} || { echo 'conan install failed'; exit 1; }
     else
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" ${CONAN_AWS_SDK_ARGS} || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
