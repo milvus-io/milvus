@@ -427,3 +427,35 @@ func TestServerFieldsAreNotCounted(t *testing.T) {
 	assert.EqualValues(t, 1, ft[schemapb.DataType_VarChar.String()].Value)
 	assert.EqualValues(t, 1, ft[schemapb.DataType_FloatVector.String()].Value)
 }
+
+// nullable says a collection has a nullable field; nullable_vector and
+// element_nullable say which kind, and each counts a collection once.
+func TestDeclaredNullableKinds(t *testing.T) {
+	pk := &model.Field{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	nullableVector := vectorField(101, schemapb.DataType_FloatVector, "8")
+	nullableVector.Nullable = true
+	in := CollectionInput{
+		Databases: []*model.Database{{Name: "default"}},
+		Collections: []*model.Collection{
+			{CollectionID: 1, DBName: "default", Fields: []*model.Field{
+				pk, {FieldID: 101, DataType: schemapb.DataType_VarChar, Nullable: true},
+			}},
+			{CollectionID: 2, DBName: "default", Fields: []*model.Field{pk, nullableVector}},
+			{
+				CollectionID: 3, DBName: "default", Fields: []*model.Field{pk},
+				StructArrayFields: []*model.StructArrayField{{FieldID: 200, Fields: []*model.Field{
+					{FieldID: 201, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, ElementNullable: true},
+					{FieldID: 202, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true},
+				}}},
+			},
+		},
+	}
+	dc := indexGroup(ComputeCollectionEntries(in), GroupDeclared)
+	assert.EqualValues(t, 2, dc[DeclaredNullable].Value, "a nullable vector field is a nullable field")
+	assert.EqualValues(t, 1, dc[DeclaredNullableVector].Value)
+	assert.EqualValues(t, 1, dc[DeclaredElementNullable].Value, "two sub-fields, one collection")
+
+	empty := indexGroup(ComputeCollectionEntries(CollectionInput{}), GroupDeclared)
+	assert.Contains(t, empty, DeclaredNullableVector, "predicates are present at zero")
+	assert.Contains(t, empty, DeclaredElementNullable)
+}

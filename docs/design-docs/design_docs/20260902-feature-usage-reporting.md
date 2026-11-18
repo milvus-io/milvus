@@ -494,6 +494,7 @@ introduced:
 | Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where its queue accepts a compaction task (`enqueueCompaction` in `compaction_inspector.go`, after `submitTask`: a full queue makes the trigger plan the same compaction again on its next tick). The import hook counts the job's **distinct** file types once each, not once per file: one job carrying a thousand Parquet files is one use of Parquet |
 | Delegator decisions (`two_stage_search`, `segment_prune`) | execution feature bits the delegator ORs into the results it returns (`delegator.search` after both stages of a two-stage search ran, `PruneSegments` when it removed at least one sealed segment), counted by the Proxy like the segcore bits: once per user request, never on a retry, a recall evaluation or an internal query |
 | `run_analyzer` | `Proxy.RunAnalyzer`, once per client request, whichever QueryNode ends up serving it (a QueryNode-side count repeats on a replica retry) |
+| Operation counters (`snapshot=*`, `file_resource=add`, `running_requests=*`, `truncate_collection`, `schema_change=*`) and `query_function_chains` | the operation counters at the top of the Proxy handler of each RPC (`snapshot_impl.go`, `request_registry.go`, `impl.go`), after the health check where there is one and before any validation; `ListRunningRequests` / `CancelRequests` count on the public handler only, not on the `ListLocalRunningRequests` / `CancelLocalRequests` fan-out MixCoord makes to every Proxy. `query_function_chains` at the start of `queryTask.PreExecute` with the other request fields |
 | QueryNode configuration (`config` group) | read at report time, not counted: `QueryNode.GetFeatureUsage` renders each boolean `queryNode.*` item as `key=true` / `key=false`. A non-refreshable item (`refreshable:"false"` in the paramtable) is reported with the value captured at node init, which is the value the node runs with; a refreshable one with its live value |
 | Loaded state (`loaded` group) | read at report time from QueryCoord's `CollectionManager` and `ReplicaManager`, not counted; collection IDs are resolved against the RootCoord snapshot's `CollectionContext` |
 
@@ -765,6 +766,8 @@ mechanism handles both.
 | `enable_dynamic_field` | `declared` | predicate | schema flag **or** `dynamicfield.enabled` property |
 | `enable_namespace` *(undocumented)* | `declared` | predicate | schema flag **or** namespace property |
 | `nullable` | `declared` | predicate | at least one nullable field |
+| `nullable_vector` | `declared` | predicate | at least one nullable vector field; `nullable` alone does not say which kind of field it is |
+| `element_nullable` | `declared` | predicate | at least one struct array sub-field with `FieldSchema.element_nullable` |
 | `default_value` | `declared` | predicate | at least one field with a default |
 | `auto_id` | `declared` | predicate | primary key is auto-generated |
 | `multi_vector_field` (named) | `declared` | predicate | more than one vector field |
@@ -1059,6 +1062,34 @@ the two together with `index_types`.
 | `upsert_fields` | fields the upsert carries, buckets `1`, `2-4`, `5-16`, `>16` | yes |
 | `delete_mode=ids` / `delete_mode=filter` | whether the user's delete expression is only a primary-key match, which is how the SDKs send `delete(ids=...)` and which deletes without a query, or a filter the Proxy queries first; classified before any row-level-security predicate is merged in, which would make every delete a filter delete | yes |
 
+#### Operations (counted per call)
+
+| Entry | Signal | Recommend |
+|---|---|---|
+| `query_function_chains` | a Query carrying `function_chains`. A query chain is a scan-stage transform, not a reranker, so it does not count under `reranker=*` | yes |
+| `snapshot=create` / `snapshot=restore` / `snapshot=export` | `CreateSnapshot`; `RestoreSnapshot` and `RestoreExternalSnapshot`; `ExportSnapshot` | yes |
+| `file_resource=add` | `AddFileResource` | yes |
+| `running_requests=list` / `running_requests=cancel` | `ListRunningRequests`, `CancelRequests` | yes |
+| `truncate_collection` | `TruncateCollection` | yes |
+| `schema_change=add_field` / `alter_schema` / `alter_function` | `AddCollectionField` and `AddCollectionStructField`; `AlterCollectionSchema`; `AlterCollectionFunction` | yes |
+
+Every other request counter names an option inside a request. These name a call, and they exist
+because the question asked of them is "has this instance ever used the feature", which the metadata
+cannot answer: a snapshot that was created and dropped leaves nothing to count, and listing running
+requests or truncating a collection leaves nothing at all. An object count would read zero for an
+instance that uses snapshots every night and keeps none. They follow the rule of the other request
+counters: counted when the client asks, whether or not the server then accepts the call.
+
+This is a closed list, not a counter per RPC. An RPC is left out when the metadata already shows the
+result (`CreateIndex`, `CreateAlias`, `AlterCollection`, `AlterCollectionField`), when it is called by
+a Milvus component or the control plane rather than a user (`CreateReplicateStream`,
+`UpdateReplicateConfiguration`; replication also has its own metrics in `pkg/metrics/cdc_metrics.go`),
+when it is an operational or read-only call (`Flush`, `LoadBalance`, the `Describe*` / `List*` /
+`Get*` family), or when this tree does not serve it (the row-level-security RPCs return "RLS is not
+supported"; `Prewarm` has no Proxy handler; `AddCollectionFunction` and `DropCollectionFunction` are
+rejected as no longer supported). Role, grant and privilege-group counts stay out for the reason given
+under `objects`.
+
 `output_fields=vector` and the two `auth_method` entries were added after the first review round, at the
 request of the Cloud side, which wanted "does this client read raw vectors" and "API key or username and
 password" per instance. The report answers both per instance; the daily and weekly shape, and any ratio,
@@ -1121,6 +1152,43 @@ go test ./internal/featureusage/ -run TestReportSurfaceIsStable -update-surface
 
 and the updated file is committed with the change. The set of reported QueryNode
 configuration keys is pinned the same way, in the QueryNode test.
+
+### New request fields are pinned too
+
+The report surface test protects counters that exist; it cannot notice one that
+was never written. Request counters are added by hand, so a feature that adds a
+request field reaches users whether or not anybody counts it.
+`internal/featureusage/testdata/request_surface.golden` lists every field and
+every enum value reachable from the input message of each `MilvusService` RPC
+and from `planpb.PlanNode`, recursing into `milvus.proto.*` messages. It leaves
+out `common.MsgBase`, whose `MsgType` enum grows with internal message types.
+`TestRequestSurfaceIsStable` fails when a milvus-proto bump or a `plan.proto`
+change adds or removes a line, and whoever makes that change decides:
+
+- **A user-facing feature.** Add a counter: an id and a name in
+  `internal/featureusage/counters.go`, a hook where the request is already
+  parsed (see "Where the counting hooks live"), and a request in the
+  integration suite that drives it, which the acceptance gate requires.
+- **Not a feature** (plumbing, a management RPC). Nothing beyond regenerating.
+
+Either way `go test ./internal/featureusage/ -update-surface` rewrites both
+golden files. No per-field record of the decision is kept: the diff of the two
+files is the record. A filter in the root `OWNERS` adds a required reviewer to
+any change of `internal/featureusage/testdata/*.golden`. That filter only
+requests the review (prow's blunderbuss plugin adds the reviewer; approval still
+comes from `maintainers`), so the failing test is the gate and the review
+request is the reminder.
+
+Replayed over the eight milvus-proto bumps on master between 2026-08-12 and
+2026-11-06, seven change the milvus-proto part of the surface, by 1 to 22 lines
+each. Among those lines are `UpsertRequest.write_condition`, which #54697 later
+counted, and `QueryRequest.function_chains`, `CancelRequestsRequest` and
+`ListRunningRequestsRequest`, which nothing counted until the audit that came with this test
+(see "Operations (counted per call)").
+
+It does not catch features passed as `KeyValuePair` strings (index parameters,
+collection properties; D9's allowlist test covers the official ones) or
+behavior changes that touch no proto.
 
 ### Integration suite
 
