@@ -67,6 +67,10 @@ func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schem
 // Otherwise returns an error for incompatible types.
 // Also returns the original placeholder type (before conversion) for callers that need it.
 func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema) ([]byte, commonpb.PlaceholderType, error) {
+	return convertPlaceholderGroup(phgBytes, fieldSchema, nil)
+}
+
+func convertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema, elementCount *int64) ([]byte, commonpb.PlaceholderType, error) {
 	var phg commonpb.PlaceholderGroup
 	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
@@ -87,6 +91,14 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 	}
 
 	placeholder := phg.Placeholders[0]
+	if elementCount != nil && *elementCount >= 0 {
+		n, ok := inputVectorCount(placeholder, fieldSchema)
+		if ok {
+			*elementCount += n
+		} else {
+			*elementCount = -1
+		}
+	}
 	phType := placeholder.Type
 	fieldType := fieldSchema.GetDataType()
 	if fieldType == schemapb.DataType_ArrayOfVector {
@@ -128,6 +140,37 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 		// This should never be reached due to the check above, but keep for safety
 		return phgBytes, phType, nil
 	}
+}
+
+// An embedding-list placeholder contains one concatenation of fixed-width
+// vectors per query. The inner dimension lives in the schema, not the wire data.
+func inputVectorCount(ph *commonpb.PlaceholderValue, field *schemapb.FieldSchema) (int64, bool) {
+	var bits int64
+	switch ph.GetType() {
+	case commonpb.PlaceholderType_EmbListFloatVector:
+		bits = 32
+	case commonpb.PlaceholderType_EmbListFloat16Vector, commonpb.PlaceholderType_EmbListBFloat16Vector:
+		bits = 16
+	case commonpb.PlaceholderType_EmbListInt8Vector:
+		bits = 8
+	case commonpb.PlaceholderType_EmbListBinaryVector:
+		bits = 1
+	default:
+		return int64(len(ph.GetValues())), true
+	}
+	dim, err := typeutil.GetDim(field)
+	if err != nil || dim <= 0 || dim > math.MaxInt64/bits || dim*bits%8 != 0 {
+		return 0, false
+	}
+	width := dim * bits / 8
+	var count int64
+	for _, item := range ph.GetValues() {
+		if int64(len(item))%width != 0 {
+			return 0, false
+		}
+		count += int64(len(item)) / width
+	}
+	return count, true
 }
 
 // convertPlaceholder converts fp32 vectors in placeholder to the target type.

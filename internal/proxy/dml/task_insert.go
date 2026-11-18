@@ -48,6 +48,9 @@ type InsertTask struct {
 
 	idempotencyEnabled bool
 	idempotencyKey     string
+
+	// Payload is supplied by extensions that measure the original client fields.
+	Payload *RequestPayload
 }
 
 // NewInsertTask constructs an insert task. It takes the host node and the
@@ -237,6 +240,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 	it.schemaVersion = schema.Version
+	it.Payload.measure(it.insertMsg.GetFieldsData(), schema.SchemaHelper)
 	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {
 		return err
 	}

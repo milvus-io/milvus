@@ -2564,6 +2564,26 @@ func TestCheckParams(t *testing.T) {
 	})
 }
 
+func TestFinishedIndexBytes(t *testing.T) {
+	m := NewSegmentIndexMeta(nil)
+	const coll, seg int64 = 101, 201
+	for id := int64(1); id <= 4; id++ {
+		m.updateCollectionIndex(&model.Index{CollectionID: coll, IndexID: id, IsDeleted: id == 2})
+		state := commonpb.IndexState_Finished
+		if id == 3 {
+			state = commonpb.IndexState_Failed
+		}
+		m.updateSegmentIndex(&model.SegmentIndex{
+			CollectionID: coll, SegmentID: seg, IndexID: id, BuildID: id,
+			IndexSerializedSize: 11, IndexState: state, IsDeleted: id == 4,
+		})
+	}
+	require.EqualValues(t, 11, m.FinishedIndexBytes(coll, []int64{seg, seg + 1}))
+	require.Zero(t, m.FinishedIndexBytes(coll+1, []int64{seg}))
+	m.updateCollectionIndex(&model.Index{CollectionID: coll, IndexID: 1, IsDeleted: true})
+	require.Zero(t, m.FinishedIndexBytes(coll, []int64{seg}))
+}
+
 // TestStoredIndexFilesSizeMetric exercises the stored_index_files_size gauge
 // invariants (issue #49024).
 func TestStoredIndexFilesSizeMetric(t *testing.T) {

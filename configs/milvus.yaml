@@ -1742,6 +1742,7 @@ streamingNode:
 
 # Any configuration related to query views.
 queryView:
+  publishCollectionSize: false # Sample whole-collection data and index bytes when preparing a QueryView and return the sample in query plans. Requires coordinator restart.
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.

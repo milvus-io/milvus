@@ -138,6 +138,9 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
+    // Whole-collection data and index bytes sampled when the view was prepared.
+    // Presence distinguishes an empty collection from a view without a measurement.
+    optional int64 collection_size_bytes = 10;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -358,6 +361,8 @@ message GetQueryPlanResponse {
     ExecutionSummary execution_summary = 3;
     // Consumed by QueryViewClient; not part of the reusable worker plan.
     QueryPlanClientOptimizeInfo client_optimize_info = 4;
+    // Taken from the serving view before shard or partition pruning.
+    optional int64 collection_size_bytes = 5;
 }
 
 // Diagnostic facts for the successful execution attempt, never execution controls.

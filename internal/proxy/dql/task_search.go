@@ -75,6 +75,10 @@ type SearchTask struct {
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
 
+	// VectorElementCount is set only by callers measuring the input vectors.
+	// A negative value means the input representation could not be measured.
+	VectorElementCount *int64
+
 	tr                     *timerecord.TimeRecorder
 	collectionName         string
 	resolvedDBName         string
@@ -1364,7 +1368,7 @@ func (t *SearchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	if field == nil {
 		return phgBytes, 0, nil
 	}
-	return ConvertPlaceholderGroup(phgBytes, field)
+	return convertPlaceholderGroup(phgBytes, field, t.VectorElementCount)
 }
 
 func (t *SearchTask) tryGeneratePlan(
@@ -1565,6 +1569,10 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.resultBuf.Insert(searchResult)
 	}
 	return nil
+}
+
+func (t *SearchTask) CollectionSizeBytes() *int64 {
+	return queryclient.CollectionSizeFromPlans(t.queryViewPlans)
 }
 
 // find the last bound based on reduced results and metric type

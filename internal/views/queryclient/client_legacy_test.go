@@ -29,7 +29,7 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacySearchPlan(shardA, queryNode),
 			shardB.VChannel: legacySearchPlan(shardB, queryNode),
-		}},
+		}, size: proto.Int64(200)},
 		&legacyServiceClient{
 			searchResults: map[string]*internalpb.SearchResults{
 				shardA.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 101}},
@@ -55,6 +55,22 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		result.Results[1].GetBase().GetSourceID(),
 	})
 	require.Len(t, result.Plans, 2)
+	require.Equal(t, int64(200), *CollectionSizeFromPlans(result.Plans))
+}
+
+func TestCollectionSizeFromPlans(t *testing.T) {
+	plan := func(channel string, version int64, size *int64) ShardPlan {
+		return ShardPlan{
+			ShardID:             qviews.ShardID{VChannel: channel},
+			Version:             &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: version}},
+			CollectionSizeBytes: size,
+		}
+	}
+	old, compacted, empty := plan("a", 1, proto.Int64(1000)), plan("b", 2, proto.Int64(320)), plan("a", 2, proto.Int64(0))
+	require.EqualValues(t, 320, *CollectionSizeFromPlans([]ShardPlan{old, compacted, plan("c", 3, nil)}))
+	require.EqualValues(t, 0, *CollectionSizeFromPlans([]ShardPlan{compacted, old, empty}))
+	require.EqualValues(t, 0, *CollectionSizeFromPlans([]ShardPlan{empty, old, compacted}))
+	require.Nil(t, CollectionSizeFromPlans([]ShardPlan{plan("a", 1, nil)}))
 }
 
 func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
@@ -211,10 +227,11 @@ func (r *legacyResolver) ResolveVChannels(context.Context, int64) ([]string, err
 type legacyPlanClient struct {
 	QueryPlanClient
 	plans map[string]*viewpb.QueryPlan
+	size  *int64
 }
 
 func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel], CollectionSizeBytes: c.size}, nil
 }
 
 func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {

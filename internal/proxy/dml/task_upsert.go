@@ -99,6 +99,9 @@ type UpsertTask struct {
 	writeState   requestutil.ConditionalWriteState
 	requestSize  int
 	mutationSize int
+
+	// Payload is captured before conditional/partial updates rewrite req.
+	Payload *RequestPayload
 }
 
 // NewUpsertTask constructs an upsert task. It takes the host node and the
@@ -2107,6 +2110,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
+	it.Payload.measure(it.req.GetFieldsData(), schema.SchemaHelper)
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}

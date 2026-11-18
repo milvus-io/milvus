@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/dml"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -2320,6 +2321,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
+	report := newRequestReport()
+	if report != nil {
+		it.Payload = &dml.RequestPayload{}
+	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2373,18 +2378,19 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	dbName := request.DbName
 	collectionName := request.CollectionName
 
-	v := hookutil.GetExtension().Report(map[string]any{
+	info := map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
 		hookutil.DatabaseKey:        dbName,
 		hookutil.UsernameKey:        username,
 		hookutil.RequestDataSizeKey: proto.Size(request),
 		hookutil.SuccessCntKey:      successCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeInsert, request.DbName, username).Add(float64(v))
 	}
+	if report != nil {
+		info[hookutil.ClientRequestBytesKey] = it.Payload.FieldBytes
+	}
+	report.record(it.Result().GetStatus(), info)
+	report.finish(ctx, it.Result().GetStatus())
 	metrics.ProxyInsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))
@@ -2430,6 +2436,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 	dr.SetViewQueryClient(node.viewQueryClient)
+	report := newRequestReport()
+	if report != nil {
+		dr.MeasurePayload()
+	}
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2460,14 +2470,23 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
-	v := hookutil.GetExtension().Report(map[string]any{
+	info := map[string]any{
 		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
 		hookutil.DatabaseKey:   dbName,
 		hookutil.UsernameKey:   username,
 		hookutil.SuccessCntKey: successCnt,
 		hookutil.RelatedCntKey: dr.AllQueryCnt(),
-	})
-	SetReportValue(dr.Result().GetStatus(), v)
+	}
+	if report != nil {
+		info[hookutil.DeletedPKBytesKey] = dr.DeletedPKBytes()
+		info[hookutil.IsFilterDeleteKey] = dr.IsFilterDelete()
+		if dr.IsFilterDelete() {
+			info[hookutil.DeleteExprBytesKey] = dr.ExpressionBytes()
+			info[hookutil.CollectionStorageBytesKey] = dr.CollectionSizeBytes()
+		}
+	}
+	report.record(dr.Result().GetStatus(), info)
+	report.finish(ctx, dr.Result().GetStatus())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedRemoteBytes()) / 1024 / 1024)
@@ -2478,10 +2497,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		ScannedRemoteBytes: dr.ScannedRemoteBytes(),
 		ScannedTotalBytes:  dr.ScannedTotalBytes(),
 	})
-
-	if merr.Ok(dr.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
-	}
 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
@@ -2524,6 +2539,10 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
+	report := newRequestReport()
+	if report != nil {
+		it.Payload = &dml.RequestPayload{}
+	}
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
@@ -2583,22 +2602,24 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	requestSize, mutationSize := it.AccountingSizes()
-	v := hookutil.GetExtension().Report(map[string]any{
+	info := map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
 		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
+	}
+	if report != nil {
+		info[hookutil.ClientRequestBytesKey] = it.Payload.FieldBytes
+		info[hookutil.PrimaryKeyBytesKey] = it.Payload.PrimaryKeyBytes
+	}
+	report.record(it.Result().GetStatus(), info)
+	report.finish(ctx, it.Result().GetStatus())
 	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedTotalBytes) / 1024 / 1024)
-	}
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))
@@ -2632,6 +2653,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	// cancellable for its whole lifetime, including the retries below.
 	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
 	defer node.unregisterRequest(entry)
+	report := newRequestReport()
 
 	var err error
 	rsp := &milvuspb.SearchResults{
@@ -2644,12 +2666,12 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	isRecallEvaluation := false
 	countFeatures := true
 	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetSearchParams(), func(ctx context.Context) (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, countFeatures)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, countFeatures, report)
 		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, false)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, false, report)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2672,7 +2694,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true, false)
+			rspGT, _, _, _, err = node.search(ctx, request, false, true, false, report)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2691,7 +2713,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = status
+		rsp.Status = report.finish(ctx, status)
 	}
 	return rsp, nil
 }
@@ -2700,7 +2722,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // Proxy can run the same request through this function again -- the
 // un-optimized retry, the recall-evaluation ground truth, a retry.Handle
 // re-entry -- and those runs must not move the feature counters again.
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool, report *requestReport) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2743,12 +2765,25 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, err
 	}
 
+	if searchByPK != nil {
+		searchByPK.measureSize = report != nil && !isRecallEvaluation
+	}
 	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
 	if err != nil {
 		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
 	}
 	// If all IDs have null vectors (Nq == 0), return empty results without executing search
 	if len(validData) > 0 && request.GetNq() == 0 {
+		if report != nil && !isRecallEvaluation {
+			report.collectionSize = searchByPK.collectionSize
+			report.info = map[string]any{
+				hookutil.OpTypeKey:             hookutil.OpTypeSearch,
+				hookutil.DatabaseKey:           request.GetDbName(),
+				hookutil.UsernameKey:           GetCurUserFromContextOrDefault(ctx),
+				hookutil.NqKey:                 int64(len(validData)),
+				hookutil.VectorElementCountKey: int64(len(validData)),
+			}
+		}
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
 			Results: &schemapb.SearchResultData{
@@ -2763,6 +2798,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
+	if report != nil && !isRecallEvaluation {
+		qt.VectorElementCount = new(int64)
+	}
 	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
@@ -2870,19 +2908,29 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if qt.Result() != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.Result())
-		v := hookutil.GetExtension().Report(map[string]any{
+		info := map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
-		})
-		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
-		if merr.Ok(qt.Result().GetStatus()) {
-			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
+		if !isRecallEvaluation || report == nil {
+			if report != nil {
+				report.collectionSize = qt.CollectionSizeBytes()
+				nq := qt.GetNq()
+				if len(validData) > 0 {
+					nq = int64(len(validData))
+				}
+				info[hookutil.NqKey] = nq
+				if elements := *qt.VectorElementCount; elements >= 0 {
+					info[hookutil.VectorElementCountKey] = elements + nq - qt.GetNq()
+				}
+			}
+			report.record(qt.Result().GetStatus(), info)
+		}
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 	}
 
 	if qt.Result() != nil && qt.Result().Results != nil && len(validData) > 0 {
@@ -2896,6 +2944,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
 	defer node.unregisterRequest(entry)
+	report := newRequestReport()
 
 	var err error
 	rsp := &milvuspb.SearchResults{
@@ -2906,12 +2955,12 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	isTopkReduce := false
 	countFeatures := true
 	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), nil, func(ctx context.Context) (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, countFeatures)
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, countFeatures, report)
 		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, false)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, false, report)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -2936,7 +2985,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	}
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = status
+		rsp.Status = report.finish(ctx, status)
 	}
 	return rsp, nil
 }
@@ -2958,7 +3007,7 @@ func (l *hybridSearchRequestExprLogger) String() string {
 
 // countFeatures carries the same meaning as in search: only the first task
 // built for a user request moves the feature counters.
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool, report *requestReport) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3088,19 +3137,25 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if qt.Result() != nil {
 		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
-		v := hookutil.GetExtension().Report(map[string]any{
+		info := map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
-		})
-		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
-		if merr.Ok(qt.Result().GetStatus()) {
-			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
+		if report != nil {
+			report.collectionSize = qt.CollectionSizeBytes()
+			info[hookutil.SubSearchCountKey] = int64(len(request.GetRequests()))
+			var totalNq int64
+			for _, sub := range qt.GetSubReqs() {
+				totalNq += sub.GetNq()
+			}
+			info[hookutil.SubSearchTotalNqKey] = totalNq
+		}
+		report.record(qt.Result().GetStatus(), info)
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 	}
 	succeeded = true
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), nil
@@ -3152,6 +3207,8 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 
 type searchByPKPreflight struct {
 	collectionInfo *collectionInfo
+	measureSize    bool
+	collectionSize *int64
 }
 
 // copySearchRequestForAttempt isolates the fields mutated while preparing a
@@ -3359,6 +3416,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 	qt.BindReadSchema(collectionInfo.CollID, collectionInfo.Schema)
+	qt.CaptureCollectionSize = preflight.measureSize
 	// The user issued a search, and the search path already counted it; this
 	// retrieval is how the Proxy serves it.
 	qt.MarkInternal()
@@ -3372,6 +3430,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if !merr.Ok(queryResult.GetStatus()) {
 		return nil, merr.Error(queryResult.GetStatus())
 	}
+	preflight.collectionSize = qt.CollectionSizeBytes
 
 	// Extract primary key field to check result count
 	pkFieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
@@ -3673,6 +3732,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	// cancelable while it waits for an automatic load or a view refresh.
 	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
 	defer node.unregisterRequest(entry)
+	report := newRequestReport()
 
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
@@ -3692,7 +3752,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	var result *milvuspb.QueryResults
 	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
 		var err error
-		result, err = node.executeQuery(ctx, request)
+		result, err = node.executeQuery(ctx, request, report)
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
@@ -3705,10 +3765,13 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
 		return &milvuspb.QueryResults{Status: status}, nil
 	}
+	if status := report.finish(ctx, result.GetStatus()); !merr.Ok(status) {
+		return &milvuspb.QueryResults{Status: status}, nil
+	}
 	return result, nil
 }
 
-func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest, report *requestReport) (*milvuspb.QueryResults, error) {
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
@@ -3729,6 +3792,7 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 	defer sp.End()
 	method := "Query"
 
+	qt.CaptureCollectionSize = report != nil
 	res, storageCost, err := node.query(ctx, qt, sp)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
@@ -3754,18 +3818,19 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 	mlog.Debug(ctx, rpcDone(method))
 
 	username := GetCurUserFromContextOrDefault(ctx)
-	nodeID := paramtable.GetStringNodeID()
-	v := hookutil.GetExtension().Report(map[string]any{
+	info := map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeQuery,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
 		hookutil.ResultDataSizeKey:  proto.Size(res),
 		hookutil.RelatedDataSizeKey: qt.TotalRelatedDataSize(),
 		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
-	})
-	SetReportValue(res.Status, v)
+	}
+	if report != nil {
+		report.collectionSize = qt.CollectionSizeBytes
+	}
+	report.record(res.Status, info)
 	SetStorageCost(res.Status, storageCost)
-	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)

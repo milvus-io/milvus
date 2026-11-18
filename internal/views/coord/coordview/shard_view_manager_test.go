@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ---------------------------------------------------------------------------
@@ -365,6 +366,40 @@ func TestShardViewManagerPinsBeforePersist(t *testing.T) {
 
 	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	require.Equal(t, []string{"pin", "persist"}, events)
+}
+
+type measuredDataViews struct {
+	stubDataViewRefProvider
+	size int64
+	err  error
+}
+
+func (p *measuredDataViews) CollectionSizeBytes(context.Context, int64) (int64, error) {
+	return p.size, p.err
+}
+
+func TestCollectionSizeSampleFollowsQueryView(t *testing.T) {
+	catalog := newMockCatalog()
+	provider := &measuredDataViews{size: 1200}
+	mgr := newTestManagerWithReferences(t, catalog, newMockSyncer(), provider)
+	require.NoError(t, mgr.AddPreparing(t.Context(), testBuilder(1, 1, 1)))
+	first := catalog.saved[0].GetMeta()
+	require.EqualValues(t, 1200, *first.CollectionSizeBytes)
+
+	provider.size, provider.err = 0, merr.ErrServiceNotReady
+	require.ErrorIs(t, mgr.AddPreparing(t.Context(), testBuilder(2, 1, 1)), merr.ErrServiceNotReady)
+	require.Len(t, catalog.saved, 1)
+	provider.err = nil
+	require.NoError(t, mgr.AddPreparing(t.Context(), testBuilder(2, 1, 1)))
+	require.EqualValues(t, 1200, *first.CollectionSizeBytes)
+	for _, view := range catalog.saved {
+		if view.GetMeta().GetVersion().GetDataVersion().GetStreamingVersion() == 2 {
+			require.NotNil(t, view.Meta.CollectionSizeBytes)
+			require.Zero(t, *view.Meta.CollectionSizeBytes)
+			return
+		}
+	}
+	t.Fatal("new view was not persisted")
 }
 
 func TestShardViewManagerPinFailureDoesNotPreemptCurrentView(t *testing.T) {

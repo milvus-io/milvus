@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -307,8 +308,11 @@ type DeleteRunner struct {
 	// task queue
 	queue *scheduler.DmTaskQueue
 
-	allQueryCnt atomic.Int64
-	sessionTS   atomic.Uint64
+	allQueryCnt         atomic.Int64
+	sessionTS           atomic.Uint64
+	measurePayload      bool
+	deletedPKBytes      int64
+	collectionSizeBytes int64
 
 	scannedRemoteBytes atomic.Int64
 	scannedTotalBytes  atomic.Int64
@@ -343,6 +347,19 @@ func (dr *DeleteRunner) Result() *milvuspb.MutationResult {
 // AllQueryCnt returns the total number of queries counted across shards.
 func (dr *DeleteRunner) AllQueryCnt() int64 {
 	return dr.allQueryCnt.Load()
+}
+
+// MeasurePayload enables request-level measurements before Init parses the filter.
+func (dr *DeleteRunner) MeasurePayload() { dr.measurePayload = true }
+
+func (dr *DeleteRunner) IsFilterDelete() bool { return !dr.userPlanIsSimple }
+
+func (dr *DeleteRunner) CollectionSizeBytes() int64 { return dr.collectionSizeBytes }
+
+func (dr *DeleteRunner) DeletedPKBytes() int64 { return dr.deletedPKBytes }
+
+func (dr *DeleteRunner) ExpressionBytes() int64 {
+	return deleteExpressionBytes(dr.req.GetExpr(), dr.req.GetExprTemplateValues())
 }
 
 // ScannedRemoteBytes returns the scanned remote bytes across shards.
@@ -428,7 +445,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-	if featureusage.Enabled() {
+	if featureusage.Enabled() || dr.measurePayload {
 		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
 	}
 
@@ -716,6 +733,9 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	if dr.viewQueryClient != nil {
 		return dr.complexDeleteByQueryView(ctx, serializedPlan, outputFieldIDs)
 	}
+	if dr.measurePayload && dr.IsFilterDelete() {
+		return merr.WrapErrServiceInternalMsg("filtered delete requires a QueryView collection size for collection %d", dr.collectionID)
+	}
 
 	exec := dr.getStreamingQueryAndDelteFunc(serializedPlan, outputFieldIDs)
 	channelName, useNamespaceChannel, err := dql.NamespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
@@ -750,11 +770,34 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	return nil
 }
 
+// A cold filtered delete can load the bound collection and retry its read.
+// The hot path uses its first plan. No tombstones have been submitted here.
+func (dr *DeleteRunner) queryMatchingKeys(ctx context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
+	query := func() (*queryclient.LegacyQueryResult, error) {
+		result, err := dr.viewQueryClient.Legacy().Query(ctx, req)
+		if err != nil {
+			return nil, dql.QueryViewLoadError(ctx, dr.node, dr.collectionID, dr.partitionIDs, err)
+		}
+		return result, nil
+	}
+	result, err := query()
+	if err == nil || !dr.measurePayload || !dr.IsFilterDelete() || !paramtable.Get().ProxyCfg.EnableAutoLoad.GetAsBool() ||
+		!errors.Is(err, merr.ErrCollectionNotLoaded) || ctx.Err() != nil {
+		return result, err
+	}
+	loadCtx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
+	defer cancel()
+	if err := dql.EnsureQueryViewReady(loadCtx, dr.node, dr.collectionID, dr.vChannels); err != nil {
+		return nil, err
+	}
+	return query()
+}
+
 func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serializedPlan []byte, outputFieldIDs []int64) error {
 	// TODO: use a streaming QueryView interface when available. Materialize the
 	// complete batch before producing any deletes, so query retries have no
 	// write side effects and failed/oversized reads cannot silently delete a prefix.
-	result, err := dr.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
+	result, err := dr.queryMatchingKeys(ctx, &queryclient.LegacyQueryRequest{
 		Schema:      dr.schema.CollectionSchema,
 		BarrierMVCC: dr.ts,
 		Req: &internalpb.RetrieveRequest{
@@ -777,7 +820,14 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serialized
 		},
 	})
 	if err != nil {
-		return dql.QueryViewLoadError(ctx, dr.node, dr.collectionID, dr.partitionIDs, err)
+		return err
+	}
+	if dr.measurePayload && dr.IsFilterDelete() {
+		size := queryclient.CollectionSizeFromPlans(result.Plans)
+		if size == nil {
+			return merr.WrapErrServiceInternalMsg("query plan missing collection size for collection %d", dr.collectionID)
+		}
+		dr.collectionSizeBytes = *size
 	}
 
 	primaryKeys := &schemapb.IDs{}
@@ -828,6 +878,9 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	if err == nil {
 		dr.result.DeleteCnt = task.count
 		dr.result.Timestamp = task.sessionTS
+		if dr.measurePayload {
+			dr.deletedPKBytes = primaryKeyBytes(pk)
+		}
 	}
 	return err
 }

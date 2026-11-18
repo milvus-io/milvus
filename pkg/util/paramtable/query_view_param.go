@@ -21,6 +21,7 @@ type queryViewConfig struct {
 	IDFLazyLoadSealedStats                  ParamItem `refreshable:"true"`
 	IDFSealedStatsLoadConcurrencyRatio      ParamItem `refreshable:"true"`
 	LeaseDuration                           ParamItem `refreshable:"false"`
+	PublishCollectionSize                   ParamItem `refreshable:"false"`
 	LogicalSizeSource                       ParamItem `refreshable:"false"`
 	LogicalSizeBytesPerUnit                 ParamItem `refreshable:"false"`
 	LogicalSizeSegmentBaseCost              ParamItem `refreshable:"true"`
@@ -74,6 +75,15 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.LeaseDuration.Init(base.mgr)
+
+	p.PublishCollectionSize = ParamItem{
+		Key:          "queryView.publishCollectionSize",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Sample whole-collection data and index bytes when preparing a QueryView and return the sample in query plans. Requires coordinator restart.",
+	}
+	p.PublishCollectionSize.Init(base.mgr)
 
 	p.LogicalSizeSource = ParamItem{
 		Key:          "queryView.logicalSize.source",

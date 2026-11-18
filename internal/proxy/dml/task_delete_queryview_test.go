@@ -2,9 +2,12 @@ package dml
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -21,13 +24,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestComplexDeleteQueryViewBatch(t *testing.T) {
-	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
+	for _, scenario := range []string{"int64", "varchar", "empty", "cold", "cold_disabled", "cold_load_error", "query_error", "incomplete", "missing_size", "rate_limit", "enqueue_error", "write_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
+			cold := strings.HasPrefix(scenario, "cold")
+			if cold {
+				params := paramtable.Get()
+				key := params.ProxyCfg.EnableAutoLoad.Key
+				require.NoError(t, params.Save(key, strconv.FormatBool(scenario != "cold_disabled")))
+				t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+			}
 			pkType := schemapb.DataType_Int64
 			values := []any{int64(1), int64(2), int64(3)}
 			if scenario == "varchar" {
@@ -54,13 +65,21 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			if scenario == "empty" {
 				response.Results = nil
 			}
+			if scenario != "missing_size" {
+				response.Plans = []queryclient.ShardPlan{{CollectionSizeBytes: proto.Int64(12000)}}
+			}
 			if scenario == "incomplete" {
 				response.Results[1].HasMoreResult = true
 			}
 			client := queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{}, nil, nil, nil)
 			var captured *internalpb.RetrieveRequest
+			queryCalls := 0
 			query := mockey.Mock(mockey.GetMethod(client.Legacy(), "Query")).To(func(_ context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
 				captured = proto.Clone(req.Req).(*internalpb.RetrieveRequest)
+				queryCalls++
+				if cold && queryCalls == 1 {
+					return nil, merr.WrapErrCollectionNotLoaded(int64(10))
+				}
 				if scenario == "query_error" {
 					return nil, merr.ErrServiceUnavailable
 				}
@@ -68,7 +87,17 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			}).Build()
 			defer query.UnPatch()
 			// Transient query errors consult the authoritative load config.
-			mixCoord := mockey.Mock((*mockTaskNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+			coord := mocks.NewMockMixCoordClient(t)
+			if scenario == "cold" || scenario == "cold_load_error" {
+				status := merr.Success()
+				if scenario == "cold_load_error" {
+					status = merr.Status(merr.ErrServiceUnavailable)
+				}
+				coord.EXPECT().EnsureCollectionReady(mock.Anything, &querypb.EnsureCollectionReadyRequest{
+					CollectionID: 10, ExpectedVchannels: []string{"batch_shard"},
+				}).Return(status, nil).Once()
+			}
+			mixCoord := mockey.Mock((*mockTaskNode).MixCoord).Return(coord).Build()
 			defer mixCoord.UnPatch()
 			loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(&querypb.GetQueryViewLoadInfoResponse{
 				Status: merr.Success(), PartitionIDs: []int64{11},
@@ -113,7 +142,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			defer produce.UnPatch()
 
 			runner := &DeleteRunner{
-				node:   &mockTaskNode{},
+				node: &mockTaskNode{}, vChannels: []string{"batch_shard"},
 				req:    &milvuspb.DeleteRequest{CollectionName: "batch_delete", ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
 				result: &milvuspb.MutationResult{Status: merr.Success()},
 				schema: schema, plan: plan, dbID: 9, collectionID: 10, partitionIDs: []int64{11},
@@ -121,11 +150,14 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				// No legacy LB: falling back to GetShardLeaders would fail this test.
 			}
 			runner.SetViewQueryClient(client)
+			runner.MeasurePayload()
 			err = runner.Run(ctx)
 			switch scenario {
-			case "query_error", "enqueue_error", "write_error":
+			case "query_error", "enqueue_error", "write_error", "cold_load_error":
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			case "incomplete":
+			case "cold_disabled":
+				require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+			case "incomplete", "missing_size":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "rate_limit":
 				require.ErrorIs(t, err, merr.ErrServiceRateLimit)
@@ -150,20 +182,31 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.NoError(t, proto.Unmarshal(captured.GetSerializedExprPlan(), parsed))
 			require.EqualValues(t, typeutil.Unlimited, parsed.GetQuery().GetLimit())
 			require.True(t, proto.Equal(plan.GetQuery().GetPredicates(), parsed.GetQuery().GetPredicates()))
-			if scenario == "int64" || scenario == "varchar" {
+			if scenario == "cold" {
+				require.Equal(t, 2, queryCalls)
+			} else {
+				require.Equal(t, 1, queryCalls)
+			}
+			wrote := scenario == "int64" || scenario == "varchar" || scenario == "cold"
+			if wrote {
+				require.Equal(t, 1, produce.Times())
 				require.True(t, proto.Equal(ids(values...), produced), "overlapping worker results must produce each PK once")
 				require.EqualValues(t, 3, runner.Result().GetDeleteCnt())
 				require.EqualValues(t, 200, runner.Result().GetTimestamp())
 				require.EqualValues(t, 12, runner.AllQueryCnt())
 				require.EqualValues(t, 40, runner.ScannedRemoteBytes())
 				require.EqualValues(t, 60, runner.ScannedTotalBytes())
+				require.Equal(t, primaryKeyBytes(ids(values...)), runner.DeletedPKBytes())
 			} else {
 				require.Zero(t, runner.Result().GetDeleteCnt())
+			}
+			if err == nil {
+				require.EqualValues(t, 12000, runner.CollectionSizeBytes())
 			}
 			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" {
 				require.Zero(t, limitCalls)
 			}
-			if scenario != "int64" && scenario != "varchar" && scenario != "enqueue_error" && scenario != "write_error" {
+			if !wrote && scenario != "enqueue_error" && scenario != "write_error" {
 				require.Nil(t, produced, "failed, incomplete or empty reads must not enqueue a delete")
 			}
 		})

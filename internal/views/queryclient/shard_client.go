@@ -297,12 +297,13 @@ func (s *shardViewQueryClient) executeShard(
 		}
 
 		return &ShardPlan{
-			ShardID:          shardID,
-			Version:          plan.Version,
-			Mvcc:             plan.GetMvcc(),
-			WorkNodes:        workNodes,
-			Selections:       plan.GetWorkNodes(),
-			ExecutionSummary: response.GetExecutionSummary(),
+			ShardID:             shardID,
+			Version:             plan.Version,
+			Mvcc:                plan.GetMvcc(),
+			WorkNodes:           workNodes,
+			Selections:          plan.GetWorkNodes(),
+			ExecutionSummary:    response.GetExecutionSummary(),
+			CollectionSizeBytes: response.CollectionSizeBytes,
 		}, nil
 	}
 }

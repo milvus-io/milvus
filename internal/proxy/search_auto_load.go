@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -118,12 +118,5 @@ func (node *Proxy) ensureCollectionReady(ctx context.Context, dbName, collection
 		return err
 	}
 
-	status, err := node.mixCoord.EnsureCollectionReady(ctx, &querypb.EnsureCollectionReadyRequest{
-		CollectionID:      collection.CollID,
-		ExpectedVchannels: collection.VChannels,
-	})
-	if ctx.Err() != nil {
-		return context.Cause(ctx)
-	}
-	return merr.CheckRPCCall(status, err)
+	return dql.EnsureQueryViewReady(ctx, node, collection.CollID, collection.VChannels)
 }

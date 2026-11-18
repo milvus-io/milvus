@@ -469,13 +469,23 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 			err = merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
 		}
 	}
+	// Read local DataCoord metadata before acquiring m.mu. Persist the sample
+	// with the view so recovery and repeated plans use exactly the same value.
+	if sizes, ok := m.dataViewRefs.(interface {
+		CollectionSizeBytes(context.Context, int64) (int64, error)
+	}); ok && err == nil {
+		var size int64
+		size, err = sizes.CollectionSizeBytes(ctx, view.Meta.CollectionId)
+		if err == nil {
+			view.Meta.CollectionSizeBytes = &size
+		}
+	}
 	var releaseLoadInfo func()
 	if err == nil && m.loadInfoRefs != nil {
 		releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
-		if err != nil && ref != nil {
-			ref.Deref()
-			ref = nil
-		}
+	}
+	if err != nil && ref != nil {
+		ref.Deref()
 	}
 	m.mu.Lock()
 	if err != nil {
