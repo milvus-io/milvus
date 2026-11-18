@@ -399,9 +399,8 @@ func TestLatencyWeightedConfigDefaults(t *testing.T) {
 		minShare: 0.001,
 	}, loadLatencyConfig())
 	assert.Equal(t, hedgeConfig{
-		enabled:          false,
-		minDelay:         200 * time.Millisecond,
-		maxInflightRatio: 0.1,
+		enabled:  false,
+		minDelay: 200 * time.Millisecond,
 	}, loadHedgeConfig())
 }
 

@@ -466,7 +466,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 		}
 		if workload.Hedgeable {
-			defer lb.hedging.EnterPrimary()()
 		}
 		// cancel work load which assign to the target node
 		if selectedByBalancer {
