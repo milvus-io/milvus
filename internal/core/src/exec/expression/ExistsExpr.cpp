@@ -48,9 +48,13 @@ EvaluateShreddedArrayExists(const std::string_view* values,
                             ValidityView valid,
                             size_t size,
                             TargetBitmapView result,
-                            TargetBitmapView /*valid_result*/) {
+                            TargetBitmapView /*valid_result*/,
+                            TargetBitmapView resolved) {
+    // The executor slices result for each scan batch; resolved spans the segment.
+    const auto resolved_batch = resolved.view(result.offset(), size);
     for (size_t i = 0; i < size; ++i) {
-        if (valid && !valid[i]) {
+        // Rows already matched by another descendant need no BSON parsing.
+        if (resolved_batch[i] || (valid && !valid[i])) {
             result[i] = false;
             continue;
         }
@@ -268,12 +272,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     // Resolve cheap scalar validity first, regardless of field
                     // name order, before reading any array payloads.
                     for (const auto& field : shredding_fields) {
-                        if (res_view.all()) {
-                            break;
-                        }
                         if (index->GetShreddingJsonType(field) ==
                             index::JSONType::ARRAY) {
                             continue;
+                        }
+                        if (res_view.all()) {
+                            break;
                         }
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
@@ -284,12 +288,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
                     // Only read arrays if scalar validity left unresolved rows.
                     for (const auto& field : shredding_fields) {
-                        if (res_view.all()) {
-                            break;
-                        }
                         if (index->GetShreddingJsonType(field) !=
                             index::JSONType::ARRAY) {
                             continue;
+                        }
+                        if (res_view.all()) {
+                            break;
                         }
                         TargetBitmap array_exists(active_count_, false);
                         // The evaluator ignores validity output; the executor
@@ -300,7 +304,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                             EvaluateShreddedArrayExists,
                             nullptr,
                             TargetBitmapView(array_exists),
-                            TargetBitmapView(array_exists));
+                            TargetBitmapView(array_exists),
+                            res_view);
                         res_view |= TargetBitmapView(array_exists);
                     }
                 }
