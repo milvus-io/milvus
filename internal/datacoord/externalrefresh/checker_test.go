@@ -1816,7 +1816,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	})
 
 	t.Run("a refresh whose segments are all already indexed finishes in the entry pass", func(t *testing.T) {
-		// The eager task path calls this synchronously when the last task
+		// The task path requests this pass when the last task
 		// finishes, so evaluating the debt only on the next periodic tick
 		// would put a whole externalCollectionCheckInterval on every refresh -
 		// including a re-scan that changed nothing, which is the case a
@@ -2274,4 +2274,37 @@ func TestExternalCollectionRefreshChecker_WaitsForSegmentChangePublication(t *te
 		require.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
 		require.Equal(t, 1, applies)
 	})
+}
+
+func TestExternalCollectionRefreshChecker_MissingColumnDoesNotPublishSibling(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	catalog := &StubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{{
+		JobId: 1, CollectionId: 100,
+		State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001, 1002},
+	}}
+	reason := "source manifest is missing mapped column field_id=103; create a new snapshot"
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{
+			TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, ResultReady: true,
+			UpdatedSegments: []*datapb.SegmentInfo{{ID: 2001}},
+		},
+		{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFailed, FailReason: reason},
+	}
+	listJobs := mockey.Mock((*StubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer listJobs.UnPatch()
+	listTasks := mockey.Mock((*StubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer listTasks.UnPatch()
+	save := mockey.Mock((*StubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer save.UnPatch()
+	mt, err := NewExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	applied := false
+	checker := NewRefreshChecker(ctx, nil, nil, mt, make(chan struct{}), nil,
+		func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied = true; return nil }, nil, nil, nil)
+	checker.AggregateJobState(mt.GetJob(1))
+	require.Equal(t, indexpb.JobState_JobStateFailed, mt.GetJob(1).GetState())
+	require.Equal(t, reason, mt.GetJob(1).GetFailReason())
+	require.False(t, applied)
 }

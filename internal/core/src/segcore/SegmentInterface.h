@@ -689,6 +689,11 @@ class SegmentInternalInterface : public SegmentInterface {
         return true;
     }
 
+    virtual bool
+    HasFieldInLoadedManifest(FieldId) const {
+        return true;
+    }
+
     // Projects whether IndexCapability contains a typed JSON-path entry;
     // it does not create a reader. Default false covers segment types that do
     // not install sealed JSON indexes, such as growing segments.

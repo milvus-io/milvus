@@ -179,6 +179,14 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryCoordCfg.init(bt)
 	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
+	p.CommonCfg.UseLoonFFI = ParamItem{
+		Key:          "common.storage.useLoonFFI",
+		Version:      "2.6.7",
+		DefaultValue: "true",
+		Forbidden:    p.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool(),
+		Export:       true,
+	}
+	p.CommonCfg.UseLoonFFI.Init(bt.mgr)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.QueryViewCfg.init(bt)
@@ -331,6 +339,10 @@ func (p *ComponentParam) CleanEvent() {
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
+	CloudClusterID    ParamItem `refreshable:"false"`
+	CloudInstanceType ParamItem `refreshable:"false"`
+	CloudClassType    ParamItem `refreshable:"false"`
+
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
@@ -381,7 +393,6 @@ type commonConfig struct {
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
 	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
-	UseArrowFSChunkManager        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -529,6 +540,27 @@ func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetByte
 	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
+// TalonNamespace returns the cloud namespace shared by Talon reads and prewarming.
+// An empty cluster ID selects Talon's default namespace.
+func (p *commonConfig) TalonNamespace() string {
+	clusterID := p.CloudClusterID.GetValue()
+	if clusterID == "" {
+		return ""
+	}
+	namespaceType := "others"
+	switch {
+	case p.CloudInstanceType.GetValue() == "VectorLake":
+		namespaceType = "VectorLake"
+	case p.CloudClassType.GetValue() == "Tiered":
+		namespaceType = "Tiered"
+	}
+	caseMode := "meta"
+	if p.StorageTalonEnabledStages.GetAsUint32() == common.TalonStagesAll {
+		caseMode = "all"
+	}
+	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
+}
+
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
@@ -544,6 +576,34 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Export:       true,
 	}
 	p.ClusterPrefix.Init(base.mgr)
+
+	p.CloudClusterID = ParamItem{
+		Key:          "common.cloud.clusterId",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
+		Export:       true,
+	}
+	p.CloudClusterID.Init(base.mgr)
+	p.CloudInstanceType = ParamItem{
+		Key:          "common.cloud.instanceType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.",
+		Export:       true,
+	}
+	p.CloudInstanceType.Init(base.mgr)
+	p.CloudClassType = ParamItem{
+		Key:          "common.cloud.classType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.",
+		Export:       true,
+	}
+	p.CloudClassType.Init(base.mgr)
 
 	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {
@@ -900,18 +960,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ManifestFFIConcurrency.Init(base.mgr)
-
-	p.UseArrowFSChunkManager = ParamItem{
-		Key:          "common.storage.useArrowFileSystemChunkManager",
-		Version:      "3.0.1",
-		DefaultValue: "false",
-		Doc: "Whether segcore routes chunk manager IO (segment load, index build/load) " +
-			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
-			"Applies to both remote and local storage types; when false, the legacy chunk managers are used. " +
-			"Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.",
-		Export: true,
-	}
-	p.UseArrowFSChunkManager.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
@@ -1512,14 +1560,6 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
-	p.UseLoonFFI = ParamItem{
-		Key:          "common.storage.useLoonFFI",
-		Version:      "2.6.7",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.UseLoonFFI.Init(base.mgr)
-
 	p.EnableGrowingSourceFlush = ParamItem{
 		Key:          "common.storage.enableGrowingSourceFlush",
 		Version:      "3.0.0",
@@ -1650,6 +1690,7 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Key:          "common.storage.talon.enabledStages",
 		Version:      "3.0.1",
 		DefaultValue: "all",
+		Forbidden:    true,
 		Doc:          "Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.",
 		Formatter: func(value string) string {
 			mask, ok := common.ParseTalonEnabledStages(value)
@@ -2863,8 +2904,10 @@ type proxyConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkProxy ParamItem `refreshable:"true"`
 
-	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
-	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
+	ExprParseCacheEnabled       ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntries    ParamItem `refreshable:"false"`
+	ExprParseCacheMaxBytes      ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntryBytes ParamItem `refreshable:"false"`
 
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
@@ -2935,6 +2978,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -2969,6 +3014,26 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ExprParseCacheMaxEntries.Init(base.mgr)
+
+	p.ExprParseCacheMaxBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxBytes",
+		Version:      "3.0.6",
+		DefaultValue: "67108864",
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+		Doc:          "Maximum aggregate retained byte budget of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 67108864 (64 MiB). Entries retain the existing maxEntries and 10-minute TTL bounds. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxBytes.Init(base.mgr)
+
+	p.ExprParseCacheMaxEntryBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxEntryBytes",
+		Version:      "3.0.6",
+		DefaultValue: "8388608",
+		Formatter:    positiveProxyLimitFormatter("8388608"),
+		Doc:          "Maximum estimated retained byte cost for a single expression parse cache entry. Non-positive or invalid values use 8388608 (8 MiB), clamped to proxy.exprParseCache.maxBytes. Larger expressions still parse normally without being cached. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxEntryBytes.Init(base.mgr)
 
 	p.SplitChunkProxy = ParamItem{
 		Key:          "proxy.splitChunk",
@@ -3198,7 +3263,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Key:          "proxy.enableAutoLoad",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether to automatically load an unloaded collection before DQL requests",
+		Doc:          "whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows",
 		Export:       true,
 	}
 	p.EnableAutoLoad.Init(base.mgr)
@@ -3706,6 +3771,32 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
+
+	p.EnableReduceStream = ParamItem{
+		Key:          "proxy.queryView.enableReduceStream",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
+		Export:       true,
+	}
+	p.EnableReduceStream.Init(base.mgr)
+
+	const defaultReduceStreamChunkBytes = "262144"
+	p.ReduceStreamChunkBytes = ParamItem{
+		Key:          "proxy.queryView.reduceStreamChunkBytes",
+		Version:      "3.1.0",
+		DefaultValue: defaultReduceStreamChunkBytes,
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
+		Export:       true,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultReduceStreamChunkBytes
+			}
+			return value
+		},
+	}
+	p.ReduceStreamChunkBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3758,9 +3849,13 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 	AutoReleaseEnabled         ParamItem `refreshable:"true"`
-	AutoReleaseIdleTTLSeconds  ParamItem `refreshable:"true"`
+	AutoReleaseTTISeconds      ParamItem `refreshable:"true"`
 	AutoReleaseCheckInterval   ParamItem `refreshable:"true"`
 	AutoReleaseConcurrency     ParamItem `refreshable:"true"`
+
+	AutoReleaseLRUHighWatermark ParamItem `refreshable:"true"`
+	AutoReleaseLRULowWatermark  ParamItem `refreshable:"true"`
+	AutoReleaseLRUMaxEvictions  ParamItem `refreshable:"true"`
 
 	DistributionRequestTimeout  ParamItem `refreshable:"true"`
 	HeartBeatWarningLag         ParamItem `refreshable:"true"`
@@ -3823,6 +3918,17 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
+}
+
+func autoReleaseWatermarkFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		value, err := strconv.ParseFloat(v, 64)
+		if err != nil || !(value > 0 && value <= 100) {
+			mlog.Warn(context.TODO(), "collection LRU memory watermark must be in (0, 100], using default", mlog.String("configured", v))
+			return defaultValue
+		}
+		return v
+	}
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -4165,33 +4271,33 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.autoRelease.enabled",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true",
+		Doc:          "whether QueryCoord releases collections after the configured time to idle (TTI) or under Worker QN memory pressure; effective only when proxy.enableAutoLoad is true",
 		Export:       true,
 	}
 	p.AutoReleaseEnabled.Init(base.mgr)
 
-	p.AutoReleaseIdleTTLSeconds = ParamItem{
-		Key:          "queryCoord.autoRelease.idleTTLSeconds",
+	p.AutoReleaseTTISeconds = ParamItem{
+		Key:          "queryCoord.autoRelease.ttiSeconds",
 		Version:      "3.0.0",
-		DefaultValue: "600",
+		DefaultValue: "3600",
 		PanicIfEmpty: true,
 		Export:       true,
 		Formatter: func(v string) string {
 			seconds, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
-				mlog.Warn(context.TODO(), "queryCoord.autoRelease.idleTTLSeconds must be positive and fit time.Duration, using default",
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.ttiSeconds must be positive and fit time.Duration, using default",
 					mlog.String("configured", v))
-				return "600"
+				return p.AutoReleaseTTISeconds.DefaultValue
 			}
 			return v
 		},
 	}
-	p.AutoReleaseIdleTTLSeconds.Init(base.mgr)
+	p.AutoReleaseTTISeconds.Init(base.mgr)
 
 	p.AutoReleaseCheckInterval = ParamItem{
 		Key:          "queryCoord.autoRelease.checkIntervalSeconds",
 		Version:      "3.0.0",
-		DefaultValue: "30",
+		DefaultValue: "10",
 		PanicIfEmpty: true,
 		Export:       true,
 		Formatter: func(v string) string {
@@ -4199,7 +4305,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
 				mlog.Warn(context.TODO(), "queryCoord.autoRelease.checkIntervalSeconds must be positive and fit time.Duration, using default",
 					mlog.String("configured", v))
-				return "30"
+				return p.AutoReleaseCheckInterval.DefaultValue
 			}
 			return v
 		},
@@ -4211,7 +4317,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "3.0.0",
 		DefaultValue: "16",
 		PanicIfEmpty: true,
-		Doc:          "maximum concurrent automatic collection releases in one scan; changes apply to the next release batch",
+		Doc:          "maximum concurrent automatic collection releases per scan; runtime updates take effect on the next scan",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) <= 0 {
@@ -4223,6 +4329,41 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		},
 	}
 	p.AutoReleaseConcurrency.Init(base.mgr)
+
+	p.AutoReleaseLRUHighWatermark = ParamItem{
+		Key:          "queryCoord.autoRelease.lruHighWatermarkPercentage",
+		Version:      "3.0.0",
+		DefaultValue: "85",
+		Export:       true,
+		Doc:          "Worker QueryNode pool anonymous resident memory percentage that starts collection LRU release; takes effect on the next scan",
+		Formatter:    autoReleaseWatermarkFormatter("85"),
+	}
+	p.AutoReleaseLRUHighWatermark.Init(base.mgr)
+	p.AutoReleaseLRULowWatermark = ParamItem{
+		Key:          "queryCoord.autoRelease.lruLowWatermarkPercentage",
+		Version:      "3.0.0",
+		DefaultValue: "80",
+		Export:       true,
+		Doc:          "Worker QueryNode pool anonymous resident memory percentage that stops selecting collection LRU releases; must be below the high watermark",
+		Formatter:    autoReleaseWatermarkFormatter("80"),
+	}
+	p.AutoReleaseLRULowWatermark.Init(base.mgr)
+	p.AutoReleaseLRUMaxEvictions = ParamItem{
+		Key:          "queryCoord.autoRelease.lruMaxEvictionsPerScan",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Export:       true,
+		Doc:          "maximum collection LRU releases selected per scan, independent of releaseConcurrency",
+		Formatter: func(v string) string {
+			value, err := strconv.Atoi(v)
+			if err != nil || value <= 0 {
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.lruMaxEvictionsPerScan must be positive, using default", mlog.String("configured", v))
+				return "64"
+			}
+			return v
+		},
+	}
+	p.AutoReleaseLRUMaxEvictions.Init(base.mgr)
 
 	p.HeartbeatAvailableInterval = ParamItem{
 		Key:          "queryCoord.heartbeatAvailableInterval",
@@ -6696,6 +6837,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	SegmentIndexSummariesEnabled        ParamItem `refreshable:"false"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
@@ -6829,6 +6971,20 @@ type dataCoordConfig struct {
 	ScalarIndexTaskSlotUsage             ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
+
+	// Two-dimensional task pricing (dataCoord.taskResource.*). CPU in cores,
+	// memory as a multiplier of the input size or an absolute size.
+	TaskResourceVectorIndexCPU           ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeCPU               ParamItem `refreshable:"true"`
+	TaskResourceClusteringCompactionCPU  ParamItem `refreshable:"true"`
+	TaskResourceDefaultCPU               ParamItem `refreshable:"true"`
+	TaskResourceIndexMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceStatsMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceL0CompactionMemoryFactor ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
+	TaskResourceImportMemoryFactor       ParamItem `refreshable:"true"`
+	TaskResourceMinTaskMemory            ParamItem `refreshable:"true"`
+	TaskResourceExternalRefreshMemory    ParamItem `refreshable:"true"`
 
 	EnableSortCompaction       ParamItem `refreshable:"true"`
 	TaskCheckInterval          ParamItem `refreshable:"true"`
@@ -7496,10 +7652,18 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
 
+	p.SegmentIndexSummariesEnabled = ParamItem{
+		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false", Forbidden: true,
+		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
+	}
+	p.SegmentIndexSummariesEnabled.Init(base.mgr)
+	summaryMode := p.SegmentIndexSummariesEnabled.GetAsBool()
+
 	p.WriteSegmentIndexToManifest = ParamItem{
 		Key:          "dataCoord.index.writeSegmentIndexToManifest",
 		Version:      "3.0.0",
 		DefaultValue: "true",
+		Forbidden:    summaryMode,
 		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
 New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
 The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
@@ -7525,6 +7689,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
 		Version:      "3.0.1",
 		DefaultValue: "false",
+		Forbidden:    summaryMode,
 		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
 Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
 Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
@@ -7582,6 +7747,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 
 	p.ManifestIndexRollbackEnabled = ParamItem{
 		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
+		Forbidden: summaryMode,
 		Doc: `Copy StorageV3 path-version-2 index files to index_v1 with object-storage server-side Copy, then atomically restore etcd records with path version 1 and remove their manifest entries. Source files remain retained for readers and snapshots. Local-storage layout migration is unsupported. This restart-scoped switch overrides forward backfill and creation of new manifest index tasks; already-created version-2 tasks still finish in manifests and are then eligible for rollback.
 Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
 		Export: true,
@@ -8783,6 +8949,105 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		},
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
+
+	p.TaskResourceVectorIndexCPU = ParamItem{
+		Key:          "dataCoord.taskResource.vectorIndexCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a vector index build task is expected to use; used by DataCoord to place tasks across DataNodes",
+		Export:       false,
+	}
+	p.TaskResourceVectorIndexCPU.Init(base.mgr)
+
+	p.TaskResourceAnalyzeCPU = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores an analyze task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeCPU.Init(base.mgr)
+
+	p.TaskResourceClusteringCompactionCPU = ParamItem{
+		Key:          "dataCoord.taskResource.clusteringCompactionCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a clustering compaction task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceClusteringCompactionCPU.Init(base.mgr)
+
+	p.TaskResourceDefaultCPU = ParamItem{
+		Key:          "dataCoord.taskResource.defaultCPU",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc:          "cpu cores every other task type (scalar index, stats, mix/l0/sort compaction, import, copy segment, external refresh) is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceDefaultCPU.Init(base.mgr)
+
+	p.TaskResourceIndexMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.indexMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an index build task = indexed field size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceIndexMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceStatsMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.statsMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of a stats task (text match, bm25, json key index) = size of the fields it indexes * this factor; of a sort compaction = segment size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceStatsMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceL0CompactionMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.l0CompactionMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an l0 compaction task = total delta log size of its input segments * this factor + the stats log size of the target segments the deletes are applied to",
+		Export:       false,
+	}
+	p.TaskResourceL0CompactionMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceAnalyzeMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an analyze task = size of the clustering-key field in its input segments * this factor",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceImportMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.importMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an import task = files * per-file read buffer * this factor; the factor covers the batch that is being serialized and uploaded while the next one is read",
+		Export:       false,
+	}
+	p.TaskResourceImportMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceMinTaskMemory = ParamItem{
+		Key:          "dataCoord.taskResource.minTaskMemory",
+		Version:      "3.0.1",
+		DefaultValue: "64m",
+		Doc:          "lower bound of the memory estimate of any task, so that no task is ever placed as if it were free",
+		Export:       false,
+	}
+	p.TaskResourceMinTaskMemory.Init(base.mgr)
+
+	p.TaskResourceExternalRefreshMemory = ParamItem{
+		Key:          "dataCoord.taskResource.externalRefreshMemory",
+		Version:      "3.0.1",
+		DefaultValue: "1g",
+		Doc:          "memory of a refresh external collection task; it does not scale with an input DataCoord can size, so it is a fixed budget",
+		Export:       false,
+	}
+	p.TaskResourceExternalRefreshMemory.Init(base.mgr)
 
 	p.EnableSortCompaction = ParamItem{
 		Key:          "dataCoord.sortCompaction.enable",

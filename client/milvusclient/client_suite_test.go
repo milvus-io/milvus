@@ -96,7 +96,7 @@ func (s *MockSuiteBase) setupConnect() {
 }
 
 func (s *MockSuiteBase) setupCache(collName string, schema *entity.Schema) {
-	s.client.collCache.collections.Insert(collName, &entity.Collection{
+	s.client.collCache.collections.Insert(newCollectionCacheKey(s.client.getCurrentDB(), collName), &entity.Collection{
 		Name:   collName,
 		Schema: schema,
 	})

@@ -96,6 +96,20 @@ Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
 The cache manager removes `.cache` files on rebuild and does not restore them
 across restarts. These files are not manifests or DataCoord GC objects.
 
+## New-cluster index summary mode
+
+`dataCoord.index.segmentIndexSummariesEnabled` selects an immutable mode at
+initial startup of an empty cluster. Completed vector/scalar index inventory
+lives in `SegmentInfo.index_summaries`; file lists remain in segment manifests
+and are read on demand. Active and pending-cleanup tasks retain catalog rows.
+Manifest publication updates the pointer and summary and retires the task in
+one catalog transaction. An artifact-free completion retains a summary without
+creating a manifest index entry. GC must consult the current manifest after an
+active-task lookup misses; absence from the task table does not prove orphanhood.
+Historical migration, rollback, incompatible snapshot restore and direct manifest
+version adoption are unsupported in this mode. See the
+[index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
+
 ## Local upgrade compatibility
 
 The official Docker Compose and embedded standalone launchers run Milvus as the
@@ -155,6 +169,14 @@ another storage.
 Root confinement still applies. Referenced snapshots retain source identity
 validation. Worker-side conversion to object keys does not define the restore
 fingerprint.
+
+Snapshot-source import without `external_spec` also accepts a bucket-relative
+metadata object key (`[prefix/]snapshots/<collection_id>/metadata/<snapshot_id>.json`)
+resolved against the active instance's configured bucket. Same-prefix
+self-contained bundles normalize origin-matching URIs to bare object keys during
+import preparation, while any remaining scheme-bearing internal reference is
+rejected by `ValidateSnapshotImportPaths`. Restore retains its URI-preserving
+behavior.
 
 - Configuration initialization requires an absolute local root and freezes it
   against runtime configuration updates.

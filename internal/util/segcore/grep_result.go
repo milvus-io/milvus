@@ -62,9 +62,10 @@ func newGrepScanResult(record arrow.Record, inputRows int, limit int64) (*native
 func validateGrepDetails(details *array.Binary) error {
 	for row := 0; row < details.Len(); row++ {
 		var lines []*struct {
-			Content *string  `json:"content"`
-			Starts  []*int64 `json:"starts"`
-			Ends    []*int64 `json:"ends"`
+			Type    string          `json:"type"`
+			Content *string         `json:"content"`
+			Starts  json.RawMessage `json:"starts"`
+			Ends    json.RawMessage `json:"ends"`
 		}
 		payload := details.Value(row)
 		if !utf8.Valid(payload) {
@@ -76,21 +77,46 @@ func validateGrepDetails(details *array.Binary) error {
 		if len(lines) == 0 {
 			return merr.WrapErrServiceInternalMsg("grep runner selected a row without matching lines")
 		}
+		hasMatch := false
 		for _, line := range lines {
-			if line == nil || line.Content == nil || line.Starts == nil || line.Ends == nil {
+			if line == nil || line.Content == nil {
 				return merr.WrapErrServiceInternalMsg("missing or null native grep detail value")
 			}
-			if len(line.Starts) != len(line.Ends) {
+			switch line.Type {
+			case "context":
+				if len(line.Starts) != 0 || len(line.Ends) != 0 {
+					return merr.WrapErrServiceInternalMsg("native grep context line must omit spans")
+				}
+				continue
+			case "match":
+				hasMatch = true
+			default:
+				return merr.WrapErrServiceInternalMsg("invalid native grep line type")
+			}
+			var starts, ends []*int64
+			if err := json.Unmarshal(line.Starts, &starts); err != nil {
+				return merr.WrapErrServiceInternalErr(err, "invalid native grep starts")
+			}
+			if err := json.Unmarshal(line.Ends, &ends); err != nil {
+				return merr.WrapErrServiceInternalErr(err, "invalid native grep ends")
+			}
+			if starts == nil || ends == nil {
+				return merr.WrapErrServiceInternalMsg("missing or null native grep spans")
+			}
+			if len(starts) != len(ends) {
 				return merr.WrapErrServiceInternalMsg("native grep span boundary counts differ")
 			}
-			for i, start := range line.Starts {
-				if start == nil || line.Ends[i] == nil {
+			for i, start := range starts {
+				if start == nil || ends[i] == nil {
 					return merr.WrapErrServiceInternalMsg("null native grep span")
 				}
-				if *start < 0 || *start > *line.Ends[i] {
+				if *start < 0 || *start > *ends[i] || *ends[i] > int64(len(*line.Content)) {
 					return merr.WrapErrServiceInternalMsg("invalid native grep span boundary")
 				}
 			}
+		}
+		if !hasMatch {
+			return merr.WrapErrServiceInternalMsg("grep runner selected a row without matching lines")
 		}
 	}
 	return nil

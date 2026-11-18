@@ -264,6 +264,14 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     retrieve_result.total_data_cnt_ = 0;
 
     auto active_count = segment->get_active_count(timestamp_);
+    if (retrieve_candidate_budget_ && active_count == 0) {
+        retrieve_result.has_more_result = false;
+        retrieve_result.element_level_ =
+            dynamic_cast<const plan::ElementFilterBitsNode*>(
+                node.plannodes_.get()) != nullptr;
+        retrieve_result_opt_ = std::move(retrieve_result);
+        return;
+    }
 
     // Get plan
     auto plan = plan::PlanFragment(node.plannodes_);
@@ -307,6 +315,10 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     RetrieveResult& tmp_retrieve_result,
     const segcore::SegmentInternalInterface* segment,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    // Preserve element mode even when execution produces no rows.
+    tmp_retrieve_result.element_level_ =
+        dynamic_cast<const plan::ElementFilterBitsNode*>(
+            node.plannodes_.get()) != nullptr;
     if (result == nullptr) {
         // Return empty field_data arrays with correct schema (0 rows, N columns)
         // to ensure result structure matches the expected output type.
@@ -322,6 +334,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 tmp_retrieve_result.field_data_[i] = std::move(data_array);
             }
         }
+        tmp_retrieve_result.has_more_result = false;
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }
@@ -342,7 +355,9 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             auto struct_element_offsets =
                 query_context->get_struct_element_offsets();
             auto [doc_offsets, element_indices, has_more] =
-                segment->find_first_n_element(node.limit_,
+                segment->find_first_n_element(retrieve_candidate_budget_
+                                                  ? segcore::Unlimited
+                                                  : node.limit_,
                                               view,
                                               struct_element_offsets.get(),
                                               node.query_iterator_cursor_);
@@ -353,40 +368,21 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
             auto limit = node.limit_;
             if (retrieve_candidate_budget_) {
-                // Bound both selection and reserve() by the scan cap, while
-                // leaving the original Query limit unchanged.
-                const auto candidates = view.size() - view.count();
-                auto reserved_rows = candidates;
+                // Candidate extraction stays complete; Grep applies its soft
+                // scan threshold after optional index filtering.
+                const auto reserved_rows = view.size() - view.count();
                 limit = segcore::Unlimited;
-                if (retrieve_candidate_max_rows_ > 0) {
-                    limit = retrieve_candidate_max_rows_;
-                    reserved_rows =
-                        std::min(candidates, static_cast<size_t>(limit));
-                }
                 if (reserved_rows >
                     static_cast<uint64_t>(*retrieve_candidate_budget_) /
                         sizeof(int64_t)) {
-                    ThrowInfo(
-                        InvalidParameter,
-                        "grep candidate offsets exceed the retrieve byte "
-                        "budget "
-                        "(limit={} bytes); add a more selective filter or "
-                        "configure function.grep.maxScanRows "
-                        "(a row cap may produce incomplete results)",
-                        *retrieve_candidate_budget_);
+                    ThrowInfo(InvalidParameter,
+                              "grep candidate offsets exceed the retrieve byte "
+                              "budget "
+                              "(limit={} bytes); add a more selective filter",
+                              *retrieve_candidate_budget_);
                 }
             }
             auto results_pair = segment->find_first_n(limit, view);
-            if (retrieve_candidate_budget_ &&
-                retrieve_candidate_max_rows_ > 0 && results_pair.second) {
-                LOG_WARN(
-                    "Candidate scan reached row cap; results may be "
-                    "incomplete: "
-                    "segmentID={}, maxRows={}, returnedRows={}",
-                    segment->get_segment_id(),
-                    retrieve_candidate_max_rows_,
-                    results_pair.first.size());
-            }
             tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
             tmp_retrieve_result.has_more_result = results_pair.second;
         }

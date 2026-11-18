@@ -1062,26 +1062,35 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		log.Info(ctx, "clear dropped segments done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	all := gc.Meta.SelectSegments(ctx)
+	// The scan keeps only the dropped segments and the outputs they were
+	// compacted into: it does not assemble every segment of the meta.
 	drops := make(map[int64]*meta.SegmentInfo, 0)
-	compactTo := make(map[int64]*meta.SegmentInfo)
+	compactToProtos := make(map[int64]*datapb.SegmentInfo)
+	children := make(map[int64][]int64)
 	channels := typeutil.NewSet[string]()
-	for _, segment := range all {
+	gc.Meta.Segments.RangeReused(func(segment *meta.SegmentInfo) bool {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
-			drops[segment.GetID()] = segment
+			drops[segment.GetID()] = segment.ShadowClone()
 			channels.Insert(funcutil.ToPhysicalChannel(segment.GetInsertChannel()))
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
 		for _, from := range segment.GetCompactionFrom() {
-			compactTo[from] = segment
+			compactToProtos[from] = segment.SegmentInfo
+			children[from] = append(children[from], segment.GetID())
+		}
+		return true
+	})
+	compactTo := make(map[int64]*meta.SegmentInfo, len(drops))
+	for id := range drops {
+		if to, ok := compactToProtos[id]; ok {
+			compactTo[id] = &meta.SegmentInfo{SegmentInfo: to}
 		}
 	}
-
 	// A Dropped parent can still be the published QueryView frontier. Keep
 	// its descendants too: intermediate lineage is needed to flatten a later
 	// sort/merge before replacing that frontier. Snapshot once per sweep.
-	protected := gc.dataViewCompactionProtection(all)
+	protected := gc.dataViewCompactionProtection(children)
 
 	droppedCompactTo := make(map[int64]*meta.SegmentInfo)
 	for id := range drops {
@@ -1183,18 +1192,13 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 // dataViewCompactionProtection retains both the published bases and the
 // intermediate metadata needed to relate current leaves to those bases. Once
 // the latest and all retained Views move past a base, its old ancestry is no
-// longer protected. This is O(segments + lineage edges), once per GC sweep.
-func (gc *GarbageCollector) dataViewCompactionProtection(segments []*meta.SegmentInfo) map[int64]struct{} {
+// longer protected. children maps a compaction parent to its outputs. This is
+// O(lineage edges), once per GC sweep.
+func (gc *GarbageCollector) dataViewCompactionProtection(children map[int64][]int64) map[int64]struct{} {
 	if gc.Meta.DataViewManager == nil {
 		return nil
 	}
 	protected := gc.Meta.DataViewManager.ReferencedSegments()
-	children := make(map[int64][]int64)
-	for _, segment := range segments {
-		for _, parent := range segment.GetCompactionFrom() {
-			children[parent] = append(children[parent], segment.GetID())
-		}
-	}
 	queue := make([]int64, 0, len(protected))
 	for id := range protected {
 		queue = append(queue, id)
@@ -1311,8 +1315,8 @@ const (
 	gcBlockedByManifest
 )
 
-func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, GcBlockReason) {
-	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
+func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, GcBlockReason) {
+	segIndexes := gc.getAllSegmentIndexSummariesForDroppedSegment(segmentID)
 	if snapshotMeta := gc.Option.SnapshotMeta; snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
 			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
@@ -1321,9 +1325,11 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 		}
 	}
 	indexFiles := make(map[string]struct{}, len(segIndexes))
-	for _, segIdx := range segIndexes {
-		for key := range gc.getRetainedIndexFilesOfIndex(segIdx) {
-			indexFiles[key] = struct{}{}
+	for _, summary := range segIndexes {
+		if record, ok := gc.Option.IndexMeta.GetIndexJob(summary.BuildID); ok {
+			for key := range gc.getRetainedIndexFilesOfIndex(record) {
+				indexFiles[key] = struct{}{}
+			}
 		}
 	}
 
@@ -1431,7 +1437,7 @@ func (gc *GarbageCollector) getManifestIndexFiles(ctx context.Context, io *packe
 // markSegmentIndexesDeleted persists every task's deletion marker before any
 // segment artifacts are removed. A failure leaves all files for the next GC
 // cycle; markers already persisted remain authoritative and are idempotent.
-func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndexSummary) error {
 	for _, segIdx := range segIndexes {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1445,16 +1451,16 @@ func (gc *GarbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIn
 	return nil
 }
 
-// getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
+// getAllSegmentIndexSummariesForDroppedSegment wraps indexMeta.GetAllSegmentIndexSummaries
 // with a defensive nil guard. Production initGarbageCollection always wires indexMeta, but
 // the guard is cheap and turns any unexpected nil into "no index records"
 // instead of a panic during a GC sweep — keeping a single misbuilt gc
 // instance from taking the whole datacoord down.
-func (gc *GarbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
+func (gc *GarbageCollector) getAllSegmentIndexSummariesForDroppedSegment(segmentID int64) []*model.SegmentIndexSummary {
 	if gc.Option.IndexMeta == nil {
 		return nil
 	}
-	return gc.Option.IndexMeta.GetAllSegmentIndexes(segmentID)
+	return gc.Option.IndexMeta.GetAllSegmentIndexSummaries(segmentID)
 }
 
 // v3SegmentGCPrefix accepts canonical and legacy namespaces beneath the root,
@@ -1564,7 +1570,7 @@ func (gc *GarbageCollector) RemoveDroppedSegmentFiles(ctx context.Context, clone
 	return nil
 }
 
-func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndexSummary) error {
 	if len(segIndexes) == 0 {
 		return nil
 	}

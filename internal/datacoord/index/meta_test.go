@@ -1294,8 +1294,8 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 	assert.Equal(t, int64(1), snapshot[segment2ID][indexID].IndexVersion)
 }
 
-func TestMeta_GetAllSegmentIndexes(t *testing.T) {
-	assert.Nil(t, (&IndexMeta{}).GetAllSegmentIndexes(meta.SegID))
+func TestMeta_GetAllSegmentIndexSummaries(t *testing.T) {
+	assert.Nil(t, (&IndexMeta{}).GetAllSegmentIndexSummaries(meta.SegID))
 
 	m := &IndexMeta{
 		SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -1322,12 +1322,13 @@ func TestMeta_GetAllSegmentIndexes(t *testing.T) {
 	m.SegmentIndexes.Insert(meta.SegID, segIdxes)
 
 	assert.Empty(t, m.GetSegmentIndexes(meta.CollID, meta.SegID))
-	segIndexes := m.GetAllSegmentIndexes(meta.SegID)
+	segIndexes := m.GetAllSegmentIndexSummaries(meta.SegID)
 	require.Len(t, segIndexes, 1)
 	assert.Equal(t, meta.BuildID, segIndexes[0].BuildID)
 	origin, ok := segIdxes.Get(meta.IndexID)
 	require.True(t, ok)
-	assert.False(t, origin == segIndexes[0])
+	segIndexes[0].IsDeleted = true
+	assert.False(t, origin.IsDeleted)
 }
 
 func TestMeta_GetFieldIDByIndexID(t *testing.T) {
@@ -2857,6 +2858,8 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 		}
 		return schema
 	}
+	deletedDiskIndex := newIndex(1, topVector.FieldID, "DISKANN")
+	deletedDiskIndex.IsDeleted = true
 
 	tests := []struct {
 		name    string
@@ -2885,6 +2888,12 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 			name:   "top-level vector without index",
 			schema: newSchema(false, topVector),
 			want:   false,
+		},
+		{
+			name:    "top-level vector with only a deleted DISKANN",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{deletedDiskIndex},
+			want:    false,
 		},
 		{
 			name:    "sparse vector is ignored",

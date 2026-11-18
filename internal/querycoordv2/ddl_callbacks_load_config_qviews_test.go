@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
@@ -151,6 +152,9 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	t.Helper()
 	paramtable.Init()
 	initStreamingSystem()
+	t.Cleanup(withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(10001),
+	}))
 
 	catalog := metastoremocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()
@@ -189,16 +193,16 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	m.HandleNodeUp(context.Background(), 1)
 
 	broker := meta.NewMockBroker(t)
-	usage := newCollectionUsageManager(runtime.loadConfigStore, broker, nil)
-	t.Cleanup(usage.close)
-	return &Server{
-		meta:            m,
-		metaView:        store,
-		idAllocator:     allocateID,
-		broker:          broker,
-		qviewsRuntime:   runtime,
-		collectionUsage: usage,
-	}, catalog, broker
+	s := &Server{
+		meta:          m,
+		metaView:      store,
+		idAllocator:   allocateID,
+		broker:        broker,
+		qviewsRuntime: runtime,
+	}
+	s.collectionUsage = newCollectionUsageManager(s)
+	t.Cleanup(s.collectionUsage.close)
+	return s, catalog, broker
 }
 
 func registerCaptureBroadcast(t *testing.T, capture func(message.BroadcastMutableMessage)) {

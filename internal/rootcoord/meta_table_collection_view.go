@@ -22,14 +22,14 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // collectionSchemaPB builds the schema RootCoord reports for coll, with
 // DbName set to dbName: the model's DBName may be out of sync with the
-// database resolved from DBID.
+// database resolved from DBID. The schema shares coll's field schemas
+// (see model.Collection.SchemaView), so callers must not modify them.
 func collectionSchemaPB(coll *model.Collection, dbName string) *schemapb.CollectionSchema {
-	schema := coll.ToCollectionSchemaPB()
+	schema := coll.SchemaView()
 	schema.DbName = dbName
 	return schema
 }
@@ -84,8 +84,7 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 		DroppingPartitions: dropping,
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
-		Properties:         funcutil.KeyValuePair2Map(coll.Properties),
-		PropertyPairs:      coll.Properties,
+		Properties:         coll.Properties,
 		DatabaseName:       dbName,
 		DatabaseID:         coll.DBID,
 		StartPositions:     coll.StartPositions,

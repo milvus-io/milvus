@@ -81,15 +81,19 @@ func TestCreateStorageConfigTalonStages(t *testing.T) {
 			require.NoError(t, params.Save("common.storage.talon.mode", tc.mode))
 			require.NoError(t, params.Save("common.storage.talon.enabledStages", tc.stages))
 			require.NoError(t, params.Save("common.storage.talon.enableForExternalTable", "true"))
+			require.NoError(t, params.Save("common.cloud.clusterId", "cluster-1"))
 			for _, storageType := range []string{"remote", "local"} {
 				require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
 				config := createStorageConfig()
 				assert.Equal(t, tc.want, config.GetTalonMode(), storageType)
 				assert.Equal(t, tc.mask, config.GetTalonEnabledStages(), storageType)
+				assert.Equal(t, params.CommonCfg.TalonNamespace(), config.GetTalonNamespace(), storageType)
 				assert.True(t, config.GetTalonEnableForExternalTable())
 				assert.Equal(t, tc.mode, params.CommonCfg.StorageTalonMode.GetValue())
-				assert.Equal(t, tc.want, packed.CreateStorageConfig().GetTalonMode())
-				assert.Equal(t, tc.mask, packed.CreateStorageConfig().GetTalonEnabledStages())
+				packedConfig := packed.CreateStorageConfig()
+				assert.Equal(t, tc.want, packedConfig.GetTalonMode())
+				assert.Equal(t, tc.mask, packedConfig.GetTalonEnabledStages())
+				assert.Equal(t, config.GetTalonNamespace(), packedConfig.GetTalonNamespace())
 			}
 		})
 	}

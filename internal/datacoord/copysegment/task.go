@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -355,6 +356,11 @@ func (t *Task) GetTaskState() taskcommon.State {
 	return taskcommon.FromCopySegmentState(t.GetState())
 }
 
+// GetTaskResource: copy tasks stream objects and hold little of them.
+func (t *Task) GetTaskResource() taskcommon.Resource {
+	return taskresource.Lightweight()
+}
+
 // GetTaskSlot returns the number of task slots this task consumes.
 //
 // Used for resource quota enforcement across different task types.
@@ -406,7 +412,7 @@ func (t *Task) GetTaskVersion() int64 {
 // - Snapshot data contains full binlog paths needed for copy
 // - The first task for a job reads it from storage to populate CopySegmentRequest
 // - Tasks in the same job share a cache to avoid redundant remote reads
-func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	if t.resumeCopyPublication() {
 		return
 	}
@@ -434,12 +440,11 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		mlog.Warn(ctx, "failed to persist copy cleanup plan", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal(), resource)
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-		version, _ := t.GetIndexStorePathVersion()
-		if (job.GetExternal() || metautil.IsSegmentRooted(version)) && errors.Is(err, merr.ErrServiceUnimplemented) {
+		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
 			t.markTaskAndJobFailed(merr.Wrap(err,
 				"datanode does not support the requested copy segment task").Error())
 		}
@@ -1359,8 +1364,13 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	}
 
 	// Sync vector/scalar indexes
-	if err := syncVectorScalarIndexes(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds); err != nil {
+	var summaries []*datapb.SegmentIndexSummary
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
 		return err
+	}
+	if summaryMode {
+		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summaries))
 	}
 
 	// Sync text indexes
@@ -1379,6 +1389,11 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	manifestUpdates, err = mt.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	if err != nil {
 		return failCopySegmentSync(ctx, task, copyMeta, err)
+	}
+	if summaryMode {
+		if published := mt.GetSegment(ctx, result.GetSegmentId()); published != nil {
+			indexMeta.AccountCopiedIndexes(published.SegmentInfo)
+		}
 	}
 	// An inspector may have skipped these records while import protection
 	// was set. Wake it again after the durable target becomes eligible.
@@ -1691,8 +1706,23 @@ func cloneOptionalBool(value *bool) *bool {
 func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
 ) error {
+	return syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, nil)
+}
+
+func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.CopySegmentResult,
+	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
+	summaries *[]*datapb.SegmentIndexSummary,
+) error {
 	if len(result.GetIndexInfos()) == 0 {
 		return nil
+	}
+	var seenIndexIDs map[int64]struct{}
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if summaryMode {
+		if summaries == nil {
+			return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
+		}
+		seenIndexIDs = make(map[int64]struct{}, len(result.GetIndexInfos()))
 	}
 
 	// Build indexName -> target indexID mapping from target collection's index definitions.
@@ -1755,6 +1785,29 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		hasArtifact := len(indexInfo.GetIndexFilePaths()) > 0
 		manifestResident := storageV3 && published && hasArtifact
 
+		if summaryMode {
+			if hasArtifact && !manifestResident {
+				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
+			}
+			if _, exists := seenIndexIDs[targetIndexID]; exists {
+				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
+			}
+			seenIndexIDs[targetIndexID] = struct{}{}
+			*summaries = append(*summaries, &datapb.SegmentIndexSummary{
+				IndexId:             targetIndexID,
+				FieldId:             indexInfo.GetFieldId(),
+				BuildId:             indexInfo.GetBuildId(),
+				HasArtifact:         hasArtifact,
+				IndexVersion:        indexInfo.GetVersion(),
+				SerializedSize:      uint64(indexInfo.GetIndexSize()),
+				MemSize:             metautil.CopiedIndexMemSize(indexInfo),
+				VectorEngineVersion: indexInfo.GetCurrentIndexVersion(),
+				ScalarEngineVersion: indexInfo.GetCurrentScalarIndexVersion(),
+				IndexType:           indexInfo.GetIndexType(),
+			})
+			continue
+		}
+
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
 			SegmentID:                 result.GetSegmentId(),
@@ -1766,7 +1819,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
-			IndexMemSize:              uint64(indexInfo.GetIndexSize()),
+			IndexMemSize:              metautil.CopiedIndexMemSize(indexInfo),
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),

@@ -250,8 +250,10 @@ class TestChaosApplyMultiReplicas:
         if connections.has_connection("default") is False:
             raise Exception("no connections")
 
-    def teardown(self):
-        for chaos_config in self.chaos_configs:
+    def teardown_method(self):
+        for chaos_config in getattr(self, "chaos_configs", []):
+            if not chaos_config:
+                continue
             chaos_res = CusResource(
                 kind=chaos_config["kind"],
                 group=constants.CHAOS_GROUP,

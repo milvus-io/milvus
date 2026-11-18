@@ -6,59 +6,27 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/client/v3/entity"
-	"github.com/milvus-io/milvus/client/v3/internal/conc"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 	"github.com/milvus-io/milvus/client/v3/internal/retry"
-	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 )
 
-// CollectionCache stores the cached collection schema information.
-type CollectionCache struct {
-	sf          conc.Singleflight[*entity.Collection]
-	collections *typeutil.ConcurrentMap[string, *entity.Collection]
-	fetcher     func(context.Context, string) (*entity.Collection, error)
+// guarantee timestamp constants shared with the pymilvus client,
+// see pymilvus/client/constants.py (EVENTUALLY_TS / BOUNDED_TS).
+const (
+	// eventuallyTs is the fallback guarantee timestamp when no cached
+	// mutation timestamp is available for the collection.
+	eventuallyTs = uint64(1)
+	// boundedTs is the guarantee timestamp used by the bounded consistency level.
+	boundedTs = uint64(2)
+)
+
+func (c *Client) getCollectionInDB(ctx context.Context, dbName, collName string) (*entity.Collection, error) {
+	return c.collCache.GetCollection(ctx, newCollectionCacheKey(dbName, collName), false)
 }
 
-func (c *CollectionCache) GetCollection(ctx context.Context, collName string) (*entity.Collection, error) {
-	coll, ok := c.collections.Get(collName)
-	if ok {
-		return coll, nil
-	}
-
-	coll, err, _ := c.sf.Do(collName, func() (*entity.Collection, error) {
-		coll, err := c.fetcher(ctx, collName)
-		if err != nil {
-			return nil, err
-		}
-		c.collections.Insert(collName, coll)
-		return coll, nil
-	})
-	return coll, err
-}
-
-// Evict removes the collection cache related to the provided collection name.
-func (c *CollectionCache) Evict(collName string) {
-	c.collections.Remove(collName)
-}
-
-// Reset clears all cached info, used when client switching env.
-func (c *CollectionCache) Reset() {
-	c.collections = typeutil.NewConcurrentMap[string, *entity.Collection]()
-}
-
-func NewCollectionCache(fetcher func(context.Context, string) (*entity.Collection, error)) *CollectionCache {
-	return &CollectionCache{
-		collections: typeutil.NewConcurrentMap[string, *entity.Collection](),
-		fetcher:     fetcher,
-	}
-}
-
-func (c *Client) getCollection(ctx context.Context, collName string) (*entity.Collection, error) {
-	return c.collCache.GetCollection(ctx, collName)
-}
-
-func (c *Client) retryIfSchemaError(ctx context.Context, collName string, work func(ctx context.Context) (uint64, error)) error {
+func (c *Client) retryIfSchemaError(ctx context.Context, dbName, collName string, work func(ctx context.Context) (uint64, error)) error {
 	var lastTs uint64 = math.MaxUint64
 	return retry.Handle(ctx, func() (bool, error) {
 		ts, err := work(ctx)
@@ -68,7 +36,7 @@ func (c *Client) retryIfSchemaError(ctx context.Context, collName string, work f
 				sameTs := ts == lastTs
 				lastTs = ts
 				if !sameTs {
-					c.collCache.Evict(collName)
+					c.collCache.Evict(newCollectionCacheKey(dbName, collName))
 				}
 				// retry if not same ts
 				return !sameTs, err
@@ -77,4 +45,47 @@ func (c *Client) retryIfSchemaError(ctx context.Context, collName string, work f
 		}
 		return false, nil
 	})
+}
+
+// guaranteeTimestamp computes the guarantee_timestamp for a search/query request
+// according to the requested consistency level, mirroring pymilvus's
+// `construct_guarantee_ts`:
+//
+//   - default consistency: last write ts of the collection, or eventually (1)
+//   - Strong: 0 (server assigns the newest ts)
+//   - Session: last write ts of the collection, or eventually (1)
+//   - Bounded: 2
+//   - Eventually: 1
+//   - Customized: 1 (the legacy option interfaces do not expose a way to set a
+//     caller-provided timestamp; pymilvus falls back to eventually (1) here too
+//     when no timestamp is supplied)
+func (c *Client) guaranteeTimestamp(key collectionCacheKey, consistencyLevel commonpb.ConsistencyLevel, useDefault bool) uint64 {
+	ts := c.collCache.GetWriteTs(key)
+	if useDefault {
+		return firstNonZero(ts, eventuallyTs)
+	}
+	switch entity.ConsistencyLevel(consistencyLevel) {
+	case entity.ClStrong:
+		return 0
+	case entity.ClSession:
+		return firstNonZero(ts, eventuallyTs)
+	case entity.ClBounded:
+		return boundedTs
+	case entity.ClEventually, entity.ClCustomized:
+		// pymilvus does kwargs.setdefault(GUARANTEE_TIMESTAMP, EVENTUALLY_TS):
+		// without a public way to supply a caller timestamp this falls back to
+		// eventually (1)
+		return eventuallyTs
+	default:
+		return 0
+	}
+}
+
+func firstNonZero(vals ...uint64) uint64 {
+	for _, v := range vals {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }

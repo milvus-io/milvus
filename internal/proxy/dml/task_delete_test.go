@@ -827,6 +827,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
 		dr := DeleteRunner{
 			schema:       schema,
+			plan:         plan,
 			collectionID: collectionID,
 			lb:           shardclient.NewMockLBPolicy(t),
 			req: &milvuspb.DeleteRequest{
@@ -834,7 +835,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 				DbName:         dbName,
 			},
 		}
-		err = dr.complexDelete(ctx, plan)
+		err = dr.complexDelete(ctx)
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 		require.NotEmpty(t, plan.GetOutputFieldIds(),
 			"output fields must be finalized before the one-time marshal")

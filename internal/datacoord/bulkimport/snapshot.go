@@ -193,10 +193,11 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
-	if bucket == "" {
-		return nil, nil, merr.WrapErrImportFailedMsg("snapshot-source import requires a complete metadata URI")
-	}
-	if !importutilv2.HasExternalSource(options) {
+	if importutilv2.HasExternalSource(options) {
+		if bucket == "" {
+			return nil, nil, merr.WrapErrImportFailedMsg("snapshot-source import with external_spec requires a complete metadata URI")
+		}
+	} else {
 		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), uri); err != nil {
 			return nil, nil, err
 		}
@@ -214,10 +215,13 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := storage.RebaseBareImportSelfContainedSnapshot(uri, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+		return nil, nil, err
+	}
 	if err := storage.ValidateSnapshotMetadataLocation(uri, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, err
 	}
-	if err := storage.ValidateExternalSnapshotPaths(uri, snapshot, nil); err != nil {
+	if err := storage.ValidateSnapshotImportPaths(uri, snapshot, nil); err != nil {
 		return nil, nil, err
 	}
 	options, err = prepareSnapshotImportOptions(schema, snapshot.Collection.GetSchema(), options)
@@ -275,10 +279,11 @@ func expandSnapshotImportFiles(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if bucket == "" {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import requires a complete metadata URI; bare object keys are not supported")
-	}
-	if !importutilv2.HasExternalSource(options) {
+	if importutilv2.HasExternalSource(options) {
+		if bucket == "" {
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import with external_spec requires a complete metadata URI; bare object keys are not supported")
+		}
+	} else {
 		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), metadataPath); err != nil {
 			return nil, nil, nil, err
 		}
@@ -297,6 +302,9 @@ func expandSnapshotImportFiles(
 	}
 	if snapshot == nil {
 		return nil, nil, nil, merr.WrapErrImportSysFailed("snapshot reader returned no data")
+	}
+	if err := storage.RebaseBareImportSelfContainedSnapshot(metadataPath, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+		return nil, nil, nil, err
 	}
 	if err := storage.ValidateSnapshotMetadataLocation(metadataPath, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, nil, err
@@ -434,7 +442,7 @@ func expandSnapshotImportFiles(
 		}
 		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
 	}
-	if err := storage.ValidateExternalSnapshotPaths(metadataPath, snapshot, refs); err != nil {
+	if err := storage.ValidateSnapshotImportPaths(metadataPath, snapshot, refs); err != nil {
 		return nil, nil, nil, err
 	}
 	needsSourceContext := hasV2 || len(applicable) != 0
@@ -631,7 +639,7 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 			if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot L0", objectPath, ""); err != nil {
 				return nil, err
 			}
-			if err := storage.ValidateExternalSnapshotPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
+			if err := storage.ValidateSnapshotImportPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
 				Path: objectPath, NormalizedPath: storage.NormalizeSnapshotObjectPath(objectPath), Type: storage.SnapshotFileTypeDeltaBinlog,
 			}}); err != nil {
 				return nil, err

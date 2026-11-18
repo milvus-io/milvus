@@ -16,10 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// toMilvusError is the collection-level client boundary, after all internal
-// retries. Restore structured business errors before interpreting protocol codes;
-// an UNKNOWN ViewError can still carry a precise business error such as 2042.
-func toMilvusError(err error) (result error) {
+// ToMilvusError converts terminal errors after retry decisions, including stream
+// receive errors that arrive after the client returns. Restore structured business
+// errors before protocol codes; an UNKNOWN ViewError can carry a precise code.
+func ToMilvusError(err error) (result error) {
 	if err == nil {
 		return nil
 	}
@@ -132,9 +132,11 @@ func streamingMilvusError(code streamingpb.StreamingCode, cause string) error {
 func formatRPCContext(err error, info *viewpb.RPCRequestContext) error {
 	var operation string
 	switch info.Method {
-	case viewpb.ViewQueryService_SearchOnView_FullMethodName:
+	case viewpb.ViewQueryService_SearchOnView_FullMethodName,
+		viewpb.ViewQueryService_SearchOnViewStream_FullMethodName:
 		operation = "search"
-	case viewpb.ViewQueryService_QueryOnView_FullMethodName:
+	case viewpb.ViewQueryService_QueryOnView_FullMethodName,
+		viewpb.ViewQueryService_QueryOnViewStream_FullMethodName:
 		operation = "query"
 	case viewpb.ViewQueryService_StatisticsOnView_FullMethodName:
 		operation = "get statistics"

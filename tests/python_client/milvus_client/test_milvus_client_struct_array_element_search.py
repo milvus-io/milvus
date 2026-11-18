@@ -5850,7 +5850,8 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             field_name="structA[embedding]",
             index_type=index_type,
             metric_type=metric_type,
-            params=INDEX_PARAMS if index_type == "HNSW" else {},
+            # Range boundaries and returned distances are checked against the original vectors.
+            params={**INDEX_PARAMS, "refine_quant_type": "NONE"} if index_type == "HNSW" else {},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -111,6 +112,13 @@ func AsViewError(err error) *ViewError {
 	if errors.As(err, &clientStatus) {
 		if viewErr := clientStatus.TryIntoViewError(); viewErr != nil {
 			return viewErr
+		}
+	}
+	if rpcStatus, ok := status.FromError(err); ok {
+		for _, detail := range rpcStatus.Details() {
+			if detail, ok := detail.(*viewpb.ViewError); ok {
+				return New(detail.Code, detail.Cause)
+			}
 		}
 	}
 

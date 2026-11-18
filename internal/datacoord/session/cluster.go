@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -40,6 +39,13 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
+	// Two-dimensional report. TotalMemory == 0 means the worker predates it
+	// and must be placed on AvailableSlots alone.
+	TotalCPU        int64
+	AvailableCPU    int64
+	TotalMemory     int64
+	AvailableMemory int64
+	Idle            bool
 }
 
 // Cluster defines the interface for tasks
@@ -48,16 +54,16 @@ type Cluster interface {
 	QuerySlot() map[int64]*WorkerSlots
 
 	// CreateCompaction creates a new compaction task on the specified node
-	CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error
+	CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64, resource taskcommon.Resource) error
 	// QueryCompaction queries the status of a compaction task
 	QueryCompaction(nodeID int64, in *datapb.CompactionStateRequest) (*datapb.CompactionPlanResult, error)
 	// DropCompaction drops a compaction task
 	DropCompaction(nodeID int64, planID int64) error
 
 	// CreatePreImport creates a pre-import task
-	CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error
+	CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error
 	// CreateImport creates an import task
-	CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error
+	CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64, resource taskcommon.Resource) error
 	// QueryPreImport queries the status of a pre-import task
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
 	// QueryImport queries the status of an import task
@@ -66,55 +72,55 @@ type Cluster interface {
 	DropImport(nodeID int64, taskID int64) error
 
 	// CreatePreImportV3 creates an Import V3 count-only pre-import task
-	CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error
+	CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error
 	// QueryPreImportV3 queries the status of an Import V3 count-only pre-import task
 	QueryPreImportV3(nodeID int64, in *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error)
 	// DropPreImportV3 drops an Import V3 count-only pre-import task
 	DropPreImportV3(nodeID int64, taskID int64) error
 
 	// CreateReshard creates a reshard task
-	CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error
+	CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64, resource taskcommon.Resource) error
 	// QueryReshard queries the status of a reshard task
 	QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error)
 	// DropReshard drops a reshard task
 	DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error
 	// CreateImportV3 creates an import v3 task
-	CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error
+	CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64, resource taskcommon.Resource) error
 	// QueryImportV3 queries the status of an import v3 task
 	QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error)
 	// DropImportV3 drops an import v3 task
 	DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error
 
 	// CreateIndex creates an index building task
-	CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
+	CreateIndex(nodeID int64, in *workerpb.CreateJobRequest, resource taskcommon.Resource) error
 	// QueryIndex queries the status of index building tasks
 	QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.IndexJobResults, error)
 	// DropIndex drops an index building task
 	DropIndex(nodeID int64, taskID int64) error
 
 	// CreateStats creates a statistics collection task
-	CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) error
+	CreateStats(nodeID int64, in *workerpb.CreateStatsRequest, resource taskcommon.Resource) error
 	// QueryStats queries the status of statistics collection tasks
 	QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.StatsResults, error)
 	// DropStats drops a statistics collection task
 	DropStats(nodeID int64, taskID int64) error
 
 	// CreateAnalyze creates an analysis task
-	CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
+	CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest, resource taskcommon.Resource) error
 	// QueryAnalyze queries the status of analysis tasks
 	QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.AnalyzeResults, error)
 	// DropAnalyze drops an analysis task
 	DropAnalyze(nodeID int64, taskID int64) error
 
 	// CreateRefreshExternalCollectionTask dispatches a refresh-external-collection task to the worker
-	CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error
+	CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource) error
 	// QueryRefreshExternalCollectionTask queries the status of a refresh-external-collection task
 	QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error)
 	// DropRefreshExternalCollectionTask drops a refresh-external-collection task
 	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
-	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool, resource taskcommon.Resource) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
@@ -264,8 +270,13 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			mu.Lock()
 			defer mu.Unlock()
 			availableNodeSlots[nodeID] = &WorkerSlots{
-				NodeID:         nodeID,
-				AvailableSlots: resp.GetAvailableSlots(),
+				NodeID:          nodeID,
+				AvailableSlots:  resp.GetAvailableSlots(),
+				TotalCPU:        resp.GetTotalCpu(),
+				AvailableCPU:    resp.GetAvailableCpu(),
+				TotalMemory:     resp.GetTotalMemory(),
+				AvailableMemory: resp.GetAvailableMemory(),
+				Idle:            resp.GetIdle(),
 			}
 		}()
 	}
@@ -274,12 +285,13 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 	return availableNodeSlots
 }
 
-func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error {
+func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetPlanID())
 	properties.AppendType(taskcommon.Compaction)
 	properties.AppendTaskSlot(in.GetSlotUsage())
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
 }
@@ -353,22 +365,24 @@ func (c *cluster) DropCompaction(nodeID int64, planID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
+func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImport)
 	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
-func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
+func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Import)
 	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
@@ -420,12 +434,13 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 	}
 }
 
-func (c *cluster) CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
+func (c *cluster) CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImportV3)
 	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
@@ -526,12 +541,13 @@ func (c *cluster) DropImport(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error {
+func (c *cluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskId())
 	properties.AppendType(taskcommon.Reshard)
 	properties.AppendTaskSlot(in.GetSlot())
+	properties.AppendTaskResource(resource)
 	properties.AppendTaskVersion(in.GetRunId())
 	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
@@ -594,12 +610,13 @@ func (c *cluster) DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) e
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error {
+func (c *cluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskId())
 	properties.AppendType(taskcommon.ImportV3)
 	properties.AppendTaskSlot(in.GetSlot())
+	properties.AppendTaskResource(resource)
 	properties.AppendTaskVersion(in.GetRunId())
 	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
@@ -662,29 +679,13 @@ func (c *cluster) DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request)
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error {
-	if metautil.IsSegmentRooted(in.GetIndexStorePathVersion()) {
-		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		cli, err := c.nm.GetClient(nodeID)
-		if err != nil {
-			return err
-		}
-		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
-		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
-			return err
-		}
-		if !caps.GetSegmentRootedIndexes() {
-			return merr.Wrapf(merr.ErrServiceUnimplemented,
-				"datanode %d does not support segment-rooted index paths; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
-		}
-	}
+func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetBuildID())
 	properties.AppendType(taskcommon.Index)
 	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendTaskResource(resource)
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetIndexVersion())
 	c.appendCollection(properties, in.GetCollectionID())
@@ -755,13 +756,14 @@ func (c *cluster) DropIndex(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) error {
+func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Stats)
 	properties.AppendSubType(in.GetSubJobType().String())
 	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendTaskResource(resource)
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetTaskVersion())
 	c.appendCollection(properties, in.GetCollectionID())
@@ -832,12 +834,13 @@ func (c *cluster) DropStats(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error {
+func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendTaskResource(resource)
 	properties.AppendTaskVersion(in.GetVersion())
 	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
@@ -906,7 +909,7 @@ func (c *cluster) DropAnalyze(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
+func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource) error {
 	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -922,6 +925,7 @@ func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.
 	properties.AppendTaskID(req.GetTaskID())
 	properties.AppendType(taskcommon.RefreshExternalCollection)
 	properties.AppendTaskSlot(1)
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, req.GetCollectionID())
 
 	payload, err := proto.Marshal(req)
@@ -959,12 +963,27 @@ func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64)
 		return nil, err
 	}
 
-	// Unmarshal the response payload
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+	if state != taskcommon.Finished {
+		// Only a finished task needs segment results from the payload.
+		return &datapb.RefreshExternalCollectionTaskResponse{Status: resp.GetStatus(), State: state, FailReason: reason}, nil
+	}
+
 	result := &datapb.RefreshExternalCollectionTaskResponse{}
 	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
 		return nil, err
 	}
-
+	// An empty payload decodes to None. Only a finished worker result can
+	// supply the segment changes that DataCoord will publish.
+	if result.GetState() != taskcommon.Finished {
+		return nil, merr.WrapErrServiceInternalMsg("finished refresh task %d has result payload in state %s", taskID, result.GetState())
+	}
+	result.FailReason = reason
 	return result, nil
 }
 
@@ -976,7 +995,7 @@ func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) 
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error {
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool, resource taskcommon.Resource) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
@@ -986,14 +1005,11 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	}
 	properties.AppendType(taskType)
 	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendTaskResource(resource)
 	c.appendCollection(properties, collectionID)
 	// Query the selected worker, rather than infer capability from a version
 	// string. Unknown workers retain the original wire representation.
-	segmentRooted := false
-	for _, target := range in.GetTargets() {
-		segmentRooted = segmentRooted || metautil.IsSegmentRooted(target.GetIndexStorePathVersion())
-	}
-	if len(in.GetTargetIndexes()) > 0 || segmentRooted {
+	if len(in.GetTargetIndexes()) > 0 {
 		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -1004,10 +1020,6 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
 		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
 			return err
-		}
-		if segmentRooted && !caps.GetSegmentRootedIndexes() {
-			return merr.Wrapf(merr.ErrServiceUnimplemented,
-				"datanode %d does not support segment-rooted index copy destinations; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
 		}
 		if !caps.GetCopySegmentSharedIndexes() {
 			in = proto.Clone(in).(*datapb.CopySegmentRequest)

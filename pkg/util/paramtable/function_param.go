@@ -143,7 +143,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "0",
 		Export:       true,
-		Doc:          "Maximum candidate offsets returned per segment for Grep after filter and MVCC. 0 disables the row cap; invalid or negative configuration falls back to 0. A positive cap truncates candidate selection and logs a warning when more candidates may remain; Grep results may be incomplete. Changes apply to newly enabled candidate plans.",
+		Doc:          "Soft threshold for text rows scanned by Grep per segment. 0 disables it; invalid or negative configuration falls back to 0. Checked between batches, so scans may exceed the threshold. NGRAM-rejected rows and NULLs do not count; Probe scans do. Candidate offsets remain complete. Stopping with unread candidates may produce incomplete results. Changes apply to newly prepared Grep operators.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed < 0 {

@@ -250,11 +250,11 @@ func NewRetrievePlan(col *CCollection,
 }
 
 // EnableCandidateMode prepares a candidate read before segment fan-out.
-// maxRows is a non-negative candidate row cap; zero disables the cap.
+// Candidate offsets remain complete; Grep limits text scanning separately.
 // The caller supplies the execution budget. The Query limit and projection
 // remain unchanged, including for subsequent explicit reads by offsets.
-func (plan *RetrievePlan) EnableCandidateMode(maxRows int64) error {
-	status := C.SetRetrievePlanMode(plan.cRetrievePlan, C.RetrieveModeCandidates, C.int64_t(maxRows))
+func (plan *RetrievePlan) EnableCandidateMode() error {
+	status := C.SetRetrievePlanMode(plan.cRetrievePlan, C.RetrieveModeCandidates)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return merr.Wrap(err, "enable candidate retrieve mode")
 	}

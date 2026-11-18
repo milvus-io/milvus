@@ -35,8 +35,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -312,9 +315,26 @@ func TestQueryScanMergedFrameOwnsComputedRows(t *testing.T) {
 		)}))
 		require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{values.NewArray()}))
 		values.Release()
+		lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+		for row := 0; row < 2; row++ {
+			lists.Append(true)
+			lists.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{int32(i), int32(row + 3)}, nil)
+		}
+		require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{lists.NewArray()}))
+		lists.Release()
 		frames = append(frames, builder.Build())
 		builder.Release()
 	}
+	// Two selected elements fill the worker quota with one document.
+	// The complete list and its computed output stay aligned.
+	capped, err := mergeQueryScanResults(frames, 2, reduce.IReduceNoOrder)
+	require.NoError(t, err)
+	cappedResult, err := chain.ToRetrieveResults(capped.Frame)
+	require.NoError(t, err)
+	capped.Frame.Release()
+	require.Equal(t, []int64{1}, cappedResult.Ids.GetIntId().Data)
+	require.Len(t, cappedResult.ElementIndices, 1)
+	require.Equal(t, []int32{0, 3}, cappedResult.ElementIndices[0].Indices)
 	columnOrders := make([][]string, len(frames))
 	for i, frame := range frames {
 		columnOrders[i] = append([]string(nil), frame.ColumnNames()...)
@@ -331,6 +351,11 @@ func TestQueryScanMergedFrameOwnsComputedRows(t *testing.T) {
 	result, err := chain.ToRetrieveResults(merged.Frame)
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2, 3}, result.Ids.GetIntId().Data)
+	require.True(t, result.ElementLevel)
+	require.Len(t, result.ElementIndices, 3)
+	require.Equal(t, []int32{0, 3}, result.ElementIndices[0].Indices)
+	require.Equal(t, []int32{1, 3}, result.ElementIndices[1].Indices)
+	require.Equal(t, []int32{1, 4}, result.ElementIndices[2].Indices)
 	require.Len(t, result.FieldsData, 1)
 	require.Equal(t, []int64{1, 2, 2}, result.FieldsData[0].GetScalars().GetLongData().Data)
 	require.Equal(t, schemapb.DataType_JSON, result.ComputedResults[0].Type)
@@ -349,18 +374,20 @@ func TestQueryScanEmptyFramePreservesColumns(t *testing.T) {
 			computed := arrow.NewSchema([]arrow.Field{{Name: "matches", Type: arrow.BinaryTypes.Binary, Metadata: arrow.NewMetadata(
 				[]string{chain.ArrowDataTypeMetadataKey}, []string{fmt.Sprint(int(schemapb.DataType_JSON))},
 			)}}, nil)
-			frame, err := emptyQueryFrame(schema, []*schemapb.FieldSchema{pk, vector}, computed)
+			frame, err := emptyQueryFrame(schema, []*schemapb.FieldSchema{pk, vector}, computed, true)
 			require.NoError(t, err)
 			defer frame.Release()
 			require.Zero(t, frame.NumRows())
 			require.False(t, frame.Schema().Field(frame.Schema().FieldIndices("matches")[0]).Nullable)
-			require.ElementsMatch(t, []string{"$id", "$timestamp", "pk", "vector", "matches"}, frame.ColumnNames())
+			require.ElementsMatch(t, []string{"$id", "$timestamp", "pk", "vector", "matches", types.QueryElementIndicesFieldName}, frame.ColumnNames())
 			for _, name := range frame.ColumnNames() {
 				require.NotEqual(t, arrow.NULL, frame.Column(name).DataType().ID())
 				require.Empty(t, frame.Column(name).Chunks())
 			}
 			result, err := chain.ToRetrieveResults(frame)
 			require.NoError(t, err)
+			require.True(t, result.ElementLevel)
+			require.Empty(t, result.ElementIndices)
 			if pkType == schemapb.DataType_Int64 {
 				require.NotNil(t, result.Ids.GetIntId())
 			} else {
@@ -471,6 +498,40 @@ func TestQueryScanOutputEstimateBeforeMaterialization(t *testing.T) {
 	t.Run("computed output alone exceeds budget", func(t *testing.T) {
 		check(t, selected, computedSize-1, -1)
 	})
+	t.Run("element quota avoids materializing excess document payloads", func(t *testing.T) {
+		var frames []*chain.DataFrame
+		for i, payload := range []string{"[]", strings.Repeat("x", 1024), strings.Repeat("y", 1024)} {
+			record := scanIdentityRecord(pool, []int64{int64(i)}, []int64{int64(i + 1)}, []int64{1}, false)
+			base := scanFrameFromRecord(t, record)
+			record.Release()
+			builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{1})
+			for _, name := range base.ColumnNames() {
+				require.NoError(t, builder.AddColumnFrom(base, name))
+			}
+			base.Release()
+			values := array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary)
+			values.Append([]byte(payload))
+			require.NoError(t, builder.SetComputedField(frame.Schema().Field(frame.Schema().FieldIndices("matches")[0])))
+			require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{values.NewArray()}))
+			values.Release()
+			base = builder.Build()
+			builder.Release()
+			elements := withQueryScanElements(t, pool, base, [][]int32{{0, 1}})
+			base.Release()
+			defer elements.Release()
+			frames = append(frames, elements)
+		}
+		capped, err := mergeQueryScanResults(frames, 2, reduce.IReduceNoOrder)
+		require.NoError(t, err)
+		defer capped.Frame.Release()
+		require.Equal(t, []OffsetSelection{{SegmentIndex: 0, Offset: 0}}, capped.Selections)
+		size := int64(capped.Frame.Column("matches").Chunk(0).Data().SizeInBytes())
+		check(t, capped, size+123, 123)
+		uncapped, err := mergeQueryScanResults(frames, -1, reduce.IReduceNoOrder)
+		require.NoError(t, err)
+		defer uncapped.Frame.Release()
+		check(t, uncapped, size+123, -1)
+	})
 	t.Run("numeric computed output", func(t *testing.T) {
 		record := scanIdentityRecord(pool, []int64{0, 1}, []int64{1, 2}, []int64{1, 1}, false)
 		base := scanFrameFromRecord(t, record)
@@ -501,4 +562,243 @@ func TestQueryScanOutputEstimateBeforeMaterialization(t *testing.T) {
 		result := &queryScanMergeResult{Frame: plain, Selections: []OffsetSelection{{Offset: 0}, {Offset: 1}}}
 		check(t, result, 100, 100)
 	})
+}
+
+// A per-segment element quota cannot replace the document cap without a refill
+// contract: another segment can replace a selected version with fewer elements.
+func TestQueryScanElementLimitAfterVersionReplacement(t *testing.T) {
+	for _, truncateOldSegment := range []bool{false, true} {
+		name := "complete candidates fill page"
+		if truncateOldSegment {
+			name = "element cap without refill underfills page"
+		}
+		t.Run(name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer pool.AssertSize(t, 0)
+			makeFrame := func(offsets, pks, timestamps []int64, elements [][]int32, details []int64) *chain.DataFrame {
+				record := scanIdentityRecord(pool, offsets, pks, timestamps, false)
+				base := scanFrameFromRecord(t, record)
+				record.Release()
+				defer base.Release()
+				builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{int64(len(pks))})
+				defer builder.Release()
+				for _, name := range base.ColumnNames() {
+					require.NoError(t, builder.AddColumnFrom(base, name))
+				}
+				lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+				defer lists.Release()
+				for _, indices := range elements {
+					lists.Append(true)
+					lists.ValueBuilder().(*array.Int32Builder).AppendValues(indices, nil)
+				}
+				require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{lists.NewArray()}))
+				values := array.NewInt64Builder(pool)
+				defer values.Release()
+				values.AppendValues(details, nil)
+				require.NoError(t, builder.SetComputedField(arrow.Field{Name: "matches", Type: arrow.PrimitiveTypes.Int64}))
+				require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{values.NewArray()}))
+				return builder.Build()
+			}
+			offsets, pks, timestamps := []int64{10, 20}, []int64{1, 2}, []int64{10, 10}
+			elements, details := [][]int32{{0, 1, 2, 3}, {1, 3, 5}}, []int64{100, 200}
+			if truncateOldSegment {
+				// Simulate stopping Grep after PK 1 alone contributes four elements.
+				offsets, pks, timestamps = offsets[:1], pks[:1], timestamps[:1]
+				elements, details = elements[:1], details[:1]
+			}
+			old := makeFrame(offsets, pks, timestamps, elements, details)
+			newer := makeFrame([]int64{30}, []int64{1}, []int64{20}, [][]int32{{7}}, []int64{101})
+			defer old.Release()
+			defer newer.Release()
+			merged, err := mergeQueryScanResults([]*chain.DataFrame{old, newer}, 4, reduce.IReduceNoOrder)
+			require.NoError(t, err)
+			defer merged.Frame.Release()
+			exported, err := chain.ToRetrieveResults(merged.Frame)
+			require.NoError(t, err)
+			reply := &internalpb.RetrieveResults{
+				Ids: exported.Ids, FieldsData: exported.FieldsData,
+				ComputedResults: exported.ComputedResults, ElementLevel: exported.ElementLevel,
+				ElementIndices: convertSegcoreElementIndicesToInternal(exported.ElementIndices),
+			}
+			out, err := queryutil.NewSortAndCheckPKPageOperator(reduce.IReduceNoOrder, nil, 4, 0).Run(context.Background(), nil, []*internalpb.RetrieveResults{reply})
+			require.NoError(t, err)
+			page := out[0].(*internalpb.RetrieveResults)
+			require.True(t, page.ElementLevel)
+			require.Equal(t, []int32{7}, page.ElementIndices[0].Indices)
+			actualDetails := page.ComputedResults[0].GetScalars().GetLongData().Data
+			if truncateOldSegment {
+				require.Equal(t, []int64{1}, page.Ids.GetIntId().Data)
+				require.Equal(t, []int64{101}, actualDetails)
+			} else {
+				require.Equal(t, []int64{1, 2}, page.Ids.GetIntId().Data)
+				require.Equal(t, []int32{1, 3, 5}, page.ElementIndices[1].Indices)
+				require.Equal(t, []int64{101, 200}, actualDetails)
+				require.Equal(t, 4, len(page.ElementIndices[0].Indices)+len(page.ElementIndices[1].Indices))
+				require.Equal(t, []OffsetSelection{{SegmentIndex: 1, Offset: 30}, {SegmentIndex: 0, Offset: 20}}, merged.Selections)
+			}
+		})
+	}
+}
+
+func withQueryScanElements(t *testing.T, pool memory.Allocator, frame *chain.DataFrame, elements [][]int32) *chain.DataFrame {
+	t.Helper()
+	require.EqualValues(t, frame.NumRows(), len(elements))
+	builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{frame.NumRows()})
+	defer builder.Release()
+	for _, name := range frame.ColumnNames() {
+		require.NoError(t, builder.AddColumnFrom(frame, name))
+	}
+	lists := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+	defer lists.Release()
+	// Exercise a sliced Arrow list whose first offset is not zero.
+	lists.Append(true)
+	lists.ValueBuilder().(*array.Int32Builder).AppendValues([]int32{99, 100}, nil)
+	for _, indices := range elements {
+		lists.Append(true)
+		lists.ValueBuilder().(*array.Int32Builder).AppendValues(indices, nil)
+	}
+	values := lists.NewArray()
+	defer values.Release()
+	require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{array.NewSlice(values, 1, int64(len(elements)+1))}))
+	return builder.Build()
+}
+
+func TestQueryScanElementMergeCountsWinningVersions(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		t.Run(fmt.Sprint(stringPK), func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer pool.AssertSize(t, 0)
+			makeFrame := func(pks, timestamps []int64, elements [][]int32) *chain.DataFrame {
+				record := scanIdentityRecord(pool, pks, pks, timestamps, stringPK)
+				defer record.Release()
+				base := scanFrameFromRecord(t, record)
+				defer base.Release()
+				return withQueryScanElements(t, pool, base, elements)
+			}
+			old := makeFrame([]int64{1, 3, 5}, []int64{10, 10, 10}, [][]int32{{0, 1, 2, 3}, {0, 2, 4}, {1, 2}})
+			newer := makeFrame([]int64{1, 2, 4}, []int64{20, 20, 20}, [][]int32{{7}, {0, 3}, {1, 2, 3, 4}})
+			defer old.Release()
+			defer newer.Release()
+			for _, tc := range []struct {
+				limit int64
+				mode  reduce.IReduceType
+				pks   []int64
+			}{
+				{0, reduce.IReduceNoOrder, nil},
+				{1, reduce.IReduceNoOrder, []int64{1}},
+				{3, reduce.IReduceNoOrder, []int64{1, 2}},
+				{4, reduce.IReduceNoOrder, []int64{1, 2, 3}},
+				{4, reduce.IReduceInOrder, []int64{1, 2, 3}},
+				{-1, reduce.IReduceNoOrder, []int64{1, 2, 3, 4, 5}},
+				{1, reduce.IReduceInOrderForBest, []int64{1, 2, 3, 4, 5}},
+			} {
+				merged, err := mergeQueryScanResults([]*chain.DataFrame{old, newer}, tc.limit, tc.mode)
+				require.NoError(t, err)
+				out, err := chain.ToRetrieveResults(merged.Frame)
+				merged.Frame.Release()
+				require.NoError(t, err)
+				require.Len(t, merged.Selections, len(tc.pks))
+				for i, pk := range tc.pks {
+					want := any(pk)
+					if stringPK {
+						want = fmt.Sprintf("pk-%02d", pk)
+					}
+					require.Equal(t, want, typeutil.GetPK(out.Ids, int64(i)))
+				}
+				if len(tc.pks) > 0 {
+					require.Equal(t, []int32{7}, out.ElementIndices[0].Indices)
+				}
+				if tc.limit == 4 && tc.mode == reduce.IReduceNoOrder {
+					// Worker retains six elements for limit+offset=4. Proxy alone
+					// applies offset=1 and trims the final document to one element.
+					require.Equal(t, []int32{0, 2, 4}, out.ElementIndices[2].Indices)
+					reply := &internalpb.RetrieveResults{
+						Ids:            out.Ids,
+						FieldsData:     out.FieldsData,
+						ElementLevel:   true,
+						ElementIndices: convertSegcoreElementIndicesToInternal(out.ElementIndices),
+					}
+					page, err := queryutil.NewSliceOperator(3, 1).Run(context.Background(), nil, reply)
+					require.NoError(t, err)
+					got := page[0].(*internalpb.RetrieveResults)
+					require.Len(t, got.ElementIndices, 2)
+					require.Equal(t, []int32{0, 3}, got.ElementIndices[0].Indices)
+					require.Equal(t, []int32{0}, got.ElementIndices[1].Indices)
+				}
+			}
+			for _, counts := range [][][]int32{{{0}, {2, 3, 4}, {5}, {6}}, {{0, 1, 2}, {3}, {4}, {5, 6}}} {
+				// Replacements within one input must adjust, not accumulate, counts.
+				frame := makeFrame([]int64{1, 1, 2, 3}, []int64{1, 2, 1, 1}, counts)
+				merged, err := mergeQueryScanResults([]*chain.DataFrame{frame}, 4, reduce.IReduceNoOrder)
+				require.NoError(t, err)
+				out, err := chain.ToRetrieveResults(merged.Frame)
+				merged.Frame.Release()
+				frame.Release()
+				require.NoError(t, err)
+				wantRows := 3
+				if len(counts[1]) == 3 {
+					wantRows = 2
+				}
+				require.Len(t, out.ElementIndices, wantRows)
+				require.Equal(t, counts[1], out.ElementIndices[0].Indices)
+			}
+			// Equal timestamps preserve the first version and its whole list.
+			tied := makeFrame([]int64{1}, []int64{10}, [][]int32{{7}})
+			defer tied.Release()
+			merged, err := mergeQueryScanResults([]*chain.DataFrame{old, tied}, 3, reduce.IReduceNoOrder)
+			require.NoError(t, err)
+			defer merged.Frame.Release()
+			require.Equal(t, []OffsetSelection{{SegmentIndex: 0, Offset: 1}}, merged.Selections)
+		})
+	}
+}
+
+func TestQueryScanElementModeValidation(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	for _, count := range []int{0, 1} {
+		record := scanIdentityRecord(pool, []int64{0}[:count], []int64{1}[:count], []int64{1}[:count], false)
+		base := scanFrameFromRecord(t, record)
+		record.Release()
+		element := withQueryScanElements(t, pool, base, [][]int32{{0, 1}}[:count])
+		for _, frames := range [][]*chain.DataFrame{{base, element}, {element, base}} {
+			merged, err := mergeQueryScanResults(frames, 1, reduce.IReduceNoOrder)
+			require.Nil(t, merged)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		}
+		merged, err := mergeQueryScanResults([]*chain.DataFrame{element}, 1, reduce.IReduceNoOrder)
+		require.NoError(t, err)
+		merged.Frame.Release()
+		element.Release()
+		for _, wrongType := range []bool{false, true} {
+			builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{int64(count)})
+			for _, name := range base.ColumnNames() {
+				require.NoError(t, builder.AddColumnFrom(base, name))
+			}
+			child := arrow.PrimitiveTypes.Int32
+			if wrongType {
+				child = arrow.PrimitiveTypes.Int64
+			}
+			lists := array.NewListBuilder(pool, child)
+			if count > 0 {
+				lists.AppendNull()
+			}
+			require.NoError(t, builder.AddColumnFromChunks(types.QueryElementIndicesFieldName, []arrow.Array{lists.NewArray()}))
+			lists.Release()
+			bad := builder.Build()
+			builder.Release()
+			merged, err := mergeQueryScanResults([]*chain.DataFrame{bad}, 1, reduce.IReduceNoOrder)
+			if count == 0 && !wrongType {
+				require.NoError(t, err)
+				merged.Frame.Release()
+			} else {
+				require.Nil(t, merged)
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			}
+			bad.Release()
+		}
+		base.Release()
+	}
 }

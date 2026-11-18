@@ -18,38 +18,11 @@ add_source_at_current_directory()
 
 add_subdirectory(artifact)
 
-add_subdirectory(minio)
-add_subdirectory(aliyun)
-add_subdirectory(tencent)
-add_subdirectory(huawei)
-
-if (ENABLE_GCP_NATIVE)
-    add_definitions(-DENABLE_GCP_NATIVE)
-    add_subdirectory(gcp-native-storage)
-endif()
-
-if (ENABLE_AZURE_FS)
-    set(AZURE_BUILD_DIR ON)
-    add_definitions(-DAZURE_BUILD_DIR)
-    add_subdirectory(azure)
-endif()
-
 # Add loon_ffi subdirectory to include loon FFI source files
 add_subdirectory(loon_ffi)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/loon_ffi)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
-
-# Cloud credential providers intentionally use matching file-local constant
-# names. Compile them separately so those names do not collide in unity mode.
-set_source_files_properties(
-    aliyun/AliyunCredentialsProvider.cpp
-    aliyun/AliyunSTSClient.cpp
-    tencent/TencentCloudCredentialsProvider.cpp
-    tencent/TencentCloudSTSClient.cpp
-    huawei/HuaweiCloudCredentialsProvider.cpp
-    huawei/HuaweiCloudSTSClient.cpp
-    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)
