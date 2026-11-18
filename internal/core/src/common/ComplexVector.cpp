@@ -24,6 +24,23 @@
 
 namespace milvus {
 
+VectorPtr
+MakeColumnVector(DataType type, size_t size, std::optional<size_t> null_count) {
+    return DispatchVectorType(type, [&]<typename T>() -> VectorPtr {
+        return std::make_shared<ColumnVector<T>>(type, size, null_count);
+    });
+}
+
+VectorPtr
+MakeColumnVector(FieldDataPtr values, TargetBitmap valid, size_t null_count) {
+    AssertInfo(values != nullptr, "Column values cannot be null");
+    return DispatchVectorType(
+        values->get_data_type(), [&]<typename T>() -> VectorPtr {
+            return std::make_shared<ColumnVector<T>>(
+                std::move(values), std::move(valid), null_count);
+        });
+}
+
 void
 BaseVector::prepareForReuse() {
     null_count_ = std::nullopt;

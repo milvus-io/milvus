@@ -41,10 +41,8 @@ StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
                   args.childrens().size());
     }
     auto strs = AsSimpleVector<std::string>(args.child(0));
-    Assert(strs != nullptr);
     CheckVarcharOrStringType(strs);
     auto prefixes = AsSimpleVector<std::string>(args.child(1));
-    Assert(prefixes != nullptr);
     CheckVarcharOrStringType(prefixes);
 
     TargetBitmap bitmap(strs->size(), false);

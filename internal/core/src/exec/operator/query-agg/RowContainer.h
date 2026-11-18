@@ -280,9 +280,6 @@ class RowContainer {
                    "extracted rows number should be equal to the size of "
                    "result vector");
         auto result_column_vec = AsColumnVector<T>(result);
-        AssertInfo(
-            result_column_vec != nullptr,
-            "Input column to extract result must be of ColumnVector type");
         for (auto i = 0; i < numRows; i++) {
             const char* row = rows[i];
             auto resultIndex = i;
@@ -311,9 +308,6 @@ class RowContainer {
                    "extracted rows number should be equal to the size of "
                    "result vector");
         auto result_column_vec = AsColumnVector<T>(result);
-        AssertInfo(
-            result_column_vec != nullptr,
-            "Input column to extract result must be of ColumnVector type");
         for (auto i = 0; i < numRows; i++) {
             const char* row = rows[i];
             if (row == nullptr) {

@@ -101,14 +101,10 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
         return;
     }
 
-    // Extract column vectors from input RowVector
-    const auto& children = input->childrens();
-    std::vector<VectorPtr> columns;
-    columns.reserve(children.size());
-    for (const auto& child : children) {
+    const auto& columns = input->childrens();
+    for (const auto& child : columns) {
         // Validate concrete storage once before adding rows to the sort buffer.
         VisitColumnVector(child, [](const auto&) {});
-        columns.push_back(child);
     }
 
     AssertInfo(columns.size() == column_types_.size(),

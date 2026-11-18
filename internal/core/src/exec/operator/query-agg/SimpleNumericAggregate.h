@@ -31,9 +31,6 @@ class SimpleNumericAggregate : public exec::Aggregate {
         AssertInfo((*result)->elementSize() == sizeof(TData),
                    "Incorrect type size of input result vector");
         auto result_column = AsColumnVector<TData>(*result);
-        AssertInfo(result_column != nullptr,
-                   "input vector for extracting aggregation must be of Type "
-                   "ColumnVector");
         result_column->resize(numGroups);
         TData* rawValues = static_cast<TData*>(result_column->GetRawData());
         for (auto i = 0; i < numGroups; i++) {
@@ -70,9 +67,6 @@ class SimpleNumericAggregate : public exec::Aggregate {
                    const VectorPtr& vector,
                    UpdateSingle updateSingleValue) {
         auto column_data = AsColumnVector<TValue>(vector);
-        AssertInfo(
-            column_data != nullptr,
-            "input column data for upgrading groups should not be nullptr");
         for (auto i = 0; i < column_data->size(); i++) {
             updateOneGroupAtIndex<true, TData, TValue>(
                 group, column_data, i, updateSingleValue);
@@ -88,9 +82,6 @@ class SimpleNumericAggregate : public exec::Aggregate {
                  const VectorPtr& vector,
                  UpdateSingleValue updateSingleValue) {
         auto column_data = AsColumnVector<TValue>(vector);
-        AssertInfo(
-            column_data != nullptr,
-            "input column data for upgrading groups should not be nullptr");
         for (auto i = 0; i < column_data->size(); i++) {
             updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
                 groups[i], column_data, i, updateSingleValue);

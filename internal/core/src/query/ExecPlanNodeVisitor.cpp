@@ -130,7 +130,7 @@ fillTypedDataPtrArray(void* src_raw_data,
 
 template <typename T>
 void
-fillDataArrayFromColumnVector(const ColumnVectorPtr<T>& column_vector,
+fillDataArrayFromColumnVector(ColumnVector<T>* column_vector,
                               DataArray& data_array) {
     auto column_raw_data = column_vector->GetRawData();
     auto column_data_size = column_vector->size();

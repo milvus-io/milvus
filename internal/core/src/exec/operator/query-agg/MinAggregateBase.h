@@ -129,9 +129,6 @@ class MinStringAggregate final : public Aggregate {
                   int32_t numGroups,
                   VectorPtr* result) override {
         auto result_column = AsColumnVector<std::string>(*result);
-        AssertInfo(result_column != nullptr,
-                   "input vector for extracting aggregation must be of Type "
-                   "ColumnVector");
         result_column->resize(numGroups);
         for (auto i = 0; i < numGroups; i++) {
             char* group = groups[i];
@@ -157,8 +154,6 @@ class MinStringAggregate final : public Aggregate {
         AssertInfo(input.size() == 1,
                    "min aggregate expects exactly one input column");
         auto column = AsColumnVector<std::string>(input[0]);
-        AssertInfo(column != nullptr,
-                   "min aggregate input must be of type ColumnVector");
         auto raw = column->RawAsValues<std::string>();
         for (auto i = 0; i < column->size(); i++) {
             if (!column->ValidAt(i)) {
@@ -175,8 +170,6 @@ class MinStringAggregate final : public Aggregate {
         AssertInfo(input.size() == 1,
                    "min aggregate expects exactly one input column");
         auto column = AsColumnVector<std::string>(input[0]);
-        AssertInfo(column != nullptr,
-                   "min aggregate input must be of type ColumnVector");
         auto raw = column->RawAsValues<std::string>();
         for (auto i = 0; i < column->size(); i++) {
             if (!column->ValidAt(i)) {

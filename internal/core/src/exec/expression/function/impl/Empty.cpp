@@ -42,7 +42,6 @@ EmptyVarchar(const RowVector& args, FilterFunctionReturn& result) {
     }
     const auto& arg = args.childrens()[0];
     auto vec = AsSimpleVector<std::string>(arg);
-    Assert(vec != nullptr);
     CheckVarcharOrStringType(vec);
     TargetBitmap bitmap(vec->size(), false);
     TargetBitmap valid_bitmap(vec->size(), true);

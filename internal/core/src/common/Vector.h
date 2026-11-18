@@ -584,6 +584,7 @@ DispatchVectorType(DataType type, Func&& func) {
     }
 }
 
+// The callback borrows a typed column for the duration of the call.
 template <typename Func>
 decltype(auto)
 VisitColumnVector(BaseVector* vector, Func&& func) {
@@ -597,31 +598,16 @@ VisitColumnVector(BaseVector* vector, Func&& func) {
 template <typename Func>
 decltype(auto)
 VisitColumnVector(const VectorPtr& vector, Func&& func) {
-    AssertInfo(vector != nullptr, "Column vector cannot be null");
-    return DispatchVectorType(vector->type(),
-                              [&]<typename T>() -> decltype(auto) {
-                                  return func(AsColumnVector<T>(vector));
-                              });
+    return VisitColumnVector(vector.get(), std::forward<Func>(func));
 }
 
-inline VectorPtr
+VectorPtr
 MakeColumnVector(DataType type,
                  size_t size,
-                 std::optional<size_t> null_count = std::nullopt) {
-    return DispatchVectorType(type, [&]<typename T>() -> VectorPtr {
-        return std::make_shared<ColumnVector<T>>(type, size, null_count);
-    });
-}
+                 std::optional<size_t> null_count = std::nullopt);
 
-inline VectorPtr
-MakeColumnVector(FieldDataPtr values, TargetBitmap valid, size_t null_count) {
-    AssertInfo(values != nullptr, "Column values cannot be null");
-    return DispatchVectorType(
-        values->get_data_type(), [&]<typename T>() -> VectorPtr {
-            return std::make_shared<ColumnVector<T>>(
-                std::move(values), std::move(valid), null_count);
-        });
-}
+VectorPtr
+MakeColumnVector(FieldDataPtr values, TargetBitmap valid, size_t null_count);
 
 /**
  * @brief Multi vectors for scalar types
