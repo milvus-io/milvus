@@ -13,12 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -210,10 +208,7 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 			request, requestErr := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).
 				WithANNSField("vector").WithConsistencyLevel(entity.ClEventually).Request()
 			require.NoError(t, requestErr)
-			blocked := proto.CloneOf(request)
-			blocked.UseDefaultConsistency = false
-			blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
-			blocked.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
+			blocked := multiSearchBlockingRequest(request)
 			service := mc.GetService()
 			blockedCtx, release := context.WithCancel(ctx)
 			defer release()

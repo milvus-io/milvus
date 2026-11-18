@@ -36,6 +36,17 @@ import (
 // -args -multisearch-resource-probes. They are separate from shared E2E traffic.
 var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch resource probes")
 
+func multiSearchBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	blocked := proto.CloneOf(request)
+	blocked.UseDefaultConsistency = false
+	blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
+	blocked.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
+	// QueryView samples ordinary Session reads as Strong. An iterator's fixed
+	// snapshot instead reaches the cancellable WAL barrier for this timestamp.
+	blocked.SearchParams = append(blocked.SearchParams, &commonpb.KeyValuePair{Key: "iterator", Value: "true"})
+	return blocked
+}
+
 func multiSearchRESTConfig() (string, string) {
 	endpoint := strings.TrimRight(hp.GetURI(), "/")
 	if !strings.Contains(endpoint, "://") {
@@ -174,12 +185,7 @@ func TestMultiSearchProxyRetainedHeap(t *testing.T) {
 		err      error
 	}
 	measure := func(completed int) (int64, int64) {
-		blocked := proto.CloneOf(request)
-		blocked.UseDefaultConsistency = false
-		// Session preserves an explicit guarantee timestamp even when the
-		// QueryNode can use a local WAL to accelerate strong reads.
-		blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
-		blocked.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
+		blocked := multiSearchBlockingRequest(request)
 		requests := make([]*milvuspb.SearchRequest, completed+1)
 		for i := range completed {
 			requests[i] = proto.CloneOf(request)
@@ -204,6 +210,11 @@ func TestMultiSearchProxyRetainedHeap(t *testing.T) {
 			t.Fatal("future-timestamp Search did not keep the batch pending")
 		default:
 		}
+		// The release codec returns wire buffers to sync.Pool. One GC moves
+		// them to its victim cache; a second GC can reclaim them. Apply the
+		// same two-GC protocol while pending and after completion so the
+		// comparison measures live results rather than idle codec buffers.
+		heldFirstGC := multiSearchLiveHeap(t, ctx)
 		held := multiSearchLiveHeap(t, ctx)
 		var received outcome
 		select {
@@ -221,17 +232,20 @@ func TestMultiSearchProxyRetainedHeap(t *testing.T) {
 		}
 		require.Equal(t, merr.TimeoutCode, received.response.Results[completed].GetStatus().GetCode())
 		require.Equal(t, int64(completed+1), multiSearchAttemptCount(t, ctx)-before)
-		return held, multiSearchLiveHeap(t, ctx)
+		firstGC := multiSearchLiveHeap(t, ctx)
+		secondGC := multiSearchLiveHeap(t, ctx)
+		t.Logf("MULTISEARCH_HEAP_GC completed=%d held_first_gc=%d held_second_gc=%d released_first_gc=%d released_second_gc=%d", completed, heldFirstGC, held, firstGC, secondGC)
+		return held, secondGC
 	}
 
 	retainedDeltas, releasedDeltas := make([]int64, 0, 3), make([]int64, 0, 3)
 	for sample := range 3 {
-		control, _ := measure(0)
+		control, controlReleased := measure(0)
 		held, released := measure(retainedItems)
 		retainedDeltas = append(retainedDeltas, held-control)
-		releasedDeltas = append(releasedDeltas, released-control)
-		t.Logf("MULTISEARCH_RETAINED_HEAP sample=%d native_vector_bytes=%d control_heap=%d held_heap=%d released_heap=%d retained_delta=%d released_delta=%d",
-			sample, retainedItems*rows*dim*4, control, held, released, held-control, released-control)
+		releasedDeltas = append(releasedDeltas, released-controlReleased)
+		t.Logf("MULTISEARCH_RETAINED_HEAP sample=%d native_vector_bytes=%d control_held_heap=%d control_released_heap=%d held_heap=%d released_heap=%d retained_delta=%d released_delta=%d",
+			sample, retainedItems*rows*dim*4, control, controlReleased, held, released, held-control, released-controlReleased)
 	}
 	slices.Sort(retainedDeltas)
 	slices.Sort(releasedDeltas)
@@ -253,12 +267,10 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 	search, err := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).
 		WithANNSField("vector").Request()
 	require.NoError(t, err)
-	search.UseDefaultConsistency = false
-	search.ConsistencyLevel = commonpb.ConsistencyLevel_Session
-	search.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
+	blocked := multiSearchBlockingRequest(search)
 	const workers, waiting, submitted = 8, 64, 80
 	budget := int64(15000)
-	batch := &milvuspb.MultiSearchRequest{Requests: []*milvuspb.SearchRequest{search}, TimeoutMs: &budget}
+	batch := &milvuspb.MultiSearchRequest{Requests: []*milvuspb.SearchRequest{blocked}, TimeoutMs: &budget}
 	type outcome struct {
 		response *milvuspb.MultiSearchResponse
 		err      error
@@ -326,8 +338,6 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 			t.Fatal("accepted batches did not stop after parent cancellation")
 		}
 	}
-	search.GuaranteeTimestamp = 0
-	search.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 	require.Eventually(t, func() bool {
 		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, time.Second)
 		defer recoveryCancel()
