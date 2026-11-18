@@ -291,15 +291,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                             index::JSONType::ARRAY) {
                             continue;
                         }
-                        TargetBitmap temp_valid(active_count_, true);
                         TargetBitmap array_exists(active_count_, false);
+                        // The evaluator ignores validity output; the executor
+                        // only clears both outputs for skipped invalid rows.
                         index->ExecutorForShreddingData<std::string_view>(
                             op_ctx_,
                             field,
                             EvaluateShreddedArrayExists,
                             nullptr,
                             TargetBitmapView(array_exists),
-                            TargetBitmapView(temp_valid));
+                            TargetBitmapView(array_exists));
                         res_view |= TargetBitmapView(array_exists);
                     }
                 }
