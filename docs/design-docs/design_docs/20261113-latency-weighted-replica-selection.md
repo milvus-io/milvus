@@ -7,14 +7,10 @@ Related issue: [#55587](https://github.com/milvus-io/milvus/issues/55587).
 `proxy.replicaSelectionPolicy` (`round_robin`, `look_aside`, or `latency_weighted`;
 default `look_aside`) is refreshable (`refreshable: true`): live changes apply to
 new channel requests, while in-flight requests retain the policy and accounting
-captured at entry. `proxy.hedging` (`enabled: false`, `minDelay: 200ms`,
-`maxInflightRatio: 0.1`) is orthogonal to `proxy.replicaSelectionPolicy` and
+captured at entry. `proxy.hedging` (`enabled: false`, `minDelay: 200ms`) is orthogonal to `proxy.replicaSelectionPolicy` and
 applies to Search/Query regardless of which selection policy is active, sending
 at most one hedge per channel request across all retry rounds (orthogonal to
-`proxy.retryTimesOnReplica`). `maxInflightRatio` defaults to `0.1` (10%),
-referencing gRPC's `retryThrottling` (`tokenRatio = 0.1`, gRFC A6), with a
-built-in floor of `2` concurrent hedges and slot retention until the hedged
-RPC goroutine actually returns. No wire protocol, storage format, persistent
+`proxy.retryTimesOnReplica`). No wire protocol, storage format, persistent
 metadata, or CDC state changes are involved.
 
 ## Problem and scope
