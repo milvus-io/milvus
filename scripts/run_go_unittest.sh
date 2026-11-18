@@ -173,6 +173,9 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/meta
 
 function test_cmd()
 {
+if [[ ! -f "${ROOT_DIR}/cmd/tools/migration/legacy/legacypb/legacy.pb.go" ]]; then
+  make -C "${ROOT_DIR}" generated-proto-without-cpp
+fi
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/milvus/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
