@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -57,16 +58,15 @@ func (kc *Catalog) EnsureIndexMetadataMode(ctx context.Context, summaries, hasCo
 			}
 		}
 	}
-	swapped, err := kc.MetaKv.CompareVersionAndSwap(ctx, indexMetadataModeKey, 0, requested)
-	if err != nil {
-		return merr.Wrap(err, "initialize index metadata mode")
-	}
-	if swapped {
+	writeErr := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{indexMetadataModeKey: requested}, nil,
+		predicates.KeyNotExist(indexMetadataModeKey))
+	if writeErr == nil {
 		return nil
 	}
+	// Another initializer may have won, or the write response may have been lost.
 	current, err = kc.MetaKv.Load(ctx, indexMetadataModeKey)
 	if err != nil {
-		return merr.Wrap(err, "reload index metadata mode")
+		return merr.Wrap(writeErr, "initialize index metadata mode")
 	}
 	if current != requested {
 		return merr.Wrap(merr.ErrServiceUnimplemented, "index metadata mode was initialized with another mode")

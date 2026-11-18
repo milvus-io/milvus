@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"cmp"
 	"slices"
 
 	"google.golang.org/protobuf/proto"
@@ -35,22 +36,12 @@ func ApplyIndexSummary(segment *datapb.SegmentInfo, record *model.SegmentIndexSu
 	if !present {
 		return
 	}
-	segment.IndexSummaries = append(segment.IndexSummaries, &datapb.SegmentIndexSummary{
-		IndexId: record.IndexID, FieldId: fieldID, BuildId: record.BuildID,
-		HasArtifact: record.HasArtifact, IndexVersion: record.IndexVersion,
-		SerializedSize: record.IndexSerializedSize, MemSize: record.IndexMemSize,
-		VectorEngineVersion: record.CurrentIndexVersion, ScalarEngineVersion: record.CurrentScalarIndexVersion,
-		IndexType: record.IndexType,
-	})
-	slices.SortFunc(segment.IndexSummaries, func(a, b *datapb.SegmentIndexSummary) int {
-		if a.GetIndexId() < b.GetIndexId() {
-			return -1
-		}
-		if a.GetIndexId() > b.GetIndexId() {
-			return 1
-		}
-		return 0
-	})
+	segment.IndexSummaries = append(segment.IndexSummaries, model.MarshalSegmentIndexSummary(record, fieldID))
+	slices.SortFunc(segment.IndexSummaries, compareIndexSummary)
+}
+
+func compareIndexSummary(a, b *datapb.SegmentIndexSummary) int {
+	return cmp.Compare(a.GetIndexId(), b.GetIndexId())
 }
 
 func manifestSummaryFieldID(commit SegmentManifestCommit, buildID int64) int64 {
@@ -74,6 +65,7 @@ func UpdateIndexSummaries(segmentID int64, summaries []*datapb.SegmentIndexSumma
 		for i, summary := range summaries {
 			segment.IndexSummaries[i] = proto.Clone(summary).(*datapb.SegmentIndexSummary)
 		}
+		slices.SortFunc(segment.IndexSummaries, compareIndexSummary)
 		return true
 	}
 }

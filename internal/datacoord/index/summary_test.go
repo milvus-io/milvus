@@ -19,17 +19,21 @@ package index
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -194,6 +198,61 @@ func TestSummaryModeRestartPreservesInventory(t *testing.T) {
 	require.Zero(t, recoveredDM.IndexMeta.SegmentIndexes.Len())
 	require.Equal(t, mt.GetSegment(t.Context(), meta.RestartSegID).GetIndexSummaries(), recovered.GetSegment(t.Context(), meta.RestartSegID).GetIndexSummaries())
 	require.Len(t, recovered.GetSegment(t.Context(), meta.RestartSegID).GetIndexSummaries(), 1)
+}
+
+func TestSummaryModeEmptyCompletionAfterDropIndex(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		name := "marked deleted"
+		if remove {
+			name = "removed by GC"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			mt, dm, err := NewMemoryMetaWithIndex(t)
+			require.NoError(t, err)
+			im := dm.IndexMeta
+			require.NoError(t, im.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+			require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			})))
+			require.NoError(t, im.UseSegmentSummaries(mt.MetaStore))
+			record := &model.SegmentIndex{
+				CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 20,
+				IndexState: commonpb.IndexState_InProgress,
+			}
+			require.NoError(t, im.AddSegmentIndex(ctx, record))
+			task := NewIndexBuildTask(record, 1, mt, im, nil, nil, nil)
+			require.NoError(t, im.MarkIndexAsDeleted(ctx, 1, []int64{10}))
+			if remove {
+				require.NoError(t, im.RemoveIndex(ctx, 1, 10))
+			}
+			require.NoError(t, task.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}))
+			persisted, err := mt.Catalog.ListSegments(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, persisted, 1)
+			require.Empty(t, persisted[0].GetIndexSummaries())
+			rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, commonpb.IndexState_Finished, rows[0].IndexState)
+		})
+	}
+}
+
+func TestSummaryModeRecoveryPublishesStoredIndexSize(t *testing.T) {
+	const collectionID = 73501
+	im := CreateTestIndexMeta(t, collectionID, make(map[int64]*model.Index))
+	im.updateCollectionIndex(&model.Index{CollectionID: collectionID, IndexID: 10, FieldID: 100})
+	store := metacache.NewMetaStore(nil)
+	store.PutSegment(&datapb.SegmentInfo{
+		ID: 3, CollectionID: collectionID, PartitionID: 2,
+		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, BuildId: 20, SerializedSize: 4096}},
+	})
+	gauges := metrics.DataCoordStoredIndexFilesSize
+	gauge := gauges.WithLabelValues("", "", "73501")
+	t.Cleanup(func() { gauges.DeleteLabelValues("", "", "73501") })
+	require.NoError(t, im.UseSegmentSummaries(store))
+	require.Eventually(t, func() bool { return testutil.ToFloat64(gauge) == 4096 }, time.Second, 5*time.Millisecond)
 }
 
 func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {

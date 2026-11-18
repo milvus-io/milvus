@@ -17,13 +17,36 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type indexModeStartupCatalog struct {
+	metastore.DataCoordCatalog
+	modeChecked bool
+}
+
+func (c *indexModeStartupCatalog) EnsureIndexMetadataMode(context.Context, bool, bool) error {
+	c.modeChecked = true
+	return nil
+}
+
+func TestSummaryModeRejectsV2BeforePersistingMode(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, "true")
+	setSegmentChangeTestParam(t, &Params.CommonCfg.UseLoonFFI, "false")
+	catalog := &indexModeStartupCatalog{}
+	server := &Server{ctx: t.Context(), catalog: catalog}
+	err := server.initMeta(nil)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+	require.ErrorContains(t, err, "common.storage.useLoonFFI=true")
+	require.False(t, catalog.modeChecked)
+}
 
 func TestSummaryModeRejectsDirectManifestAdoption(t *testing.T) {
 	key := Params.DataCoordCfg.SegmentIndexSummariesEnabled.Key

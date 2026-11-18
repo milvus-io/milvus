@@ -26,7 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -42,6 +44,8 @@ func TestSummaryCopyPublishesInventoryWithoutBuildRecords(t *testing.T) {
 	result.IndexInfos[9001].IndexType = "HNSW"
 	result.IndexInfos[9001].Version = 4
 	result.IndexInfos[9001].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	require.NoError(t, im.CreateIndex(t.Context(), &model.Index{CollectionID: 100, IndexID: 200, FieldID: 102, IndexName: "scalar_idx"}))
+	result.IndexInfos[9002] = &datapb.VectorScalarIndexInfo{IndexId: 200, BuildId: 9002, FieldId: 102, IndexName: "scalar_idx"}
 	entry := packed.ManifestIndexInfo{IndexID: 300, FieldID: 101, BuildID: 9001, IndexVersion: 4, IndexName: "vec_idx", IndexType: "HNSW",
 		Path: "files/insert_log/100/10/2001/_index/9001/4", IndexFileKeys: []string{"index.bin"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
@@ -51,11 +55,27 @@ func TestSummaryCopyPublishesInventoryWithoutBuildRecords(t *testing.T) {
 	require.NoError(t, SyncCopySegmentTask(t.Context(), task, resp, copies, mt, im))
 	segment := mt.GetSegment(context.Background(), 2001)
 	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
-	require.Len(t, segment.GetIndexSummaries(), 1)
-	require.EqualValues(t, 9001, segment.GetIndexSummaries()[0].GetBuildId())
-	require.EqualValues(t, 300, segment.GetIndexSummaries()[0].GetIndexId())
+	require.Len(t, segment.GetIndexSummaries(), 2)
+	require.EqualValues(t, 200, segment.GetIndexSummaries()[0].GetIndexId())
+	require.False(t, segment.GetIndexSummaries()[0].GetHasArtifact())
+	require.EqualValues(t, 300, segment.GetIndexSummaries()[1].GetIndexId())
+	require.EqualValues(t, 9001, segment.GetIndexSummaries()[1].GetBuildId())
+	require.True(t, segment.GetIndexSummaries()[1].GetHasArtifact())
 	require.False(t, im.HasBuildInfo(9001))
 	require.Zero(t, im.SegmentIndexes.Len())
 	require.NoError(t, SyncCopySegmentTask(t.Context(), task, resp, copies, mt, im))
-	require.Len(t, mt.GetSegment(t.Context(), 2001).GetIndexSummaries(), 1)
+	require.Len(t, mt.GetSegment(t.Context(), 2001).GetIndexSummaries(), 2)
+}
+
+func TestCopyWithoutIndexesAcceptsNilIndexMeta(t *testing.T) {
+	fixture := &CopySegmentTaskSuite{}
+	fixture.SetT(t)
+	task, copies, mt, _, resp := fixture.newCopiedManifestReadBackFixture()
+	result := resp.GetSegmentResults()[0]
+	result.ManifestIndexRewritten = proto.Bool(true)
+	result.IndexInfos = nil
+	require.NoError(t, SyncCopySegmentTask(t.Context(), task, resp, copies, mt, nil))
+	segment := mt.GetSegment(t.Context(), result.GetSegmentId())
+	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
+	require.Empty(t, segment.GetIndexSummaries())
 }

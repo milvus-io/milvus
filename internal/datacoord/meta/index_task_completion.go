@@ -47,6 +47,7 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		}
 		return m.IndexCatalog.FinishTask(result)
 	}
+	finishAsTask := false
 	err := func() error {
 		ids := []int64{result.GetBuildID()}
 		m.IndexCatalog.LockBuildIDs(ids)
@@ -58,17 +59,24 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		if err != nil {
 			return err
 		}
-		fieldID := m.IndexCatalog.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
 		var observe func()
 		defer func() {
 			if observe != nil {
 				observe()
 			}
 		}()
+		m.IndexCatalog.RLockFieldIndexes()
+		defer m.IndexCatalog.RUnlockFieldIndexes()
+		fieldID, live := m.IndexCatalog.GetLiveIndexFieldIDLocked(record.CollectionID, record.IndexID)
+		if !live {
+			finishAsTask = true
+			return nil
+		}
 		defer m.LockSegments(segmentID)()
 		segment := m.Segments.GetSegment(segmentID)
 		if !IsSegmentHealthy(segment) {
-			return merr.WrapErrSegmentNotFound(segmentID)
+			finishAsTask = true
+			return nil
 		}
 		for _, summary := range segment.GetIndexSummaries() {
 			if summary.GetIndexId() == record.IndexID && summary.GetHasArtifact() {
@@ -87,7 +95,7 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		observe = staged.Install()
 		return nil
 	}()
-	if errors.Is(err, merr.ErrSegmentNotFound) {
+	if finishAsTask {
 		return m.IndexCatalog.FinishTask(result)
 	}
 	return err

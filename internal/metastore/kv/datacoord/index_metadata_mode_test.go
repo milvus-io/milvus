@@ -23,14 +23,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type indexModeTestKV struct {
 	kv.MetaKv
-	value     string
-	occupied  bool
-	loadError error
+	t              *testing.T
+	value          string
+	occupied       bool
+	loadError      error
+	writeError     error
+	competingValue string
 }
 
 func (k *indexModeTestKV) Load(context.Context, string) (string, error) {
@@ -43,20 +47,53 @@ func (k *indexModeTestKV) Load(context.Context, string) (string, error) {
 	return k.value, nil
 }
 func (k *indexModeTestKV) HasPrefix(context.Context, string) (bool, error) { return k.occupied, nil }
-func (k *indexModeTestKV) CompareVersionAndSwap(_ context.Context, _ string, _ int64, value string) (bool, error) {
-	if k.value != "" {
-		return false, nil
-	}
-	k.value = value
-	return true, nil
+func (k *indexModeTestKV) CompareVersionAndSwap(context.Context, string, int64, string) (bool, error) {
+	return false, merr.ErrServiceUnimplemented
 }
+
+func (k *indexModeTestKV) MultiSaveAndRemove(_ context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	require.Empty(k.t, removals)
+	require.Len(k.t, saves, 1)
+	require.Equal(k.t, []predicates.Predicate{predicates.KeyNotExist(indexMetadataModeKey)}, preds)
+	if k.competingValue != "" {
+		k.value = k.competingValue
+	}
+	if k.value != "" {
+		return merr.ErrIoFailed
+	}
+	if k.writeError != nil {
+		return k.writeError
+	}
+	k.value = saves[indexMetadataModeKey]
+	return nil
+}
+
 func TestIndexMetadataModeIsImmutable(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
-		k := &indexModeTestKV{}
+		k := &indexModeTestKV{t: t}
 		c := &Catalog{MetaKv: k}
 		require.NoError(t, c.EnsureIndexMetadataMode(t.Context(), enabled, false))
 		require.NoError(t, c.EnsureIndexMetadataMode(t.Context(), enabled, true))
 		require.ErrorIs(t, c.EnsureIndexMetadataMode(t.Context(), !enabled, false), merr.ErrServiceUnimplemented)
+	}
+}
+
+func TestIndexMetadataModeReconcilesFailedConditionalWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		winner string
+		want   error
+	}{
+		{name: "same mode", winner: "segment-summary-v1"},
+		{name: "different mode", winner: "legacy", want: merr.ErrServiceUnimplemented},
+		{name: "no winner", want: merr.ErrServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k := &indexModeTestKV{t: t, competingValue: tc.winner, writeError: merr.ErrServiceUnavailable}
+			err := (&Catalog{MetaKv: k}).EnsureIndexMetadataMode(t.Context(), true, false)
+			require.ErrorIs(t, err, tc.want)
+			require.Equal(t, tc.winner, k.value)
+		})
 	}
 }
 func TestIndexMetadataModeRejectsExistingCluster(t *testing.T) {

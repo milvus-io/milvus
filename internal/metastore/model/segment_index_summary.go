@@ -46,3 +46,13 @@ func SegmentIndexSummaryFromProto(segment *datapb.SegmentInfo, summary *datapb.S
 		IndexType: summary.GetIndexType(),
 	}
 }
+
+func MarshalSegmentIndexSummary(record *SegmentIndexSummary, fieldID int64) *datapb.SegmentIndexSummary {
+	return &datapb.SegmentIndexSummary{
+		IndexId: record.IndexID, FieldId: fieldID, BuildId: record.BuildID,
+		HasArtifact: record.HasArtifact, IndexVersion: record.IndexVersion,
+		SerializedSize: record.IndexSerializedSize, MemSize: record.IndexMemSize,
+		VectorEngineVersion: record.CurrentIndexVersion, ScalarEngineVersion: record.CurrentScalarIndexVersion,
+		IndexType: record.IndexType,
+	}
+}

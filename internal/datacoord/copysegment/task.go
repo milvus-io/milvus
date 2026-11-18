@@ -1355,12 +1355,13 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	}
 
 	// Sync vector/scalar indexes
-	summarySegment := &datapb.SegmentInfo{}
-	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, summarySegment); err != nil {
+	var summaries []*datapb.SegmentIndexSummary
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
 		return err
 	}
-	if indexMeta.UsesSegmentSummaries() {
-		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summarySegment.GetIndexSummaries()))
+	if summaryMode {
+		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summaries))
 	}
 
 	// Sync text indexes
@@ -1380,7 +1381,7 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	if err != nil {
 		return failCopySegmentSync(ctx, task, copyMeta, err)
 	}
-	if indexMeta.UsesSegmentSummaries() {
+	if summaryMode {
 		if published := mt.GetSegment(ctx, result.GetSegmentId()); published != nil {
 			indexMeta.AccountCopiedIndexes(published.SegmentInfo)
 		}
@@ -1690,10 +1691,18 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
-	summarySegment *datapb.SegmentInfo,
+	summaries *[]*datapb.SegmentIndexSummary,
 ) error {
 	if len(result.GetIndexInfos()) == 0 {
 		return nil
+	}
+	var seenIndexIDs map[int64]struct{}
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if summaryMode {
+		if summaries == nil {
+			return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
+		}
+		seenIndexIDs = make(map[int64]struct{}, len(result.GetIndexInfos()))
 	}
 
 	// Build indexName -> target indexID mapping from target collection's index definitions.
@@ -1777,19 +1786,15 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
-		if indexMeta.UsesSegmentSummaries() {
-			if summarySegment == nil {
-				return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
-			}
+		if summaryMode {
 			if hasArtifact && !manifestResident {
 				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
 			}
-			for _, summary := range summarySegment.GetIndexSummaries() {
-				if summary.GetIndexId() == targetIndexID {
-					return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
-				}
+			if _, exists := seenIndexIDs[targetIndexID]; exists {
+				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
 			}
-			meta.ApplyIndexSummary(summarySegment, model.SummarizeSegmentIndex(segIndex), indexInfo.GetFieldId(), true)
+			seenIndexIDs[targetIndexID] = struct{}{}
+			*summaries = append(*summaries, model.MarshalSegmentIndexSummary(model.SummarizeSegmentIndex(segIndex), indexInfo.GetFieldId()))
 			continue
 		}
 		var err error

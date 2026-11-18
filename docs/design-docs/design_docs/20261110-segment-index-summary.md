@@ -15,8 +15,9 @@ and retires completed records. Manifest artifact entries remain in both modes.
 
 The new mode is selected only when an empty cluster first starts and is persisted
 in the metadata namespace. Subsequent starts must select the same mode. Existing
-clusters cannot enable it, and summary-mode clusters cannot disable it. StorageV3
-and manifest publication are required. Historical migration, rollback, and
+clusters cannot enable it, and summary-mode clusters cannot disable it. Manifest
+publication and `common.storage.useLoonFFI=true` are required. Summary mode
+pins the storage setting at startup. Historical migration, rollback, and
 conversion of incompatible snapshots are outside this version. Legacy direct
 manifest-version adoption (BatchUpdateManifest and pre-baked backfill results)
 is rejected before publication because it cannot update index inventory or fence
@@ -75,6 +76,9 @@ No full-cluster artifact metadata cache is introduced.
 
 Copy/restore verifies compatibility before creating work or copying files.
 Compatible targets publish their manifest and summaries before becoming visible.
+L0 delete segments keep their existing format. When a snapshot captures no
+index definitions, physical manifest entries left by dropped indexes are
+discarded during copy.
 An incompatible snapshot returns an explicit unsupported error; no format
 conversion or legacy artifact publication is attempted.
 

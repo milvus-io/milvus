@@ -1195,15 +1195,16 @@ func (m *IndexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 
-	fieldIndexes, ok := m.Indexes[collID]
-	if !ok {
-		return false
-	}
-	if index, ok := fieldIndexes[indexID]; !ok || index.IsDeleted {
-		return false
-	}
+	_, exists := m.GetLiveIndexFieldIDLocked(collID, indexID)
+	return exists
+}
 
-	return true
+func (m *IndexMeta) GetLiveIndexFieldIDLocked(collectionID, indexID int64) (int64, bool) {
+	index, exists := m.Indexes[collectionID][indexID]
+	if !exists || index.IsDeleted {
+		return 0, false
+	}
+	return index.FieldID, true
 }
 
 // UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.

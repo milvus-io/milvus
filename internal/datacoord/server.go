@@ -880,6 +880,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return nil
 	}
 	summaryMode := Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool()
+	if summaryMode && !Params.CommonCfg.UseLoonFFI.GetAsBool() {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require common.storage.useLoonFFI=true")
+	}
 	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
 		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
 	}

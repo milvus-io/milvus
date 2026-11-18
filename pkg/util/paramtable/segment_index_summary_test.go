@@ -17,9 +17,14 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/config"
 )
 
 func TestSegmentIndexSummariesConfig(t *testing.T) {
@@ -29,4 +34,33 @@ func TestSegmentIndexSummariesConfig(t *testing.T) {
 	params.Save(params.DataCoordCfg.SegmentIndexSummariesEnabled.Key, "true")
 	require.True(t, params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
 	require.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+}
+
+func TestSegmentIndexSummariesPinStorageV3AcrossRefresh(t *testing.T) {
+	for _, mode := range []string{"false", "true"} {
+		t.Run(mode, func(t *testing.T) {
+			base := &BaseTable{mgr: config.NewManager()}
+			defer base.mgr.Close()
+			require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+			filename := filepath.Join(t.TempDir(), "milvus.yaml")
+			writeConfig := func(summaryMode, useLoonFFI string) {
+				t.Helper()
+				require.NoError(t, os.WriteFile(filename, []byte(
+					"dataCoord:\n  index:\n    segmentIndexSummariesEnabled: "+summaryMode+
+						"\ncommon:\n  storage:\n    useLoonFFI: "+useLoonFFI+"\n"), 0o600))
+			}
+			writeConfig(mode, "true")
+			source := config.NewFileSource(&config.FileInfo{Files: []string{filename}})
+			require.NoError(t, base.mgr.AddSource(source))
+			var params ComponentParam
+			params.Init(base)
+			require.True(t, params.CommonCfg.UseLoonFFI.GetAsBool())
+
+			writeConfig(strconv.FormatBool(mode != "true"), "false")
+			_, err := source.GetConfigurations()
+			require.NoError(t, err)
+			require.Equal(t, mode == "true", params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
+			require.Equal(t, mode == "true", params.CommonCfg.UseLoonFFI.GetAsBool())
+		})
+	}
 }

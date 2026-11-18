@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (m *IndexMeta) UsesSegmentSummaries() bool { return m.summarySource != nil }
+func (m *IndexMeta) UsesSegmentSummaries() bool { return m != nil && m.summarySource != nil }
 
 // UseSegmentSummaries runs once during recovery, before metadata is published.
 func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
@@ -43,6 +43,7 @@ func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
 			m.taskCounts.adjustSummary(model.SegmentIndexSummaryFromProto(segment, summary), 1)
 		}
 	}
+	go m.taskCounts.publishStoredSizes()
 	return nil
 }
 

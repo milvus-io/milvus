@@ -19,12 +19,17 @@ package snapshot
 import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSummarySnapshot(snapshot *snapshotstorage.SnapshotData) error {
 	for _, segment := range snapshot.Segments {
+		if segment.GetSegmentLevel() == datapb.SegmentLevel_L0 && len(segment.GetIndexFiles()) == 0 &&
+			!segment.GetManifestHasIndex() {
+			continue
+		}
 		if segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" || segment.ManifestHasIndex == nil {
 			return merr.Wrap(merr.ErrServiceUnimplemented, "snapshot is incompatible with segment index summary mode: StorageV3 and explicit manifest index inventory are required")
 		}
@@ -38,7 +43,7 @@ func validateSummarySnapshot(snapshot *snapshotstorage.SnapshotData) error {
 				return merr.Wrap(merr.ErrServiceUnimplemented, "snapshot is incompatible with segment index summary mode: indexes must use segment-rooted storage")
 			}
 		}
-		if segment.GetManifestHasIndex() && !hasArtifact {
+		if segment.GetManifestHasIndex() && !hasArtifact && len(snapshot.Indexes) > 0 {
 			return merr.Wrap(merr.ErrServiceUnimplemented, "snapshot is incompatible with segment index summary mode: explicit index files are missing")
 		}
 	}

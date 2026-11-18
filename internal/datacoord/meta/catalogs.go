@@ -85,6 +85,8 @@ type SegmentIndexCatalog interface {
 	RLockFieldIndexes()
 	// RUnlockFieldIndexes releases the read side taken by RLockFieldIndexes.
 	RUnlockFieldIndexes()
+	// GetLiveIndexFieldIDLocked requires RLockFieldIndexes.
+	GetLiveIndexFieldIDLocked(collectionID, indexID int64) (int64, bool)
 	// LiveIndexIDsOnColumnsLocked returns the IDs of the live indexes of the
 	// collection whose field ID, formatted as a manifest column name, is in
 	// columns. The caller must hold RLockFieldIndexes.

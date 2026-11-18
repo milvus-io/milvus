@@ -40,9 +40,29 @@ func TestSummarySnapshotCompatibility(t *testing.T) {
 	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
 	nonempty := true
 	segment.ManifestHasIndex = &nonempty
+	require.NoError(t, validateSummarySnapshot(data), "the manifest may retain physical entries after DropIndex")
+	data.Indexes = []*indexpb.IndexInfo{{IndexID: 1}}
 	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
-	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"index"}}}
+	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexID: 1, IndexFilePaths: []string{"index"}}}
 	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
 	segment.IndexFiles[0].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	require.NoError(t, validateSummarySnapshot(data))
+}
+
+func TestSummarySnapshotAllowsL0Deletes(t *testing.T) {
+	empty := false
+	l0 := &datapb.SegmentDescription{
+		SegmentLevel:   datapb.SegmentLevel_L0,
+		StorageVersion: storage.StorageV2,
+		Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "delete-log"}}}},
+	}
+	data := &snapshotstorage.SnapshotData{
+		Segments: []*datapb.SegmentDescription{
+			{StorageVersion: storage.StorageV3, ManifestPath: "manifest", ManifestHasIndex: &empty},
+			l0,
+		},
+	}
+	require.NoError(t, validateSummarySnapshot(data))
+	l0.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"index"}}}
+	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
 }

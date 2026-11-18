@@ -179,6 +179,14 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryCoordCfg.init(bt)
 	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
+	p.CommonCfg.UseLoonFFI = ParamItem{
+		Key:          "common.storage.useLoonFFI",
+		Version:      "2.6.7",
+		DefaultValue: "true",
+		Forbidden:    p.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool(),
+		Export:       true,
+	}
+	p.CommonCfg.UseLoonFFI.Init(bt.mgr)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.QueryViewCfg.init(bt)
@@ -1511,14 +1519,6 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
-
-	p.UseLoonFFI = ParamItem{
-		Key:          "common.storage.useLoonFFI",
-		Version:      "2.6.7",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.UseLoonFFI.Init(base.mgr)
 
 	p.EnableGrowingSourceFlush = ParamItem{
 		Key:          "common.storage.enableGrowingSourceFlush",
@@ -7548,8 +7548,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	p.IndexStorePathVersion.Init(base.mgr)
 
 	p.SegmentIndexSummariesEnabled = ParamItem{
-		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false",
-		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires StorageV3, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
+		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false", Forbidden: true,
+		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
 	}
 	p.SegmentIndexSummariesEnabled.Init(base.mgr)
 
