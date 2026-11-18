@@ -46,8 +46,10 @@ func TestJSONFlatRetirementRetriesAndRestarts(t *testing.T) {
 	m := NewSegmentIndexMeta(catalog)
 	m.getCollectionSchema = func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() }
 	putJSONFlatTestIndex(m, jsonFlatDefinition())
-	original := &model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, NodeID: 20,
-		IndexState: commonpb.IndexState_InProgress, IndexVersion: 7, IndexStorePathVersion: 1, IndexFileKeys: []string{}}
+	original := &model.SegmentIndex{
+		CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, NodeID: 20,
+		IndexState: commonpb.IndexState_InProgress, IndexVersion: 7, IndexStorePathVersion: 1, IndexFileKeys: []string{},
+	}
 	m.updateSegmentIndex(model.CloneSegmentIndex(original))
 	mt := &meta.Meta{IndexCatalog: m, Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](), Segments: meta.NewSegmentsInfo()}
 	mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
@@ -90,8 +92,10 @@ func TestJSONFlatRetirementPreservesArtifactOwnership(t *testing.T) {
 	for _, state := range []commonpb.IndexState{commonpb.IndexState_Unissued, commonpb.IndexState_InProgress, commonpb.IndexState_Finished, commonpb.IndexState_Failed} {
 		t.Run(state.String(), func(t *testing.T) {
 			m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
-			original := &model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
-				IndexState: state, IndexFileKeys: []string{"historical-file"}, FailReason: "original", IndexVersion: 7}
+			original := &model.SegmentIndex{
+				CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
+				IndexState: state, IndexFileKeys: []string{"historical-file"}, FailReason: "original", IndexVersion: 7,
+			}
 			m.updateSegmentIndex(model.CloneSegmentIndex(original))
 			require.NoError(t, m.retireJSONFlatTask(1000))
 			got, _ := m.GetIndexJob(1000)
@@ -107,8 +111,10 @@ func TestJSONFlatRecoversOnlyDeprecationFailure(t *testing.T) {
 			m := NewSegmentIndexMeta(catalog)
 			m.getCollectionSchema = func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() }
 			putJSONFlatTestIndex(m, jsonFlatDefinition())
-			m.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
-				IndexState: commonpb.IndexState_Failed, FailReason: reason})
+			m.updateSegmentIndex(&model.SegmentIndex{
+				CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
+				IndexState: commonpb.IndexState_Failed, FailReason: reason,
+			})
 			mt := &meta.Meta{IndexCatalog: m, Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](), Segments: meta.NewSegmentsInfo()}
 			mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
 			scheduler := task.NewMockGlobalScheduler(t)
