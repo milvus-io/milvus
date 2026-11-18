@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -133,7 +134,7 @@ func TestSearchUnitByteSizeMatchesChunk(t *testing.T) {
 			unit := searchReduceUnit{data: result.ResultData, rowIndex: row}
 			got, err := unit.reducibleByteSize()
 			require.NoError(t, err)
-			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 2, "", false, false)
+			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 2, "", false, false, nil)
 			require.NoError(t, err)
 			data := chunk.GetResultData()
 			want := proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
@@ -170,7 +171,7 @@ func TestSearchUnitByteSizeCompound(t *testing.T) {
 		for _, unit := range buffer.units {
 			got, err := unit.reducibleByteSize()
 			require.NoError(t, err)
-			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 2, 2, "", false, false)
+			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 2, 2, "", false, false, nil)
 			require.NoError(t, err)
 			row := chunk.GetResultData()
 			want := proto.Size(&schemapb.SearchResultData{FieldsData: row.FieldsData, Ids: row.Ids, Scores: row.Scores, ElementIndices: row.ElementIndices, GroupByFieldValue: row.GroupByFieldValue, GroupByFieldValues: row.GroupByFieldValues})
@@ -229,7 +230,7 @@ func BenchmarkSearchUnitByteSize(b *testing.B) {
 							b.Fatal(err)
 						}
 					} else {
-						chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 1, "", false, false)
+						chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 1, "", false, false, nil)
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -703,6 +704,61 @@ func TestSplitSearchResultReusesSingleChunk(t *testing.T) {
 				require.True(t, proto.Equal(before, result))
 			})
 		}
+	}
+}
+
+func TestSplitSearchResultNullableVectorCopyScansLinearly(t *testing.T) {
+	for _, rows := range []int{512, 1024} {
+		t.Run(fmt.Sprint(rows), func(t *testing.T) {
+			hits := make([]testHit, rows)
+			valid := make([]bool, rows)
+			vectors := make([]float32, 0, rows)
+			for i := range hits {
+				hits[i] = testHit{id: int64(i + 1), score: 1 / float32(i+1)}
+				valid[i] = i%2 == 0
+				if valid[i] {
+					vectors = append(vectors, float32(i+1), -float32(i+1))
+				}
+			}
+			result := newSearchChunk(1, int64(rows), hits)
+			result.ResultData.FieldsData = append(result.ResultData.FieldsData, &schemapb.FieldData{
+				Type: schemapb.DataType_FloatVector, FieldId: 200,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2, ValidData: valid,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
+				}},
+			})
+
+			lastRows := make(map[*typeutil.FieldDataIdxComputer]int64)
+			var visits int64
+			var compute func(*typeutil.FieldDataIdxComputer, int64) []int64
+			patch := mockey.Mock((*typeutil.FieldDataIdxComputer).Compute).Origin(&compute).To(func(computer *typeutil.FieldDataIdxComputer, row int64) []int64 {
+				last := lastRows[computer]
+				if row < last {
+					last = 0
+				}
+				visits += row - last
+				lastRows[computer] = row
+				return compute(computer, row)
+			}).Build()
+			defer patch.UnPatch()
+
+			chunks, err := SplitSearchResult(result, 1)
+			require.NoError(t, err)
+			require.Len(t, chunks, rows)
+			for i, chunk := range chunks {
+				require.Equal(t, []int64{hits[i].id}, chunk.GetResultData().GetIds().GetIntId().GetData())
+				vector := chunk.GetResultData().GetFieldsData()[1].GetVectors()
+				require.Equal(t, []bool{valid[i]}, vector.GetValidData())
+				if valid[i] {
+					require.Equal(t, []float32{float32(i + 1), -float32(i + 1)}, vector.GetFloatVector().GetData())
+				} else {
+					require.Empty(t, vector.GetFloatVector().GetData())
+				}
+			}
+			t.Logf("%d hits: %d validity entries visited by sizing and copying", rows, visits)
+			require.EqualValues(t, 2*(rows-1), visits)
+		})
 	}
 }
 

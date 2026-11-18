@@ -249,6 +249,9 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 	}
 
 	chunks := make([]*internalpb.SearchResults, 0)
+	// Copy consecutive rows without restarting the validity scan at each Chunk.
+	// Sizing has its own cursor because it can advance ahead of copying.
+	copyFieldIndexComputers := make(map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer)
 	start := 0
 	accumulatedBytes := 0
 	for end, unit := range buffer.units {
@@ -264,6 +267,7 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 				result.GetMetricType(),
 				result.GetIsTopkReduce(),
 				result.GetIsRecallEvaluation(),
+				copyFieldIndexComputers,
 			)
 			if err != nil {
 				return nil, err
@@ -288,6 +292,7 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 			result.GetMetricType(),
 			result.GetIsTopkReduce(),
 			result.GetIsRecallEvaluation(),
+			copyFieldIndexComputers,
 		)
 		if err != nil {
 			return nil, err
@@ -304,6 +309,7 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 			result.GetMetricType(),
 			result.GetIsTopkReduce(),
 			result.GetIsRecallEvaluation(),
+			copyFieldIndexComputers,
 		)
 		if err != nil {
 			return nil, err
@@ -804,6 +810,7 @@ func (s *OrderedReduceStream) createOutputChunk(outputBuffer *orderedOutputBuffe
 		s.metricType,
 		s.isTopKReduce,
 		s.isRecallEval,
+		nil,
 	)
 }
 
@@ -844,6 +851,7 @@ func buildSearchChunk(
 	metricType string,
 	isTopKReduce bool,
 	isRecallEvaluation bool,
+	fieldIndexComputers map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer,
 ) (*internalpb.SearchResults, error) {
 	first := units[0]
 	templateFields := first.data.GetFieldsData()
@@ -864,7 +872,9 @@ func buildSearchChunk(
 		OutputFields:     append([]string(nil), first.data.GetOutputFields()...),
 		PrimaryFieldName: first.data.GetPrimaryFieldName(),
 	}
-	fieldIndexComputers := make(map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer)
+	if fieldIndexComputers == nil {
+		fieldIndexComputers = make(map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer)
+	}
 	groupFields := first.data.GetGroupByFieldValues()
 	legacyGroupField := len(groupFields) == 0 && first.data.GetGroupByFieldValue() != nil
 	if legacyGroupField {
