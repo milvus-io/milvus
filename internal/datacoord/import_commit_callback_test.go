@@ -480,13 +480,15 @@ func TestImportPendingJobCapsFlushCertificate(t *testing.T) {
 	server, _, _ := newImportCommitCallbackTest(t)
 	ctx := t.Context()
 	check := func(expected map[string]uint64) {
-		view, _, abort, err := server.dataViewManager.PrepareFlush(ctx, dataview.FlushDataViewEvent{
+		flush, _, abort, err := server.dataViewManager.PrepareFlush(ctx, dataview.FlushDataViewEvent{
 			CollectionID:           100,
 			GrowingTransformStarts: map[string]uint64{"v1": 1000, "v2": 1000},
 			Segments:               []dataview.LoadableSegment{{SegmentID: 40, VChannel: "v1", PartitionID: 1, TransformStartAfterTimetick: 70}},
 		})
 		require.NoError(t, err)
 		defer abort()
+		view, err := flush.Snapshot(nil)
+		require.NoError(t, err)
 		for _, shard := range view.GetShards() {
 			require.Equal(t, expected[shard.GetVchannel()], shard.GetGrowingTransformStartAfterTimetick())
 		}

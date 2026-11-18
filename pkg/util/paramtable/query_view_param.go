@@ -81,7 +81,7 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "false",
 		Export:       true,
-		Doc:          "Sample whole-collection data and index bytes when preparing a QueryView and return the sample in query plans. Requires coordinator restart.",
+		Doc:          "Record whole-collection data and index bytes with each new DataVersion and return that sample in query plans. Requires coordinator restart.",
 	}
 	p.PublishCollectionSize.Init(base.mgr)
 

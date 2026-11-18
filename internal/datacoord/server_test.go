@@ -248,59 +248,6 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 	})
 }
 
-func TestQueryViewCollectionSizeBytes(t *testing.T) {
-	store := metacache.NewMetaStore(nil)
-	svr := &Server{
-		ctx:         context.Background(),
-		meta:        &meta.Meta{MetaStore: store, Segments: meta.NewSegmentsInfo(store)},
-		domainMetas: domainMetas{indexMeta: index.NewSegmentIndexMeta(nil)},
-	}
-	svr.stateCode.Store(commonpb.StateCode_Healthy)
-	const collectionID int64 = 9020
-	store.PutCollection(&meta.CollectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}, Partitions: []int64{1, 2}})
-	check := func(want int64) {
-		t.Helper()
-		got, err := svr.CollectionSizeBytes(t.Context(), collectionID)
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	}
-	check(0)
-	for i, seg := range []*datapb.SegmentInfo{
-		{PartitionID: 1, TextStatsLogs: map[int64]*datapb.TextIndexStats{4: {LogSize: 6}}},
-		{PartitionID: 2, JsonKeyStats: map[int64]*datapb.JsonKeyStats{5: {LogSize: 7}}},
-		{PartitionID: 3},
-		{PartitionID: 1, IsInvisible: true},
-		{PartitionID: 1, IsImporting: true},
-		{PartitionID: 1, IsFake: true},
-		{PartitionID: 1, State: commonpb.SegmentState_Dropped},
-	} {
-		seg.ID, seg.CollectionID, seg.NumOfRows = int64(9021+i), collectionID, 1
-		if seg.State != commonpb.SegmentState_Dropped {
-			seg.State = commonpb.SegmentState_Flushed
-		}
-		seg.Stats = &datapb.Statistics{InsertBinlogSize: 20, StatsBinlogSize: 3, DeltaBinlogSize: 2}
-		svr.meta.Segments.SetSegment(seg.ID, meta.NewSegmentInfo(seg))
-	}
-	check(63)
-	svr.indexMeta.Indexes[collectionID] = map[int64]*model.Index{11: {CollectionID: collectionID, IndexID: 11}}
-	svr.indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
-		CollectionID: collectionID, SegmentID: 9021, IndexID: 11,
-		BuildID: 21, IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 18, ManifestPublished: true,
-	})
-	check(81)
-	svr.meta.Segments.DropSegment(9021)
-	check(32)
-	l0 := &datapb.SegmentInfo{
-		ID: 9080, CollectionID: collectionID, PartitionID: common.AllPartitionsID,
-		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
-		Stats: &datapb.Statistics{DeltaBinlogSize: 9},
-	}
-	svr.meta.Segments.SetSegment(l0.ID, meta.NewSegmentInfo(l0))
-	check(41)
-	_, err := svr.CollectionSizeBytes(t.Context(), collectionID+1)
-	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
-}
-
 func TestGetCollectionStatistics(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)

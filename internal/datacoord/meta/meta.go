@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -2057,10 +2058,10 @@ func (m *Meta) UpdateSegmentsInfoWithoutNotify(ctx context.Context, operators ..
 // UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
 // publishing either in memory. On the over-limit fallback, binlogs land first;
 // the first-publication binding and DataView commit together in the final txn.
-// dataView may be nil to commit SegmentMeta alone. A supplied DataView is saved
+// A nil flush commits SegmentMeta alone. A supplied DataView is saved
 // even without SegmentMeta mutations; (false, nil) means both are absent.
 // Catalog retries overwrite the same actions until success or cancellation.
-func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
+func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, flush *dataview.PreparedFlush, operators ...UpdateOperator) (bool, error) {
 	var updates []*SegmentInfo
 	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, updates) }()
 	locks, updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
@@ -2068,8 +2069,22 @@ func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	if err != nil {
 		return false, err
 	}
-	if updatePack == nil && dataView == nil {
+	if updatePack == nil && flush == nil {
 		return false, nil
+	}
+	dataView, err := flush.Snapshot(func(id int64) (int64, error) {
+		if updatePack != nil {
+			if seg := updatePack.Segments[id]; seg != nil {
+				return seg.dataViewDataBytes(), nil
+			}
+		}
+		if seg := m.GetSegment(ctx, id); seg != nil {
+			return seg.dataViewDataBytes(), nil
+		}
+		return 0, merr.WrapErrServiceNotReadyMsg("flushing segment %d is missing from SegmentMeta", id)
+	})
+	if err != nil {
+		return false, err
 	}
 
 	actions := make([]metastore.UpdateAction, 0, 1)

@@ -223,7 +223,6 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMetaView(s.metaStore)
-	s.queryCoordServer.SetCollectionSizeReader(s.datacoordServer.CollectionSizeBytes)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
 	if err := s.streamingCoord.Start(s.ctx); err != nil {

@@ -938,6 +938,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	collectionVChannels := lo.SliceToMap(collections, func(c *meta.CollectionInfo) (int64, []string) {
 		return c.ID, c.VChannelNames
 	})
+	var sizeProjector dataview.CollectionSizeProjector
+	if Params.QueryViewCfg.PublishCollectionSize.GetAsBool() {
+		sizeProjector = recoveredMeta.DataViewSizeBytes
+	}
 	var manager dataview.Manager
 	if err := retry.Do(s.ctx, func() error {
 		var err error
@@ -955,6 +959,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithCollectionSizeProjector(sizeProjector),
 			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
 				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
 			}),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -17,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ---------------------------------------------------------------------------
@@ -71,9 +69,11 @@ func (c *mockCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryV
 // Stats, Deref, ...) is supplied by mockey patches per test, so no mock
 // logic lives here.
 type stubDataViewRef struct {
+	size    *int64
 	version qviews.DataVersion
 }
 
+func (r stubDataViewRef) CollectionSizeBytes() *int64            { return r.size }
 func (r stubDataViewRef) DataView() *viewpb.DataViewOfCollection { return nil }
 
 func (r stubDataViewRef) Version() *viewpb.DataVersion {
@@ -372,58 +372,47 @@ func TestShardViewManagerPinsBeforePersist(t *testing.T) {
 
 func TestCollectionSizeSampleFollowsQueryView(t *testing.T) {
 	ctx := t.Context()
-	size := int64(1200)
-	var readErr error
-	reads := 0
-	sources := ShardViewSources{
-		DataViews: stubDataViewRefProvider{},
-		ReadCollectionSize: func(_ context.Context, id int64) (int64, error) {
-			require.EqualValues(t, testCollectionID, id)
-			reads++
-			return size, readErr
-		},
-	}
+	// Both DataVersions are already published when either shard prepares.
+	sizes := map[int64]*int64{1: proto.Int64(1200), 2: proto.Int64(0)}
+	patch := mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, id int64, v *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		require.EqualValues(t, testCollectionID, id)
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(v), size: sizes[v.GetStreamingVersion()]}, nil
+	}).Build()
+	defer patch.UnPatch()
+	sources := ShardViewSources{DataViews: stubDataViewRefProvider{}}
 	catalog := newMockCatalog()
 	registry, err := RecoverShardViewRegistryWithDataViews(ctx, catalog, newMockSyncer(), sources)
 	require.NoError(t, err)
 	defer registry.Close()
-	manager := registry.Ensure(testShardID)
-	require.NoError(t, manager.AddPreparing(ctx, testBuilder(1, 1, 1)))
-	require.NoError(t, registry.flushScheduler.Flush(ctx))
-	require.Len(t, catalog.saved, 1)
-	first := catalog.saved[0]
-	require.EqualValues(t, 1200, first.GetMeta().GetCollectionSizeBytes())
 
-	// A restarted coordinator must retain the saved value even if DataCoord is unavailable.
-	size, readErr = 0, merr.ErrServiceNotReady
-	recoveredCatalog := &mockCatalog{listed: []*viewpb.QueryViewOfShard{first}}
+	for _, ch := range []string{testVChannel, "second"} {
+		shard := qviews.ShardID{VChannel: ch, ReplicaID: testReplicaID}
+		// This query placement contains one partition. Both shards must copy the
+		// same whole-collection measurement from their exact pinned version.
+		v := testBuilder(1, 0, 1).Build()
+		v.Meta.Vchannel = ch
+		require.NoError(t, registry.Ensure(shard).AddPreparing(ctx, qviews.NewQueryViewAtCoordBuilderFromView(v)))
+	}
+	require.NoError(t, registry.flushScheduler.Flush(ctx))
+	require.Len(t, catalog.saved, 2)
+	for _, view := range catalog.saved {
+		require.Equal(t, sizes[1], view.Meta.CollectionSizeBytes)
+	}
+	recoveredCatalog := &mockCatalog{listed: catalog.saved}
 	restored, err := RecoverShardViewRegistryWithDataViews(ctx, recoveredCatalog, newMockSyncer(), sources)
 	require.NoError(t, err)
 	defer restored.Close()
-	require.Equal(t, 1, reads)
 	recovered := restored.Get(testShardID)
-	require.NotNil(t, recovered)
-	previousSaves := recoveredCatalog.numSaveCalls()
-	var derefs atomic.Int32
-	patch := mockey.Mock((stubDataViewRef).Deref).To(func(stubDataViewRef) { derefs.Add(1) }).Build()
-	defer patch.UnPatch()
-	require.ErrorIs(t, recovered.AddPreparing(ctx, testBuilder(2, 1, 1)), merr.ErrServiceNotReady)
-	require.EqualValues(t, 1, derefs.Load())
-	require.Equal(t, previousSaves, recoveredCatalog.numSaveCalls())
-	require.Equal(t, 2, reads)
 	recovered.mu.Lock()
-	storedSize := recovered.latestViewLocked().View().GetMeta().GetCollectionSizeBytes()
+	storedSize := recovered.latestViewLocked().View().Meta.CollectionSizeBytes
 	recovered.mu.Unlock()
-	require.EqualValues(t, 1200, storedSize)
+	require.Equal(t, sizes[1], storedSize)
 
-	readErr = nil
-	require.NoError(t, recovered.AddPreparing(ctx, testBuilder(2, 1, 1)))
+	require.NoError(t, recovered.AddPreparing(ctx, testBuilder(2, 0, 1)))
 	require.NoError(t, restored.flushScheduler.Flush(ctx))
-	require.Equal(t, 3, reads)
 	for _, view := range recoveredCatalog.saved {
-		if view.GetMeta().GetVersion().GetDataVersion().GetStreamingVersion() == 2 {
-			require.NotNil(t, view.Meta.CollectionSizeBytes)
-			require.Zero(t, *view.Meta.CollectionSizeBytes)
+		if view.Meta.GetVersion().GetDataVersion().GetStreamingVersion() == 2 {
+			require.Equal(t, sizes[2], view.Meta.CollectionSizeBytes)
 			return
 		}
 	}

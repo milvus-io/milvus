@@ -24,14 +24,10 @@ type LoadInfoRefProvider interface {
 	AcquireLoadInfo(context.Context, int64, uint64) (func(), error)
 }
 
-// CollectionSizeReader reads a whole collection's logical data and index bytes.
-type CollectionSizeReader func(ctx context.Context, collectionID int64) (int64, error)
-
-// ShardViewSources supplies the references and optional measurement used to prepare a view.
+// ShardViewSources supplies the references held by each prepared view.
 type ShardViewSources struct {
-	DataViews          DataViewRefProvider // Holds the exact version against GC for the lifetime of the QueryView.
-	LoadInfo           LoadInfoRefProvider
-	ReadCollectionSize CollectionSizeReader // Nil when publication is disabled.
+	DataViews DataViewRefProvider // Holds the exact version against GC for the lifetime of the QueryView.
+	LoadInfo  LoadInfoRefProvider
 }
 
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
@@ -453,8 +449,8 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		return err
 	}
 
-	// Acquiring references and sampling DataCoord metadata may block. Keep node
-	// callbacks, Stats and RequestRelease available throughout preparation.
+	// Acquiring references may block. Keep node callbacks, Stats and
+	// RequestRelease available throughout preparation.
 	ref, err := m.sources.prepareDataView(ctx, view.GetMeta())
 	var releaseLoadInfo func()
 	if err == nil && m.sources.LoadInfo != nil {
@@ -557,15 +553,7 @@ func (s ShardViewSources) prepareDataView(ctx context.Context, meta *viewpb.Quer
 	if ref == nil {
 		return nil, merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", qviews.FromProtoDataVersion(version), collectionID)
 	}
-	if s.ReadCollectionSize == nil {
-		return ref, nil
-	}
-	size, err := s.ReadCollectionSize(ctx, collectionID)
-	if err != nil {
-		ref.Deref()
-		return nil, err
-	}
-	meta.CollectionSizeBytes = &size
+	meta.CollectionSizeBytes = ref.CollectionSizeBytes()
 	return ref, nil
 }
 

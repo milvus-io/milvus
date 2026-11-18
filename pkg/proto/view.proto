@@ -76,6 +76,8 @@ message DataViewOfCollection {
     DataVersion data_version = 3;
     // Read schema supported by this exact snapshot; advanced only by schema DDL.
     int32 schema_version = 4;
+    // Whole-collection logical bytes at publication of this DataVersion, when measured.
+    optional int64 collection_size_bytes = 5;
 }
 
 // DataViewOfShard groups loadable segments by partition for one vchannel.
@@ -138,7 +140,7 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
-    // Whole-collection data and index bytes sampled when the view was prepared.
+    // Whole-collection data and index bytes copied from the referenced DataVersion.
     // Presence distinguishes an empty collection from a view without a measurement.
     optional int64 collection_size_bytes = 10;
 }

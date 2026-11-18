@@ -129,6 +129,7 @@ func TestQueryViewIdentifiersString(t *testing.T) {
 // (DataView/Version/Stats/Deref) is enforced at compile time.
 type stubDataViewRef struct{}
 
+func (s *stubDataViewRef) CollectionSizeBytes() *int64            { return nil }
 func (s *stubDataViewRef) DataView() *viewpb.DataViewOfCollection { return nil }
 func (s *stubDataViewRef) Version() *viewpb.DataVersion           { return nil }
 func (s *stubDataViewRef) Stats(segmentID int64) (SegmentStats, bool) {

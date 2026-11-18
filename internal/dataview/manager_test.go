@@ -157,10 +157,18 @@ func flushAndCommit(t *testing.T, manager Manager, event FlushDataViewEvent) *vi
 	require.NotNil(t, commit)
 	require.NotNil(t, abort)
 	if mgr, ok := manager.(*dataViewManager); ok {
-		require.NoError(t, mgr.catalog.SaveDataView(context.Background(), view))
+		require.NoError(t, mgr.catalog.SaveDataView(context.Background(), flushSnapshot(t, view)))
 	}
 	commit()
-	return view.GetDataVersion()
+	return view.Version()
+}
+
+// These fixtures run with collection-size publication disabled.
+func flushSnapshot(t *testing.T, flush *PreparedFlush) *viewpb.DataViewOfCollection {
+	t.Helper()
+	view, err := flush.Snapshot(nil)
+	require.NoError(t, err)
+	return view
 }
 
 func requireVersion(t *testing.T, actual *viewpb.DataVersion, streaming, compact int64) {
@@ -333,7 +341,7 @@ func TestManagerFlushReplayStaleManifestVersionIsNoOp(t *testing.T) {
 	// The replayed flush is a membership no-op: no snapshot is persisted and
 	// the stored (newer) manifest version is preserved.
 	require.Equal(t, before, catalog.saveCall)
-	require.Equal(t, []int64{4}, view.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
+	require.Equal(t, []int64{4}, flushSnapshot(t, view).GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
 	commit()
 	commit()
 }
@@ -824,7 +832,7 @@ func TestManagerConflictingSnapshotRejected(t *testing.T) {
 		Segments:     []LoadableSegment{segment(1, "ch-1", 10)},
 	})
 	require.NoError(t, err)
-	require.NoError(t, catalog.SaveDataView(ctx, view))
+	require.NoError(t, catalog.SaveDataView(ctx, flushSnapshot(t, view)))
 	commit()
 	defer abort()
 
@@ -1108,17 +1116,17 @@ func TestManagerPrepareFlushCommitAbortContract(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, commit)
 	require.NotNil(t, abort2)
-	require.NoError(t, catalog.SaveDataView(ctx, view))
+	require.NoError(t, catalog.SaveDataView(ctx, flushSnapshot(t, view)))
 	commit()
 	commit()
-	requireVersion(t, view.GetDataVersion(), 2, 0)
+	requireVersion(t, view.Version(), 2, 0)
 	requireVersion(t, mustLatest(t, manager, 1), 2, 0)
 
 	// An idempotent replay of the already-committed flush returns the same
 	// version and stays a no-op on memory.
 	view2, commit2, _, err := manager.PrepareFlush(ctx, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(2, "ch-1", 10)}})
 	require.NoError(t, err)
-	require.NoError(t, catalog.SaveDataView(ctx, view2))
+	require.NoError(t, catalog.SaveDataView(ctx, flushSnapshot(t, view2)))
 	commit2()
 	requireVersion(t, mustLatest(t, manager, 1), 2, 0)
 }
@@ -1542,4 +1550,59 @@ func TestManagerFlushStatsCarryBaseSegments(t *testing.T) {
 	// The DataView itself contains both segments.
 	ids := ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds()
 	require.ElementsMatch(t, []int64{10, 20}, ids)
+}
+
+func TestDataViewCollectionSizeAcrossFlushRetry(t *testing.T) {
+	ctx := t.Context()
+	catalog := &fakeDataViewCatalog{}
+	disabled := newManager(ctx, catalog, nil)
+	initial, err := disabled.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"a"}})
+	require.NoError(t, err)
+
+	samples := 0
+	project := WithCollectionSizeProjector(func(_ context.Context, _ *viewpb.DataViewOfCollection, omit []int64) (int64, error) {
+		samples++
+		require.Equal(t, []int64{10}, omit)
+		return 40, nil
+	})
+	manager, err := RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil },
+		projectSegments(), []int64{1}, map[int64][]string{1: {"a"}}, project)
+	require.NoError(t, err)
+	ref, err := manager.Get(ctx, 1, initial)
+	require.NoError(t, err)
+	defer ref.Deref()
+	require.Nil(t, ref.CollectionSizeBytes())
+	require.Zero(t, samples)
+
+	event := FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(10, "a", 1)}}
+	flush, _, abort, err := manager.PrepareFlush(ctx, event)
+	require.NoError(t, err)
+	_, err = flush.Snapshot(func(int64) (int64, error) { return 0, context.Canceled })
+	require.ErrorIs(t, err, context.Canceled)
+	abort()
+	require.Len(t, catalog.views, 1)
+
+	flush, commit, abort, err := manager.PrepareFlush(ctx, event)
+	require.NoError(t, err)
+	defer abort()
+	staged := func(id int64) (int64, error) {
+		require.EqualValues(t, 10, id)
+		return 2, nil
+	}
+	first, err := flush.Snapshot(staged)
+	require.NoError(t, err)
+	require.Equal(t, proto.Int64(42), first.CollectionSizeBytes)
+	snapshot, err := flush.Snapshot(staged)
+	require.NoError(t, err)
+	require.Equal(t, proto.Int64(42), snapshot.CollectionSizeBytes)
+	require.NoError(t, catalog.SaveDataView(ctx, snapshot))
+	commit()
+
+	replay, _, release, err := manager.PrepareFlush(ctx, event)
+	require.NoError(t, err)
+	defer release()
+	unchanged, err := replay.Snapshot(nil)
+	require.NoError(t, err)
+	require.Equal(t, proto.Int64(42), unchanged.CollectionSizeBytes)
+	require.Equal(t, 2, samples)
 }

@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -138,8 +137,7 @@ type Server struct {
 	loadConfigWatcher *LoadConfigWatcher
 
 	// query view runtime
-	qviewsRuntime      *qviewsRuntime
-	readCollectionSize coordview.CollectionSizeReader
+	qviewsRuntime *qviewsRuntime
 
 	// DQL activity tracking and TTL-based collection release.
 	collectionUsage *collectionUsageManager
@@ -398,7 +396,6 @@ func (s *Server) initQViewsRuntime() error {
 		s.meta.ResourceManager,
 		s.mixCoord,
 	)
-	deps.readCollectionSize = s.readCollectionSize
 	deps.replicaResources = qviewsReplicaResources{ResourceManager: s.meta.ResourceManager, allocateID: s.idAllocator}
 	runtime, err := newQViewsRuntime(s.ctx, deps)
 	if err != nil {
@@ -653,11 +650,6 @@ func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 // segment details from. Must be called before initMeta.
 func (s *Server) SetMetaView(view metacache.MetaView) {
 	s.metaView = view
-}
-
-// SetCollectionSizeReader supplies DataCoord's local reader before QueryCoord starts.
-func (s *Server) SetCollectionSizeReader(read coordview.CollectionSizeReader) {
-	s.readCollectionSize = read
 }
 
 func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {

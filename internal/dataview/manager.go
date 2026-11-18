@@ -19,6 +19,7 @@ package dataview
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -61,7 +62,16 @@ type FrontierProjector func(ctx context.Context, collectionID int64) (map[string
 // the candidate snapshot, such as a pending Import. It must not reenter Manager.
 type PendingTransformProjector func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error)
 
+// CollectionSizeProjector measures the candidate snapshot across all shards. The
+// supplied IDs omit segment data being retired or finalized by the publishing
+// transaction. A selected segment's finished field indexes still count.
+type CollectionSizeProjector func(ctx context.Context, view *viewpb.DataViewOfCollection, omitData []int64) (int64, error)
+
 type Option func(*dataViewManager)
+
+func WithCollectionSizeProjector(project CollectionSizeProjector) Option {
+	return func(m *dataViewManager) { m.collectionSizeProjector = project }
+}
 
 func WithFrontierProjector(project FrontierProjector) Option {
 	return func(m *dataViewManager) { m.frontierProjector = project }
@@ -78,7 +88,7 @@ type Manager interface {
 	// PrepareFlush builds the post-flush snapshot under the Collection lock
 	// for the flush atomic txn (see implementation comment for the
 	// commit/abort contract).
-	PrepareFlush(ctx context.Context, event FlushDataViewEvent) (view *viewpb.DataViewOfCollection, commit func(), abort func(), err error)
+	PrepareFlush(ctx context.Context, event FlushDataViewEvent) (flush *PreparedFlush, commit func(), abort func(), err error)
 	// PublishChange builds the post-batch-publish snapshot under the Collection
 	// lock for the batch atomic publish txn (see publish_change.go for the
 	// commit/abort contract). Symmetric with PrepareFlush; advances only
@@ -229,6 +239,7 @@ type dataViewManager struct {
 	projector                 Projector
 	frontierProjector         FrontierProjector
 	pendingTransformProjector PendingTransformProjector
+	collectionSizeProjector   CollectionSizeProjector
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
 	// a process-lifetime context; RecoverManager derives it from the caller's
 	// ctx so the worker stops when the coordinator does.
@@ -241,6 +252,7 @@ type dataViewRef struct {
 	once  sync.Once
 	state *collectionState
 	entry *versionEntry
+	view  *viewpb.DataViewOfCollection // Immutable snapshot selected under the collection lock.
 }
 
 // NewManager constructs a DataView manager with the SegmentMeta projection
@@ -497,6 +509,10 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 		shard.CompactedTransformStartAfterTimetick = event.TransformStarts[shard.Vchannel]
 	}
 	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1}
+	// RootCoord creates the first, empty DataView before registering the collection.
+	if m.collectionSizeProjector != nil {
+		view.CollectionSizeBytes = proto.Int64(0)
+	}
 	if err := m.persistLocked(ctx, state, view); err != nil {
 		return nil, err
 	}
@@ -523,6 +539,9 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 		return nil, err
 	}
 	if err := advanceTransformFrontiers(view, bounds); err != nil {
+		return nil, err
+	}
+	if err := m.sampleCollectionSize(ctx, view, nil); err != nil {
 		return nil, err
 	}
 	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentStats(event.Segments)); err != nil {
@@ -593,6 +612,9 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		return dataVersionFromView(base), nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
+	if err := m.sampleCollectionSize(ctx, next, nil); err != nil {
+		return nil, err
+	}
 	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentStats(segments)); err != nil {
 		return nil, err
 	}
@@ -899,15 +921,15 @@ func (m *dataViewManager) persistMemoryLockedWithStats(state *collectionState, v
 
 // PrepareFlush builds the post-flush DataView snapshot while holding the
 // Collection lock. It is the manager side of the flush atomic txn: the caller
-// composes the returned snapshot into the same catalog.Update as the
-// SegmentMeta actions (see meta.UpdateSegmentsInfoAndDataView), then calls
+// completes PreparedFlush.Snapshot with the staged data and composes it into
+// the same catalog.Update as SegmentMeta (see meta.UpdateSegmentsInfoAndDataView), then calls
 // commit when the composite txn was persisted (loads the snapshot into memory
 // and releases the lock), or abort when the txn failed and the error is
 // surfaced to the caller (releases the lock without touching memory). When
 // nothing was persisted (the txn short-circuited because the Collection's
 // DataViews were dropped, PrepareFlush returns nil with no-op callbacks), the
 // caller may skip both callbacks. All callbacks are idempotent.
-func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataViewOfCollection, func(), func(), error) {
+func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewEvent) (*PreparedFlush, func(), func(), error) {
 	state, unlock := m.lockStateForMutation(event.CollectionID)
 	if state == nil {
 		// The Collection's DataViews were dropped while this flush was in
@@ -942,9 +964,26 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		var once sync.Once
 		commit := func() { once.Do(unlock) }
 		abort := func() { once.Do(unlock) }
-		return view, commit, abort, nil
+		return &PreparedFlush{view: view}, commit, abort, nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceStreaming)
+	flush := &PreparedFlush{view: next}
+	if m.collectionSizeProjector != nil {
+		ids := make([]int64, 0, len(event.Segments))
+		for _, segment := range event.Segments {
+			ids = append(ids, segment.SegmentID)
+		}
+		slices.Sort(ids)
+		flush.pending = slices.Compact(ids)
+	}
+	if err := m.sampleCollectionSize(ctx, next, flush.pending); err != nil {
+		unlock()
+		return nil, nil, nil, err
+	}
+	if len(flush.pending) > 0 {
+		flush.otherBytes = next.GetCollectionSizeBytes()
+		next.CollectionSizeBytes = nil // Completed by Snapshot inside the SegmentMeta transaction.
+	}
 
 	// The flushed snapshot is incremental: next carries the base version's
 	// segments plus the flushed ones, so its stats index must merge the base
@@ -975,7 +1014,7 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 	abort := func() {
 		once.Do(unlock)
 	}
-	return next, commit, abort, nil
+	return flush, commit, abort, nil
 }
 
 func (m *dataViewManager) getState(collectionID int64) *collectionState {
@@ -1047,21 +1086,28 @@ func acquireRefLocked(state *collectionState, entry *versionEntry) DataViewRef {
 		return nil
 	}
 	entry.refs.count++
-	return &dataViewRef{state: state, entry: entry}
+	return &dataViewRef{state: state, entry: entry, view: entry.view}
 }
 
 func (r *dataViewRef) DataView() *viewpb.DataViewOfCollection {
-	if r == nil || r.entry == nil {
+	if r == nil {
 		return nil
 	}
-	return canonicalDataViewClone(r.entry.view)
+	return canonicalDataViewClone(r.view)
+}
+
+func (r *dataViewRef) CollectionSizeBytes() *int64 {
+	if r == nil || r.view == nil || r.view.CollectionSizeBytes == nil {
+		return nil
+	}
+	return proto.Int64(r.view.GetCollectionSizeBytes())
 }
 
 func (r *dataViewRef) Version() *viewpb.DataVersion {
-	if r == nil || r.entry == nil {
+	if r == nil {
 		return nil
 	}
-	return cloneDataVersion(r.entry.view.GetDataVersion())
+	return cloneDataVersion(r.view.GetDataVersion())
 }
 
 // Stats returns the published SegmentStats of one segment in the referenced

@@ -797,7 +797,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				abortView()
 				return dataview.FlushResultStatus(current.GetSealedAtDataVersion()), nil
 			}
-			flushedVersion = flushView.GetDataVersion()
+			flushedVersion = flushView.Version()
 			if flushedVersion != nil {
 				operators = append(operators, meta.SetSealedAtDataVersion(req.GetSegmentID(), flushedVersion))
 			}
