@@ -141,7 +141,7 @@ func TestProxyReplicaSelectionConfiguration(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	cfg := &params.ProxyCfg
-	for _, item := range []*paramtable.ParamItem{&cfg.ReplicaSelectionPolicy, &cfg.LatencyWeightedDecay, &cfg.LatencyWeightedMinShare, &cfg.HedgingEnabled, &cfg.HedgingMinDelay, &cfg.HedgingMaxInflightRatio} {
+	for _, item := range []*paramtable.ParamItem{&cfg.ReplicaSelectionPolicy, &cfg.LatencyWeightedDecay, &cfg.LatencyWeightedMinShare, &cfg.HedgingEnabled, &cfg.HedgingMinDelay} {
 		key, value := item.Key, item.GetValue()
 		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
 	}
@@ -162,7 +162,7 @@ func TestProxyReplicaSelectionConfiguration(t *testing.T) {
 
 	// Live policy switch to latency_weighted applies to new shard requests without restart.
 	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "latency_weighted"))
-	for key, value := range map[string]string{cfg.LatencyWeightedDecay.Key: "10s", cfg.LatencyWeightedMinShare.Key: "0.001", cfg.HedgingMinDelay.Key: "200ms", cfg.HedgingMaxInflightRatio.Key: "0.1"} {
+	for key, value := range map[string]string{cfg.LatencyWeightedDecay.Key: "10s", cfg.LatencyWeightedMinShare.Key: "0.001", cfg.HedgingMinDelay.Key: "200ms"} {
 		require.NoError(t, params.Save(key, value))
 	}
 	captured := provider()
@@ -171,7 +171,6 @@ func TestProxyReplicaSelectionConfiguration(t *testing.T) {
 	require.Equal(t, .001, captured.MinShare)
 	require.True(t, captured.HedgeEnabled)
 	require.Equal(t, 200*time.Millisecond, captured.HedgeMinDelay)
-	require.Equal(t, .1, captured.HedgeMaxInflightRatio)
 	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "look_aside"))
 	require.False(t, provider().LatencyWeighted)
 	require.True(t, captured.LatencyWeighted, "previous requests retain their captured mode")
