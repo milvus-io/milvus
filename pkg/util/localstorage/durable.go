@@ -14,10 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package localstorage synchronizes completed local file writes.
+// Package localstorage atomically publishes and synchronizes local file writes.
 package localstorage
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"io/fs"
 	"os"
@@ -29,7 +31,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// WriteFile writes directly to the target path, syncing the file and its
+// tempPrefix names a write that is not yet published. Listings skip it, as
+// object stores hide in-progress uploads.
+const tempPrefix = ".milvus-tmp-"
+
+// IsTemp reports whether the base name of path marks an unpublished write.
+func IsTemp(path string) bool {
+	return strings.HasPrefix(filepath.Base(path), tempPrefix)
+}
+
+// WriteFile atomically publishes data at name, syncing the file and its
 // directory entries before returning success. See Write for boundary.
 func WriteFile(name string, data []byte, perm fs.FileMode, boundary string) error {
 	return Write(name, perm, func(w io.Writer) error {
@@ -38,8 +49,12 @@ func WriteFile(name string, data []byte, perm fs.FileMode, boundary string) erro
 	}, boundary)
 }
 
-// Write syncs once after all callback writes. An error can leave an incomplete
-// file; callers must not commit metadata referencing a failed write.
+// Write publishes name with the semantics of an object store PUT: callback
+// writes go to a temporary file in the same directory, which is synced and
+// then renamed onto name. Readers, including those that opened or mapped the
+// previous file, see either the previous content or the complete new one,
+// never a partial file. A failed write leaves the previous content in place.
+// A crash may leave a temporary file behind, which IsTemp identifies.
 //
 // boundary is the physical data root returned by PrepareRoot, prepared once by
 // its owner; directory synchronization stops there. Empty, there is no
@@ -55,22 +70,53 @@ func Write(name string, perm fs.FileMode, write func(io.Writer) error, boundary 
 	if err := writeFile(name, perm, write); err != nil {
 		return err
 	}
+	// Persist the rename and any directories created for it.
 	return SyncDirectories(boundary, parentPath(name))
 }
 
 func writeFile(name string, perm fs.FileMode, write func(io.Writer) error) (err error) {
-	if err := os.MkdirAll(parentPath(name), 0o777); err != nil {
+	dir := parentPath(name)
+	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
+	f, err := createTemp(dir, perm)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			// Best effort: a leftover is hidden from listings like a crash leftover.
+			_ = os.Remove(f.Name())
+		}
+	}()
+	if err := writeAndSync(f, write); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), name)
+}
+
+func writeAndSync(f *os.File, write func(io.Writer) error) (err error) {
 	defer func() { err = errors.CombineErrors(err, f.Close()) }()
 	if err := write(f); err != nil {
 		return err
 	}
 	return f.Sync()
+}
+
+// createTemp creates a unique file in dir. Unlike os.CreateTemp, it applies
+// perm subject to the umask, as os.OpenFile does.
+func createTemp(dir string, perm fs.FileMode) (*os.File, error) {
+	var suffix [8]byte
+	for {
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, err
+		}
+		name := dir + string(filepath.Separator) + tempPrefix + hex.EncodeToString(suffix[:])
+		f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+		if !os.IsExist(err) {
+			return f, err
+		}
+	}
 }
 
 // parentPath preserves symlink/.. semantics: filepath.Dir cleans the path

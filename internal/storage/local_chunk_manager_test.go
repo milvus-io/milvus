@@ -41,7 +41,8 @@ func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
 	destination := filepath.Join(root, "new", "parents", "copy")
 	require.NoError(t, cm.Write(ctx, source, []byte("complete")))
 	require.NoError(t, cm.Copy(ctx, source, destination))
-	require.ErrorIs(t, cm.Copy(ctx, source, source), merr.ErrServiceInternal)
+	// Publication by rename keeps the open source intact.
+	require.NoError(t, cm.Copy(ctx, source, source))
 	data, err := cm.Read(ctx, source)
 	require.NoError(t, err)
 	require.Equal(t, "complete", string(data))
@@ -96,11 +97,31 @@ func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
 	name := root + "/link/../source"
 	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
 	// "link/../source" aliases root/actual/source, not root/source.
-	require.ErrorIs(t, cm.Copy(t.Context(), name, root+"/actual/source"), merr.ErrServiceInternal)
+	require.NoError(t, cm.Copy(t.Context(), name, root+"/actual/source"))
+	_, err := os.Stat(root + "/source")
+	require.True(t, os.IsNotExist(err))
 	require.NoError(t, cm.Copy(t.Context(), name, root+"/new/copy"))
 	data, err := os.ReadFile(root + "/actual/source")
 	require.NoError(t, err)
 	require.Equal(t, "data", string(data))
+}
+
+func TestLocalChunkManagerWalkWithPrefixSkipsUnpublishedWrites(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	dir := filepath.Join(root, "segment")
+	require.NoError(t, cm.Write(ctx, filepath.Join(dir, "object"), []byte("data")))
+	// What a crash between creating and publishing a write leaves behind.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".milvus-tmp-0123456789abcdef"), []byte("partial"), 0o600))
+	for _, recursive := range []bool{false, true} {
+		var listed []string
+		require.NoError(t, cm.WalkWithPrefix(ctx, dir+"/", recursive, func(info *ChunkObjectInfo) bool {
+			listed = append(listed, info.FilePath)
+			return true
+		}))
+		require.Equal(t, []string{filepath.Join(dir, "object")}, listed, "recursive=%v", recursive)
+	}
 }
 
 var localPath string

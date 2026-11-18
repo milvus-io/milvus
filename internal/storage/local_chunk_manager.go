@@ -120,7 +120,8 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 	return reader, nil
 }
 
-// Write writes the data to local storage.
+// Write atomically publishes the data, like an object store PUT (see
+// localstorage.Write).
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -171,6 +172,9 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	return results, el
 }
 
+// WalkWithPrefix skips unpublished writes (see localstorage.IsTemp), as object
+// stores do not list in-progress uploads, so RemoveWithPrefix leaves files a
+// crash interrupted before publication.
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 	logger.Info(ctx, "start walk through objects")
@@ -187,6 +191,11 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 		return filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			// Unpublished writes are hidden, including one renamed away between
+			// reading its directory and stating it.
+			if localstorage.IsTemp(filePath) {
+				return nil
 			}
 			// A missing scan root is an empty listing, including repeated GC.
 			if filePath == dir && os.IsNotExist(err) {
@@ -220,6 +229,9 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 	for _, filePath := range globPaths {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if localstorage.IsTemp(filePath) {
+			continue
 		}
 
 		f, err := os.Stat(filePath)
@@ -334,18 +346,8 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// The destination is truncated in place, so copying a file onto itself
-	// (including through an alias) would destroy the source. No caller does it.
-	if dstInfo, statErr := os.Stat(dstFilePath); statErr == nil {
-		srcInfo, err := srcFile.Stat()
-		if err != nil {
-			return merr.WrapErrIoFailed(srcFilePath, err)
-		}
-		if os.SameFile(srcInfo, dstInfo) {
-			return merr.WrapErrServiceInternalMsg("copy source %s and destination %s are the same file", srcFilePath, dstFilePath)
-		}
-	}
-
+	// The destination is published by rename, so the open source keeps its
+	// content even when both name the same file.
 	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
 		if err := ctx.Err(); err != nil {
 			return err
