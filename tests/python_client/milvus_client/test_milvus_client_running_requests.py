@@ -93,8 +93,13 @@ def test_list_and_cancel_search_on_single_proxy(running_request_endpoint):
 
         def search(data):
             return app.search(
-                collection, data, anns_field="vector", filter=expr, limit=TOPK,
-                search_params={"metric_type": "L2"}, timeout=90,
+                collection,
+                data,
+                anns_field="vector",
+                filter=expr,
+                limit=TOPK,
+                search_params={"metric_type": "L2"},
+                timeout=90,
             )
 
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -145,13 +150,16 @@ def test_list_empty_result_and_cancel_unknown_id(running_request_endpoint):
 
 
 @pytest.mark.tags(CaseLabel.L0)
-@pytest.mark.parametrize(("method", "payload", "code"), [
-    pytest.param("list", {"collectionName": {}}, 1801, id="list-collection-type"),
-    pytest.param("list", {"minElapsedMs": "1"}, 1801, id="list-elapsed-type"),
-    pytest.param("cancel", {}, 1802, id="cancel-missing-ids"),
-    pytest.param("cancel", {"requestIds": []}, 1101, id="cancel-empty-ids"),
-    pytest.param("cancel", {"requestIds": [123]}, 1801, id="cancel-id-type"),
-])
+@pytest.mark.parametrize(
+    ("method", "payload", "code"),
+    [
+        pytest.param("list", {"collectionName": {}}, 1801, id="list-collection-type"),
+        pytest.param("list", {"minElapsedMs": "1"}, 1801, id="list-elapsed-type"),
+        pytest.param("cancel", {}, 1802, id="cancel-missing-ids"),
+        pytest.param("cancel", {"requestIds": []}, 1101, id="cancel-empty-ids"),
+        pytest.param("cancel", {"requestIds": [123]}, 1801, id="cancel-id-type"),
+    ],
+)
 def test_list_cancel_invalid_input(running_request_endpoint, method, payload, code):
     _, _, post = running_request_endpoint
     body = post(method, payload)
