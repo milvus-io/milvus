@@ -660,9 +660,10 @@ func TestMultiSearchRESTRequestMetricsRecordRefusals(t *testing.T) {
 			require.Len(t, body.Data, 1)
 			require.NotZero(t, body.Data[0].Search.Code)
 			group, outcome := "rg-a", metrics.RejectedLabel
-			if phase == "before" {
+			switch phase {
+			case "before":
 				group = ""
-			} else if phase == "execution" {
+			case "execution":
 				outcome = metrics.FailLabel
 			}
 			for _, labels := range [][2]string{{metrics.TotalLabel, metrics.CauseNA}, {outcome, metrics.CauseUser}} {
