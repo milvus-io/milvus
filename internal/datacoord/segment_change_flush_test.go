@@ -50,6 +50,8 @@ func newStreamingFlushTestWithRows(t *testing.T, rows int64) (*Server, *datapb.S
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	parent := newIndexLineageSegment(1, rows, commonpb.SegmentState_Growing)
 	s, scalar := newIndexReadinessTestServer([]*datapb.SegmentInfo{parent}, nil)
+	s.flushCh = make(chan UniqueID, 1024)
+	s.allocator = meta.NewMockAllocator(t)
 	scalar.FieldID, scalar.IndexName = 20, "scalar_index"
 	scalar.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: "STL_SORT"}}
 	collection := s.meta.GetCollection(1)
@@ -176,6 +178,75 @@ func TestStreamingFlushGroupSortIndexAndHandoff(t *testing.T) {
 	require.NoError(t, s.dataViewManager.GarbageCollect(ctx, 1, 1))
 	_, protected = collector.DataViewCompactionProtectionForTest(nil)[1]
 	require.False(t, protected, "durable SN acknowledgment and version GC release the old source")
+}
+
+func TestStreamingFlushNotifiesSortWithoutPeriodicSweep(t *testing.T) {
+	s, req := newStreamingFlushTest(t)
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	s.flushCh = make(chan UniqueID, 1)
+	meta.DrainStatsTaskChForTest()
+	t.Cleanup(meta.DrainStatsTaskChForTest)
+	status, err := s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	select {
+	case id := <-s.flushCh:
+		require.Equal(t, req.GetSegmentID(), id)
+		require.NoError(t, s.postFlush(t.Context(), id))
+	default:
+		t.Fatal("staged streaming flush must notify postFlush without the periodic sweep")
+	}
+	select {
+	case id := <-meta.GetStatsTaskChSingleton():
+		require.Equal(t, req.GetSegmentID(), id)
+	default:
+		t.Fatal("postFlush must wake required sort preparation")
+	}
+}
+
+func TestStreamingFlushPollPublishesReadyOutputs(t *testing.T) {
+	s, req := newStreamingFlushTest(t)
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "false")
+	status, err := s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	_, pending, err := dataview.ParseStagedFlushResult(status)
+	require.NoError(t, err)
+	require.True(t, pending)
+	addIndexServingTask(s, 1, 10, commonpb.IndexState_Finished)
+	s.indexMeta.Indexes[1][20] = &model.Index{CollectionID: 1, FieldID: 10, IndexID: 20}
+	addIndexServingTask(s, 1, 20, commonpb.IndexState_Finished)
+	status, err = s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	version, pending, err := dataview.ParseStagedFlushResult(status)
+	require.NoError(t, err)
+	require.False(t, pending, "publication polling must not wait for the periodic inspector")
+	require.NotNil(t, version)
+	require.Equal(t, model.SegmentChangeStateCommitted, s.meta.GetSegmentChangeGroup(t.Context(), 1, 1).State)
+}
+
+func TestStreamingFlushPollRetriesLostSortNotification(t *testing.T) {
+	s, req := newStreamingFlushTest(t)
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	s.flushCh = make(chan UniqueID) // No worker can receive the first notification.
+	meta.DrainStatsTaskChForTest()
+	t.Cleanup(meta.DrainStatsTaskChForTest)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	status, err := s.SaveBinlogPaths(ctx, proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.NoError(t, ctx.Err(), "durability receipt must not block on the notification queue")
+	status, err = s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	_, pending, err := dataview.ParseStagedFlushResult(status)
+	require.NoError(t, err)
+	require.True(t, pending, "polling must preserve readiness checks")
+	select {
+	case id := <-meta.GetStatsTaskChSingleton():
+		require.Equal(t, req.GetSegmentID(), id)
+	default:
+		t.Fatal("polling must recover the lost required-sort notification")
+	}
 }
 
 func TestStreamingFlushGroupWithoutSortAndEmptyFlush(t *testing.T) {

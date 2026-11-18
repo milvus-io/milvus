@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -51,21 +52,32 @@ func restoreSchemaTestMeta() *streamingpb.VChannelMeta {
 
 func TestModuleRestoresGrowingEncodingSchemaVersion(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		schemaVersion  int32
-		createTimeTick uint64
-		retireInitial  bool
-		sealed         bool
-		flushPending   bool
+		name            string
+		schemaVersion   int32
+		createTimeTick  uint64
+		retireInitial   bool
+		sealed          bool
+		flushPending    bool
+		published       bool
+		retireOwner     bool
+		retirePartition bool
 	}{
 		{name: "native version one", schemaVersion: 1, createTimeTick: 25},
 		{name: "migrated version with retired allocation history", schemaVersion: 1, createTimeTick: 15, retireInitial: true},
 		{name: "real version zero", schemaVersion: 0, createTimeTick: 15},
 		{name: "sealed version lookup unchanged", schemaVersion: 1, createTimeTick: 15, sealed: true},
 		{name: "pending flush with retired allocation history", schemaVersion: 1, createTimeTick: 15, retireInitial: true, flushPending: true},
+		{name: "published flush with retired collection", schemaVersion: 0, createTimeTick: 15, flushPending: true, published: true, retireOwner: true},
+		{name: "published flush with retired partition", schemaVersion: 0, createTimeTick: 15, flushPending: true, published: true, retirePartition: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			meta := restoreSchemaTestMeta()
+			if tc.retireOwner {
+				meta.State = streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED
+			}
+			if tc.retirePartition {
+				meta.CollectionInfo.Partitions[0].State = streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED
+			}
 			if tc.retireInitial {
 				meta.CollectionInfo.Schemas[0].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
 				meta.CollectionInfo.Schemas[0].Schema = nil
@@ -83,6 +95,10 @@ func TestModuleRestoresGrowingEncodingSchemaVersion(t *testing.T) {
 				CollectionId: 1, PartitionId: 10, SegmentId: 1000, Vchannel: "v1",
 				State: state, SchemaVersion: tc.schemaVersion, FlushDataDurable: tc.flushPending,
 				Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: tc.createTimeTick},
+			}
+			if tc.published {
+				assignment.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+				assignment.SealedAtDataVersion = &viewpb.DataVersion{StreamingVersion: 2}
 			}
 			var restoredSchema *schemapb.CollectionSchema
 			var original func(*streamingpb.SegmentAssignmentMeta, *schemapb.CollectionSchema, segment.ViewConfig) *segment.SegmentView
@@ -159,6 +175,22 @@ func TestRestoreSegmentSchemaPreservesOwnerLifetimeFilters(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetainedFlushSchemaDoesNotSubstituteAnotherVersion(t *testing.T) {
+	meta := restoreSchemaTestMeta()
+	meta.State = streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED
+	meta.CollectionInfo.Schemas = meta.CollectionInfo.Schemas[1:]
+	_, err := NewModule(ModuleConfig{
+		PChannel: "p1", VChannel: "v1", VChannelMeta: meta,
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{1000: {
+			CollectionId: 1, PartitionId: 10, SegmentId: 1000, Vchannel: "v1", SchemaVersion: 0,
+			State:            streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			FlushDataDurable: true, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 2},
+			Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 15},
+		}},
+	})
+	require.ErrorContains(t, err, "missing encoding schema version 0")
 }
 
 func TestRestoreSegmentSchemaDoesNotGuessMissingEncodingVersion(t *testing.T) {

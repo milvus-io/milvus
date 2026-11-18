@@ -137,6 +137,9 @@ func (s *BloomSizingReadbackSuite) runBloomReadback(varchar bool) {
 			if seg.GetState() != commonpb.SegmentState_Flushed {
 				continue
 			}
+			if seg.GetIsInvisible() || seg.GetIsImporting() {
+				return false
+			}
 			if !seg.GetIsSorted() {
 				return false
 			}

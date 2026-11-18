@@ -224,6 +224,12 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			m.groupMu.RUnlock()
 			return err
 		}
+		if groupWritesMemberCommitTS(g) {
+			// Project the cursor installed by UpdateCommitTimestamp in this same
+			// publication transaction. The private metadata has no commit cursor
+			// yet; exposing it would leave import/copy publication waiting forever.
+			l.TransformStartAfterTimetick = commitTs
+		}
 		loadable = append(loadable, l)
 	}
 	m.groupMu.RUnlock()

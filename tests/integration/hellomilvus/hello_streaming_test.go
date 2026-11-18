@@ -122,8 +122,7 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	segments, err := c.ShowSegments(collectionName)
-	s.NoError(err)
+	segments := s.WaitForPublishedSegments(ctx, dbName, collectionName)
 	s.NotEmpty(segments)
 	flushedSegment := lo.Filter(segments, func(info *datapb.SegmentInfo, i int) bool {
 		return info.GetState() == commonpb.SegmentState_Flushed || info.GetState() == commonpb.SegmentState_Flushing

@@ -763,6 +763,13 @@ disabled, A itself remains the output. V3 schema preparation can update a
 private streaming output or replace it without creating a second publication
 group. Other private producer groups retain their existing C23 behavior.
 
+Durable registration also notifies the ordinary post-flush preparation path.
+Publication polls re-notify required private sort work after a lost notification
+and run the same readiness/publish state machine, so progress does not require
+two inspector ticks or an automatic compaction sweep. These notifications are
+best effort and must not block the durability receipt. A poll never bypasses
+sort, schema, stats, or index readiness.
+
 Flush durability and query handoff are separate facts:
 
 1. The registration receipt releases the WAL Flush handle after data is
@@ -906,6 +913,12 @@ After staging:
   replay; it does not allocate a new row timestamp. The primary validates the
   readiness/schema fence before appending CommitImport. The callback assigns
   each group's WAL timestamp, then waits for publication before job completion.
+  The DataView built for that publication projects this timestamp as each new
+  member's `transform_start_after_timetick`; the private SegmentMeta still has
+  its pre-commit cursor until the same catalog transaction installs both the
+  DataView and `UpdateCommitTimestamp`. An aborted transaction exposes neither.
+  Copy groups that own their publication timestamp use the same projection;
+  copy groups preserving member timestamps retain their source cursors.
   With staging opted in it also completes legacy jobs; per-channel SN RPCs are
   idempotent participants. CDC receivers may prepare their local groups only
   when the replicated commit arrives and then wait for local artifacts.

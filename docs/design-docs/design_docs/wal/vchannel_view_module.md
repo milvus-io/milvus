@@ -174,6 +174,15 @@ Segments awaiting catalog deletion continue to pin their schemas. QueryView
 retention must keep the corresponding SegmentViews alive; it does not introduce
 a separate schema-version index here.
 
+Recovery of a durable streaming flush source resolves its exact persisted
+encoding SchemaVersion, including version zero, independently of admission for
+new writes. Retained sources may outlive the collection/partition write lifetime
+because older QueryViews or recovery snapshots still refer to them. A closed
+owner therefore does not invalidate its retained encoding schema. A missing
+encoding version remains a data-integrity error; recovery never substitutes the
+latest schema. Growing-segment allocation retains the ordinary owner-lifetime
+checks.
+
 Unreferenced historical versions first become `DROPPED` in a normal full
 VChannel snapshot. Their `checkpoint_time_tick` remains the original effective
 version timestamp. A later scan selects only persisted tombstones for explicit
