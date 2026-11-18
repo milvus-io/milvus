@@ -176,19 +176,19 @@ class TestOperations(TestBase):
         # event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
         # event_records.insert("init_health_checkers", "finished")
-        cc.start_monitor_threads(self.health_checkers)
-        log.info("*********************Load Start**********************")
-        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
-        if request_duration[-1] == "+":
-            request_duration = request_duration[:-1]
-        request_duration = eval(request_duration)
-        for i in range(10):
-            sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
-                v.check_result()
-                # log.info(v.check_result())
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
-        time.sleep(60)
+        with cc.monitor_threads(self.health_checkers):
+            log.info("*********************Load Start**********************")
+            request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+            if request_duration[-1] == "+":
+                request_duration = request_duration[:-1]
+            request_duration = eval(request_duration)
+            for i in range(10):
+                sleep(request_duration // 10)
+                for k, v in self.health_checkers.items():
+                    v.check_result()
+                    # log.info(v.check_result())
+            wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+            time.sleep(60)
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         if is_check:
