@@ -1435,7 +1435,7 @@ func (m *IndexMeta) UpdateIndexStateWithContext(ctx context.Context, buildID Uni
 }
 
 // retireJSONFlatTask removes an artifact-free pending build after its worker
-// has been cancelled. Keep completed/history records and their file ownership.
+// has been canceled. Keep completed/history records and their file ownership.
 // Downgrade recreates missing builds from the retained collection definition.
 func (m *IndexMeta) retireJSONFlatTask(buildID UniqueID) error {
 	m.KeyLock.Lock(buildID)
