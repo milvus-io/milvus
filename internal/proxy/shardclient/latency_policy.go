@@ -190,7 +190,6 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 			}
 		}
 		if workload.Hedgeable {
-			defer lb.hedging.EnterPrimary()()
 		}
 		client, err := lb.clientMgr.GetClient(ctx, node)
 		if err == nil {

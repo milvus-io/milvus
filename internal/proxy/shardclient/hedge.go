@@ -38,11 +38,10 @@ var ErrAttemptSuperseded = errors.New("attempt superseded by another attempt of 
 
 // decisions of a hedge, as metric labels
 const (
-	hedgeSent                 = "sent"
-	hedgeWon                  = "won"
-	hedgeSkippedLowWinRate    = "skipped_low_win_rate"
-	hedgeSkippedNoReplica     = "skipped_no_replica"
-	hedgeSkippedInflightLimit = "skipped_inflight_limit"
+	hedgeSent              = "sent"
+	hedgeWon               = "won"
+	hedgeSkippedLowWinRate = "skipped_low_win_rate"
+	hedgeSkippedNoReplica  = "skipped_no_replica"
 )
 
 func recordHedge(decision string) {
@@ -138,11 +137,10 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 	hedgeKey := hedgeStatsKey(workload)
 	gate := &attemptGate{}
 	results := make(chan hedgeResult, 2)
-	launch := func(node NodeInfo, selected bool, start time.Time, release func()) *attemptFeedback {
+	launch := func(node NodeInfo, selected bool, start time.Time) *attemptFeedback {
 		attemptCtx := context.WithValue(ctx, attemptGateKey{}, gate)
 		feedback := &attemptFeedback{balancer: lw, ctx: attemptCtx, key: key, node: node.NodeID, selected: selected, start: start}
 		go func() {
-			defer release()
 			if lw == nil && selected {
 				defer balancer.CancelWorkload(node.NodeID, workload.Nq)
 			}
@@ -156,7 +154,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 		}()
 		return feedback
 	}
-	primaryFeedback := launch(primary, primarySelected, primaryStart, lb.hedging.EnterPrimary())
+	primaryFeedback := launch(primary, primarySelected, primaryStart)
 	pending := 1
 	timer := time.NewTimer(max(delay-time.Since(primaryStart), 0))
 	defer timer.Stop()
@@ -198,10 +196,6 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 			if gate.committed.Load() {
 				continue
 			}
-			if !lb.hedging.CanAcquireHedge() {
-				recordHedge(hedgeSkippedInflightLimit)
-				continue
-			}
 			if !lb.hedging.AllowHedge(hedgeKey) {
 				recordHedge(hedgeSkippedLowWinRate)
 				continue
@@ -241,21 +235,11 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 				continue
 			}
-			releaseHedge, ok := lb.hedging.TryAcquireHedge()
-			if !ok {
-				if lw != nil && selected {
-					lw.ReleaseSelection(key, node.NodeID)
-				} else if lw == nil && selected {
-					balancer.CancelWorkload(node.NodeID, workload.Nq)
-				}
-				recordHedge(hedgeSkippedInflightLimit)
-				continue
-			}
 			recordHedge(hedgeSent)
 			log.RatedInfo(ctx, 5, "attempt is slow, sending a hedged attempt to another replica",
 				mlog.Int64("primary", primary.NodeID), mlog.Int64("hedge", node.NodeID), mlog.Duration("delay", delay))
 			hedgeNode = node.NodeID
-			launch(node, selected, start, releaseHedge)
+			launch(node, selected, start)
 			pending++
 		case r := <-results:
 			pending--

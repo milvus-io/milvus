@@ -18,12 +18,9 @@ package shardclient
 
 import (
 	"context"
-	"math"
 	"math/rand"
 	"sync"
 	"time"
-
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -32,31 +29,21 @@ const (
 	// defaultHedgeMinWinRate suppresses speculative hedges when recent win rate
 	// drops below this threshold, keeping hedgeProbeRate probes active.
 	defaultHedgeMinWinRate = 0.3
-	// hedgeMinInflight is the minimum concurrent hedge allowance on a Proxy
-	// when hedging is enabled, so low-QPS workloads can still hedge.
-	hedgeMinInflight = 2
 )
 
 type hedgeConfig struct {
-	enabled          bool
-	minDelay         time.Duration
-	maxInflightRatio float64
+	enabled  bool
+	minDelay time.Duration
 }
 
 func loadHedgeConfig() hedgeConfig {
 	p := &paramtable.Get().ProxyCfg
 	c := hedgeConfig{
-		enabled:          p.HedgingEnabled.GetAsBool(),
-		minDelay:         p.HedgingMinDelay.GetAsDurationByParse(),
-		maxInflightRatio: p.HedgingMaxInflightRatio.GetAsFloat(),
+		enabled:  p.HedgingEnabled.GetAsBool(),
+		minDelay: p.HedgingMinDelay.GetAsDurationByParse(),
 	}
 	if c.minDelay < 0 {
 		c.minDelay = 200 * time.Millisecond
-	}
-	if c.maxInflightRatio < 0 {
-		c.maxInflightRatio = 0
-	} else if c.maxInflightRatio > 1 {
-		c.maxInflightRatio = 1
 	}
 	return c
 }
@@ -75,9 +62,6 @@ type hedgeTracker struct {
 	mu   sync.Mutex
 	keys map[string]*keyStats
 	rng  *rand.Rand
-
-	inflightPrimaries atomic.Int64
-	inflightHedges    atomic.Int64
 
 	now             func() time.Time
 	cleanupInterval time.Duration
@@ -198,49 +182,4 @@ func (t *hedgeTracker) ObserveHedge(key string, won bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.keyLocked(key).hedges.add(now, won)
-}
-
-func (t *hedgeTracker) EnterPrimary() func() {
-	t.inflightPrimaries.Inc()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			t.inflightPrimaries.Dec()
-		})
-	}
-}
-
-func (t *hedgeTracker) hedgeInflightLimit(cfg hedgeConfig) int64 {
-	if !cfg.enabled || cfg.maxInflightRatio <= 0 {
-		return 0
-	}
-	primaries := t.inflightPrimaries.Load()
-	limit := int64(math.Ceil(cfg.maxInflightRatio * float64(primaries)))
-	if limit < hedgeMinInflight {
-		limit = hedgeMinInflight
-	}
-	return limit
-}
-
-func (t *hedgeTracker) CanAcquireHedge() bool {
-	return t.inflightHedges.Load() < t.hedgeInflightLimit(loadHedgeConfig())
-}
-
-func (t *hedgeTracker) TryAcquireHedge() (func(), bool) {
-	cfg := loadHedgeConfig()
-	for {
-		limit := t.hedgeInflightLimit(cfg)
-		current := t.inflightHedges.Load()
-		if current >= limit {
-			return nil, false
-		}
-		if t.inflightHedges.CompareAndSwap(current, current+1) {
-			var once sync.Once
-			return func() {
-				once.Do(func() {
-					t.inflightHedges.Dec()
-				})
-			}, true
-		}
-	}
 }

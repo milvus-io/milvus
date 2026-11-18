@@ -2544,7 +2544,6 @@ type proxyConfig struct {
 	LatencyWeightedMinShare           ParamItem `refreshable:"true"`
 	HedgingEnabled                    ParamItem `refreshable:"true"`
 	HedgingMinDelay                   ParamItem `refreshable:"true"`
-	HedgingMaxInflightRatio           ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -3090,15 +3089,6 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.HedgingMinDelay.Init(base.mgr)
-
-	p.HedgingMaxInflightRatio = ParamItem{
-		Key:          "proxy.hedging.maxInflightRatio",
-		Version:      "3.0.0",
-		DefaultValue: "0.1",
-		Doc:          "Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.",
-		Export:       true,
-	}
-	p.HedgingMaxInflightRatio.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
