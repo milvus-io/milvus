@@ -159,6 +159,11 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 		// advance a staged member's SchemaVersion. Fail immediately instead of
 		// waiting out the staging timeout.
 		if !readiness.SchemaReady(seg) {
+			if g.Source == model.SegmentChangeSourceStreamingFlush {
+				// Accepted WAL rows remain recoverable through the growing source.
+				// A schema mismatch must never turn them into reclaimable garbage.
+				return
+			}
 			if g.AwaitCommitFence && g.CommitTS == 0 {
 				return
 			}
@@ -315,7 +320,7 @@ func (i *segmentChangeInspector) stagingTimedOut(g *model.SegmentChangeGroup) bo
 	// not make their outputs invalid and must not introduce a new one-hour
 	// failure where the producer previously waited for completion.
 	switch g.Source {
-	case model.SegmentChangeSourceClustering, model.SegmentChangeSourceCopySegment, model.SegmentChangeSourceExternalRefresh:
+	case model.SegmentChangeSourceClustering, model.SegmentChangeSourceCopySegment, model.SegmentChangeSourceExternalRefresh, model.SegmentChangeSourceStreamingFlush:
 		return false
 	}
 	if g.CreateTS <= 0 {
@@ -337,7 +342,16 @@ func (i *segmentChangeInspector) applyTerminalTransition(ctx context.Context, g 
 	if g.IsTerminal() {
 		return
 	}
+	// A streaming producer has already accepted WAL rows. Preserve its growing
+	// source and private outputs on preparation failures; only collection
+	// deletion authorizes discarding those rows.
+	if g.Source == model.SegmentChangeSourceStreamingFlush && i.mt.GetCollection(g.CollectionID) != nil {
+		return
+	}
 	terminal := g.Clone()
+	if g.Source == model.SegmentChangeSourceStreamingFlush {
+		terminal.StreamingDataRetired = true
+	}
 	terminal.State = state
 	terminal.FailReason = reason
 	if err := i.mt.UpdateSegmentChangeGroup(ctx, terminal); err != nil {

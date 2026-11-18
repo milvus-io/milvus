@@ -23,6 +23,12 @@ type TransformFrontierCommitter interface {
 	CommitL1SegmentWithTransformStart(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, startAfter uint64) (*viewpb.DataVersion, error)
 }
 
+// StagedFlushCommitter separates durable WAL materialization from the later
+// query handoff. Pending registration is durable but carries no DataVersion.
+type StagedFlushCommitter interface {
+	CommitL1SegmentWithPublication(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, startAfter uint64) (*viewpb.DataVersion, bool, error)
+}
+
 // GrowingTransformFrontierProvider captures the complete VChannel observation
 // state, including unpublished Segments in other partitions.
 type GrowingTransformFrontierProvider interface {

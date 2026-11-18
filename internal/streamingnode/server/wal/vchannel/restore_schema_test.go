@@ -56,11 +56,13 @@ func TestModuleRestoresGrowingEncodingSchemaVersion(t *testing.T) {
 		createTimeTick uint64
 		retireInitial  bool
 		sealed         bool
+		flushPending   bool
 	}{
 		{name: "native version one", schemaVersion: 1, createTimeTick: 25},
 		{name: "migrated version with retired allocation history", schemaVersion: 1, createTimeTick: 15, retireInitial: true},
 		{name: "real version zero", schemaVersion: 0, createTimeTick: 15},
 		{name: "sealed version lookup unchanged", schemaVersion: 1, createTimeTick: 15, sealed: true},
+		{name: "pending flush with retired allocation history", schemaVersion: 1, createTimeTick: 15, retireInitial: true, flushPending: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			meta := restoreSchemaTestMeta()
@@ -72,11 +74,14 @@ func TestModuleRestoresGrowingEncodingSchemaVersion(t *testing.T) {
 			if tc.sealed {
 				state = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED
 			}
+			if tc.flushPending {
+				state = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+			}
 			// A migrated allocation's time lookup can resolve a retired entry
 			// while its reconstructed encoding version remains available.
 			assignment := &streamingpb.SegmentAssignmentMeta{
 				CollectionId: 1, PartitionId: 10, SegmentId: 1000, Vchannel: "v1",
-				State: state, SchemaVersion: tc.schemaVersion,
+				State: state, SchemaVersion: tc.schemaVersion, FlushDataDurable: tc.flushPending,
 				Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: tc.createTimeTick},
 			}
 			var restoredSchema *schemapb.CollectionSchema

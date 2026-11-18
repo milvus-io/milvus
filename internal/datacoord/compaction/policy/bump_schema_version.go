@@ -66,7 +66,8 @@ func isSchemaBumpDataSegment(segment *meta.SegmentInfo) bool {
 // whose SchemaVersion lags behind collectionSchemaVersion.
 func (policy *BumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, collectionSchemaVersion int32) []*meta.ChanPartSegments {
 	return meta.GetSegmentsChanPart(policy.meta, collectionID, meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
-		if !isSchemaBumpDataSegment(segment) ||
+		groupOutput := policy.meta.CanPrepareStreamingSchema(segment.GetID())
+		if (!isSchemaBumpDataSegment(segment) && !groupOutput) ||
 			segment.IsCompacting ||
 			policy.meta.IsSegmentCompactionProtected(segment.GetID()) ||
 			segment.GetSchemaVersion() >= collectionSchemaVersion {

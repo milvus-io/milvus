@@ -664,3 +664,70 @@ func TestCatalog_Update_ClusteringPublicationFallbackMarkers(t *testing.T) {
 		metastore.SavePartitionStatsVersion(10, 100, "ch-1", 5000),
 		metastore.SaveSegmentChangeGroup(group), metastore.SaveDataView(view)))
 }
+
+// A failed nonfinal chunk cannot produce a durable registration receipt,
+// a query handoff, or a DDL retirement. Retrying the same actions converges.
+func TestCatalog_Update_StreamingFlushCommitMarkers(t *testing.T) {
+	for _, phase := range []string{"registration", "publication", "ddl"} {
+		t.Run(phase, func(t *testing.T) {
+			g := &model.SegmentChangeGroup{
+				GroupID: 100, CollectionID: 10, PartitionID: 1,
+				Source: model.SegmentChangeSourceStreamingFlush, SourceJobID: 100,
+				StreamingSegmentID: 100, VChannel: "ch-1", NewSegmentIDs: []int64{100}, State: model.SegmentChangeStateStaged,
+			}
+			source := &datapb.SegmentInfo{ID: 100, CollectionID: 10, PartitionID: 1, State: commonpb.SegmentState_Flushed, IsInvisible: true, NumOfRows: 10}
+			for i := int64(1); i <= 6; i++ {
+				source.Binlogs = append(source.Binlogs, &datapb.FieldBinlog{FieldID: i, Binlogs: []*datapb.Binlog{{LogID: i, EntriesNum: 10}}})
+			}
+			actions := []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(g), metastore.AddSegment(source)}
+			markerKeys := []string{buildSegmentPath(10, 1, 100)}
+			switch phase {
+			case "publication":
+				g.State = model.SegmentChangeStateCommitted
+				g.StreamingDataVersion = &viewpb.DataVersion{StreamingVersion: 2}
+				source.SealedAtDataVersion = proto.CloneOf(g.StreamingDataVersion)
+				source.IsInvisible = false
+				actions = append(actions, metastore.SaveDataView(&viewpb.DataViewOfCollection{CollectionId: 10, DataVersion: g.StreamingDataVersion}))
+				markerKeys = append(markerKeys, buildSegmentChangeGroupKey(10, 100), buildDataViewVersionKey(10, 2, 0))
+			case "ddl":
+				g.State, g.StreamingDataRetired = model.SegmentChangeStateAborted, true
+				g.NewSegmentIDs = []int64{200}
+				source.State = commonpb.SegmentState_Dropped
+				actions = []metastore.UpdateAction{
+					metastore.SaveSegmentChangeGroup(g), metastore.UpdateSegment(source),
+					metastore.UpdateSegment(&datapb.SegmentInfo{ID: 200, CollectionID: 10, PartitionID: 1, State: commonpb.SegmentState_Dropped}),
+				}
+				for i := int64(300); i < 306; i++ {
+					actions = append(actions, metastore.UpdateSegment(&datapb.SegmentInfo{ID: i, CollectionID: 10, PartitionID: 1, State: commonpb.SegmentState_Dropped}))
+				}
+				markerKeys = append(markerKeys, buildSegmentPath(10, 1, 200), buildSegmentChangeGroupKey(10, 100))
+			}
+			metakv := mocks.NewMetaKv(t)
+			metakv.EXPECT().MaxTxnOps().Return(3).Maybe()
+			failChunk, committed := true, false
+			metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, saves map[string]string) error {
+				for _, key := range markerKeys {
+					assert.NotContains(t, saves, key)
+				}
+				if failChunk {
+					failChunk = false
+					return context.DeadlineExceeded
+				}
+				return nil
+			})
+			metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, saves map[string]string, _ []string, _ ...predicates.Predicate) error {
+					for _, key := range markerKeys {
+						assert.Contains(t, saves, key)
+					}
+					committed = true
+					return nil
+				}).Once()
+			c := NewCatalog(metakv, "", "")
+			assert.ErrorIs(t, c.Update(t.Context(), actions...), context.DeadlineExceeded)
+			assert.False(t, committed)
+			assert.NoError(t, c.Update(t.Context(), actions...))
+			assert.True(t, committed)
+		})
+	}
+}

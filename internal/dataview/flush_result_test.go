@@ -38,3 +38,19 @@ func TestFlushResultRejectsUnspecifiedOrInvalidSuccess(t *testing.T) {
 		require.Nil(t, version)
 	}
 }
+
+func TestStagedFlushResultProtocol(t *testing.T) {
+	through := &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 3}
+	pending := PendingFlushResultStatus(through)
+	_, err := ParseFlushResult(pending)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable, "legacy callers cannot mistake a durability receipt for a handoff")
+	version, waiting, err := ParseStagedFlushResult(pending)
+	require.NoError(t, err)
+	require.True(t, waiting)
+	require.True(t, proto.Equal(through, version))
+	pending.ExtraInfo[flushRetired] = "true"
+	_, _, err = ParseStagedFlushResult(pending)
+	require.Error(t, err)
+	_, _, err = ParseStagedFlushResult(PendingFlushResultStatus(nil))
+	require.Error(t, err, "a pending receipt must prove an immutable DataView boundary")
+}

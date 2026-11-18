@@ -63,6 +63,8 @@ func (info *SegmentView) visibleAtDataVersionLocked(dataVersion qviews.DataVersi
 	switch info.meta.GetState() {
 	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
 		return true
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+		return info.meta.GetFlushDataDurable() && info.meta.GetSealedAtDataVersion() == nil
 	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
 		if info.meta.GetSealedAtDataVersion() == nil {
 			return false

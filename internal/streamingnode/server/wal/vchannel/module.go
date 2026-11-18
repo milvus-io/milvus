@@ -147,10 +147,14 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 				if schema == nil {
 					return nil, merr.WrapErrDataIntegrityMsg("missing schema version %d for sealed segment %d", meta.GetSchemaVersion(), id)
 				}
-			} else if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			} else if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
+				(meta.GetFlushDataDurable() && (meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED || meta.GetSealedAtDataVersion() != nil)) {
 				// Migration may recover the encoding version even when the schema
 				// at the original allocation timetick is no longer retained.
 				schema = module.vchannelView.restoreSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick(), meta.GetSchemaVersion())
+				if meta.GetFlushDataDurable() && schema == nil {
+					return nil, merr.WrapErrDataIntegrityMsg("missing encoding schema version %d for streaming flush source %d", meta.GetSchemaVersion(), id)
+				}
 			} else {
 				schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
 			}
@@ -584,13 +588,13 @@ func (m *VChannelRecoveryModule) GrowingTransformStartAfterTimeTick(publishingSe
 	return start
 }
 
-// Transform materialization through T requires final DataCoord publication of
-// every earlier L1, including other partitions and in-flight Flush RPCs.
+// L0 durability through T requires durable registration of every earlier L1.
+// Query handoff can still be waiting for sort/index; it cannot block Flush ACKs.
 func (m *VChannelRecoveryModule) earlierSegmentsFlushed(through uint64) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, view := range m.segments {
-		if created, pending := view.L1MaterializationBlockerTimeTick(); pending && created < through {
+		if created, pending := view.L1DataMaterializationBlockerTimeTick(); pending && created < through {
 			return false
 		}
 	}

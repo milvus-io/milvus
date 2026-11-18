@@ -6,12 +6,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -171,7 +173,14 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 		meta := segment.AssignmentMeta()
 		var version *viewpb.DataVersion
 		var err error
-		if committer, ok := segment.lifecycle.(TransformFrontierCommitter); ok {
+		pending := false
+		if committer, ok := segment.lifecycle.(StagedFlushCommitter); ok {
+			var startAfter uint64
+			if provider, ok := segment.owner.(GrowingTransformFrontierProvider); ok {
+				startAfter = provider.GrowingTransformStartAfterTimeTick(segment.ID())
+			}
+			version, pending, err = committer.CommitL1SegmentWithPublication(ctx, meta, startAfter)
+		} else if committer, ok := segment.lifecycle.(TransformFrontierCommitter); ok {
 			var startAfter uint64
 			if provider, ok := segment.owner.(GrowingTransformFrontierProvider); ok {
 				startAfter = provider.GrowingTransformStartAfterTimeTick(segment.ID())
@@ -188,6 +197,25 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 
 		segment.mu.Lock()
 		handles := segment.markPendingDataDurableLocked(t.timetick)
+		segment.flushDataDurable.Store(true)
+		segment.meta.FlushDataDurable = true
+		segment.durableMeta.FlushDataDurable = true
+		if pending {
+			segment.durableMeta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+			segment.meta.FlushPendingThroughDataVersion = proto.CloneOf(version)
+			segment.durableMeta.FlushPendingThroughDataVersion = proto.CloneOf(version)
+			segment.dirty = true
+			await := &awaitFlushPublicationTask{
+				segmentTaskBase: segment.newSegmentTaskBaseLocked("awaitFlushPublicationTask"),
+				timetick:        t.timetick,
+			}
+			segment.pendingFinalCommit = await
+			segment.pendingTasks = append(segment.pendingTasks, await)
+			segment.mu.Unlock()
+			segment.NotifyDataUpdated()
+			releaseMessages(handles)
+			return nil
+		}
 		segment.finalCommitDone.Store(true)
 		segment.meta.SealedAtDataVersion = version
 		// Publication and retirement are one stable transition; a snapshot can
@@ -228,6 +256,48 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 	})
 }
 
+// This task has no retained Flush handle: registration already made the data
+// recoverable. A slow index releases the scheduler worker between retries.
+type awaitFlushPublicationTask struct {
+	segmentTaskBase
+	timetick uint64
+}
+
+func (t *awaitFlushPublicationTask) timeTick() uint64 { return t.timetick }
+
+func (t *awaitFlushPublicationTask) Execute(ctx context.Context) error {
+	return t.execute(ctx, func(ctx context.Context) error {
+		s := t.segment
+		committer, ok := s.lifecycle.(StagedFlushCommitter)
+		if !ok {
+			return merr.WrapErrServiceUnavailableMsg("streaming flush publication committer is unavailable")
+		}
+		version, pending, err := committer.CommitL1SegmentWithPublication(ctx, s.AssignmentMeta(), 0)
+		if err != nil {
+			return err
+		}
+		if pending {
+			s.mu.Lock()
+			s.meta.FlushPendingThroughDataVersion = proto.CloneOf(version)
+			s.durableMeta.FlushPendingThroughDataVersion = proto.CloneOf(version)
+			s.dirty = true
+			s.mu.Unlock()
+			s.NotifyDataUpdated()
+			return merr.WrapErrServiceUnavailableMsg("streaming flush %d is waiting for query handoff", s.ID())
+		}
+		s.mu.Lock()
+		s.finalCommitDone.Store(true)
+		s.meta.SealedAtDataVersion = version
+		s.durableMeta.SealedAtDataVersion = version
+		s.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+		s.durableMeta.State = s.meta.State
+		s.dirty = true
+		s.mu.Unlock()
+		s.NotifyDataUpdated()
+		return nil
+	})
+}
+
 func (s *SegmentView) newEnsureGrowingSegmentTaskLocked(timetick uint64) segmentTask {
 	task := &ensureGrowingSegmentTask{
 		segmentTaskBase: s.newSegmentTaskBaseLocked("ensureGrowingSegmentTask"),
@@ -256,6 +326,12 @@ func (s *SegmentView) newCommitL1SegmentTaskLocked(timetick uint64) segmentTask 
 func (s *SegmentView) newRecoveredCommitL1SegmentTaskLocked(timetick uint64) segmentTask {
 	if !s.canScheduleFinalCommitLocked() {
 		return nil
+	}
+	if s.flushDataDurable.Load() {
+		await := &awaitFlushPublicationTask{segmentTaskBase: s.newSegmentTaskBaseLocked("awaitFlushPublicationTask"), timetick: timetick}
+		s.pendingFinalCommit = await
+		s.pendingTasks = append(s.pendingTasks, await)
+		return await
 	}
 	return s.newCommitL1SegmentTaskWithFlushTimeTickLocked(timetick, 0)
 }

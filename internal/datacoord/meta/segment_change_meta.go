@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -213,7 +214,10 @@ func (m *Meta) validateSegmentChangeGroupOwnershipLocked(group *model.SegmentCha
 // break the invariant at the persistence layer. The caller holds groupMu.
 func (m *Meta) validateSegmentChangeGroupOwnershipAgainstLocked(group *model.SegmentChangeGroup, staged, superseded map[int64]int64) error {
 	for _, id := range group.NewSegmentIDs {
-		if seg := m.Segments.GetSegment(id); seg != nil && ((!seg.GetIsInvisible() && !seg.GetIsImporting() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != group.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
+		seg := m.Segments.GetSegment(id)
+		streamingSource := seg != nil && group.Source == model.SegmentChangeSourceStreamingFlush && id == group.StreamingSegmentID &&
+			seg.GetSealedAtDataVersion() == nil && (seg.GetState() == commonpb.SegmentState_Growing || seg.GetState() == commonpb.SegmentState_Sealed)
+		if seg != nil && ((!streamingSource && !seg.GetIsInvisible() && !seg.GetIsImporting() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != group.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
 			return merr.WrapErrDataIntegrityMsg("segment change group %d cannot stage visible, foreign, or L0 member %d", group.GroupID, id)
 		}
 		if owner, ok := staged[id]; ok {
@@ -364,6 +368,15 @@ func (m *Meta) UpdateSegmentChangeGroup(ctx context.Context, group *model.Segmen
 // immutable record-owned fields) is preserved from current.
 func mergeTransitionOntoRecord(current, group *model.SegmentChangeGroup) *model.SegmentChangeGroup {
 	updated := current.Clone()
+	if current.Source == model.SegmentChangeSourceStreamingFlush && group.State == model.SegmentChangeStateCommitted {
+		if group.StreamingDataVersion != nil {
+			updated.StreamingDataVersion = proto.CloneOf(group.StreamingDataVersion)
+		}
+		updated.StreamingHandoffAcknowledged = current.StreamingHandoffAcknowledged || group.StreamingHandoffAcknowledged
+	}
+	if current.Source == model.SegmentChangeSourceStreamingFlush && (group.State == model.SegmentChangeStateAborted || group.State == model.SegmentChangeStateFailed) {
+		updated.StreamingDataRetired = current.StreamingDataRetired || group.StreamingDataRetired
+	}
 	updated.State = group.State
 	updated.ReadyTS = group.ReadyTS
 	updated.CommitTS = group.CommitTS
@@ -382,6 +395,44 @@ func (m *Meta) GetSegmentChangeGroup(ctx context.Context, collectionID, groupID 
 		return nil
 	}
 	return group.Clone()
+}
+
+// AcknowledgeStreamingFlush releases only the producer's recovery hold. It
+// cannot change the immutable publication or perform a state transition.
+func (m *Meta) AcknowledgeStreamingFlush(ctx context.Context, groupID int64, version *viewpb.DataVersion) error {
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
+	g := m.segmentChangeGroups[groupID]
+	if g == nil || g.Source != model.SegmentChangeSourceStreamingFlush || g.State != model.SegmentChangeStateCommitted || !proto.Equal(g.StreamingDataVersion, version) {
+		return merr.WrapErrDataIntegrityMsg("streaming flush %d acknowledgment does not match a committed publication", groupID)
+	}
+	if g.StreamingHandoffAcknowledged {
+		return nil
+	}
+	next := g.Clone()
+	next.StreamingHandoffAcknowledged = true
+	action := metastore.SaveSegmentChangeGroup(next)
+	if err := m.Catalog.Update(ctx, action); err != nil {
+		return err
+	}
+	m.applySegmentChangeGroupActionMemoryLocked(action)
+	return nil
+}
+
+// SelectSegmentsWithChangeGroups captures the physical index-build frontier.
+// Group membership and its segment replacements are installed under groupMu;
+// reading them together avoids reporting Finished between the two snapshots.
+func (m *Meta) SelectSegmentsWithChangeGroups(ctx context.Context, filters ...SegmentFilter) ([]*SegmentInfo, []*model.SegmentChangeGroup) {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	segments := m.SelectSegments(ctx, filters...)
+	groups := make([]*model.SegmentChangeGroup, 0)
+	for _, g := range m.segmentChangeGroups {
+		if !g.IsTerminal() {
+			groups = append(groups, g.Clone())
+		}
+	}
+	return segments, groups
 }
 
 // GetSegmentChangeGroupsByCollection returns clones of all groups of a
@@ -448,6 +499,15 @@ func (m *Meta) SnapshotCandidateSegments(collectionID int64) []*SegmentInfo {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
 	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
+	// Snapshot durability is independent of query publication. The original
+	// growing source contains the accepted rows while its sorted replacement
+	// remains private. Pin that source once; never include both frontiers.
+	for _, g := range m.segmentChangeGroups {
+		if g.CollectionID == collectionID && g.Source == model.SegmentChangeSourceStreamingFlush && !g.IsTerminal() {
+			unpublished.Remove(g.StreamingSegmentID)
+		}
+	}
+
 	return m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting() && !unpublished.Contain(info.GetID())
 	}))
@@ -864,7 +924,7 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 		if !recovery && (entry.Group.Source == model.SegmentChangeSourceMixCompaction ||
 			entry.Group.Source == model.SegmentChangeSourceSortCompaction ||
 			entry.Group.Source == model.SegmentChangeSourceClustering ||
-			entry.Group.Source == model.SegmentChangeSourceBumpSchema) &&
+			entry.Group.Source == model.SegmentChangeSourceBumpSchema || entry.Group.Source == model.SegmentChangeSourceStreamingFlush) &&
 			m.IsCollectionCompactionBlocked(entry.Group.CollectionID) {
 			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish is waiting for collection snapshot protection", entry.Group.GroupID)
 		}

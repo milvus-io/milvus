@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -93,6 +94,14 @@ func (m *Meta) StageAdmittedChange(ctx context.Context, g *model.SegmentChangeGr
 		if current.CollectionID != g.CollectionID || current.Source != g.Source || current.SourceJobID != g.SourceJobID || current.VChannel != g.VChannel {
 			return nil, true, merr.WrapErrDataIntegrityMsg("producer %d conflicts with its registered group", g.SourceJobID)
 		}
+		if current.Source == model.SegmentChangeSourceStreamingFlush && !current.IsTerminal() {
+			if source := m.GetSegment(ctx, current.StreamingSegmentID); source != nil && !IsFlushState(source.GetState()) {
+				operators = append(operators, SetSegmentIsInvisible(source.GetID(), true), UpdateIsImporting(source.GetID(), false))
+				if err := m.UpdateSegmentsInfoAndChangeGroups(ctx, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(current)}, operators...); err != nil {
+					return nil, true, err
+				}
+			}
+		}
 		return current.Clone(), true, nil
 	}
 	if !admitted && !Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
@@ -123,6 +132,14 @@ func (m *Meta) StageAdmittedChange(ctx context.Context, g *model.SegmentChangeGr
 	}
 	if !admitted && !Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
 		return nil, false, nil
+	}
+	// Derive emptiness from the completed metadata operators, not the request's
+	// row count: checkpoints can be corrected by the authoritative binlogs.
+	if g.Source == model.SegmentChangeSourceStreamingFlush && isEmptySegmentChangeOutput(pack.Segments[g.StreamingSegmentID]) {
+		if err := m.applySegmentChangesLocked(ctx, nil, nil, nil, false, pack); err != nil {
+			return nil, true, err
+		}
+		return nil, true, nil
 	}
 	if err := m.applySegmentChangesLocked(ctx, nil, actions, nil, false, pack); err != nil {
 		return nil, true, err
@@ -191,4 +208,52 @@ func (m *Meta) FailedImportGroupsHaveCommitFence(jobID int64) bool {
 		}
 	}
 	return false
+}
+
+// Explicit DDL owns row retirement. The caller holds the selected segment
+// writer locks. Keep source/current-output records with the terminal group in
+// the final catalog transaction, so startup never mistakes half a DDL drop
+// for corruption of accepted WAL rows.
+func (m *Meta) dropStreamingFlushGroupsLocked(ctx context.Context, segments []*SegmentInfo) (bool, error) {
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
+	selected := make(map[int64]bool, len(segments))
+	for _, seg := range segments {
+		selected[seg.GetID()] = true
+	}
+	handled := false
+	for _, g := range m.segmentChangeGroups {
+		if g.Source != model.SegmentChangeSourceStreamingFlush || g.IsTerminal() || !selected[g.StreamingSegmentID] {
+			continue
+		}
+		for _, id := range g.NewSegmentIDs {
+			if !selected[id] {
+				return true, merr.WrapErrServiceUnavailableMsg("streaming flush %d changed while selecting DDL retirement", g.GroupID)
+			}
+		}
+		next := g.Clone()
+		next.State = model.SegmentChangeStateAborted
+		next.StreamingDataRetired = true
+		next.FailReason = "source rows retired by DDL"
+		// Keep the final commit set bounded independently of the partition's
+		// number of pending flushes. DDL retries already-retired groups safely.
+		if err := m.updateSegmentsInfoAndChangeGroupsLocked(ctx, nil, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(next)}, func(pack *UpdateSegmentPack) bool {
+			for _, id := range append([]int64{g.StreamingSegmentID}, g.NewSegmentIDs...) {
+				UpdateStatusOperator(id, commonpb.SegmentState_Dropped)(pack)
+			}
+			return true
+		}); err != nil {
+			return true, err
+		}
+		handled = true
+	}
+	if !handled {
+		return false, nil
+	}
+	return true, m.updateSegmentsInfoAndChangeGroupsLocked(ctx, nil, nil, func(pack *UpdateSegmentPack) bool {
+		for _, seg := range segments {
+			pack.Segments[seg.GetID()] = seg
+		}
+		return true
+	})
 }

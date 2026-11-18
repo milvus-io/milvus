@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -43,7 +44,8 @@ const (
 	// waiting for the atomic publish.
 	SegmentChangeStateReady
 	// SegmentChangeStateCommitted: members were atomically published into a
-	// DataView snapshot (compact_version +1) and are visible.
+	// DataView snapshot and are visible (streaming_version for a first flush,
+	// compact_version for replacements).
 	SegmentChangeStateCommitted
 	// SegmentChangeStateFailed: a member's post-processing failed terminally;
 	// members are reclaimed, superseded parents stay visible.
@@ -84,6 +86,7 @@ const (
 	SegmentChangeSourceCopySegment
 	SegmentChangeSourceExternalRefresh
 	SegmentChangeSourceCDCReplicated
+	SegmentChangeSourceStreamingFlush
 )
 
 func (s SegmentChangeSource) String() string {
@@ -108,6 +111,8 @@ func (s SegmentChangeSource) String() string {
 		return "ExternalRefresh"
 	case SegmentChangeSourceCDCReplicated:
 		return "CDCReplicated"
+	case SegmentChangeSourceStreamingFlush:
+		return "StreamingFlush"
 	default:
 		return fmt.Sprintf("SegmentChangeSource(%d)", int32(s))
 	}
@@ -131,8 +136,8 @@ type SegmentChangeGroup struct {
 	// with no outputs, including a parent-retirement-only compaction.
 	NewSegmentIDs []int64 `json:"newSegmentIds"`
 	// InitialSegmentIDs preserve the producer result identity when a STAGED
-	// member is materialized by sort compaction. Only the coordinator's sort
-	// completion path may replace NewSegmentIDs, recording the durable lineage.
+	// member is materialized by sort or private schema rewrite. Only the
+	// coordinator completion path may replace NewSegmentIDs, recording lineage.
 	InitialSegmentIDs []int64                        `json:"initialSegmentIds,omitempty"`
 	SortJobs          map[int64]SegmentChangeSortJob `json:"sortJobs,omitempty"`
 	// Publication side effects belong to the group, so restart can finish them
@@ -148,6 +153,13 @@ type SegmentChangeGroup struct {
 	AwaitCommitFence bool  `json:"awaitCommitFence,omitempty"`
 	SubgroupOrdinal  int64 `json:"subgroupOrdinal,omitempty"`
 	PreviousGroupID  int64 `json:"previousGroupID,omitempty"`
+	// StreamingSegmentID is the growing query source handed off by this
+	// group's first sealed publication. It can equal an output (sort disabled).
+	StreamingSegmentID                 int64               `json:"streamingSegmentID,omitempty"`
+	StreamingDataVersion               *viewpb.DataVersion `json:"streamingDataVersion,omitempty"`
+	StreamingDataRetired               bool                `json:"streamingDataRetired,omitempty"`
+	StreamingHandoffAcknowledged       bool                `json:"streamingHandoffAcknowledged,omitempty"`
+	GrowingTransformStartAfterTimetick uint64              `json:"growingTransformStartAfterTimetick,omitempty"`
 	// SupersededSegmentIDs are the parents retired (marked Dropped) at publish.
 	SupersededSegmentIDs []int64 `json:"supersededSegmentIds"`
 	// SupersededL0SegmentIDs are the superseded parents that were exempted from
@@ -176,6 +188,7 @@ func (g *SegmentChangeGroup) Clone() *SegmentChangeGroup {
 		return nil
 	}
 	clone := *g
+	clone.StreamingDataVersion = proto.CloneOf(g.StreamingDataVersion)
 	clone.NewSegmentIDs = append([]int64(nil), g.NewSegmentIDs...)
 	clone.InitialSegmentIDs = append([]int64(nil), g.InitialSegmentIDs...)
 	if g.SortJobs != nil {
@@ -308,6 +321,18 @@ func (g *SegmentChangeGroup) Validate() error {
 	}
 	if g.CollectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("segment change group %d requires a positive collection ID", g.GroupID)
+	}
+	if g.Source == SegmentChangeSourceStreamingFlush {
+		if g.StreamingDataRetired && g.State != SegmentChangeStateAborted && g.State != SegmentChangeStateFailed {
+			return merr.WrapErrDataIntegrityMsg("streaming flush %d retires data outside a DDL terminal state", g.GroupID)
+		}
+		if g.State == SegmentChangeStateCommitted && (g.StreamingDataVersion == nil || g.StreamingDataVersion.GetStreamingVersion() <= 0) {
+			return merr.WrapErrDataIntegrityMsg("streaming flush %d has no committed handoff version", g.GroupID)
+		}
+	}
+	if g.Source == SegmentChangeSourceStreamingFlush &&
+		(g.StreamingSegmentID <= 0 || g.GroupID != g.StreamingSegmentID || g.SourceJobID != g.StreamingSegmentID || g.VChannel == "") {
+		return merr.WrapErrDataIntegrityMsg("invalid streaming flush identity in group %d", g.GroupID)
 	}
 	if g.AwaitCommitFence && g.Source != SegmentChangeSourceImportJob && g.Source != SegmentChangeSourceCDCReplicated {
 		return merr.WrapErrDataIntegrityMsg("unexpected WAL fence policy in group %d", g.GroupID)
