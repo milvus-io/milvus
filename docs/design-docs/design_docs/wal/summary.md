@@ -492,20 +492,21 @@ omitted channels keep their existing pins, and completely unknown channels
 conservatively have zero retention. An RPC
 failure skips the round. There is no whole-response VChannel coverage check.
 
-Above the existing byte/count budgets, scan chunks from oldest to newest. A
-chunk is eligible only if every Transform section ends at or before its own
-VChannel's retention. Stop at the first ineligible chunk; never skip it to delete
-later chunks, and never delete a VChannel slice independently. Stop once the
-remaining retained set satisfies the budgets. Idempotency-only sections retain
-the existing budget-based policy. A low frontier for a VChannel absent from the
-head chunk cannot block that chunk.
+When both retained bytes and the oldest coverage age exceed their configured
+thresholds, scan chunks from oldest to newest. Every Transform section must end
+at or before its own VChannel's retention. The chunk must also satisfy the age,
+remaining-byte and durable idempotency recovery constraints described below.
+Stop at the first ineligible chunk; never skip it to delete later chunks, and
+never delete a VChannel slice independently. Idempotency-only chunks remain
+subject to those retention constraints. A low frontier for a VChannel absent
+from the head chunk cannot block that chunk.
 
 An empty reply does not release pins. Once a VChannel's durable tombstone is
 cleanup-ready, all Segment metadata is deleted and query references are gone,
 the VChannel module sets its retention to `DroppedVChannelTimeTick`. This releases
 its Summary dependency before waiting for `CanCleanupVChannel`; waiting for
 tombstone deletion first would create a cleanup cycle. Other VChannels and the
-existing byte/count budgets still constrain continuous-prefix retirement.
+time, byte and idempotency retention still constrain continuous-prefix retirement.
 
 After Summary retirement is published and VChannelMeta deletion is persisted,
 `removeModule` removes the retention entry through the final cleanup notification.
@@ -1248,7 +1249,7 @@ The standalone tests cover chunk/manifest framing and checksums, section
 alignment and bounds, immutable retry equivalence, concurrent upload ordering,
 coalesced manifest publication and retries, restore without inline writes,
 continuous tail probing across numeric-prefix boundaries and mixed terms,
-empty-manifest coverage, same-term writer rejection, byte/count retention,
+empty-manifest coverage, same-term writer rejection, byte/age retention,
 transform GC frontiers, reader pins, failed-deletion rediscovery and retention
 across restart. Backlog tests cover source Ack followed by silence,
 pressure-triggered sealing, absence of age-triggered sealing, and cancellation.
