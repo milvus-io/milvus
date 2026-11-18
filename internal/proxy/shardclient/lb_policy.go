@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -47,6 +48,13 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// StatsClass groups the requests whose outcomes say the same thing about a
+	// replica: the request kind and consistency level, e.g. "search/Strong".
+	// Balancers that learn from outcomes keep statistics per channel and class.
+	StatsClass string
+	// Hedgeable tells that Exec calls CommitAttempt before it publishes a
+	// result, so that two attempts of the channel may run at once.
+	Hedgeable bool
 }
 
 type CollectionWorkLoad struct {
@@ -56,6 +64,9 @@ type CollectionWorkLoad struct {
 	Nq             int64
 	Exec           ExecuteFunc
 	PreferredNodes map[string]int64
+	// StatsClass and Hedgeable: see ChannelWorkload.
+	StatsClass string
+	Hedgeable  bool
 }
 
 type LBPolicy interface {
@@ -68,14 +79,16 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin      = "round_robin"
+	LookAside       = "look_aside"
+	LatencyWeighted = "latency_weighted"
 )
 
 type LBPolicyImpl struct {
 	getBalancer    func() LBBalancer
 	clientMgr      ShardClientMgr
 	balancerMap    map[string]LBBalancer
+	hedging        *hedgeTracker
 	retryOnReplica int
 }
 
@@ -83,9 +96,10 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
+	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
@@ -98,6 +112,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
+		hedging:        newHedgeTracker(),
 		retryOnReplica: retryOnReplica,
 	}
 }
@@ -106,6 +121,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	for _, lb := range lb.balancerMap {
 		lb.Start(ctx)
 	}
+	lb.hedging.Start(ctx)
 }
 
 // GetShard will retry until ctx done, except the collection is not loaded.
@@ -132,6 +148,15 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 	return ret, err
 }
 
+// statsKey is the key outcome-learning balancers keep statistics under: the
+// channel, and the request class when set.
+func statsKey(workload ChannelWorkload) string {
+	if workload.StatsClass == "" {
+		return workload.Channel
+	}
+	return workload.Channel + "|" + workload.StatsClass
+}
+
 func recordPreferredNodeSelection(status string) {
 	metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
 		status,
@@ -149,110 +174,112 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 	return nodeID
 }
 
-// try to select the best node from the available nodes
+// snapshotBalancer captures the accounting owner for this request.
+func snapshotBalancer(balancer LBBalancer) (LBBalancer, *LatencyWeightedBalancer) {
+	lw, _ := balancer.(*LatencyWeightedBalancer)
+	return balancer, lw
+}
+
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.CollectionID),
-		zap.String("channelName", workload.Channel),
-	)
-	// Select node using specified nodes
+	balancer, lw := snapshotBalancer(balancer)
+	return lb.selectNodeWithPolicy(ctx, balancer, lw, workload, excludeNodes)
+}
+
+// selectNodeWithPolicy may refresh shard locations. Hedge execution performs
+// that lookup asynchronously and calls selectCandidate only after it completes.
+func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	trySelectNode := func(withCache bool) (NodeInfo, bool, error) {
-		shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
+		leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
 		if err != nil {
-			log.Warn("failed to get shard delegator",
-				zap.Error(err))
 			return NodeInfo{}, false, err
 		}
-
-		// if all available delegator has been excluded even after refresh shard leader cache
-		// we should clear excludeNodes and try to select node again instead of failing the request at selectNode
-		if !withCache && len(shardLeaders) > 0 && len(shardLeaders) <= excludeNodes.Len() {
-			allReplicaExcluded := true
-			for _, node := range shardLeaders {
+		if !withCache && len(leaders) > 0 {
+			allExcluded := true
+			for _, node := range leaders {
 				if !excludeNodes.Contain(node.NodeID) {
-					allReplicaExcluded = false
+					allExcluded = false
 					break
 				}
 			}
-			if allReplicaExcluded {
-				log.Warn("all replicas are excluded after refresh shard leader cache, clear it and try to select node")
+			if allExcluded {
 				excludeNodes.Clear()
 			}
 		}
-
-		candidateNodes := make(map[int64]NodeInfo)
-		serviceableNodes := make(map[int64]NodeInfo)
-		defer func() {
-			if err != nil {
-				candidatesInStr := lo.Map(shardLeaders, func(node NodeInfo, _ int) string {
-					return node.String()
-				})
-				serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node NodeInfo, _ int) string {
-					return node.String()
-				})
-				log.Warn("failed to select shard",
-					zap.Int64s("excluded", excludeNodes.Collect()),
-					zap.String("candidates", strings.Join(candidatesInStr, ", ")),
-					zap.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
-					zap.Error(err))
-			}
-		}()
-
-		// Filter nodes based on excludeNodes
-		for _, node := range shardLeaders {
-			if !excludeNodes.Contain(node.NodeID) {
-				if node.Serviceable {
-					serviceableNodes[node.NodeID] = node
-				}
-				candidateNodes[node.NodeID] = node
-			}
-		}
-		if len(candidateNodes) == 0 {
-			err = merr.WrapErrChannelNotAvailable(workload.Channel, "no available shard leaders")
-			return NodeInfo{}, false, err
-		}
-
-		if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
-			recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
-			return preferredNode, false, nil
-		} else if workload.PreferredNodeID != 0 {
-			recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
-		}
-
-		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
-
-		// prefer serviceable nodes
-		var targetNodeID int64
-		if len(serviceableNodes) > 0 {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
-		} else {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
-		}
-		if err != nil {
-			return NodeInfo{}, false, err
-		}
-
-		if _, ok := candidateNodes[targetNodeID]; !ok {
-			err = merr.WrapErrNodeNotAvailable(targetNodeID)
-			return NodeInfo{}, false, err
-		}
-
-		return candidateNodes[targetNodeID], true, nil
+		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes)
 	}
-
-	// First attempt with current shard leaders cache
-	withShardLeaderCache := true
-	targetNode, selectedByBalancer, err := trySelectNode(withShardLeaderCache)
+	node, selected, err := trySelectNode(true)
 	if err != nil {
-		// Second attempt with fresh shard leaders
-		withShardLeaderCache = false
-		targetNode, selectedByBalancer, err = trySelectNode(withShardLeaderCache)
+		return trySelectNode(false)
+	}
+	return node, selected, nil
+}
+
+// selectCandidate never performs a coordinator RPC or clears exclusions. Its
+// selection and workload reservation both belong to the calling goroutine.
+func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet) (_ NodeInfo, _ bool, err error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", workload.CollectionID), zap.String("channelName", workload.Channel))
+	candidateNodes := make(map[int64]NodeInfo)
+	serviceableNodes := make(map[int64]NodeInfo)
+	defer func() {
 		if err != nil {
-			return NodeInfo{}, false, err
+			candidatesInStr := lo.Map(shardLeaders, func(node NodeInfo, _ int) string {
+				return node.String()
+			})
+			serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node NodeInfo, _ int) string {
+				return node.String()
+			})
+			log.Warn("failed to select shard",
+				zap.Int64s("excluded", excludeNodes.Collect()),
+				zap.String("candidates", strings.Join(candidatesInStr, ", ")),
+				zap.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
+				zap.Error(err))
+		}
+	}()
+
+	// Filter nodes based on excludeNodes
+	for _, node := range shardLeaders {
+		if !excludeNodes.Contain(node.NodeID) {
+			if node.Serviceable {
+				serviceableNodes[node.NodeID] = node
+			}
+			candidateNodes[node.NodeID] = node
 		}
 	}
+	if len(candidateNodes) == 0 {
+		err = merr.WrapErrChannelNotAvailable(workload.Channel, "no available shard leaders")
+		return NodeInfo{}, false, err
+	}
 
-	return targetNode, selectedByBalancer, nil
+	if preferredNode, ok := serviceableNodes[workload.PreferredNodeID]; ok {
+		recordPreferredNodeSelection(metrics.PreferredNodeHitLabel)
+		return preferredNode, false, nil
+	} else if workload.PreferredNodeID != 0 {
+		recordPreferredNodeSelection(metrics.PreferredNodeUnavailableLabel)
+	}
+
+	balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+
+	// prefer serviceable nodes
+	nodes := lo.Keys(candidateNodes)
+	if len(serviceableNodes) > 0 {
+		nodes = lo.Keys(serviceableNodes)
+	}
+	var targetNodeID int64
+	if lw != nil {
+		targetNodeID, err = lw.SelectNodeForKey(ctx, statsKey(workload), nodes)
+	} else {
+		targetNodeID, err = balancer.SelectNode(ctx, nodes, workload.Nq)
+	}
+	if err != nil {
+		return NodeInfo{}, false, err
+	}
+
+	if _, ok := candidateNodes[targetNodeID]; !ok {
+		err = merr.WrapErrNodeNotAvailable(targetNodeID)
+		return NodeInfo{}, false, err
+	}
+
+	return candidateNodes[targetNodeID], true, nil
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
@@ -262,10 +289,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		zap.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	balancer, lw := snapshotBalancer(lb.getBalancer())
 	excludeNodes := typeutil.NewUniqueSet()
+	hedgedOnce := false
 	tryExecute := func() (bool, error) {
-		balancer := lb.getBalancer()
-		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		targetNode, selectedByBalancer, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -277,13 +305,32 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			return true, err
 		}
+		attemptStart := time.Now()
+		if workload.Hedgeable && !hedgedOnce {
+			if delay, ok := lb.hedging.HedgeDelay(statsKey(workload)); ok {
+				shouldRetry, hedged, err := lb.executeHedged(ctx, workload, balancer, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+				if hedged {
+					hedgedOnce = true
+				}
+				if err != nil {
+					lastErr = err
+				}
+				return shouldRetry, err
+			}
+		}
 		// cancel work load which assign to the target node
-		if selectedByBalancer {
+		if selectedByBalancer && lw == nil {
 			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
+		}
+		observe := func(err error) {
+			if lw != nil {
+				lw.ObserveAttempt(ctx, statsKey(workload), targetNode.NodeID, selectedByBalancer, attemptStart, err)
+			}
 		}
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
+			observe(err)
 			log.Warn("search/query channel failed, node not available",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
@@ -294,6 +341,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 
 		err = workload.Exec(ctx, targetNode.NodeID, client, workload.Channel)
+		observe(err)
 		if err != nil {
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -309,6 +357,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, lastErr
 		}
 
+		if workload.Hedgeable {
+			lb.hedging.ObserveRequest(statsKey(workload), time.Since(attemptStart))
+		}
 		return true, nil
 	}
 
@@ -319,7 +370,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	}
 	// Sweep all shard leaders once, then allow configured request-level retries after every leader has been tried.
 	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
-	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
+	retryOpts := []retry.Option{retry.Attempts(uint(retryTimes))}
+	if lw != nil {
+		// The failed replica is excluded for this request; retry another after a short backoff.
+		retryOpts = append(retryOpts, retry.Sleep(latencyWeightedRetryInterval), retry.MaxSleepTime(latencyWeightedRetryInterval))
+	}
+	err = retry.Handle(ctx, tryExecute, retryOpts...)
 	if err != nil {
 		log.Warn("failed to execute",
 			zap.String("channel", workload.Channel),
@@ -355,6 +411,8 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channelList[0]),
+			StatsClass:      workload.StatsClass,
+			Hedgeable:       workload.Hedgeable,
 		})
 	}
 
@@ -370,6 +428,8 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				Nq:              workload.Nq,
 				Exec:            workload.Exec,
 				PreferredNodeID: preferredNodeID(workload, channel),
+				StatsClass:      workload.StatsClass,
+				Hedgeable:       workload.Hedgeable,
 			})
 		})
 	}
@@ -394,6 +454,8 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channel),
+			StatsClass:      workload.StatsClass,
+			Hedgeable:       workload.Hedgeable,
 		})
 	}
 	// An empty leader list here is a transient routing-cache state (leaders are
@@ -410,4 +472,5 @@ func (lb *LBPolicyImpl) Close() {
 	for _, lb := range lb.balancerMap {
 		lb.Close()
 	}
+	lb.hedging.Close()
 }

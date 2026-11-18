@@ -2164,7 +2164,7 @@ type proxyConfig struct {
 	DDLConcurrency                 ParamItem `refreshable:"true"`
 	DCLConcurrency                 ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy         ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
 	CostMetricsExpireTime          ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
@@ -2195,6 +2195,12 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	// latency_weighted replica selection, see docs/design-docs/design_docs/20261113-latency-weighted-replica-selection.md
+	LatencyWeightedDecay    ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare ParamItem `refreshable:"true"`
+	HedgingEnabled          ParamItem `refreshable:"true"`
+	HedgingMinDelay         ParamItem `refreshable:"true"`
 }
 
 func positiveProxyLimitFormatter(defaultValue string) func(string) string {
@@ -2575,9 +2581,46 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+		Export:       true,
+		Doc:          "Replica selection policy in multiple replicas load balancing: round_robin, look_aside, or latency_weighted. Live changes apply to new channel requests.",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.LatencyWeightedDecay = ParamItem{
+		Key:          "proxy.latencyWeighted.decay",
+		Version:      "2.6.28",
+		DefaultValue: "10s",
+		Export:       true,
+		Doc:          "Time constant of the decay of the latency statistics kept per channel, request class and replica: a sample, and a failure penalty, weigh 1/e after this long.",
+	}
+	p.LatencyWeightedDecay.Init(base.mgr)
+
+	p.LatencyWeightedMinShare = ParamItem{
+		Key:          "proxy.latencyWeighted.minShare",
+		Version:      "2.6.28",
+		DefaultValue: "0.001",
+		Export:       true,
+		Doc:          "Minimum selection share among eligible replicas of a channel and request class, allowing slow or failing replicas to be probed. Existing serviceability and reachability checks still apply.",
+	}
+	p.LatencyWeightedMinShare.Init(base.mgr)
+
+	p.HedgingEnabled = ParamItem{
+		Key:          "proxy.hedging.enabled",
+		Version:      "2.6.28",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per channel request across all retry rounds.",
+	}
+	p.HedgingEnabled.Init(base.mgr)
+
+	p.HedgingMinDelay = ParamItem{
+		Key:          "proxy.hedging.minDelay",
+		Version:      "2.6.28",
+		DefaultValue: "200ms",
+		Export:       true,
+		Doc:          "Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).",
+	}
+	p.HedgingMinDelay.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
