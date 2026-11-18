@@ -96,10 +96,12 @@ func (lb *LBPolicyImpl) hasOtherReplica(ctx context.Context, workload ChannelWor
 // its result (see CommitAttempt). Both attempts run on the request's context:
 // they keep its deadline, and the losing one is canceled when the request
 // returns. There is at most one hedge per call. It returns like a
-// retry.Handle function: whether to keep retrying, and the error.
+// retry.Handle function, whether to keep retrying and the error, and whether
+// a hedge was sent: the request gets one extra attempt at most, see
+// ChannelWorkload.Hedgeable.
 func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkload, balancer *LatencyWeightedBalancer,
 	primary NodeInfo, primarySelected bool, primaryStart time.Time, delay time.Duration, excludeNodes *typeutil.UniqueSet,
-) (bool, error) {
+) (retry bool, hedged bool, err error) {
 	// With drops the rate group, so it goes last.
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", workload.CollectionID),
@@ -144,9 +146,9 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 		case <-ctx.Done():
 			settle(false)
 			if lastErr != nil {
-				return false, lastErr
+				return false, hedgeNode >= 0, lastErr
 			}
-			return false, ctx.Err()
+			return false, hedgeNode >= 0, ctx.Err()
 
 		case <-hedgeTimer:
 			hedgeTimer = nil
@@ -177,7 +179,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 				settle(won)
 				balancer.ObserveRequest(key, time.Since(primaryStart))
-				return true, nil
+				return true, hedgeNode >= 0, nil
 			}
 			if errors.Is(r.err, ErrAttemptSuperseded) {
 				// the other attempt committed and is about to report success
@@ -188,7 +190,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				zap.Bool("hedge", r.node == hedgeNode),
 				zap.Error(r.err))
 			if merr.GetErrorType(r.err) == merr.InputError {
-				return false, r.err
+				return false, hedgeNode >= 0, r.err
 			}
 			excludeNodes.Insert(r.node)
 			lastErr = errors.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
@@ -198,9 +200,9 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 			if pending == 0 {
 				settle(false)
 				if overloadErr != nil {
-					return true, overloadErr
+					return true, hedgeNode >= 0, overloadErr
 				}
-				return true, lastErr
+				return true, hedgeNode >= 0, lastErr
 			}
 		}
 	}

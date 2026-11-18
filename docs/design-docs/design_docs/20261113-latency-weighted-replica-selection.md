@@ -216,18 +216,36 @@ the first task of the group. Refusing starts only once tasks have waited: the
 tasks let in during the first moments of a burst are covered by the check on
 leaving the queue.
 
-**The Proxy moves the request, once per replica.** Under every replica
-selection policy, a replica that refuses an attempt as overloaded is excluded
-for the request and the request goes to the next replica at once: not after
-the retry interval of the policy (200ms and growing by default, which also
-gives up when less than that is left of the request), and without waiting for
-the hedge delay. The refusal is not recorded as a failure of the
-replica (see the table in Rule 2). When every replica was tried and an
-attempt was refused as overloaded, the request ends with that error: the
-shard leaders are not refreshed to go around again, which would add to the
-queues that refused it. A replica that is down and one that is overloaded
-end the request the same way. A refused hedge is dropped, and the first
-attempt goes on.
+**One extra attempt, then the refusal goes to the client.** A search or query
+gets one extra attempt on another replica, and one only, whatever the number
+of replicas. It is used by whichever comes first:
+
+- the first replica refuses the attempt as overloaded: the extra attempt
+  takes its place at once, not after the retry interval of the policy (200ms
+  and growing by default, which also gives up when less than that is left of
+  the request), and without waiting for the hedge delay;
+- the hedge delay passes (rule 3): the extra attempt is the hedge.
+
+When the extra attempt is refused as overloaded too, the request ends with
+`ErrServiceTooManyRequests`. It is not tried on a third replica, and the shard
+leaders are not refreshed to go around again: that would add to the queues
+that refused it. The server does not retry; the client may. A refused hedge
+is dropped while the first attempt is still running, and the request ends
+only when that one is refused as well. With a single replica the first
+refusal ends the request.
+
+A refusal is not recorded as a failure of the replica (see the table in Rule
+2). A replica that fails otherwise, because it is down or the connection
+breaks, does not use up the extra attempt: the request moves on to the other
+replicas as before. This holds under every replica selection policy and at
+every consistency level. A read at Strong consistency waits on each replica
+until the replica has consumed the WAL up to the request's timestamp, so an
+extra attempt on another replica returns the same data; it is only later
+there when that replica reads the WAL over the network.
+
+With a 2s request timeout and `maxQueueWaitRatio` 0.1, a request waits about
+200ms in a queue at most, so it is answered or refused after about 200ms plus
+the execution on the first replica, and after about 400ms on the second.
 
 **No resending inside the RPC client.** `ErrServiceTooManyRequests` is a
 retriable error, and the gRPC client of a component sends a request again on

@@ -53,8 +53,18 @@ type ChannelWorkload struct {
 	// replica: the request kind and consistency level, e.g. "search/Strong".
 	// Balancers that learn from outcomes keep statistics per channel and class.
 	StatsClass string
-	// Hedgeable tells that Exec calls CommitAttempt before it publishes a
-	// result, so that two attempts of the channel may run at once.
+	// Hedgeable tells that the request may get one extra attempt on another
+	// replica, and one only: a hedge when its attempt on the first replica is
+	// slow, or an attempt that takes its place when the first replica refuses
+	// it as overloaded. When that attempt is refused too, the request ends
+	// with the refusal. Exec must call CommitAttempt before it publishes a
+	// result, as two attempts of the channel may run at once.
+	//
+	// Without it a refusal ends the request at once. The Proxy sets it for
+	// searches and queries at every consistency level.
+	//
+	// A replica that fails otherwise (it is down, the connection breaks) is
+	// not concerned: the request moves on to the other replicas as before.
 	Hedgeable bool
 }
 
@@ -315,13 +325,15 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var lastErr error
 	excludeNodes := typeutil.NewUniqueSet()
 	// Under every policy, a replica that refuses the request as overloaded is
-	// not asked again by the RPC client, and does not end the request alone:
-	// the request moves to another replica, see isOverloadErr.
+	// not asked again by the RPC client, see isOverloadErr.
 	ctx = grpcclient.WithFailFastOnOverload(ctx)
 	// overloadErr is the refusal of an overloaded replica, when an attempt of
 	// this request met one. refused tells whether the last attempt did.
 	var overloadErr error
 	refused := false
+	// extraUsed tells that the request has had its one extra attempt, see
+	// ChannelWorkload.Hedgeable.
+	extraUsed := false
 	tryOnce := func() (bool, error) {
 		refused = false
 		balancer := lb.getBalancer()
@@ -344,9 +356,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		attemptStart := time.Now()
 		lw := latencyWeighted(balancer)
-		if lw != nil && workload.Hedgeable {
+		if lw != nil && workload.Hedgeable && !extraUsed {
 			if delay, ok := lw.HedgeDelay(statsKey(workload)); ok {
-				shouldRetry, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+				shouldRetry, hedged, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+				if hedged {
+					extraUsed = true
+				}
 				if err != nil {
 					lastErr = err
 					if isOverloadErr(err) {
@@ -401,19 +416,23 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	}
 	tryExecute := func() (bool, error) {
 		for {
-			if overloadErr != nil && lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
-				// Every replica was tried and the request was refused for
-				// overload: it ends here. Refreshing the shard leaders to go
-				// around again would add to the queues that refused it.
-				return false, overloadErr
-			}
 			again, err := tryOnce()
 			if !again || !refused || ctx.Err() != nil {
 				return again, err
 			}
-			// Refused for overload: the replica is excluded for the request
-			// and there is nothing to wait for. Go on to the next replica at
-			// once, whatever the retry interval of the policy.
+			// Refused for overload. The request ends with the refusal when
+			// it may not have an extra attempt, has had it, or no other
+			// replica is left: it is not tried on a third replica, nor are
+			// the shard leaders refreshed to go around again, which would
+			// add to the queues that refused it. The client may try again.
+			if !workload.Hedgeable || extraUsed || lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
+				return false, overloadErr
+			}
+			// The extra attempt takes the place of the refused one. The
+			// replica is excluded for the request and there is nothing to
+			// wait for: go on at once, whatever the retry interval of the
+			// policy.
+			extraUsed = true
 		}
 	}
 
