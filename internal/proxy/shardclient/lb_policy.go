@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -47,6 +48,13 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// StatsClass groups the requests whose outcomes say the same thing about a
+	// replica: the request kind and consistency level, e.g. "search/Strong".
+	// Balancers that learn from outcomes keep statistics per channel and class.
+	StatsClass string
+	// Hedgeable tells that Exec calls CommitAttempt before it publishes a
+	// result, so that two attempts of the channel may run at once.
+	Hedgeable bool
 }
 
 type CollectionWorkLoad struct {
@@ -56,6 +64,9 @@ type CollectionWorkLoad struct {
 	Nq             int64
 	Exec           ExecuteFunc
 	PreferredNodes map[string]int64
+	// StatsClass and Hedgeable: see ChannelWorkload.
+	StatsClass string
+	Hedgeable  bool
 }
 
 type LBPolicy interface {
@@ -68,8 +79,9 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin      = "round_robin"
+	LookAside       = "look_aside"
+	LatencyWeighted = "latency_weighted"
 )
 
 type LBPolicyImpl struct {
@@ -83,6 +95,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
+	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
 	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
@@ -130,6 +143,24 @@ func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, c
 		return !errors.Is(err, merr.ErrCollectionNotLoaded), err
 	})
 	return ret, err
+}
+
+// statsKey is the key outcome-learning balancers keep statistics under: the
+// channel, and the request class when set.
+func statsKey(workload ChannelWorkload) string {
+	if workload.StatsClass == "" {
+		return workload.Channel
+	}
+	return workload.Channel + "|" + workload.StatsClass
+}
+
+// latencyWeighted returns the balancer as a LatencyWeightedBalancer when it
+// is one and its switch is on.
+func latencyWeighted(balancer LBBalancer) *LatencyWeightedBalancer {
+	if lw, ok := balancer.(*LatencyWeightedBalancer); ok && lw.Enabled() {
+		return lw
+	}
+	return nil
 }
 
 func recordPreferredNodeSelection(status string) {
@@ -222,11 +253,15 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
 
 		// prefer serviceable nodes
-		var targetNodeID int64
+		nodes := lo.Keys(candidateNodes)
 		if len(serviceableNodes) > 0 {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
+			nodes = lo.Keys(serviceableNodes)
+		}
+		var targetNodeID int64
+		if lw := latencyWeighted(balancer); lw != nil {
+			targetNodeID, err = lw.SelectNodeForKey(ctx, statsKey(workload), nodes)
 		} else {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
+			targetNodeID, err = balancer.SelectNode(ctx, nodes, workload.Nq)
 		}
 		if err != nil {
 			return NodeInfo{}, false, err
@@ -282,8 +317,26 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
 		}
 
+		attemptStart := time.Now()
+		lw := latencyWeighted(balancer)
+		if lw != nil && workload.Hedgeable {
+			if delay, ok := lw.HedgeDelay(statsKey(workload)); ok {
+				shouldRetry, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
+				if err != nil {
+					lastErr = err
+				}
+				return shouldRetry, err
+			}
+		}
+		observe := func(err error) {
+			if lw != nil {
+				lw.ObserveAttempt(ctx, statsKey(workload), targetNode.NodeID, selectedByBalancer, attemptStart, err)
+			}
+		}
+
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
+			observe(err)
 			log.Warn("search/query channel failed, node not available",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
@@ -294,6 +347,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 
 		err = workload.Exec(ctx, targetNode.NodeID, client, workload.Channel)
+		observe(err)
 		if err != nil {
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -309,6 +363,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, lastErr
 		}
 
+		if lw != nil {
+			lw.ObserveRequest(statsKey(workload), time.Since(attemptStart))
+		}
 		return true, nil
 	}
 
@@ -319,7 +376,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	}
 	// Sweep all shard leaders once, then allow configured request-level retries after every leader has been tried.
 	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
-	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
+	retryOpts := []retry.Option{retry.Attempts(uint(retryTimes))}
+	if latencyWeighted(lb.getBalancer()) != nil {
+		// the failed replica is excluded for this request: go on to the next one at once
+		retryOpts = append(retryOpts, retry.Sleep(latencyWeightedRetryInterval), retry.MaxSleepTime(latencyWeightedRetryInterval))
+	}
+	err = retry.Handle(ctx, tryExecute, retryOpts...)
 	if err != nil {
 		log.Warn("failed to execute",
 			zap.String("channel", workload.Channel),
@@ -355,6 +417,8 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channelList[0]),
+			StatsClass:      workload.StatsClass,
+			Hedgeable:       workload.Hedgeable,
 		})
 	}
 
@@ -370,6 +434,8 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				Nq:              workload.Nq,
 				Exec:            workload.Exec,
 				PreferredNodeID: preferredNodeID(workload, channel),
+				StatsClass:      workload.StatsClass,
+				Hedgeable:       workload.Hedgeable,
 			})
 		})
 	}
@@ -394,6 +460,8 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			Nq:              workload.Nq,
 			Exec:            workload.Exec,
 			PreferredNodeID: preferredNodeID(workload, channel),
+			StatsClass:      workload.StatsClass,
+			Hedgeable:       workload.Hedgeable,
 		})
 	}
 	// An empty leader list here is a transient routing-cache state (leaders are

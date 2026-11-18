@@ -984,6 +984,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             t.Nq,
 		Exec:           t.searchShard,
+		StatsClass:     "search/" + t.ConsistencyLevel.String(),
+		Hedgeable:      true,
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
@@ -1189,6 +1191,10 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return errors.Wrapf(statusErr, "fail to search on QueryNode %d", nodeID)
+	}
+	// With hedging another attempt of this channel may have published already.
+	if !shardclient.CommitAttempt(ctx) {
+		return shardclient.ErrAttemptSuperseded
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
