@@ -66,30 +66,12 @@ and never waits for a refreshed directory. An invalid snapshot or absence of
 another eligible replica skips that hedge.
 
 To prevent retry-times-hedge multiplication and overload cascades, speculative
-work is bounded by three mechanisms:
+work is bounded by two mechanisms:
 
 1. **Single hedge per shard request**: At most one hedge attempt is dispatched
    across the entire lifecycle of a shard request (across all failure-retry
    rounds), keeping `proxy.hedging.*` orthogonal to sequential error retries.
-2. **In-flight hedge ratio cap (`proxy.hedging.maxInflightRatio`, default `0.1`)**:
-   The proxy bounds concurrent in-flight hedged attempts to
-   `max(2, ceil(maxInflightRatio * inflightPrimaries))`. Importantly, a hedge
-   slot is held until the hedged RPC goroutine actually finishes, not when the
-   outer request returns. Un-canceled loser attempts still running on QueryNodes
-   continue occupying hedge budget.
-   - **Why `0.1` (10%), referencing gRPC**: `0.1` matches the standard 10%
-     speculative/retry budget popularized by gRPC (`gRFC A6` `retryThrottling`
-     `tokenRatio: 0.1`) and Google SRE tail-tolerant designs. In steady state,
-     the p99 trigger fires on ~1% of requests, so a 10% concurrent cap gives 10x
-     headroom. During a single-replica stall (e.g., Replica A hangs for seconds
-     while Replica B answers in 20ms), hedged calls to healthy Replica B finish
-     in 20ms and immediately recycle their in-flight slots (dozens of rescues
-     per slot per second). Conversely, under cluster-wide overload where every
-     replica is slow, slow hedges hold their slots for the full execution
-     duration, immediately capping extra concurrent load on both QueryNodes and
-     the shared WAL owner StreamingNode at <= 10% with zero window lag.
-3. **Win-rate guard**: In low-concurrency regimes where the minimum floor of 2
-   slots exceeds 10%, recent hedge outcomes additionally cut unproductive hedges
+2. **Win-rate guard**: Recent hedge outcomes cut unproductive hedges
    (win rate below 30% over at least 10 samples in 10s) to 10% recovery probes.
 
 Every attempt owns its GetQueryPlan request payload, plan, response buffers,
@@ -138,10 +120,9 @@ requests:
 | `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection share per eligible replica, capped by replica count. |
 | `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `replicaSelectionPolicy`. |
 | `proxy.hedging.minDelay` | `200ms` | Lower bound of the p99-based hedge trigger delay. |
-| `proxy.hedging.maxInflightRatio` | `0.1` | Maximum ratio of concurrent in-flight hedged attempts to in-flight hedgeable primaries (floor 2). |
 
 `milvus_proxy_replica_hedge_total` uses only proxy node ID and decision labels:
-`sent`, `won`, `skipped_inflight_limit`, `skipped_low_win_rate`, and
+`sent`, `won`, `skipped_low_win_rate`, and
 `skipped_no_replica`. It does not create per-channel or per-replica metric
 series. Master currently exposes no resource group selection in this QueryView
 request contract; the policy uses only the replicas offered by its existing
