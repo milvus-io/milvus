@@ -17,6 +17,7 @@ from uuid import uuid4
 import ml_dtypes
 import numpy as np
 import pytest
+import requests
 import urllib3
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -1334,26 +1335,11 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
-    @pytest.mark.parametrize(
-        "stored_null_to_default",
-        [
-            pytest.param(False, id="supported-defaults"),
-            pytest.param(
-                True,
-                id="stored-null-to-default",
-                marks=pytest.mark.skip(
-                    reason="Known Vortex NULL/default bug: https://github.com/milvus-io/milvus/issues/54961"
-                ),
-            ),
-        ],
-    )
-    def test_snapshot_import_combined_defaults(
-        self, snapshot_default_resources, layout, db_name, stored_null_to_default
-    ):
+    def test_snapshot_import_combined_defaults(self, snapshot_default_resources, layout, db_name):
         """
-        target: SI-FN-10, exercise supported missing/NULL rules independently of stored NULL to default
-        method: import mixed NULL/0/5 and false/empty controls into default/nullable target fields
-        expected: missing and stored-NULL values follow target rules; all non-NULL values and vectors survive reload
+        target: SI-FN-10, verify defaults for source-absent fields and preserve stored NULLs
+        method: import mixed NULL/0/5 and false/empty controls into a compatible target
+        expected: missing fields get their target default or NULL; stored values survive reload
         """
         client, source, target, snapshot, export_prefix = snapshot_default_resources
         source_specs = [
@@ -1370,14 +1356,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             ("missing_default", DataType.INT64, {"default_value": 42}),
             ("missing_nullable", DataType.INT64, {"nullable": True}),
         ]
-        nullable_fields = ["keep_null"]
-        default_fields = ["missing_default"]
-        if stored_null_to_default:
-            source_specs.insert(0, ("null_to_default", DataType.INT64, {"nullable": True}))
-            target_specs.insert(0, ("null_to_default", DataType.INT64, {"default_value": 42}))
-            nullable_fields.append("null_to_default")
-            default_fields.append("null_to_default")
-
         # Step 1: Missing fields are appended after all common fields; verify actual IDs.
         source_fields = self._create_default_fields_collection(client, source, source_specs)
         target_fields = self._create_default_fields_collection(client, target, target_specs)
@@ -1389,11 +1367,9 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             assert target_fields[name]["type"] == field["type"]
         for name in ("missing_default", "missing_nullable"):
             assert name not in source_fields and target_fields[name]["field_id"] not in source_ids
-        for name in nullable_fields:
-            assert source_fields[name].get("nullable") and "default_value" not in source_fields[name]
-        for name in default_fields:
-            assert target_fields[name]["default_value"].long_data == 42
-            assert not target_fields[name].get("nullable", False)
+        assert source_fields["keep_null"].get("nullable") and "default_value" not in source_fields["keep_null"]
+        assert target_fields["missing_default"]["default_value"].long_data == 42
+        assert not target_fields["missing_default"].get("nullable", False)
         for name in ("keep_null", "missing_nullable"):
             assert target_fields[name].get("nullable") and "default_value" not in target_fields[name]
         assert target_fields["bool_value"]["default_value"].bool_data is True
@@ -1411,9 +1387,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             }
             for i in range(128)
         ]
-        if stored_null_to_default:
-            for row in rows:
-                row["null_to_default"] = row["keep_null"]
         expected = {
             row["id"]: {
                 **deepcopy(row),
@@ -1422,10 +1395,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             }
             for row in rows
         }
-        if stored_null_to_default:
-            for row in expected.values():
-                if row["null_to_default"] is None:
-                    row["null_to_default"] = 42
         source_scalars = tuple(spec[0] for spec in source_specs)
         target_scalars = tuple(spec[0] for spec in target_specs)
         assert self.insert(client, source, deepcopy(rows))[0]["insert_count"] == len(rows)
@@ -1462,6 +1431,18 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         assert self.get_load_state(client, target)[0]["state"].name == "Loaded"
         self._assert_field_id_rows(client, target, expected, target_scalars, case_id="SI-FN-10")
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
+    def test_snapshot_import_rejects_nullable_mismatch_with_default(self, snapshot_default_resources, layout, db_name):
+        """
+        target: SI-FN-10, reject a stored nullable field mapped to a non-nullable field with a default
+        method: import a snapshot containing a stored NULL into a target with default 42 and an existing row
+        expected: reject at admission without creating a job; the existing row and schema survive reload
+        """
+        self._check_snapshot_required_field_rejection(
+            snapshot_default_resources, layout, "nullable_mismatch_with_default", db_name
+        )
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
     @pytest.mark.parametrize("error_kind", ["missing_required", "null_required"])
@@ -1471,17 +1452,25 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         method: import one invalid source into a required-field target containing a sentinel
         expected: matching schema error, no partial publication; sentinel and target schema unchanged after reload
         """
+        self._check_snapshot_required_field_rejection(snapshot_default_resources, layout, error_kind, db_name)
+
+    def _check_snapshot_required_field_rejection(self, snapshot_default_resources, layout, error_kind, db_name):
         client, source, target, snapshot, export_prefix = snapshot_default_resources
+        target_default = error_kind == "nullable_mismatch_with_default"
         source_specs = (
             [] if error_kind == "missing_required" else [("required_value", DataType.INT64, {"nullable": True})]
         )
         source_fields = self._create_default_fields_collection(client, source, source_specs)
-        target_fields = self._create_default_fields_collection(client, target, [("required_value", DataType.INT64, {})])
+        target_specs = [("required_value", DataType.INT64, {"default_value": 42} if target_default else {})]
+        target_fields = self._create_default_fields_collection(client, target, target_specs)
         for name, field in source_fields.items():
             assert target_fields[name]["field_id"] == field["field_id"]
             assert target_fields[name]["type"] == field["type"]
         assert not target_fields["required_value"].get("nullable", False)
-        assert "default_value" not in target_fields["required_value"]
+        if target_default:
+            assert target_fields["required_value"]["default_value"].long_data == 42
+        else:
+            assert "default_value" not in target_fields["required_value"]
         if error_kind == "missing_required":
             assert "required_value" not in source_fields
             assert target_fields["required_value"]["field_id"] not in {
@@ -1493,7 +1482,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
         # Step 1: Snapshot input is independently queryable in its legal source schema.
         rows = [{"id": i, "vec": [(i * DIM + j) / 4096 for j in range(DIM)]} for i in range(128)]
-        if error_kind == "null_required":
+        if source_specs:
             for row in rows:
                 row["required_value"] = None if row["id"] == 127 else (0, 5)[row["id"] % 2]
         assert self.insert(client, source, deepcopy(rows))[0]["insert_count"] == len(rows)
@@ -1514,9 +1503,13 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         schema_before = self.describe_collection(client, target)[0]["fields"]
         url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
-        # Step 3: SDK raises MilvusException on admission errors; admitted jobs must reach Failed.
-        self._retain_import_resources = True
-        try:
+        # Nullable mismatches must be rejected before a job is admitted.
+        if source_specs:
+            self._assert_snapshot_import_admission_rejected(
+                url, target, uri, db_name, r"nullable mismatch for field required_value .*source true, target false"
+            )
+        else:
+            self._retain_import_resources = True
             response = bulk_import(
                 url=url,
                 collection_name=target,
@@ -1526,21 +1519,13 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
                 api_key=cf.param_info.param_token,
                 timeout=30,
             ).json()
-        except MilvusException as exc:
-            # Match only the intended schema error; network/auth/timeout failures cannot pass.
-            self._assert_default_import_error(str(exc), error_kind)
-            self._retain_import_resources = False
-            log.info(f"SI-FN-10 scenario={error_kind}, layout={layout}, target={target}, admission_rejected=True")
-        else:
             assert response["code"] == 0, response
             job_id = response["data"]["jobId"]
             assert job_id
-            log.info(f"SI-FN-10 scenario={error_kind}, layout={layout}, target={target}, job_id={job_id}")
             progress = self._wait_for_import(url, job_id, db_name, expected_state="Failed")
             self._retain_import_resources = progress["state"] not in ("Completed", "Failed")
             assert progress["state"] == "Failed", progress
-            self._assert_default_import_error(progress.get("reason", ""), error_kind)
-
+            assert "no binlog for field:required_value" in progress.get("reason", "").lower(), progress
         # Step 4: Check the whole target, not just the sentinel PK; repeat after reload.
         self._assert_field_id_rows(client, target, expected, ("required_value",), case_id="SI-FN-10")
         self.release_collection(client, target)
@@ -1744,9 +1729,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
-    @pytest.mark.skip(
-        reason="Known snapshot dimension validation bug: https://github.com/milvus-io/milvus/issues/54715"
-    )
     def test_snapshot_import_vector_dimension_rejection(self, snapshot_schema_resources, layout, db_name):
         """
         target: SI-FN-12, reject incompatible vector dimensions
@@ -1794,31 +1776,38 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             self._assert_field_id_rows(client, target, sentinel_truth, scalars, case_id="SI-FN-12")
             definitions_before = self._definitions(client, target)
 
-            # Step 3: Only the matching schema failure is accepted, at admission or in an admitted job.
-            self._retain_import_resources = True
-            try:
-                response = bulk_import(
-                    url=url,
-                    collection_name=target,
-                    db_name=db_name,
-                    files=[[uri]],
-                    options={"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
-                    api_key=cf.param_info.param_token,
-                    timeout=30,
-                ).json()
-            except MilvusException as exc:
-                self._assert_schema_import_error(str(exc), error_kind)
-                self._retain_import_resources = False
-                log.info(f"SI-FN-12 scenario={error_kind}, layout={layout}, target={target}, admission_rejected=True")
+            if error_kind == "vector_dim":
+                self._assert_snapshot_import_admission_rejected(
+                    url, target, uri, db_name, rf"vector dimension mismatch for field vec .*source {DIM}, target 16"
+                )
             else:
-                assert response["code"] == 0, response
-                job_id = response["data"]["jobId"]
-                assert job_id
-                log.info(f"SI-FN-12 scenario={error_kind}, layout={layout}, target={target}, job_id={job_id}")
-                progress = self._wait_for_import(url, job_id, db_name, expected_state="Failed")
-                self._retain_import_resources = progress["state"] not in ("Completed", "Failed")
-                assert progress["state"] == "Failed", progress
-                self._assert_schema_import_error(progress.get("reason", ""), error_kind)
+                # Step 3: Only the matching schema failure is accepted, at admission or in an admitted job.
+                self._retain_import_resources = True
+                try:
+                    response = bulk_import(
+                        url=url,
+                        collection_name=target,
+                        db_name=db_name,
+                        files=[[uri]],
+                        options={"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
+                        api_key=cf.param_info.param_token,
+                        timeout=30,
+                    ).json()
+                except MilvusException as exc:
+                    self._assert_schema_import_error(str(exc), error_kind)
+                    self._retain_import_resources = False
+                    log.info(
+                        f"SI-FN-12 scenario={error_kind}, layout={layout}, target={target}, admission_rejected=True"
+                    )
+                else:
+                    assert response["code"] == 0, response
+                    job_id = response["data"]["jobId"]
+                    assert job_id
+                    log.info(f"SI-FN-12 scenario={error_kind}, layout={layout}, target={target}, job_id={job_id}")
+                    progress = self._wait_for_import(url, job_id, db_name, expected_state="Failed")
+                    self._retain_import_resources = progress["state"] not in ("Completed", "Failed")
+                    assert progress["state"] == "Failed", progress
+                    self._assert_schema_import_error(progress.get("reason", ""), error_kind)
 
             # Step 4: Scan the whole target, not just the sentinel PK; repeat after reload.
             self._assert_field_id_rows(client, target, sentinel_truth, scalars, case_id="SI-FN-12")
@@ -1862,28 +1851,25 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
     @pytest.mark.parametrize(
-        "overflow",
+        "source_limit, last_value",
         [
-            pytest.param(False, id="within_limit"),
-            pytest.param(
-                True,
-                id="over_limit",
-                marks=pytest.mark.skip(
-                    reason="Known snapshot VarChar limit bug: https://github.com/milvus-io/milvus/issues/54719"
-                ),
-            ),
+            pytest.param(6, "abc", id="within_limit"),
+            pytest.param(64, "中文a", id="over_limit"),
+            pytest.param(64, "abc", id="wider_source_schema"),
         ],
     )
-    def test_snapshot_import_varchar_max_length(self, snapshot_varchar_resources, layout, overflow, db_name):
+    def test_snapshot_import_varchar_max_length(
+        self, snapshot_varchar_resources, layout, source_limit, last_value, db_name
+    ):
         """
-        target: SI-FN-12, enforce the target VarChar byte limit without requiring equal source/target limits
-        method: import the same max64 snapshot into max64 control and max6 target; compare all rows and reload
-        expected: six-byte values survive unchanged; a seven-byte value is rejected without changing the sentinel
+        target: SI-FN-12, reject a declared source VarChar limit wider than the target limit
+        method: import into a compatible max64 control and a max6 target with existing rows
+        expected: compatible schemas preserve all rows; wider sources are rejected before job admission
         """
         client, source, target, control, snapshot, export_prefix = snapshot_varchar_resources
-        source_fields = self._create_schema_import_collection(client, source, "compatible")
-        values = ["a", "abcdef", "中文", "中文a" if overflow else "abc"]
-        assert [len(v.encode("utf-8")) for v in values] == [1, 6, 6, 7 if overflow else 3]
+        source_fields = self._create_schema_import_collection(client, source, "compatible", max_length=source_limit)
+        values = ["a", "abcdef", "中文", last_value]
+        assert [len(v.encode("utf-8")) for v in values] == [1, 6, 6, 7 if last_value == "中文a" else 3]
         rows = [
             {"id": i, "value": value, "vec": [(i * DIM + j) / 4096 for j in range(DIM)]}
             for i, value in enumerate(values)
@@ -1900,7 +1886,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         for name, max_length in ((control, 64), (target, 6)):
             fields = self._create_schema_import_collection(client, name, "compatible", max_length=max_length)
             self._assert_schema_import_fields(source_fields, fields, "compatible")
-            assert int(source_fields["value"]["params"]["max_length"]) == 64
+            assert int(source_fields["value"]["params"]["max_length"]) == source_limit
             assert int(fields["value"]["params"]["max_length"]) == max_length
             sentinel = {"id": 10000, "value": "keep", "vec": [0.5] * DIM}
             assert self.insert(client, name, [deepcopy(sentinel)])[0]["insert_count"] == 1
@@ -1908,39 +1894,32 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             self.load_collection(client, name)
             self._assert_field_id_rows(client, name, {10000: sentinel}, ("value",), case_id="SI-FN-12")
             definitions_before = self._definitions(client, name)
-            rejected = overflow and max_length == 6
-            expected_state = "Failed" if rejected else "Completed"
-
-            self._retain_import_resources = True
-            response = bulk_import(
-                url=url,
-                collection_name=name,
-                db_name=db_name,
-                files=[[uri]],
-                options={"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
-                api_key=cf.param_info.param_token,
-                timeout=30,
-            ).json()
-            assert response["code"] == 0, response
-            job_id = response["data"]["jobId"]
-            assert job_id
-            log.info(
-                f"SI-FN-12 varchar layout={layout}, overflow={overflow}, max_length={max_length}, "
-                f"target={name}, job_id={job_id}"
-            )
-            progress = self._wait_for_import(url, job_id, db_name, expected_state=expected_state)
-            self._retain_import_resources = progress["state"] not in ("Completed", "Failed")
-            assert progress["state"] == expected_state, progress
-            if not rejected:
-                assert progress["importedRows"] == len(rows), progress
-            reason = progress.get("reason", "")
-
-            if rejected:
-                text = reason.lower()
-                assert "value" in text and "max_length" in text, reason
-                assert "exceed" in text or "too long" in text, reason
+            if source_limit > max_length:
+                self._assert_snapshot_import_admission_rejected(
+                    url,
+                    name,
+                    uri,
+                    db_name,
+                    rf"source max_length exceeds target for field value .*source {source_limit}, target {max_length}",
+                )
                 expected = {10000: sentinel}
             else:
+                self._retain_import_resources = True
+                response = bulk_import(
+                    url=url,
+                    collection_name=name,
+                    db_name=db_name,
+                    files=[[uri]],
+                    options={"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
+                    api_key=cf.param_info.param_token,
+                    timeout=30,
+                ).json()
+                assert response["code"] == 0, response
+                job_id = response["data"]["jobId"]
+                assert job_id
+                progress = self._wait_for_import(url, job_id, db_name)
+                self._retain_import_resources = False
+                assert progress["state"] == "Completed" and progress["importedRows"] == len(rows), progress
                 expected = {**truth, 10000: sentinel}
                 assert self.wait_for_index_ready(client, name, index_name="vec_idx", timeout=120)
             self._assert_field_id_rows(client, name, expected, ("value",), case_id="SI-FN-12")
@@ -2031,23 +2010,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         text = reason.lower()
         if error_kind == "missing_pk":
             assert "no binlog for field:id" in text, reason
-        elif error_kind == "vector_dim":
-            row_error = "wrong row type" in text and "[]float32" in text
-            arrow_error = (
-                "fixed_size_binary" in text
-                and "128" in text
-                and "64" in text
-                and any(token in text for token in ("mismatch", "expected", "incompatible"))
-            )
-            vortex_error = (
-                re.search(
-                    rf"\bcannot convert fixedsizelist with list size {DIM * 4} "
-                    r"to arrow array with list size 64\b",
-                    text,
-                )
-                is not None
-            )
-            assert row_error or arrow_error or vortex_error, reason
         else:
             assert error_kind == "scalar_type"
             reader_error = "expected *array.int64" in text and any(
@@ -3430,15 +3392,29 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             else:
                 remove_snapshot_export(store, bucket, prefix)
 
-    @staticmethod
-    def _assert_default_import_error(reason, error_kind):
-        assert isinstance(reason, str) and reason, "Missing schema rejection reason"
-        if error_kind == "missing_required":
-            assert "no binlog for field:required_value" in reason.lower(), reason
-        else:
-            assert error_kind == "null_required"
-            assert all(token in reason.lower() for token in ("wrong row type", "int64", "<nil>")), reason
-        log.info(f"SI-FN-10 expected schema rejection scenario={error_kind}, reason={reason}")
+    def _assert_snapshot_import_admission_rejected(self, url, target, uri, db_name, reason):
+        # bulk_import raises on rejection, so inspect the REST response to verify that it has no job ID.
+        self._retain_import_resources = True
+        headers = {"DB-Name": db_name}
+        if cf.param_info.param_token:
+            headers["Authorization"] = f"Bearer {cf.param_info.param_token}"
+        response = requests.post(
+            f"{url.rstrip('/')}/v2/vectordb/jobs/import/create",
+            headers=headers,
+            json={
+                "collectionName": target,
+                "dbName": db_name,
+                "files": [[uri]],
+                "options": {"backup": "true", "source_type": "snapshot", "auto_commit": "true"},
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+        assert result["code"] != 0 and not (result.get("data") or {}).get("jobId"), result
+        self._retain_import_resources = False
+        assert re.search(reason, result.get("message", ""), re.IGNORECASE), result
+        log.info(f"Snapshot Import admission rejected for {target}: {result['message']}")
 
     def _create_default_fields_collection(self, client, name, field_specs):
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
