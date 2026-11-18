@@ -14,6 +14,7 @@
 
 #include <arrow/c/bridge.h>
 #include <exception>
+#include <charconv>
 #include <memory>
 #include <string>
 #include <vector>
@@ -73,12 +74,58 @@ GetLoonReader(
                   "Import arrow schema failed");
     }
     auto arrow_schema = result.ValueOrDie();
+    auto bound_columns = std::make_shared<std::vector<std::string>>(
+        needed_columns, needed_columns + needed_columns_size);
+    const auto mapping = ReadMilvusTableFieldIdMapping(*column_groups);
+    if (mapping != nullptr) {
+        std::vector<std::shared_ptr<arrow::Field>> fields;
+        fields.reserve(arrow_schema->num_fields());
+        for (const auto& field : arrow_schema->fields()) {
+            auto target_id = int64_t{-1};
+            const auto& name = field->name();
+            const auto parsed = std::from_chars(
+                name.data(), name.data() + name.size(), target_id);
+            if (parsed.ec == std::errc{} &&
+                parsed.ptr == name.data() + name.size() && target_id >= 0) {
+                const auto physical = mapping->physical_columns.find(target_id);
+                if (physical != mapping->physical_columns.end()) {
+                    fields.push_back(field->WithName(physical->second));
+                    continue;
+                }
+            }
+            fields.push_back(field);
+        }
+        arrow_schema =
+            arrow::schema(std::move(fields), arrow_schema->metadata());
+        for (auto& column : *bound_columns) {
+            int64_t target_id = -1;
+            const auto parsed = std::from_chars(
+                column.data(), column.data() + column.size(), target_id);
+            if (parsed.ec == std::errc{} &&
+                parsed.ptr == column.data() + column.size() && target_id >= 0) {
+                const auto physical = mapping->physical_columns.find(target_id);
+                if (physical != mapping->physical_columns.end()) {
+                    column = physical->second;
+                    continue;
+                }
+            }
+            const bool local_identity =
+                HasMilvusTableLocalColumn(*column_groups, column);
+            const bool numeric_target =
+                !column.empty() &&
+                std::all_of(column.begin(), column.end(), [](unsigned char c) {
+                    return c >= '0' && c <= '9';
+                });
+            if (!local_identity && numeric_target) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Requested target column '{}' is absent from field "
+                          "ID mapping",
+                          column);
+            }
+        }
+    }
     auto reader = milvus_storage::api::Reader::create(
-        column_groups,
-        arrow_schema,
-        std::make_shared<std::vector<std::string>>(
-            needed_columns, needed_columns + needed_columns_size),
-        properties);
+        column_groups, arrow_schema, bound_columns, properties);
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {

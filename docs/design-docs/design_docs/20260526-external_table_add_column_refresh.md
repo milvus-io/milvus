@@ -256,8 +256,12 @@ DataNode derives target external fields from the task schema:
 - Fields not advertised there are checked together against the pinned segment
   manifest. StorageV3 fake binlogs are not persisted, so their absence after a
   DataCoord restart does not prove that the physical columns are missing.
-- `StorageColumnResolver` supplies physical names for this check: numeric field
-  IDs for `milvus-table`, and `external_field` names for ordinary file formats.
+- For `milvus-table`, DataNode resolves the requested snapshot schema once per
+  task and compares the expected target-to-source IDs with the persisted target
+  manifest binding. Missing logical bindings require a projection update;
+  changed source IDs fail. This check also runs before replacing old fragments.
+  Legacy manifests without bindings use identity IDs. Ordinary file formats
+  continue using `StorageColumnResolver` and `external_field` names.
 - Only fields absent from both sources are returned as missing. Manifest read
   failures abort the task rather than being treated as missing columns.
 

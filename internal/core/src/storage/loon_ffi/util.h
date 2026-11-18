@@ -14,8 +14,10 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include "common/type_c.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/properties.h"
@@ -79,6 +81,41 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<const milvus_storage::api::Properties>& properties);
+
+// Immutable source-to-target column bindings persisted by milvus-table.
+struct MilvusTableFieldIdMapping {
+    std::unordered_map<int64_t, std::string> physical_columns;
+    std::unordered_map<std::string, int64_t> target_fields;
+};
+
+inline constexpr const char* kMilvusTableFieldIdMappingProperty =
+    "milvus_table.field_id_mapping";
+
+// The shared JSON contract is {canonical nonnegative int64 target ID string:
+// canonical nonnegative int64 source ID string}, with unique IDs on both sides.
+// Invalid metadata throws DataFormatBroken; import adapters translate that at
+// their input boundary. Coverage and cross-file checks belong to the caller.
+MilvusTableFieldIdMapping
+ParseMilvusTableFieldIdMapping(const std::string& encoded);
+
+// Milvus-table only: resolve explicit bindings or validate numeric legacy
+// column names and construct identity bindings. Never use this fallback for
+// other external formats, whose physical column names need not be numeric.
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ResolveMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups);
+
+// Returns nullptr only for a fully legacy column-group set with no mapping
+// property. Corrupt or inconsistent persisted metadata is rejected.
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups);
+
+// After validating the bindings, unmapped groups contain target-local columns.
+bool
+HasMilvusTableLocalColumn(
+    const milvus_storage::api::ColumnGroups& column_groups,
+    const std::string& column);
 
 struct LoonManifestPath {
     std::string base_path;

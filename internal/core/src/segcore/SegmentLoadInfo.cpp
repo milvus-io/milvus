@@ -58,6 +58,18 @@ SegmentLoadInfo::GetColumnGroups() const {
     return column_groups_;
 }
 
+SealedFieldLayoutPtr
+SegmentLoadInfo::BindManifestFields(const SealedFieldLayoutPtr& fields) const {
+    if (!fields->is_external_collection() || !HasManifestPath()) {
+        return fields;
+    }
+    auto groups = GetColumnGroups();
+    auto mapping = IsMilvusTableExternalSpec(fields->get_external_spec())
+                       ? ResolveMilvusTableFieldIdMapping(*groups)
+                       : ReadMilvusTableFieldIdMapping(*groups);
+    return fields->WithManifestMapping(std::move(mapping));
+}
+
 void
 SegmentLoadInfo::InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
     if (source.HasManifestPath() &&

@@ -34,7 +34,8 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
                                           size_t num_target_columns,
                                           const char* external_source,
                                           const LoonProperties* properties,
-                                          int has_external_primary_key);
+                                          int has_external_primary_key,
+                                          const char* field_id_mapping);
 
 // The err_code a loon FFI call reports must survive milvus's OWN C-ABI export
 // layer (milvus_table_c.cpp), whose tail returns a LoonFFIResult. That tail
@@ -95,7 +96,8 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
         columns.size(),
         /*external_source=*/nullptr,
         &properties,
-        /*has_external_primary_key=*/0);
+        /*has_external_primary_key=*/0,
+        /*field_id_mapping=*/nullptr);
     SCOPE_EXIT {
         loon_ffi_free_result(&result);
     };

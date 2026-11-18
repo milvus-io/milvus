@@ -45,6 +45,7 @@ const defaultReadBufferSize = 64 * 1024 * 1024
 func ExecuteFunctionsForSegment(
 	ctx context.Context,
 	schema *schemapb.CollectionSchema,
+	sourceColumns []string,
 	fragments []packed.Fragment,
 	format string,
 	storageConfig *indexpb.StorageConfig,
@@ -59,8 +60,6 @@ func ExecuteFunctionsForSegment(
 		mlog.String("basePath", basePath),
 		mlog.Int("numFragments", len(fragments)),
 		mlog.Int("numFunctions", len(schema.GetFunctions())))
-
-	sourceColumns := packed.GetColumnNamesFromSchema(schema)
 
 	inputManifestPath, err := packed.CreateSegmentManifestWithBasePathAndExtfs(
 		ctx,

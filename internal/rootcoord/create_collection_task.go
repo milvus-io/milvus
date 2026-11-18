@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	util "github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -54,6 +53,9 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// Used only during initial allocation; the resolved target IDs are persisted
+	// in the CREATE message, so replay needs no source snapshot access.
+	milvusTableSourceFieldIDs map[int64]struct{}
 
 	// heldFileResourceIds tracks file resources whose refCnt was incremented
 	// during validation, to be released if the task fails before Broadcast.
@@ -298,11 +300,31 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		}
 	}
 
+	// Source files retain numeric source IDs. Generated outputs are target-owned
+	// physical columns in the same manifest and must not alias source columns.
+	nextID := int64(idx + StartOfUserFieldID)
+	for _, field := range schema.GetFields() {
+		if !typeutil.IsFunctionOutputField(schema, field) {
+			continue
+		}
+		if _, conflict := t.milvusTableSourceFieldIDs[field.GetFieldID()]; !conflict {
+			continue
+		}
+		for {
+			if _, occupied := t.milvusTableSourceFieldIDs[nextID]; !occupied {
+				break
+			}
+			nextID++
+		}
+		field.FieldID = nextID
+		nextID++
+	}
+
 	return assignFunctionIDsFromFieldNames(schema)
 }
 
 // assignFunctionIDsFromFieldNames resolves function input/output field IDs
-// after field IDs have been assigned or aligned from a source snapshot.
+// after target field IDs have been assigned.
 func assignFunctionIDsFromFieldNames(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
 	for _, field := range schema.GetFields() {
@@ -470,8 +492,8 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
-// prepareMilvusTableSnapshotSchema validates the source snapshot and aligns
-// target field IDs before normal create-collection field ID assignment runs.
+// prepareMilvusTableSnapshotSchema validates logical source compatibility.
+// Target IDs use normal allocation; DataNode binds source IDs in manifests.
 func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Context) error {
 	schema := t.body.CollectionSchema
 	if schema == nil || schema.GetExternalSource() == "" || schema.GetExternalSpec() == "" {
@@ -490,7 +512,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		return nil
 	}
 	if t.preserveFieldID {
-		// DDL replay carries the schema after milvus-table field-ID alignment.
+		// DDL replay already carries its resolved logical schema.
 		// Re-reading the source snapshot here would make RootCoord recovery
 		// depend on the external bucket and credentials still being available.
 		return nil
@@ -506,7 +528,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		},
 	)
 	if err != nil {
-		return merr.Wrap(err, "read milvus-table snapshot metadata for schema alignment")
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema validation")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {
@@ -518,53 +540,14 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		// contract, which is not part of the milvus-table snapshot contract.
 		return merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
 	}
-	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, false); err != nil {
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema); err != nil {
 		return merr.Wrap(err, "milvus-table target schema must match source snapshot schema")
 	}
+	t.milvusTableSourceFieldIDs = make(map[int64]struct{})
+	for _, field := range typeutil.GetAllFieldSchemas(sourceSchema) {
+		t.milvusTableSourceFieldIDs[field.GetFieldID()] = struct{}{}
+	}
 
-	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
-	nextTargetOnlyFieldID := nextMilvusTableTargetOnlyFieldID(sourceSchema)
-	for _, field := range schema.GetFields() {
-		if field.GetName() == common.VirtualPKFieldName || typeutil.IsFunctionOutputField(schema, field) {
-			// Milvus-table mapped fields must reuse source field IDs because
-			// source manifests store physical columns by field ID. Target-only
-			// fields, including virtual PK and target function outputs, are not
-			// read from the source manifest and therefore need IDs outside the
-			// source snapshot range.
-			field.FieldID = nextTargetOnlyFieldID
-			nextTargetOnlyFieldID++
-			continue
-		}
-		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
-			continue
-		}
-		sourceField := sourceFields[field.GetExternalField()]
-		if sourceField == nil {
-			return merr.WrapErrParameterInvalidMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
-		}
-		field.FieldID = sourceField.GetFieldID()
-	}
-	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
-		return merr.Wrap(err, "align milvus-table function field IDs")
-	}
-	// Newly aligned milvus-table schemas set preserveFieldID below and would
-	// bypass the direct-path ValidateFunction in prepareSchema, so run the
-	// non-runtime function validation here; DDL replay never reaches this
-	// point (it returns early above) and keeps its historical schema unjudged.
-	if err := validator.ValidateFunction(schema, "", true); err != nil {
-		return err
-	}
-	// The target schema is new input; validateSchema skips this check once
-	// preserveFieldID is set below.
-	if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
-		return err
-	}
-	t.preserveFieldID = true
-	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")
-
-	mlog.Info(ctx, "aligned milvus-table external collection field IDs with source snapshot",
-		mlog.String("collection", t.Req.GetCollectionName()),
-		mlog.String("externalSource", schema.GetExternalSource()))
 	return nil
 }
 
@@ -615,45 +598,6 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 	}
-}
-
-// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
-// snapshot IDs so target-only fields cannot collide with source columns.
-func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
-	next := int64(StartOfUserFieldID)
-	for _, schema := range schemas {
-		for _, field := range schema.GetFields() {
-			if field.GetFieldID() >= next {
-				next = field.GetFieldID() + 1
-			}
-		}
-	}
-	return next
-}
-
-// milvusTableSourceFieldsByName indexes source user fields that can be targets
-// of ExternalField mappings.
-func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
-	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, field := range schema.GetFields() {
-		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
-			continue
-		}
-		fields[field.GetName()] = field
-	}
-	return fields
-}
-
-// upsertCreateCollectionProperty inserts or updates one create-collection
-// property without disturbing the remaining request properties.
-func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, value string) []*commonpb.KeyValuePair {
-	for _, property := range properties {
-		if property.GetKey() == key {
-			property.Value = value
-			return properties
-		}
-	}
-	return append(properties, &commonpb.KeyValuePair{Key: key, Value: value})
 }
 
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {

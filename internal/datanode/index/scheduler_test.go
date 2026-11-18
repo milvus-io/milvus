@@ -50,6 +50,7 @@ func TestGetStateFromError(t *testing.T) {
 			{"conversion budget exceeded", merr.CodeUnsupported, indexpb.JobState_JobStateFailed},
 			{"allocation failed", merr.CodeMemAllocateFailed, indexpb.JobState_JobStateRetry},
 			{"other configuration error", merr.CodeConfigInvalid, indexpb.JobState_JobStateRetry},
+			{"mapped field awaiting external refresh", merr.CodeFieldNotLoaded, indexpb.JobState_JobStateRetry},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				// Preserve the code through the same wrapper used by index builds.
