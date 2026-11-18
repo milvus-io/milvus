@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -55,6 +56,14 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 	dbName := db.(string)
 	collectionName := collection.(string)
 
+	ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
+
+	start := time.Now()
+	resp, err := handler(ctx, req)
+	label, cause := requestutil.ParseMetricLabel(resp, err)
+
+	resourceGroup := requestMetrics.ResourceGroup()
+	// Attribute total and outcome together, after the hook has selected an RG.
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
@@ -62,11 +71,8 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		metrics.CauseNA,
 		dbName,
 		collectionName,
+		resourceGroup,
 	).Inc()
-
-	start := time.Now()
-	resp, err := handler(ctx, req)
-	label, cause := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
@@ -76,6 +82,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		cause,
 		dbName,
 		collectionName,
+		resourceGroup,
 	).Inc()
 
 	// Mirror the metric's cause into the logs so a failed request can be

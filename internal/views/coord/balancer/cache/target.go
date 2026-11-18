@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"maps"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -16,12 +17,13 @@ type (
 
 func (n *NodeEntry) TargetSize() int64 { return n.info.TargetLogicalSize }
 func (n *NodeEntry) TargetContribution(id qviews.ShardID) int64 {
-	v, _ := n.targets.get(shardKey(id))
+	v, _ := n.targets.getShard(id)
 	return v.rows
 }
 func (s *ShardEntry) Target() *coordview.ViewPlacement { return s.target }
 func (c *CollectionEntry) ReplicaSize(replica, node int64) int64 {
-	v, _ := c.targetLoads.get(replicaNodeKey(replica, node))
+	key := replicaNodeKey(replica, node)
+	v, _ := c.targetLoads.get(key[:])
 	return v.rows
 }
 
@@ -35,11 +37,11 @@ func (r *ResourceGroupEntry) Demand(nodes int) int64 {
 	return rows
 }
 
-func replicaNodeKey(replica, node int64) []byte {
+func replicaNodeKey(replica, node int64) [16]byte {
 	var key [16]byte
 	binary.BigEndian.PutUint64(key[:8], uint64(replica))
 	binary.BigEndian.PutUint64(key[8:], uint64(node))
-	return key[:]
+	return key
 }
 
 func demandGroups(c *CollectionEntry) (map[string]int64, int64) {
@@ -64,13 +66,14 @@ func (c *Cache) replaceDemand(old, next *CollectionEntry) {
 		}
 		for name, replicas := range groups {
 			group := c.groupLocked(name)
-			bucket, _ := group.demand.get(idKey(replicas))
+			key := idKey(replicas)
+			bucket, _ := group.demand.get(key[:])
 			bucket.replicas = replicas
 			bucket.rows += rows
 			if bucket.rows == 0 {
-				group.demand = group.demand.remove(idKey(replicas))
+				group.demand = group.demand.remove(key[:])
 			} else {
-				group.demand = group.demand.set(idKey(replicas), bucket)
+				group.demand = group.demand.set(key[:], bucket)
 			}
 			c.storeGroupLocked(name, group)
 		}
@@ -86,12 +89,14 @@ func (c *Cache) PublishReplicaActivity(collection int64, active map[int64]bool) 
 	var suspended immutableIndex[bool]
 	for replica, enabled := range active {
 		if !enabled {
-			suspended = suspended.set(idKey(replica), true)
+			key := idKey(replica)
+			suspended = suspended.set(key[:], true)
 		}
 	}
 	changed := suspended.len() != next.suspended.len()
 	for replica, enabled := range active {
-		old, _ := next.suspended.get(idKey(replica))
+		key := idKey(replica)
+		old, _ := next.suspended.get(key[:])
 		changed = changed || old == enabled
 	}
 	if !changed {
@@ -103,12 +108,13 @@ func (c *Cache) PublishReplicaActivity(collection int64, active map[int64]bool) 
 	return true
 }
 
-func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *coordview.ShardStats, fallback map[int64]int64) (*coordview.ViewPlacement, map[int64]int64) {
+func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *coordview.ShardStats, fallback, rows map[int64]int64) *coordview.ViewPlacement {
 	if stats == nil || entry.config == nil {
-		return nil, nil
+		return nil
 	}
-	if suspended, _ := entry.suspended.get(idKey(id.ReplicaID)); suspended {
-		return nil, nil
+	key := idKey(id.ReplicaID)
+	if suspended, _ := entry.suspended.get(key[:]); suspended {
+		return nil
 	}
 	group, found := "", false
 	for _, r := range entry.config.Replicas {
@@ -118,7 +124,7 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 		}
 	}
 	if !found {
-		return nil, nil
+		return nil
 	}
 	eligible := func(node int64) bool {
 		n := c.GetNode(node)
@@ -137,9 +143,8 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 		target = stats.UpPlacement
 	}
 	if target == nil {
-		return nil, nil
+		return nil
 	}
-	rows := make(map[int64]int64)
 	for partition, byNode := range target.PartitionSizes {
 		if !entry.LoadsPartition(partition) {
 			continue
@@ -159,13 +164,23 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 			delete(rows, node)
 		}
 	}
-	return target, rows
+	return target
 }
 
 func (c *Cache) refreshTargets(entry *CollectionEntry, fallback map[int64]int64) {
+	// Scratch belongs only to this publication. Changed shards receive their own
+	// map; unchanged shards retain their immutable object and index path.
+	rows := make(map[int64]int64)
 	entry.shards.each(func(old *ShardEntry) bool {
+		clear(rows)
+		target := c.selectTarget(entry, old.id, old.stats, fallback, rows)
+		if target == old.target && maps.Equal(rows, old.targetRows) {
+			return true
+		}
 		next := *old
-		c.replaceTarget(entry, old.id, old, &next, fallback)
+		next.target = target
+		next.targetRows = maps.Clone(rows)
+		c.replaceTargetRows(entry, old.id, old.targetRows, next.targetRows)
 		entry.shards = entry.shards.set(shardKey(old.id), &next)
 		return true
 	})
@@ -177,39 +192,49 @@ func (c *Cache) replaceTarget(entry *CollectionEntry, id qviews.ShardID, old, ne
 		previous = old.targetRows
 	}
 	if next != nil {
-		next.target, rows = c.selectTarget(entry, id, next.stats, fallback)
+		rows = make(map[int64]int64)
+		next.target = c.selectTarget(entry, id, next.stats, fallback, rows)
+		if maps.Equal(previous, rows) {
+			rows = previous
+		}
 		next.targetRows = rows
 	}
-	changed := make(map[int64]struct{}, len(previous)+len(rows))
-	for node := range previous {
-		changed[node] = struct{}{}
+	c.replaceTargetRows(entry, id, previous, rows)
+}
+
+func (c *Cache) replaceTargetRows(entry *CollectionEntry, id qviews.ShardID, previous, rows map[int64]int64) {
+	for node, count := range previous {
+		if _, exists := rows[node]; !exists {
+			c.replaceTargetContribution(entry, id, node, count, 0)
+		}
 	}
-	for node := range rows {
-		changed[node] = struct{}{}
+	for node, count := range rows {
+		c.replaceTargetContribution(entry, id, node, previous[node], count)
 	}
-	for node := range changed {
-		if previous[node] == rows[node] {
-			continue
-		}
-		slot := c.lockNode(node)
-		n := *slot.value.Load()
-		oldContribution := n.TargetContribution(id)
-		n.info.TargetLogicalSize += rows[node] - oldContribution
-		if rows[node] == 0 {
-			n.targets = n.targets.remove(shardKey(id))
-		} else {
-			n.targets = n.targets.set(shardKey(id), targetContribution{rows: rows[node]})
-		}
-		slot.value.Store(&n)
-		c.finishNode(node, slot)
-		key := replicaNodeKey(id.ReplicaID, node)
-		load, _ := entry.targetLoads.get(key)
-		load.rows += rows[node] - previous[node]
-		if load.rows == 0 {
-			entry.targetLoads = entry.targetLoads.remove(key)
-		} else {
-			entry.targetLoads = entry.targetLoads.set(key, load)
-		}
+}
+
+func (c *Cache) replaceTargetContribution(entry *CollectionEntry, id qviews.ShardID, node, previous, rows int64) {
+	if previous == rows {
+		return
+	}
+	slot := c.lockNode(node)
+	n := *slot.value.Load()
+	oldContribution := n.TargetContribution(id)
+	n.info.TargetLogicalSize += rows - oldContribution
+	if rows == 0 {
+		n.targets = n.targets.remove(shardKey(id))
+	} else {
+		n.targets = n.targets.set(shardKey(id), targetContribution{rows: rows})
+	}
+	slot.value.Store(&n)
+	c.finishNode(node, slot)
+	key := replicaNodeKey(id.ReplicaID, node)
+	load, _ := entry.targetLoads.get(key[:])
+	load.rows += rows - previous
+	if load.rows == 0 {
+		entry.targetLoads = entry.targetLoads.remove(key[:])
+	} else {
+		entry.targetLoads = entry.targetLoads.set(key[:], load)
 	}
 }
 

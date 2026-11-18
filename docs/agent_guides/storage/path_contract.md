@@ -55,6 +55,19 @@ storage; explicitly authenticated external sources use their own object
 permissions. All output writes retain the cluster chunk manager and layout.
 See [source storage design](../../design-docs/design_docs/20261110-external-import-storage.md).
 
+## Delegator BM25 local cache
+
+The legacy delegator IDF oracle creates a unique directory per sealed-statistics
+entry under its channel-local BM25 root. Readers use the entry's `localDir`;
+cleanup must delete that exact directory, never reconstruct it from segment ID.
+These directories are downloaded caches, not recovery metadata.
+Reopen downloads missing fields into a separate unique directory under the same
+root, then installs complete field directories under the oracle and entry locks.
+Only after installation succeeds are fields, aggregate statistics and disk
+accounting published. An obsolete entry can be detached under the oracle lock
+and physically removed after unlocking without waiting for a replacement's
+remote download. The sync still waits for that entry's local readers and removal.
+
 ## Manifest index artifacts
 
 When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3
@@ -142,6 +155,14 @@ another storage.
 Root confinement still applies. Referenced snapshots retain source identity
 validation. Worker-side conversion to object keys does not define the restore
 fingerprint.
+
+Snapshot-source import without `external_spec` also accepts a bucket-relative
+metadata object key (`[prefix/]snapshots/<collection_id>/metadata/<snapshot_id>.json`)
+resolved against the active instance's configured bucket. Same-prefix
+self-contained bundles normalize origin-matching URIs to bare object keys during
+import preparation, while any remaining scheme-bearing internal reference is
+rejected by `ValidateSnapshotImportPaths`. Restore retains its URI-preserving
+behavior.
 
 - Configuration initialization requires an absolute local root and freezes it
   against runtime configuration updates.

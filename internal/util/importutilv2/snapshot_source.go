@@ -68,7 +68,7 @@ func SnapshotPathValidator(options Options, cm storage.ChunkManager) (func(strin
 		if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot reference", path, ""); err != nil {
 			return err
 		}
-		return snapshotstorage.ValidateExternalSnapshotPaths(uri, snapshot, []snapshotstorage.SnapshotFileRef{{
+		return snapshotstorage.ValidateSnapshotImportPaths(uri, snapshot, []snapshotstorage.SnapshotFileRef{{
 			Path: path, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(path),
 		}})
 	}, nil

@@ -324,7 +324,7 @@ ApplyValidMaskForCandidates(ValidityView validity,
                             TargetBitmapView res,
                             TargetBitmapView valid_res,
                             int64_t size,
-                            const TargetBitmap* candidate_mask,
+                            const TargetBitmapView* candidate_mask,
                             int64_t candidate_pos) {
     if (!validity) {
         return;
@@ -380,7 +380,9 @@ ApplyValidMaskForCandidates(ValidityView validity,
         const auto bit_count =
             static_cast<int>(std::min<int64_t>(size - i, 64));
         const auto candidate_word = CandidatePolicy::op_read(
-            candidate_mask->data(), candidate_pos + i, bit_count);
+            candidate_mask->data(),
+            candidate_mask->offset() + candidate_pos + i,
+            bit_count);
         auto keep_word = ~candidate_word | read_validity_word(i, bit_count);
         TargetBitmapView keep(&keep_word, bit_count);
         auto res_block = res.view(i);
@@ -436,6 +438,22 @@ class Expr : public std::enable_shared_from_this<Expr> {
     virtual bool
     SupportOffsetInput() {
         return true;
+    }
+
+    // Opt-in for evaluating a sequential batch by explicit element offsets.
+    // The subtree must leave its sequential cursors untouched during Eval,
+    // then advance them exactly once through AdvanceSequentialBatch().
+    virtual bool
+    CanUseOffsetsForSequentialBatch() {
+        return false;
+    }
+
+    virtual void
+    AdvanceSequentialBatch() {
+        SetHasOffsetInput(false);
+        for (auto& input : inputs_) {
+            input->AdvanceSequentialBatch();
+        }
     }
 
     virtual std::string
@@ -1037,6 +1055,12 @@ class SegmentExpr : public Expr {
         MoveCursorInternal();
     }
 
+    void
+    AdvanceSequentialBatch() override {
+        SetHasOffsetInput(false);
+        MoveCursorInternal();
+    }
+
     template <typename T>
     static ChunkedColumnInterface::TargetType
     DataTargetType() {
@@ -1155,7 +1179,7 @@ class SegmentExpr : public Expr {
                       TargetBitmapView res,
                       TargetBitmapView valid_res,
                       int64_t size,
-                      const TargetBitmap* candidate_mask = nullptr,
+                      const TargetBitmapView* candidate_mask = nullptr,
                       int64_t candidate_pos = 0) {
         if (!batch.validity) {
             return;
@@ -1532,7 +1556,7 @@ class SegmentExpr : public Expr {
                                         OffsetVector* input,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res,
-                                        const TargetBitmap& candidate_mask,
+                                        const TargetBitmapView& candidate_mask,
                                         const ValTypes&... values) {
         return ProcessIndexLookupByOffsetsImpl<T>(
             evaluate_batch, input, res, valid_res, &candidate_mask, values...);
@@ -1544,7 +1568,7 @@ class SegmentExpr : public Expr {
                                     OffsetVector* input,
                                     TargetBitmapView res,
                                     TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         const auto* value_reader = ValueReader<T>();
@@ -1648,7 +1672,7 @@ class SegmentExpr : public Expr {
                                  OffsetVector* input,
                                  TargetBitmapView res,
                                  TargetBitmapView valid_res,
-                                 const TargetBitmap& candidate_mask,
+                                 const TargetBitmapView& candidate_mask,
                                  const ValTypes&... values) {
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
@@ -1689,7 +1713,7 @@ class SegmentExpr : public Expr {
                              OffsetVector* input,
                              TargetBitmapView res,
                              TargetBitmapView valid_res,
-                             const TargetBitmap* candidate_mask,
+                             const TargetBitmapView* candidate_mask,
                              const ValTypes&... values) {
         int64_t processed_size = 0;
         const bool has_candidate_mask =
@@ -1991,7 +2015,7 @@ class SegmentExpr : public Expr {
                                OffsetVector* input,
                                TargetBitmapView res,
                                TargetBitmapView valid_res,
-                               const TargetBitmap* candidate_mask,
+                               const TargetBitmapView* candidate_mask,
                                const ValTypes&... values) {
         // VECTOR_ARRAY has a target tag for typed access, but neither Raw nor
         // Vortex implements Take for it. Fall back before building an O(N)
@@ -2017,7 +2041,7 @@ class SegmentExpr : public Expr {
                                          OffsetVector* input,
                                          TargetBitmapView res,
                                          TargetBitmapView valid_res,
-                                         const TargetBitmap* candidate_mask,
+                                         const TargetBitmapView* candidate_mask,
                                          const ValTypes&... values) {
         static_assert(milvus::HasTargetType<T>);
         if (input->empty()) {
@@ -2875,7 +2899,7 @@ class SegmentExpr : public Expr {
                                     const SkipChunkFn& skip_func,
                                     TargetBitmapView res,
                                     TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
         const auto expected_rows = GetNextBatchSize();
         int64_t processed_size = 0;
@@ -2996,7 +3020,7 @@ class SegmentExpr : public Expr {
                             const SkipChunkFn& skip_func,
                             TargetBitmapView res,
                             TargetBitmapView valid_res,
-                            const TargetBitmap* candidate_mask,
+                            const TargetBitmapView* candidate_mask,
                             const ValTypes&... values) {
         if constexpr (!milvus::HasTargetType<T>) {
             return -1;
@@ -3015,7 +3039,7 @@ class SegmentExpr : public Expr {
                                       const SkipChunkFn& skip_func,
                                       TargetBitmapView res,
                                       TargetBitmapView valid_res,
-                                      const TargetBitmap* candidate_mask,
+                                      const TargetBitmapView* candidate_mask,
                                       const ValTypes&... values) {
         static_assert(milvus::HasTargetType<T>);
         const auto real_batch_size = GetNextBatchSize();
@@ -3146,7 +3170,7 @@ class SegmentExpr : public Expr {
                               const SkipChunkFn& skip_func,
                               TargetBitmapView res,
                               TargetBitmapView valid_res,
-                              const TargetBitmap& candidate_mask,
+                              const TargetBitmapView& candidate_mask,
                               const ValTypes&... values) {
         AssertInfo(candidate_mask.empty() ||
                        candidate_mask.size() ==
@@ -3167,7 +3191,7 @@ class SegmentExpr : public Expr {
                           const SkipChunkFn& skip_func,
                           TargetBitmapView res,
                           TargetBitmapView valid_res,
-                          const TargetBitmap* candidate_mask,
+                          const TargetBitmapView* candidate_mask,
                           const ValTypes&... values) {
         const auto processed_size =
             ProcessDataChunksByScan<T, NeedSegmentOffsets>(
@@ -4743,7 +4767,7 @@ class SegmentExpr : public Expr {
                                          int64_t batch_size,
                                          TargetBitmapView res,
                                          TargetBitmapView valid_res,
-                                         const TargetBitmap& candidate_mask,
+                                         const TargetBitmapView& candidate_mask,
                                          const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         const auto* value_reader = ValueReader<T>();
