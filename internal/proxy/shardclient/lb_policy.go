@@ -465,8 +465,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				return again, err
 			}
 		}
-		if workload.Hedgeable {
-		}
 		// cancel work load which assign to the target node
 		if selectedByBalancer {
 			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)

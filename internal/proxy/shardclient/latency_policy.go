@@ -189,8 +189,6 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 				return again, err
 			}
 		}
-		if workload.Hedgeable {
-		}
 		client, err := lb.clientMgr.GetClient(ctx, node)
 		if err == nil {
 			err = workload.Exec(ctx, node.NodeID, client, workload.Channel)
