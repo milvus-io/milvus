@@ -453,20 +453,21 @@ func TestAutoLoadBypassesSaturatedTaskQueues(t *testing.T) {
 type dqlRetryServer struct {
 	viewpb.UnimplementedQueryPlanServiceServer
 	viewpb.UnimplementedViewQueryServiceServer
-	loaded    atomic.Bool
-	injected  atomic.Bool
-	plans     atomic.Int32
-	searches  atomic.Int32
-	queries   atomic.Int32
-	failPhase string
+	replicaID         atomic.Int64 // Zero while the collection is released.
+	executedReplicaID atomic.Int64
+	injected          atomic.Bool
+	plans             atomic.Int32
+	searches          atomic.Int32
+	queries           atomic.Int32
+	failPhase         string
 }
 
 func (s *dqlRetryServer) failure(phase string) error {
 	if s.failPhase == phase && s.injected.CompareAndSwap(false, true) {
-		s.loaded.Store(false)
+		s.replicaID.Store(0)
 		return viewerror.NewGRPCStatusFromViewError(viewerror.NewViewInvalidated("collection released during %s", phase)).Err()
 	}
-	if !s.loaded.Load() {
+	if s.replicaID.Load() == 0 {
 		return viewerror.NewGRPCStatusFromViewError(viewerror.NewViewNotFound("collection is released")).Err()
 	}
 	return nil
@@ -478,7 +479,7 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 		return nil, err
 	}
 	plan := &viewpb.QueryPlan{
-		ShardId: &viewpb.ShardID{Vchannel: req.GetVchannel(), ReplicaId: 1},
+		ShardId: &viewpb.ShardID{Vchannel: req.GetVchannel(), ReplicaId: s.replicaID.Load()},
 		Version: &viewpb.QueryViewVersion{},
 		Mvcc:    &viewpb.QueryPlanMVCC{},
 		WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{
@@ -493,19 +494,21 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 	return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
 }
 
-func (s *dqlRetryServer) SearchOnView(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+func (s *dqlRetryServer) SearchOnView(_ context.Context, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 	s.searches.Add(1)
 	if err := s.failure("search"); err != nil {
 		return nil, err
 	}
+	s.executedReplicaID.Store(req.GetShardId().GetReplicaId())
 	return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
 }
 
-func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+func (s *dqlRetryServer) QueryOnView(_ context.Context, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	s.queries.Add(1)
 	if err := s.failure("query"); err != nil {
 		return nil, err
 	}
+	s.executedReplicaID.Store(req.GetShardId().GetReplicaId())
 	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
 }
 
@@ -547,7 +550,7 @@ func (c *dqlRetryClient) ResolveVChannels(context.Context, int64) ([]string, err
 func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfoClient) *dqlRetryClient {
 	t.Helper()
 	server := &dqlRetryServer{failPhase: phase}
-	server.loaded.Store(true)
+	server.replicaID.Store(1)
 	listener := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	viewpb.RegisterQueryPlanServiceServer(grpcServer, server)
@@ -588,7 +591,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			t.Cleanup(func() { rateCol = oldRateCol })
 			client := newDQLRetryClient(t, test.phase, coordinator)
 			loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
-				if !client.server.loaded.Load() {
+				if client.server.replicaID.Load() == 0 {
 					return nil, merr.WrapErrCollectionNotLoaded(100)
 				}
 				return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
@@ -596,16 +599,15 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			t.Cleanup(func() { loadInfo.UnPatch() })
 			node.viewQueryClient = client
 			if test.phase == "wait" {
-				client.server.loaded.Store(false)
+				client.server.replicaID.Store(0)
 			}
-			var loads atomic.Int32
+			var loads atomic.Int64
 			coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
 				func(_ context.Context, req *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
 					require.EqualValues(t, 100, req.GetCollectionID())
 					client.checks.Add(1)
-					if !client.server.loaded.Load() {
-						loads.Add(1)
-						client.server.loaded.Store(true)
+					if client.server.replicaID.Load() == 0 {
+						client.server.replicaID.Store(1 + loads.Add(1))
 					}
 					if client.server.failure("wait") != nil {
 						return merr.Status(merr.WrapErrCollectionNotLoaded(100)), nil
@@ -693,6 +695,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			}
 			require.NoError(t, merr.Error(status))
 			require.True(t, client.server.injected.Load())
+			require.Equal(t, 1+loads.Load(), client.server.executedReplicaID.Load(), "Phase 2 must execute on the replica allocated by reload")
 			require.EqualValues(t, 2, client.checks.Load())
 			if test.phase == "wait" {
 				require.EqualValues(t, 2, loads.Load())
