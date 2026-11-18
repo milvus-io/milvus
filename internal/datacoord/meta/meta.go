@@ -412,7 +412,7 @@ func GetSegmentsChanPart(m *Meta, collectionID int64, filters ...SegmentFilter) 
 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *Meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
-	return m.countPublishedRows(collectionID, nil)
+	return m.countDurableRows(collectionID, nil)
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
@@ -2414,14 +2414,15 @@ func (m *Meta) GetSegmentsIDOfPartitionWithDropped(ctx context.Context, collecti
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *Meta) GetNumRowsOfPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) int64 {
-	return m.countPublishedRows(collectionID, &partitionID)
+	return m.countDurableRows(collectionID, &partitionID)
 }
 
-// countPublishedRows observes group exclusions and segment states atomically.
-func (m *Meta) countPublishedRows(collectionID UniqueID, partitionID *UniqueID) int64 {
+// countDurableRows observes group exclusions and segment states atomically.
+// Pending streaming sources remain counted until their replacements publish.
+func (m *Meta) countDurableRows(collectionID UniqueID, partitionID *UniqueID) int64 {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
-	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
+	unpublished := m.durableSegmentExclusionsLocked(collectionID)
 	var ret int64
 	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
 		return IsSegmentHealthy(si) && !unpublished.Contain(si.GetID()) && (partitionID == nil || si.GetPartitionID() == *partitionID)

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 type stagedFlushTestLifecycle struct {
@@ -37,6 +38,56 @@ type stagedFlushTestLifecycle struct {
 	err             error
 	registrations   int
 	acknowledgments int
+}
+
+func TestStagedFlushRepeatedFlushReleasesAtDurability(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		name := "runtime"
+		if recovered {
+			name = "recovered"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			lifecycle := &stagedFlushTestLifecycle{pending: true, result: &viewpb.DataVersion{StreamingVersion: 1}}
+			config := runtimeConfig{lifecycle: lifecycle, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}}
+			view := newSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
+				SegmentId: 1, CollectionId: 1, Vchannel: "v1", CheckpointTimeTick: 10,
+				State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+				Stat:  &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 5, ModifiedRows: 1},
+			}, nil, config)
+			observeFlush := func(timetick uint64) *bool {
+				released := new(bool)
+				flush := message.NewFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.FlushMessageHeader{}).
+					WithBody(&message.FlushMessageBody{}).MustBuildMutable().WithTimeTick(timetick).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick)))
+				owner := message.NewOwnedImmutableMessage(flush, func() { *released = true })
+				dispatch := owner.Clone()
+				view.Flush(ctx, dispatch)
+				dispatch.Release()
+				owner.Release()
+				return released
+			}
+			first := observeFlush(20)
+			require.False(t, *first, "Flush must retain its ACK until durable registration")
+			require.NoError(t, view.pendingTasks[0].Execute(ctx))
+			require.True(t, *first)
+			if recovered {
+				view = newSegmentViewFromMeta(view.ConsumeDirtyAndGetSnapshot(), nil, config)
+				view.ResumePendingRecovery()
+			}
+			require.True(t, *observeFlush(30), "later Flush/DDL ACK must not wait for group publication")
+			require.Empty(t, view.pendingDataHandles)
+			require.False(t, view.finalCommitDone.Load())
+			require.Nil(t, view.meta.GetSealedAtDataVersion())
+			require.Error(t, view.pendingTasks[0].Execute(ctx), "publication is still pending")
+			require.True(t, *observeFlush(40))
+			lifecycle.pending = false
+			lifecycle.result = &viewpb.DataVersion{StreamingVersion: 2}
+			require.NoError(t, view.pendingTasks[0].Execute(ctx))
+			require.True(t, view.finalCommitDone.Load())
+			require.True(t, *observeFlush(50))
+			require.Empty(t, view.pendingDataHandles)
+		})
+	}
 }
 
 func (l *stagedFlushTestLifecycle) CommitL1SegmentWithPublication(_ context.Context, meta *streamingpb.SegmentAssignmentMeta, _ uint64) (*viewpb.DataVersion, bool, error) {

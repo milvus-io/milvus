@@ -383,6 +383,13 @@ func (s *SegmentView) Flush(
 		owned.IntoPoisoned()
 		return false
 	}
+	// The first flush closes the source and durably registers all its data.
+	// Later ManualFlush/DDL messages need no further persistence from it, even
+	// while query publication is pending. Retaining them here would leave no
+	// commit task to release their handles and would block consuming ACKs.
+	if s.flushDataDurable.Load() {
+		return false
+	}
 	timetick := msg.TimeTick()
 	closed, flushTimeTick, metaChanged := s.observeFlushMeta(timetick)
 	if !closed {

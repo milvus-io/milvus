@@ -74,6 +74,36 @@ func TestMeta_AddGetSegmentChangeGroup(t *testing.T) {
 	require.Empty(t, m.GetSegmentChangeGroupsByCollection(ctx, 11))
 }
 
+func TestMeta_RowStatisticsExcludePrivateProducerOutputs(t *testing.T) {
+	for _, source := range []model.SegmentChangeSource{
+		model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCopySegment,
+		model.SegmentChangeSourceCDCReplicated, model.SegmentChangeSourceExternalRefresh,
+	} {
+		t.Run(source.String(), func(t *testing.T) {
+			m, err := NewMemoryMeta(t)
+			require.NoError(t, err)
+			ctx := t.Context()
+			for _, info := range []*datapb.SegmentInfo{
+				{ID: 1001, CollectionID: 10, PartitionID: 100, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 300, IsInvisible: true},
+				{ID: 2001, CollectionID: 10, PartitionID: 100, State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1, NumOfRows: 100},
+			} {
+				require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(info)))
+			}
+			group := NewTestGroup()
+			group.Source, group.SupersededSegmentIDs = source, nil
+			require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+			for _, state := range []model.SegmentChangeState{model.SegmentChangeStateStaged, model.SegmentChangeStateReady, model.SegmentChangeStateAborted} {
+				group.State = state
+				if state != model.SegmentChangeStateStaged {
+					require.NoError(t, m.UpdateSegmentChangeGroup(ctx, group))
+				}
+				require.EqualValues(t, 100, m.GetNumRowsOfCollection(ctx, 10))
+				require.EqualValues(t, 100, m.GetNumRowsOfPartition(ctx, 10, 100))
+			}
+		})
+	}
+}
+
 func TestMeta_AddSegmentChangeGroup_RejectsConflicts(t *testing.T) {
 	m, err := NewMemoryMeta(t)
 	require.NoError(t, err)
@@ -204,6 +234,8 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 
 	assertProjection := func(wantID int64) {
 		t.Helper()
+		require.EqualValues(t, 42, m.GetNumRowsOfCollection(ctx, group.CollectionID))
+		require.EqualValues(t, 42, m.GetNumRowsOfPartition(ctx, group.CollectionID, group.PartitionID))
 		projection, err := m.LoadableProjection(ctx, group.CollectionID, nil)
 		require.NoError(t, err)
 		require.Len(t, projection, 1)

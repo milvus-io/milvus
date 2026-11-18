@@ -498,19 +498,24 @@ func (m *Meta) UnpublishedSegmentMembers(ctx context.Context, collectionID int64
 func (m *Meta) SnapshotCandidateSegments(collectionID int64) []*SegmentInfo {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
+	unpublished := m.durableSegmentExclusionsLocked(collectionID)
+	return m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting() && !unpublished.Contain(info.GetID())
+	}))
+}
+
+// durableSegmentExclusionsLocked selects the logical data frontier for snapshot
+// export and row statistics, independently of query publication readiness.
+func (m *Meta) durableSegmentExclusionsLocked(collectionID int64) typeutil.UniqueSet {
 	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
-	// Snapshot durability is independent of query publication. The original
-	// growing source contains the accepted rows while its sorted replacement
-	// remains private. Pin that source once; never include both frontiers.
+	// The original growing source contains the accepted rows while its sorted
+	// replacement remains private. Pin that source once; never include both frontiers.
 	for _, g := range m.segmentChangeGroups {
 		if g.CollectionID == collectionID && g.Source == model.SegmentChangeSourceStreamingFlush && !g.IsTerminal() {
 			unpublished.Remove(g.StreamingSegmentID)
 		}
 	}
-
-	return m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting() && !unpublished.Contain(info.GetID())
-	}))
+	return unpublished
 }
 
 // stagedSegmentMembers is the async-work set: terminal groups remain excluded
