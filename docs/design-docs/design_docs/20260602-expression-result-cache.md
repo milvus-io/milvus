@@ -1146,6 +1146,14 @@ not reserve this budget, so ordinary cache hits can still use it for decoding.
 If the reservation fails, the leader aborts sharing and wakes followers before
 optional cache insertion, while retaining its own computed result.
 
+Before reserving or copying either a computed result or a second cache hit,
+the leader checks the flight's live follower count. With no followers, it aborts
+sharing without allocating a shared pair; normal cache insertion is unchanged.
+A follower joining after the check observes `Aborted` and falls back normally.
+The count is a snapshot: followers leaving after a positive check can still
+cause an unused copy, but no additional locking is needed around computation
+or copying.
+
 `Ready` is published before optional cache insertion. Followers need not wait
 for compression, disk writes, or admission. Late followers may reuse a Ready
 record while the leader is still inserting. The leader removes its map entry
@@ -1521,6 +1529,7 @@ run against both memory and disk backends.
 | Nested validity computation | No recursive flight wait. |
 | Budget, flight, or waiter limit reached | Immediate bypass or normal fallback without exceeding the configured limits. |
 | Admission rejects insertion or cache I/O blocks after Ready | Followers can use the completed result independently of the cache write. |
+| No followers, or all followers depart before completion | No shared bitmap allocation or reservation, including during blocked cache insertion; late followers fall back safely. |
 | Read-only leader or follower | Coordination does not grant cache-write permission or duplicate admission observations. |
 | Clear, backend refresh, flight-policy refresh, disable, or generation retirement | Cache epochs and retired tokens reject stale writes; policy changes stop further joins/waits on old flights. Publication does not wait for a flight. |
 | Unused generation retirement during unrelated disk I/O | No backend lock wait; first backend use racing retirement remains safe. |

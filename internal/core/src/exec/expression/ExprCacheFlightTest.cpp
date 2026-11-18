@@ -33,6 +33,18 @@ class ExprCacheFlightTestPeer {
     HoldBackend(ExprResCacheManager& manager) {
         return std::unique_lock(manager.state_mutex_);
     }
+
+    static ExprCacheFlightCoordinator::Handle
+    ObserveFlight(ExprCacheFlightCoordinator& coordinator,
+                  const ExprCacheFlightCoordinator::Key& key) {
+        std::lock_guard lock(coordinator.map_mutex_);
+        auto it = coordinator.flights_.find(key);
+        if (it == coordinator.flights_.end())
+            return {};
+        // Observe completion without registering demand for a shared result.
+        // A null owner also keeps destruction from changing follower counts.
+        return {nullptr, it->second, false, 5000};
+    }
 };
 namespace {
 using namespace std::chrono_literals;
@@ -169,6 +181,22 @@ TEST_P(ExprCacheFlightTest, LeaderScopeExitWakesFollowers) {
     });
     leader.Reset();
     EXPECT_EQ(waiting.get(), Coordinator::WaitStatus::Bypass);
+}
+
+TEST_P(ExprCacheFlightTest, JoiningAfterNoWaitersCheckFallsBack) {
+    auto leader = flights.TryJoin(Key());
+    EXPECT_FALSE(flights.HasWaiters(leader));
+    // Join in the window between the leader's count check and Abort.
+    auto follower = flights.TryJoin(Key());
+    ASSERT_TRUE(follower);
+    ASSERT_FALSE(follower.IsLeader());
+    EXPECT_TRUE(flights.HasWaiters(leader));
+    flights.Abort(leader);
+    auto waited = flights.Wait(follower, nullptr, [] { return true; });
+    EXPECT_EQ(waited.status, Coordinator::WaitStatus::Bypass);
+    EXPECT_FALSE(waited.bitmaps);
+    follower.Reset();
+    EXPECT_FALSE(flights.HasWaiters(leader));
 }
 
 TEST_P(ExprCacheFlightTest, IncompleteResultsAreNotPublished) {
@@ -582,6 +610,100 @@ TEST_P(ExprCacheFlightTest,
     EXPECT_EQ(computed, 1);
     EXPECT_FALSE(SetExprResCacheSingleFlightConfig(true, -1, 1024, 64, 8));
     EXPECT_FALSE(flights.IsEnabled());
+}
+
+TEST_P(ExprCacheFlightTest, NoConsumersSkipSharedCopyAndPreserveAdmission) {
+    enum class Follower { None, Cancelled, TimedOut };
+    for (bool admit : {false, true}) {
+        SCOPED_TRACE(admit);
+        for (auto kind :
+             {Follower::None, Follower::Cancelled, Follower::TimedOut}) {
+            SCOPED_TRACE(static_cast<int>(kind));
+            manager.Clear();
+            cache_config.admission_threshold = admit ? 1 : 100;
+            ASSERT_TRUE(manager.SetConfig(cache_config));
+            flight_config.max_wait_ms = kind == Follower::TimedOut ? 20 : 5000;
+            ASSERT_TRUE(flights.Configure(flight_config));
+
+            std::promise<void> entered, resume;
+            auto resumed = resume.get_future().share();
+            folly::CancellationSource source;
+            auto token = source.getToken();
+            ExprCacheFlightOptions opts{&token};
+            std::atomic<int> fallback{0};
+            std::future<ExprCacheHelper::CachedBitmaps> leader, follower;
+            auto release = folly::makeGuard([&] { resume.set_value(); });
+            leader = std::async(std::launch::async, [&] {
+                return Compute([&] {
+                    entered.set_value();
+                    resumed.wait();
+                    return Full();
+                });
+            });
+            ASSERT_EQ(entered.get_future().wait_for(3s),
+                      std::future_status::ready);
+            auto observer =
+                ExprCacheFlightTestPeer::ObserveFlight(flights, Key());
+            ASSERT_TRUE(observer);
+            if (kind != Follower::None) {
+                follower = std::async(std::launch::async, [&] {
+                    return Compute(
+                        [&] {
+                            ++fallback;
+                            return Full();
+                        },
+                        true,
+                        &opts);
+                });
+                if (kind == Follower::Cancelled) {
+                    ASSERT_TRUE(Waiters(1));
+                    source.requestCancellation();
+                    EXPECT_THROW(follower.get(), folly::FutureCancellation);
+                } else {
+                    EXPECT_EQ(follower.get().result->count(), rows);
+                }
+            }
+            EXPECT_EQ(fallback, kind == Follower::TimedOut ? 1 : 0);
+            EXPECT_EQ(flights.GetStats().waiters, 0);
+
+            auto backend_lock = ExprCacheFlightTestPeer::HoldBackend(manager);
+            resume.set_value();
+            release.dismiss();
+            auto completed =
+                flights.Wait(observer, nullptr, [] { return true; });
+            EXPECT_EQ(completed.status, Coordinator::WaitStatus::Bypass);
+            EXPECT_FALSE(completed.bitmaps);
+            EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+            EXPECT_EQ(leader.wait_for(0ms), std::future_status::timeout);
+
+            // A late joiner observes Abort even while cache insertion is held.
+            auto late = flights.TryJoin(Key());
+            EXPECT_TRUE(late);
+            if (late) {
+                EXPECT_FALSE(late.IsLeader());
+                EXPECT_EQ(
+                    flights.Wait(late, nullptr, [] { return true; }).status,
+                    Coordinator::WaitStatus::Bypass);
+                late.Reset();
+            }
+            backend_lock.unlock();
+            auto result = leader.get();
+            EXPECT_EQ(result.result->count(), rows);
+            EXPECT_EQ(result.valid->count(), rows);
+            EXPECT_EQ(manager.GetEntryCount(), admit ? 1 : 0);
+            ExprResCacheManager::Value cached;
+            cached.active_count = rows;
+            EXPECT_EQ(manager.GetWithStatus(Key().cache_key, cached),
+                      admit ? ExprResCacheManager::LookupResult::Hit
+                            : ExprResCacheManager::LookupResult::Miss);
+            if (admit) {
+                ASSERT_TRUE(cached.result);
+                ASSERT_TRUE(cached.valid_result);
+                EXPECT_EQ(cached.result->count(), rows);
+                EXPECT_EQ(cached.valid_result->count(), rows);
+            }
+        }
+    }
 }
 
 TEST_P(ExprCacheFlightTest, FollowerReturnsWhileLeaderIsBlockedWritingCache) {

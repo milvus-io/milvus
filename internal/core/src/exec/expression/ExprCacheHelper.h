@@ -315,6 +315,8 @@ class ExprCacheHelper {
             CheckFlightCancellation(options);
             if (status == ExprResCacheManager::LookupResult::Hit) {
                 RunExprCacheBestEffort([&] {
+                    if (!current() || !coordinator.HasWaiters(handle))
+                        return;
                     auto lease =
                         manager.TryAcquireMaterialization(active_count);
                     if (lease && current()) {
@@ -347,7 +349,7 @@ class ExprCacheHelper {
         auto owned = OwnResult(std::move(out));
         if (handle) {
             RunExprCacheBestEffort([&] {
-                if (can_share && current() &&
+                if (can_share && current() && coordinator.HasWaiters(handle) &&
                     owned.result->size() == static_cast<size_t>(active_count) &&
                     owned.valid->size() == static_cast<size_t>(active_count)) {
                     // Reserve only when the shared copy is ready to be made;

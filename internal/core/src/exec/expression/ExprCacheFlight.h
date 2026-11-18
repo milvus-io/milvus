@@ -102,6 +102,7 @@ class ExprCacheFlightCoordinator {
 
      private:
         friend class ExprCacheFlightCoordinator;
+        friend class ExprCacheFlightTestPeer;
         Handle(ExprCacheFlightCoordinator* owner,
                std::shared_ptr<Flight> flight,
                bool leader,
@@ -148,6 +149,10 @@ class ExprCacheFlightCoordinator {
 
     Handle
     TryJoin(const Key& key);
+    // A snapshot of live follower handles, not a guarantee they will stay.
+    // If false, the caller must still Abort to release racing late joiners.
+    bool
+    HasWaiters(const Handle& handle) const noexcept;
     void
     OfferAdmission(const Handle& handle,
                    const ExprResCacheManager::AdmissionTicket& ticket);
@@ -163,6 +168,7 @@ class ExprCacheFlightCoordinator {
     Abort(const Handle& handle) noexcept;
 
  private:
+    friend class ExprCacheFlightTestPeer;
     struct KeyHasher {
         size_t
         operator()(const Key& key) const noexcept;

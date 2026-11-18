@@ -181,6 +181,12 @@ ExprCacheFlightCoordinator::TryJoin(const Key& key) {
     return Handle(this, std::move(flight), true, config_.max_wait_ms);
 }
 
+bool
+ExprCacheFlightCoordinator::HasWaiters(const Handle& handle) const noexcept {
+    return handle &&
+           handle.flight_->waiters.load(std::memory_order_relaxed) != 0;
+}
+
 void
 ExprCacheFlightCoordinator::OfferAdmission(
     const Handle& handle, const ExprResCacheManager::AdmissionTicket& ticket) {
