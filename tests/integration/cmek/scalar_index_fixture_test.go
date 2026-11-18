@@ -175,6 +175,7 @@ type campaign struct {
 var (
 	legacyV2Campaign = campaign{name: "v2", engineVersion: 2, artifact: 2}
 	packedV3Campaign = campaign{name: "v3", engineVersion: 3, artifact: 3}
+	fmindexCampaign  = campaign{name: "fmindex", engineVersion: 5, artifact: 3}
 )
 
 type scalarIndexSuite struct {
@@ -189,6 +190,10 @@ type ScalarIndexV2Suite struct {
 }
 
 type ScalarIndexV3Suite struct {
+	scalarIndexSuite
+}
+
+type ScalarIndexFMINDEXSuite struct {
 	scalarIndexSuite
 }
 

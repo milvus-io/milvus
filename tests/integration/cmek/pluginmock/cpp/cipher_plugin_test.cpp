@@ -133,6 +133,16 @@ main() {
         first->Update(17, 23, expected_ezk);
         auto second = newPlugin();
         second->Update(17, 23, expected_ezk);
+        auto [encryptor, payload_edek] = first->GetEncryptor(17, 23);
+        const std::string plaintext = "FMINDEX fixture payload";
+        auto ciphertext =
+            encryptor->Encrypt(plaintext.data(), plaintext.size());
+        require(ciphertext != plaintext,
+                "fixture encryption returned plaintext");
+        require(second->GetDecryptor(17, 23, payload_edek)
+                        ->Decrypt(ciphertext.data(), ciphertext.size()) ==
+                    plaintext,
+                "independent fixture instance could not decrypt the payload");
         auto first_edek = first->GetEncryptor(17, 23).second;
         auto second_edek = second->GetEncryptor(17, 23).second;
         require(first_edek != second_edek,
