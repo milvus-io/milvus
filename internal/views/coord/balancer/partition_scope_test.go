@@ -116,7 +116,9 @@ func TestUnloadedPartitionsDoNotAffectBalance(t *testing.T) {
 
 func TestPublishedRecoveryRetainsHistoricalPartitions(t *testing.T) {
 	id := cacheShard(1, 10)
-	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	cfg := cfgFor(1, 10, []int64{1}, nil)
+	cfg.MinimumDataVersion = qviews.DataVersion{StreamingVersion: 100}
+	c := newTestCache(cfg)
 	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
 	publishTestNodes(c, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	p := newPlanningContext(c)

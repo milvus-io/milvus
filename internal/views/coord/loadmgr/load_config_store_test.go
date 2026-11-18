@@ -195,7 +195,7 @@ func TestAutoLoadSourceUpdatePreservesRequirementsIdentity(t *testing.T) {
 	snapshot := store.Snapshot()
 	before, err := store.GetLoadInfo(t.Context(), 100, original.Version)
 	require.NoError(t, err)
-	release, err := store.AcquireLoadInfo(t.Context(), 100, original.Version)
+	release, err := store.AcquireLoadInfo(t.Context(), 100, original.Version, original.MinimumDataVersion)
 	require.NoError(t, err)
 	defer release()
 	store.EnableGC()

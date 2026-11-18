@@ -38,6 +38,12 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	// Published-schema recovery must preserve its historical membership even
 	// when the current desired config has already released some partitions.
 	retained := p.recovery != nil && p.recovery.shardID == shardID
+	dataVersion, _ := p.DataVersionForCollection(desired.CollectionID)
+	// Published-schema recovery references its historical LoadInfo; the final
+	// View admission validates that exact config rather than today's desired one.
+	if !retained && !dataVersion.GTE(desired.MinimumDataVersion) {
+		return nil
+	}
 	allPartitions := retained || collection.LoadsAllPartitions()
 	if allPartitions {
 		entries = make([]*SegmentDataView, 0, shard.SegmentCount)
@@ -118,7 +124,6 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		}
 		assignments[node][segment.PartitionID] = append(assignments[node][segment.PartitionID], segment.SegmentID)
 	}
-	dataVersion, _ := p.DataVersionForCollection(desired.CollectionID)
 	dataView := syntheticDataView(desired, dataVersion, shard)
 	dataView.SchemaVersion = p.SchemaVersion(desired.CollectionID)
 	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, dataView, shardID.VChannel)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -150,7 +151,7 @@ func TestCollectionLoadInfoVersions(t *testing.T) {
 	cfg.AutoLoad = true
 	require.NoError(t, store.Put(t.Context(), cfg))
 	first := store.GetConfigVersion(1)
-	release, err := store.AcquireLoadInfo(t.Context(), 1, first)
+	release, err := store.AcquireLoadInfo(t.Context(), 1, first, qviews.DataVersion{})
 	require.NoError(t, err)
 	require.NoError(t, store.Put(t.Context(), cfg))
 	require.Equal(t, first, store.GetConfigVersion(1), "callback replay must not allocate")
@@ -206,7 +207,7 @@ func TestCollectionLoadInfoReleaseRecovery(t *testing.T) {
 	cfg := versionedTestConfig()
 	require.NoError(t, store.Put(t.Context(), cfg))
 	version := store.GetConfigVersion(1)
-	release, err := store.AcquireLoadInfo(t.Context(), 1, version)
+	release, err := store.AcquireLoadInfo(t.Context(), 1, version, qviews.DataVersion{})
 	require.NoError(t, err)
 	store.StopPlanning(1)
 	require.False(t, store.Contains(1))
@@ -220,7 +221,7 @@ func TestCollectionLoadInfoReleaseRecovery(t *testing.T) {
 	require.True(t, restarted.Contains(1), "recover persisted configuration before callback replay")
 	restarted.StopPlanning(1) // durable DropLoadConfig callback retries after recovery
 	require.False(t, restarted.Contains(1))
-	afterCrash, err := restarted.AcquireLoadInfo(t.Context(), 1, version)
+	afterCrash, err := restarted.AcquireLoadInfo(t.Context(), 1, version, qviews.DataVersion{})
 	require.NoError(t, err)
 	require.NoError(t, restarted.CollectLoadInfo(t.Context()))
 	afterCrash()
@@ -245,7 +246,7 @@ func TestCollectionLoadInfoRecoveryBeforeGC(t *testing.T) {
 	store, err = RecoverLoadConfigStore(t.Context(), deps)
 	require.NoError(t, err)
 	require.NoError(t, store.CollectLoadInfo(t.Context()))
-	release, err := store.AcquireLoadInfo(t.Context(), 1, first)
+	release, err := store.AcquireLoadInfo(t.Context(), 1, first, qviews.DataVersion{})
 	require.NoError(t, err, "recovery has not reconstructed the View yet")
 	store.EnableGC()
 	require.NoError(t, store.CollectLoadInfo(t.Context()))
@@ -254,7 +255,7 @@ func TestCollectionLoadInfoRecoveryBeforeGC(t *testing.T) {
 	require.Equal(t, []int64{10}, old.PartitionIDs)
 	release()
 	require.NoError(t, store.CollectLoadInfo(t.Context()))
-	_, err = store.AcquireLoadInfo(t.Context(), 1, first)
+	_, err = store.AcquireLoadInfo(t.Context(), 1, first, qviews.DataVersion{})
 	require.Error(t, err)
 }
 
@@ -280,7 +281,7 @@ func TestCollectionLoadInfoAcquireSerializesWithGC(t *testing.T) {
 	<-entered
 	acquired := make(chan error, 1)
 	go func() {
-		release, err := store.AcquireLoadInfo(t.Context(), 1, first)
+		release, err := store.AcquireLoadInfo(t.Context(), 1, first, qviews.DataVersion{})
 		if release != nil {
 			release()
 		}
@@ -303,7 +304,7 @@ func TestLoadInfoAcquireWithinManagementAcceptance(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- store.WithCurrentConfig(cfg, func() error {
-			release, err := store.AcquireLoadInfo(t.Context(), 100, cfg.Version)
+			release, err := store.AcquireLoadInfo(t.Context(), 100, cfg.Version, qviews.DataVersion{})
 			if release != nil {
 				release()
 			}

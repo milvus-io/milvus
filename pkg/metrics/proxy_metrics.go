@@ -25,6 +25,10 @@ import (
 )
 
 var (
+	QueryViewCircuitBreakerEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.ProxyRole, Name: "query_view_circuit_breaker_events_total",
+		Help: "Query routing exclusion transitions and bounded-cache cleanup.",
+	}, []string{"scope", "reason"})
 	ProxyUpsertWriteConditionRows = newCollectionCounterVec(prometheus.CounterOpts{
 		Namespace: milvusNamespace, Subsystem: typeutil.ProxyRole, Name: "upsert_write_condition_rows_total",
 		Help: "Confirmed row-level outcomes of conditional upserts, including failed RPCs; unknown outcomes are excluded.",
@@ -511,6 +515,7 @@ var (
 
 // RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(QueryViewCircuitBreakerEvents)
 	registry.MustRegister(ProxyReceivedNQ)
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)

@@ -41,8 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -480,7 +478,7 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 		return nil, err
 	}
 	plan := &viewpb.QueryPlan{
-		ShardId: &viewpb.ShardID{Vchannel: req.GetShardId().GetVchannel(), ReplicaId: 1},
+		ShardId: &viewpb.ShardID{Vchannel: req.GetVchannel(), ReplicaId: 1},
 		Version: &viewpb.QueryViewVersion{},
 		Mvcc:    &viewpb.QueryPlanMVCC{},
 		WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{
@@ -512,17 +510,11 @@ func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest
 }
 
 type dqlRetryPlanClient struct {
-	replicas wal.ReplicaWatchStream
-	ctx      context.Context
 	queryclient.QueryPlanClient
 	client viewpb.QueryPlanServiceClient
 }
 
-func (c *dqlRetryPlanClient) SubscribeReplicas(vc string, h wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
-	return c.replicas.Subscribe(c.ctx, vc, h)
-}
-
-func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	resp, err := c.client.GetQueryPlan(ctx, req)
 	return resp, viewerror.ConvertViewError("GetQueryPlan", err)
 }
@@ -566,13 +558,9 @@ func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfo
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	directory := snview.NewReplicaDirectoryForTest()
-	directory.Set("v0", 1, &qviews.QueryViewVersion{}, false)
-	stream := directory.AcquireStream(t.Context(), funcutil.ToPhysicalChannel("v0"), nil)
-	t.Cleanup(func() { stream.Close(); directory.Close() })
 	client := &dqlRetryClient{server: server}
 	client.Client = queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{LoadInfoClient: loadInfo},
-		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn), replicas: stream, ctx: t.Context()},
+		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn)},
 		&dqlRetryServiceClient{client: viewpb.NewViewQueryServiceClient(conn)}, client)
 	t.Cleanup(client.Close)
 	return client

@@ -22,9 +22,6 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
-	replicas        *replicaDirectory
-	maxUpVersion    *qviews.QueryViewVersion
-	preparingViews  int
 	mu              sync.Mutex
 	recoveryChanged chan struct{}
 	closed          bool
@@ -43,9 +40,9 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
+	handoff       *linearHandoff
+	recovered     bool // Reconstructed from a persisted Up, even if recovery fails.
 	leaseDisabled bool // Explicit Down control permanently closes this View's lease.
-	advertisedUp  bool
-	preparing     bool
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
@@ -79,6 +76,7 @@ func recoverSnShardView(
 		entries[version] = &snViewEntry{
 			ApplyView: handler.ApplyView{View: view},
 			sm:        sm,
+			recovered: true,
 		}
 	}
 	s := &snShardView{
@@ -147,10 +145,6 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
-	if s.replicas != nil {
-		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, nil, false)
-	}
-	s.maxUpVersion = nil
 	s.notifyRecoveryChangedLocked()
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
@@ -185,7 +179,6 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			sm := newSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
 			entry = &snViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
-			s.publishReplicaLocked(entry)
 			qvobserve.Observe(s.ctx, qvobserve.StreamingNodeAcquireResourceEvent{View: key})
 			// SN SM constructor generates a Preparing report.
 			s.consumeReport(entry)
@@ -230,7 +223,6 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	if pushedState == qviews.QueryViewStateDown && entry.sm.State() == qviews.QueryViewStateUp {
 		if av.View.IntoProto().GetMeta().GetControl().GetPreemptServingLease() {
 			entry.disableServingLease()
-			s.publishReplicaLocked(entry)
 		}
 		entry.pendingDown = true
 		s.advancePendingDownLocked(key.QueryViewVersion, entry)
@@ -250,6 +242,9 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 		},
 	})
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
+	if before == qviews.QueryViewStateReady && entry.sm.State() == qviews.QueryViewStateUp && s.ctx.Err() == nil {
+		s.startHandoffLocked(key.QueryViewVersion, entry)
+	}
 }
 
 func (s *snShardView) setCollectionIDLocked(collectionID int64) {
@@ -372,7 +367,6 @@ func (s *snShardView) consumeReportPersistAndCleanup(version qviews.QueryViewVer
 	if !s.consumeAndPersist(entry) {
 		return
 	}
-	s.publishReplicaLocked(entry)
 	s.consumeReport(entry)
 	s.consumeAndRelease(version, entry)
 	s.cleanupIfDropped(version, entry)
@@ -455,22 +449,44 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 	return s.acquireUpViewForSchema(ctx, nil)
 }
 
-// tryAcquireUpViewForSchema returns a notification only when a matching view
-// is recovering and no matching Up view can serve. Inspecting state and taking
-// the notification under the same mutex prevents a lost recovery wakeup.
+// tryAcquireUpViewForSchema returns a state notification when no matching Up
+// view can serve. A nil error means a matching view is recovering. Other
+// replicas may become ready while that recovery is pending, so callers waiting
+// across replicas must watch every candidate. Taking the notification under the
+// same mutex as the state inspection prevents lost wakeups.
 func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
+	return s.tryAcquireUpViewWithExclusions(ctx, schema, nil, false)
+}
+
+func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema *int32, exclusions *qviews.QueryRoutingExclusions, bypassHandoff bool) (*QueryViewLease, <-chan struct{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var generation *snViewEntry
+	for version, entry := range s.views {
+		s.advancePendingDownLocked(version, entry)
+		if schema != nil && entry.sm.meta.GetSchemaVersion() != *schema {
+			continue
+		}
+		// Recovering (or failed recovery of) a persisted Up must not admit
+		// new plans at an older LoadInfoVersion while its resources catch up.
+		state := entry.sm.State()
+		wasUp := state == qviews.QueryViewStateUp || (entry.recovered && (entry.sm.IsRecovering() || state == qviews.QueryViewStateUnrecoverable))
+		if !wasUp {
+			continue
+		}
+		if generation == nil || newerPlanningCandidate(entry, generation) {
+			generation = entry
+		}
+	}
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
 	recovering := false
 	for version, entry := range s.views {
-		s.advancePendingDownLocked(version, entry)
-		if schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema {
+		if generation == nil || entry.sm.meta.GetSchemaVersion() != generation.sm.meta.GetSchemaVersion() || entry.sm.meta.GetLoadInfoVersion() != generation.sm.meta.GetLoadInfoVersion() {
 			continue
 		}
 		if entry.sm.IsRecovering() {
@@ -479,24 +495,31 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 		if entry.leaseDisabled || entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
-		if selected == nil || version.GT(selectedVersion) {
+		if selected == nil || newerPlanningCandidate(entry, selected) {
 			selected = entry
 			selectedVersion = version
 		}
 	}
 	if selected != nil {
+		if !bypassHandoff {
+			selectedVersion, selected = s.selectHandoffLocked(selectedVersion, selected, exclusions)
+		}
+		// Exclusions never permit a fallback outside the active handoff pair.
+		if excludesHandoffEntry(exclusions, selected) {
+			return nil, nil, viewerror.NewAllCandidatesExcluded()
+		}
 		return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil, nil
 	}
 	if recovering {
 		return nil, s.recoveryChangedLocked(), nil
 	}
-	return nil, nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
+	return nil, s.recoveryChangedLocked(), viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
 }
 
 func (s *snShardView) acquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, error) {
 	for {
 		lease, changed, err := s.tryAcquireUpViewForSchema(ctx, schema)
-		if changed == nil {
+		if lease != nil || err != nil {
 			return lease, err
 		}
 		select {
@@ -535,47 +558,6 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 	if entry.queryRefs == 0 && entry.releasePending {
 		entry.releasePending = false
 		s.startReleaseLocked(version, entry)
-	}
-}
-
-// publishReplicaLocked advertises local serving eligibility. State transitions
-// publish after persistence; lease closure can withdraw admission while calls drain.
-func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
-	state := entry.sm.State()
-	preparing := state == qviews.QueryViewStatePreparing || state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUpRecovering
-	preparingChanged := entry.preparing != preparing
-	if preparingChanged {
-		if preparing {
-			s.preparingViews++
-		} else {
-			s.preparingViews--
-		}
-		entry.preparing = preparing
-	}
-	up := state == qviews.QueryViewStateUp && !entry.leaseDisabled
-	if entry.advertisedUp == up && !preparingChanged {
-		return
-	}
-	if entry.advertisedUp != up {
-		entry.advertisedUp = up
-		version := entry.View.QueryViewKey().QueryViewVersion
-		if up {
-			if s.maxUpVersion == nil || version.GT(*s.maxUpVersion) {
-				s.maxUpVersion = &version
-			}
-		} else if s.maxUpVersion != nil && version.EQ(*s.maxUpVersion) {
-			s.maxUpVersion = nil
-			// Only retirement of the advertised maximum scans retained versions.
-			for candidate, other := range s.views {
-				if other.advertisedUp && (s.maxUpVersion == nil || candidate.GT(*s.maxUpVersion)) {
-					v := candidate
-					s.maxUpVersion = &v
-				}
-			}
-		}
-	}
-	if s.replicas != nil {
-		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, s.maxUpVersion, s.preparingViews > 0)
 	}
 }
 

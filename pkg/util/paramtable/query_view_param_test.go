@@ -30,6 +30,9 @@ func TestQueryViewConfiguration(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(bt)
 	p := &params.QueryViewCfg
+	require.Equal(t, HandoffPolicyLinear, p.GetHandoffPolicy())
+	require.Equal(t, 30*time.Second, p.LinearHandoffDuration.GetAsDurationByParse())
+	require.Equal(t, .1, p.LinearHandoffInitialRatio.GetAsFloat())
 	require.Equal(t, time.Minute, p.BalancerReconcileInterval.GetAsDurationByParse())
 	require.Equal(t, "queryView.logicalSize.segmentBaseCost", p.LogicalSizeSegmentBaseCost.Key)
 	require.Equal(t, "queryView.balancer.scoring.targetLogicalSizePerNode", p.BalancerTargetLogicalSizePerNode.Key)
@@ -38,6 +41,9 @@ func TestQueryViewConfiguration(t *testing.T) {
 	require.Equal(t, int64(64*1024), p.LogicalSizeBytesPerUnit.GetAsSize())
 	require.Equal(t, int64(100000), p.BalancerTargetLogicalSizePerNode.GetAsInt64())
 	defaults := map[string]string{
+		"handoffPolicy.type":                                    "linear",
+		"handoffPolicy.linear.duration":                         "30s",
+		"handoffPolicy.linear.initialRatio":                     "0.1",
 		"logicalSize.source":                                    "rowCount",
 		"logicalSize.bytesPerUnit":                              "64KB",
 		"logicalSize.segmentBaseCost":                           "16",
@@ -71,4 +77,26 @@ func TestQueryViewConfiguration(t *testing.T) {
 	require.NoError(t, params.Save(p.BalancerReconcileInterval.Key, "250ms"))
 	require.Equal(t, 250*time.Millisecond, p.BalancerReconcileInterval.GetAsDurationByParse())
 	require.Equal(t, "250ms", params.GetComponentConfigurations("querycoord", "queryviewbalancerreconcileinterval")["queryviewbalancerreconcileinterval"])
+}
+
+func TestQueryViewHandoffPolicy(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	params := &ComponentParam{}
+	params.Init(base)
+	cfg := &params.QueryViewCfg
+	for _, test := range []struct {
+		value string
+		want  HandoffPolicy
+	}{
+		{string(HandoffPolicyLinear), HandoffPolicyLinear},
+		{string(HandoffPolicyImmediate), HandoffPolicyImmediate},
+		{"unknown", HandoffPolicyImmediate},
+		{"", HandoffPolicyImmediate},
+	} {
+		require.NoError(t, params.Save(cfg.HandoffPolicy.Key, test.value))
+		require.Equal(t, test.want, cfg.GetHandoffPolicy())
+	}
+	require.NoError(t, params.Reset(cfg.HandoffPolicy.Key))
+	require.Equal(t, HandoffPolicyLinear, cfg.GetHandoffPolicy())
 }

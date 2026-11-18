@@ -18,7 +18,6 @@ import (
 )
 
 func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
-	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
@@ -58,7 +57,6 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 }
 
 func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
-	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
@@ -98,7 +96,6 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 }
 
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
-	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
@@ -134,7 +131,6 @@ func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
 }
 
 func TestLegacyClientQueryDoesNotDispatchWhenPlanHasNoWorkNodes(t *testing.T) {
-	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	service := &legacyServiceClient{
@@ -171,7 +167,6 @@ func TestLegacyClientQueryDoesNotDispatchWhenPlanHasNoWorkNodes(t *testing.T) {
 }
 
 func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
-	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
@@ -213,8 +208,8 @@ type legacyPlanClient struct {
 	plans map[string]*viewpb.QueryPlan
 }
 
-func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
+func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID]}, nil
 }
 
 func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -281,7 +276,6 @@ func legacyQueryPlanWithoutWorkNodes(shardID qviews.ShardID) *viewpb.QueryPlan {
 }
 
 func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
-	setupTestReplicaRouting(t)
 	mockey.PatchConvey("requery preserves the exact parent plan, including failures", t, func() {
 		node := qviews.NewQueryNode(9)
 		plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 2}, Version: &viewpb.QueryViewVersion{QueryVersion: 5}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, WorkNodes: []qviews.WorkNode{node}}

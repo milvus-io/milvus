@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -68,16 +67,24 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
 	feedback       viewFeedback
-	replicas       *replicaDirectory
 	mu             sync.Mutex
 	closed         bool
 	ctx            context.Context
 	pchannel       string
 	shards         map[qviews.ShardID]*snShardView
+	vchannels      map[string]*replicaGroup
 	catalog        metastore.StreamingNodeCataLog
 	resMgr         StreamingNodeResourceManager
 	localOptimizer optimizer.LocalOptimizer
 	leaseDuration  time.Duration
+}
+
+// replicaGroup bounds VChannel routing work to its own replicas. It owns no
+// View copies or resource references; h.mu protects membership and rotation.
+type replicaGroup struct {
+	shards  []*snShardView
+	next    uint64
+	changed chan struct{}
 }
 
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
@@ -90,10 +97,10 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
-		replicas:       newReplicaDirectory(),
 		ctx:            ctx,
 		pchannel:       pchannel,
 		shards:         make(map[qviews.ShardID]*snShardView),
+		vchannels:      make(map[string]*replicaGroup),
 		catalog:        catalog,
 		resMgr:         resMgr,
 		localOptimizer: optimizer.NewNoopLocalOptimizer(),
@@ -118,13 +125,10 @@ func recoverSNQueryViewHandler(
 
 	for shardID, shardViews := range grouped {
 		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
-		shard.replicas = h.replicas
-		for _, entry := range shard.views {
-			shard.publishReplicaLocked(entry)
-		}
 		shard.leaseDuration = h.leaseDuration
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
+		h.addReplicaLocked(shard)
 	}
 	views = slices.Clone(views)
 	// A vchannel runtime is shared by replicas. Register the oldest recovered
@@ -197,9 +201,6 @@ func (h *SNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 }
 
 func (h *SNQueryViewHandler) CloseForHandoff() {
-	if h.replicas != nil {
-		h.replicas.Close()
-	}
 	h.mu.Lock()
 	h.closed = true
 	shards := make([]*snShardView, 0, len(h.shards))
@@ -207,6 +208,7 @@ func (h *SNQueryViewHandler) CloseForHandoff() {
 		shards = append(shards, shard)
 	}
 	h.shards = make(map[qviews.ShardID]*snShardView)
+	h.vchannels = make(map[string]*replicaGroup)
 	h.mu.Unlock()
 
 	for _, shard := range shards {
@@ -223,7 +225,6 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &snShardView{
-			replicas:      h.replicas,
 			ctx:           h.ctx,
 			pchannel:      h.pchannel,
 			shardID:       shardID,
@@ -234,6 +235,7 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 			leaseDuration: h.leaseDuration,
 		}
 		h.shards[shardID] = shard
+		h.addReplicaLocked(shard)
 	}
 	return shard
 }
@@ -244,8 +246,26 @@ func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func(*snShardVi
 		defer h.mu.Unlock()
 		if h.shards[shardID] == emptyShard {
 			delete(h.shards, shardID)
+			group := h.vchannels[shardID.VChannel]
+			close(group.changed)
+			group.changed = make(chan struct{})
+			group.shards = slices.DeleteFunc(group.shards, func(shard *snShardView) bool { return shard == emptyShard })
+			if len(group.shards) == 0 {
+				delete(h.vchannels, shardID.VChannel)
+			}
 		}
 	}
+}
+
+func (h *SNQueryViewHandler) addReplicaLocked(shard *snShardView) {
+	group := h.vchannels[shard.shardID.VChannel]
+	if group == nil {
+		group = &replicaGroup{changed: make(chan struct{})}
+		h.vchannels[shard.shardID.VChannel] = group
+	}
+	group.shards = append(group.shards, shard)
+	close(group.changed)
+	group.changed = make(chan struct{})
 }
 
 type QueryViewLease struct {
@@ -268,47 +288,66 @@ func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID 
 }
 
 func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
+	return h.acquireUpViewWithExclusions(ctx, shardID, schema, nil, false)
+}
+
+// AcquireUpViewForRouting applies request-local exclusions before any View
+// lease or inline execution. A nil schema is used only for statistics.
+func (h *SNQueryViewHandler) AcquireUpViewForRouting(ctx context.Context, vchannel string, schema *int32, constraints *viewpb.QueryRoutingConstraints) (*QueryViewLease, error) {
+	return h.acquireUpViewWithExclusions(ctx, qviews.ShardID{VChannel: vchannel, ReplicaID: qviews.UnknownReplicaID}, schema, qviews.NewQueryRoutingExclusions(vchannel, constraints), constraints.GetBypassHandoff())
+}
+
+func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, shardID qviews.ShardID, schema *int32, exclusions *qviews.QueryRoutingExclusions, bypassHandoff bool) (*QueryViewLease, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		h.mu.Lock()
 		var candidates []*snShardView
+		var membershipChanged <-chan struct{}
 		if shard := h.shards[shardID]; shard != nil {
 			candidates = append(candidates, shard)
-		} else if shardID.ReplicaID == qviews.UnknownReplicaID {
-			for id, candidate := range h.shards {
-				if id.VChannel == shardID.VChannel {
-					candidates = append(candidates, candidate)
-				}
+		} else if group := h.vchannels[shardID.VChannel]; shardID.ReplicaID == qviews.UnknownReplicaID && group != nil {
+			membershipChanged = group.changed
+			for i := range group.shards {
+				candidates = append(candidates, group.shards[(group.next+uint64(i))%uint64(len(group.shards))])
 			}
+			group.next++
 		}
 		h.mu.Unlock()
 		// Check every replica before waiting: a recovering replica must not
 		// hide an already servable one. Never nest shard locks under h.mu.
 		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
+		recovering := false
+		excluded := false
 		for _, candidate := range candidates {
-			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema)
+			lease, changed, err := candidate.tryAcquireUpViewWithExclusions(ctx, schema, exclusions, bypassHandoff)
 			if lease != nil {
 				return lease, nil
 			}
-			if changed != nil {
-				waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(changed)})
+			if err == nil {
+				recovering = true
+			} else if viewerror.AsViewError(err).IsAllCandidatesExcluded() {
+				excluded = true
 			} else if !viewerror.AsViewError(err).IsViewNotFound() {
 				return nil, err
 			}
+			if changed != nil {
+				waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(changed)})
+			}
 		}
-		if len(waits) == 1 {
+		if excluded {
+			return nil, viewerror.NewAllCandidatesExcluded()
+		}
+		if !recovering {
 			return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
+		}
+		if membershipChanged != nil {
+			waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(membershipChanged)})
 		}
 		// Wake on any replica's progress, without polling or waiter goroutines.
 		if chosen, _, _ := reflect.Select(waits); chosen == 0 {
 			return nil, ctx.Err()
 		}
 	}
-}
-
-// AcquireReplicaWatchStream observes local eligibility without a View lease.
-func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
-	return h.replicas.AcquireStream(ctx, pchannel, unavailable)
 }

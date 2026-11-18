@@ -39,6 +39,9 @@ message CollectionLoadConfig {
     bool user_specified_replica_mode = 8;
     // Loading intent created by AutoLoad. Boost preparation only while the shard lacks a healthy Up view.
     bool auto_load = 9;
+    // Every QueryView referencing this immutable configuration must cover this
+    // data publication. Absent means no additional lower bound (legacy records).
+    DataVersion minimum_data_version = 10;
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.
@@ -239,6 +242,7 @@ enum ViewCode {
     VIEW_CODE_VIEW_NOT_FOUND   = 2;  // View version not found on this node.
     VIEW_CODE_ON_SHUTDOWN      = 3;  // Node is shutting down.
     VIEW_CODE_NOT_PRIMARY      = 4;  // Node is not the primary replica for this shard (strong consistency requires primary).
+    VIEW_CODE_ALL_CANDIDATES_EXCLUDED = 5; // Serving candidates exist, but request routing constraints exclude them.
     VIEW_CODE_UNKNOWN          = 999;
 }
 
@@ -247,6 +251,20 @@ enum ViewCode {
 message ViewError {
     ViewCode code = 1;
     string cause  = 2;
+}
+
+// A View identity scoped to the enclosing request's vchannel.
+message QueryViewIdentity {
+    int64 replica_id = 1;
+    QueryViewVersion version = 2;
+}
+
+// Hard exclusions for one planning attempt, never stored by StreamingNode.
+message QueryRoutingConstraints {
+    repeated int64 excluded_query_node_ids = 1;
+    repeated QueryViewIdentity excluded_query_views = 2;
+    // Retry on the newest eligible View without relaxing exclusions or versions.
+    bool bypass_handoff = 3;
 }
 
 //
@@ -319,7 +337,7 @@ service QueryPlanService {
 
 message GetQueryPlanRequest {
     int64 collection_id = 1;
-    ShardID shard_id = 2;
+    string vchannel = 2;
     // Mutually exclusive MVCC source:
     // - consistency_level: SN generates MVCC frontiers from WAL based on consistency level.
     //   For Strong consistency, returns VIEW_CODE_NOT_PRIMARY if not the primary replica.
@@ -342,6 +360,7 @@ message GetQueryPlanRequest {
         // SN counts growing data during this call; the returned plan targets QNs only.
         StatisticsRequest statistics_request = 9;
     }
+    QueryRoutingConstraints routing_constraints = 10;
 }
 
 message GetMVCCTimestampRequest {
@@ -476,19 +495,6 @@ message QueryPayloadReuse {
     bool serialized_expr_plan = 2;
     // Positional, parallel to SearchRequest.sub_reqs.
     repeated QueryPayloadReuse sub_requests = 3;
-}
-
-message VChannelReplicas {
-    string vchannel = 1;
-    // Complete replacement, including an empty set. Does not certify QN health
-    // or the availability of a particular schema version.
-    repeated Replica replicas = 2;
-
-    // VChannel plus replica_id identifies the shard. No full View is replicated.
-    message Replica {
-        int64 replica_id = 1;
-        QueryViewVersion max_up_view_version = 2;
-    }
 }
 
 // Phase 1 response metadata used only for client-side payload restoration and

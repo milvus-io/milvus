@@ -21,7 +21,7 @@ type DataViewRefProvider = qviews.DataViewRefProvider
 // LoadInfoRefProvider protects immutable requirements until final durable View
 // removal. Acquisition may perform synchronization and runs outside manager locks.
 type LoadInfoRefProvider interface {
-	AcquireLoadInfo(context.Context, int64, uint64) (func(), error)
+	AcquireLoadInfo(context.Context, int64, uint64, qviews.DataVersion) (func(), error)
 }
 
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
@@ -172,7 +172,7 @@ func RecoverShardViewManager(
 
 		sm := RecoverCoordQueryViewStateMachineWithRef(view, ref)
 		if m.loadInfoRefs != nil {
-			sm.releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
+			sm.releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion(), version.DataVersion)
 			if err != nil {
 				sm.ReleaseRef()
 				m.abortRecovery()
@@ -471,7 +471,7 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	}
 	var releaseLoadInfo func()
 	if err == nil && m.loadInfoRefs != nil {
-		releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
+		releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion(), newDV)
 		if err != nil && ref != nil {
 			ref.Deref()
 			ref = nil

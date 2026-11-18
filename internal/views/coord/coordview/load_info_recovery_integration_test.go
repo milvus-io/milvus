@@ -24,6 +24,7 @@ func TestLoadInfoRegistryRecoveryAndRelease(t *testing.T) {
 	require.NoError(t, store.Put(t.Context(), cfg))
 	first := store.GetConfigVersion(testCollectionID)
 	cfg.PartitionIDs = []int64{11}
+	cfg.MinimumDataVersion = qviews.DataVersion{StreamingVersion: 100}
 	require.NoError(t, store.Put(t.Context(), cfg))
 	latest := store.GetConfigVersion(testCollectionID)
 	store, err = loadmgr.RecoverLoadConfigStore(t.Context(), deps)
@@ -112,4 +113,20 @@ func TestLoadInfoFailedRecoveryRollsBackReferences(t *testing.T) {
 	require.NoError(t, store.CollectLoadInfo(t.Context()))
 	_, err = store.GetLoadInfo(t.Context(), testCollectionID, first)
 	require.Error(t, err, "aborted recovery must return previously acquired references")
+}
+
+func TestLoadInfoRecoveryRejectsDataBelowOwnMinimum(t *testing.T) {
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: testCollectionID, MinimumDataVersion: qviews.DataVersion{StreamingVersion: 100}}))
+	invalid := testBuilder(1, 1, 1).SetLoadInfoVersion(store.GetConfigVersion(testCollectionID)).Build()
+	catalog := queryview.NewQueryViewCatalog(nil, "coord")
+	list := mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return([]*viewpb.QueryViewOfShard{invalid}, nil).Build()
+	defer list.UnPatch()
+	transport := mockey.Mock((*mockSyncer).SyncViews).Return(nil).Build()
+	defer transport.UnPatch()
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, stubDataViewRefProvider{}, store)
+	require.Error(t, err)
+	require.Nil(t, registry)
+	require.Zero(t, transport.Times())
 }

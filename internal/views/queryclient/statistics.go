@@ -44,9 +44,9 @@ func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, c
 	_, err := s.executeShard(ctx, channel, &shardExecParams{
 		collectionID: collectionID,
 		barrierMVCC:  barrierMVCC,
-		buildPlanReq: func(shard qviews.ShardID) *viewpb.GetQueryPlanRequest {
+		buildPlanReq: func(vchannel string) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
-				CollectionId: collectionID, ShardId: shard.IntoProto(),
+				CollectionId: collectionID, Vchannel: vchannel,
 				Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: req},
 			}
 		},

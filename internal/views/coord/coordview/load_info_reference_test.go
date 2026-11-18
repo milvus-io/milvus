@@ -15,15 +15,16 @@ import (
 
 type stubLoadInfoRefs struct{}
 
-func (*stubLoadInfoRefs) AcquireLoadInfo(context.Context, int64, uint64) (func(), error) {
+func (*stubLoadInfoRefs) AcquireLoadInfo(context.Context, int64, uint64, qviews.DataVersion) (func(), error) {
 	panic("patch with mockey")
 }
 
 func TestLoadInfoReferenceUntilDurableRemoval(t *testing.T) {
 	var refs atomic.Int32
-	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(_ context.Context, id int64, version uint64) (func(), error) {
+	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(_ context.Context, id int64, version uint64, dataVersion qviews.DataVersion) (func(), error) {
 		require.EqualValues(t, testCollectionID, id)
 		require.EqualValues(t, 55, version)
+		require.Equal(t, testVersion(1, 1, 1).DataVersion, dataVersion)
 		refs.Add(1)
 		return sync.OnceFunc(func() { refs.Add(-1) }), nil
 	}).Build()
@@ -64,7 +65,7 @@ func TestLoadInfoReferenceUntilDurableRemoval(t *testing.T) {
 func TestLoadInfoReferenceRollbackAfterReleaseDuringAcquire(t *testing.T) {
 	started, unblock := make(chan struct{}), make(chan struct{})
 	var refs atomic.Int32
-	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(context.Context, int64, uint64) (func(), error) {
+	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(context.Context, int64, uint64, qviews.DataVersion) (func(), error) {
 		refs.Add(1)
 		close(started)
 		<-unblock
@@ -83,7 +84,7 @@ func TestLoadInfoReferenceRollbackAfterReleaseDuringAcquire(t *testing.T) {
 
 func TestLoadInfoReferenceRecoveredBeforeNodeSync(t *testing.T) {
 	var refs atomic.Int32
-	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(context.Context, int64, uint64) (func(), error) {
+	patch := mockey.Mock((*stubLoadInfoRefs).AcquireLoadInfo).To(func(context.Context, int64, uint64, qviews.DataVersion) (func(), error) {
 		refs.Add(1)
 		return sync.OnceFunc(func() { refs.Add(-1) }), nil
 	}).Build()

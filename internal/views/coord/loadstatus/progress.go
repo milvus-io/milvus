@@ -53,6 +53,9 @@ func getAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardView
 	if cfg == nil {
 		return Progress{}
 	}
+	if cfg.MinimumDataVersion.GT(dataVersion) {
+		dataVersion = cfg.MinimumDataVersion
+	}
 	shards := make([]qviews.ShardID, 0, len(vchannels)*len(cfg.Replicas))
 	for _, replica := range cfg.Replicas {
 		if resourceGroup != "" && replica.ResourceGroup != resourceGroup {

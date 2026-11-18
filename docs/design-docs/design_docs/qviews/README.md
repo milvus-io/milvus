@@ -31,13 +31,15 @@ per-worker/subquery selection, and empty-shard MVCC/result normalization.
 
 For the detailed query-path flow, service boundary, client orchestration, and
 shard discovery design, see [Query Client Design](query/query_client.md).
-For VChannel replica discovery from StreamingNode, see
-[Replica Discovery](query/replica_discovery.md).
+For VChannel-scoped replica selection on StreamingNode, see
+[Replica Selection](query/replica_discovery.md).
+For Proxy-owned node and View exclusions, see
+[QueryView Circuit Breaker](query/query_view_circuit_breaker.md).
 For node-side Phase 1 planning and Phase 2 execution, see
 [Query Plan Node-Side Design](query/query_plan.md) and
 [Query Execution Node-Side Design](query/query_execution.md).
 
-1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
+1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using an eligible Up QueryView matching the request schema and handoff policy:
    - Includes MVCC
    - Query optimization (BM25, Segment filtering, etc.)
    - Query view version
@@ -48,8 +50,9 @@ For node-side Phase 1 planning and Phase 2 execution, see
 
 ### Current SN implementation
 
-- **Phase 1:** `GetQueryPlan` acquires the highest available Up view at the exact request
-  SchemaVersion, resolves
+- **Phase 1:** `GetQueryPlan` selects within the highest already-Up LoadInfoVersion at the exact
+  request SchemaVersion, applying the configured handoff policy and routing
+  constraints before acquiring a serving lease. It resolves
   query MVCC, performs request/BM25 optimization and selects the plan's workers.
   `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
   [consistency-level discussion](#13-consistency-implementation-consistency-level)
@@ -460,16 +463,16 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ### Current primary routing
 
-The query client discovers eligible replicas through the primary SN's
-[replica directory](query/replica_discovery.md), selects an explicit ReplicaID,
-and still plans through that primary WAL owner. Strong and Session
+The query client requests a plan by VChannel with request-local routing constraints. The primary
+WAL owner performs [replica selection](query/replica_discovery.md) and returns
+the actual ShardID and View version. Strong and Session
 are sent as Strong; Bounded and Eventually preserve the requested enum.
 `wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
 prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
 writes, Eventually can reuse the current complete snapshot, and Bounded also
 requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
 also requires RW access. WAL-secondary routing remains future work; QueryView replicas on the current
-owner are selected explicitly and support shard-level failover.
+owner are selected by SN; shard retries request a new plan.
 
 Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
 [Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with

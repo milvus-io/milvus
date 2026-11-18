@@ -50,8 +50,11 @@ func TestUnknownReplicaSkipsShardsWithoutUpViews(t *testing.T) {
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound(), "an explicit replica must not fall back")
 	_, err = h.AcquireLatestUpView(context.Background(), qviews.ShardID{ReplicaID: preparing.Meta.ReplicaId + 1, VChannel: unknown.VChannel})
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound(), "a missing explicit replica must not fall back")
-	delete(h.shards, up.shardID)
+	// Remove the shard through the lifecycle callback so both routing indexes
+	// observe the same membership change.
+	h.makeOnEmpty(up.shardID)(up)
 	_, err = h.AcquireLatestUpView(context.Background(), unknown)
+	require.Error(t, err)
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

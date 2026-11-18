@@ -129,8 +129,8 @@ On receiving controlled Down, SN closes that View's serving lease: disable
 future grants/renewal, clear the deadline, and stop its timer. The existing
 pending-Down check then waits only for call references to reach zero. The closed
 lease cannot reopen on a delayed ordinary push. Existing leases can release
-normally, but cannot renew; new acquisition is rejected and the View is removed
-from replica discovery while its existing calls drain.
+normally, but cannot renew; new acquisition and StreamingNode replica selection
+exclude the View while its existing calls drain.
 
 This control introduces no per-call cancellation context or separate recovery
 protocol. Active calls retain their original caller context and reference

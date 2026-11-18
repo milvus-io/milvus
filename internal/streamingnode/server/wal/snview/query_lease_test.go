@@ -231,6 +231,7 @@ func TestServingLeaseCancellationReleasesMVCCWait(t *testing.T) {
 }
 
 func TestServingLeaseLatestViewAndOldVersionAccess(t *testing.T) {
+	useImmediateHandoff(t)
 	h, shard, entry, _, reports := leasedUpView(t, time.Minute)
 	old, err := h.AcquireLatestUpView(context.Background(), shard.shardID)
 	require.NoError(t, err)

@@ -68,7 +68,7 @@ type legacyOnlyClient struct {
 	legacy *legacyClient
 }
 
-func (c *legacyOnlyClient) Close() { c.legacy.shardClient.replicas.Close() }
+func (c *legacyOnlyClient) Close() { c.legacy.shardClient.Close() }
 
 func (c *legacyOnlyClient) Legacy() LegacyClient {
 	return c.legacy
@@ -100,6 +100,9 @@ func newLegacyClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
+	if cfg.CircuitBreaker != nil {
+		shardClient.breaker = cfg.CircuitBreaker
+	}
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{

@@ -51,11 +51,16 @@ func TestReadinessResourceIntegration(t *testing.T) {
 	defer snapshot.UnPatch()
 	refresh := mockey.Mock((*refreshSource).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 2}, nil).Build()
 	defer refresh.UnPatch()
+	originalLoadVersion := r.LoadConfigs.GetConfigVersion(1)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	require.ErrorIs(t, r.Refresh(ctx, 1), context.DeadlineExceeded, "refresh waits for the committed version to serve")
+	minimumLoadVersion := r.LoadConfigs.GetConfigVersion(1)
+	require.Greater(t, minimumLoadVersion, originalLoadVersion)
+	require.Equal(t, qviews.DataVersion{StreamingVersion: 2}, r.LoadConfigs.GetConfig(1).MinimumDataVersion)
 	ready = true
 	require.NoError(t, r.Refresh(t.Context(), 1))
+	require.Equal(t, minimumLoadVersion, r.LoadConfigs.GetConfigVersion(1), "the same publication cannot bump again")
 	require.NoError(t, r.WaitDataVersion(t.Context(), 1, qviews.DataVersion{StreamingVersion: 1}))
 	version, ok := r.RefreshVersions.Load(int64(1))
 	require.True(t, ok)
@@ -88,4 +93,24 @@ func TestReadinessResourceIntegration(t *testing.T) {
 	require.ErrorIs(t, loadstatus.WaitAtSchema(ctx, r.LoadConfigs, r.ShardViews, r.Readiness, 1, channels, 0), context.Canceled)
 	r.Readiness.Close()
 	require.ErrorIs(t, loadstatus.WaitAtSchema(t.Context(), r.LoadConfigs, r.ShardViews, r.Readiness, 1, channels, 0), merr.ErrServiceUnavailable)
+}
+
+func TestWaitDataVersionFailuresAndRelease(t *testing.T) {
+	r := managementResources(t)
+	r.RefreshVersions = &sync.Map{}
+	minimum := qviews.DataVersion{StreamingVersion: 2}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, r.WaitDataVersion(ctx, 1, minimum), context.Canceled)
+	patch := mockey.Mock((*loadmgr.LoadConfigStore).AdvanceMinimumDataVersion).Return(context.DeadlineExceeded).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	require.ErrorIs(t, r.WaitDataVersion(t.Context(), 1, minimum), context.DeadlineExceeded)
+	patch.UnPatch()
+	r.VChannels = func(context.Context, int64) ([]string, error) { return nil, context.DeadlineExceeded }
+	require.ErrorIs(t, r.WaitDataVersion(t.Context(), 1, minimum), context.DeadlineExceeded)
+	r.VChannels = func(context.Context, int64) ([]string, error) {
+		r.LoadConfigs.StopPlanning(1)
+		return []string{"v0", "v1"}, nil
+	}
+	require.NoError(t, r.WaitDataVersion(t.Context(), 1, minimum), "release removes the obligation before waiting")
 }

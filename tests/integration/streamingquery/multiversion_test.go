@@ -71,7 +71,7 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 	plans := viewpb.NewQueryPlanServiceClient(sn)
 	queries := viewpb.NewViewQueryServiceClient(sn)
 	nextShard := &viewpb.ShardID{ReplicaId: next.Meta.ReplicaId, Vchannel: next.Meta.Vchannel}
-	response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: next.Meta.CollectionId, ShardId: nextShard, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: oldPlan.GetLegacyRetrieveRequest()}})
+	response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: next.Meta.CollectionId, Vchannel: nextShard.GetVchannel(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: oldPlan.GetLegacyRetrieveRequest()}})
 	newPlan := response.GetPlan()
 	require.True(t, proto.Equal(next.Meta.Version, newPlan.GetVersion()))
 	require.Empty(t, newPlan.GetWorkNodes(), "Ready must already fence sealed handoff; do not poll away an early Ready")

@@ -78,6 +78,9 @@ func (r *Resources) WaitDataVersion(ctx context.Context, collectionID int64, ver
 	if !r.LoadConfigs.Contains(collectionID) {
 		return nil
 	}
+	if err := r.LoadConfigs.AdvanceMinimumDataVersion(ctx, collectionID, version); err != nil {
+		return err
+	}
 	for {
 		old, loaded := r.RefreshVersions.LoadOrStore(collectionID, version)
 		if !loaded || old.(qviews.DataVersion).GTE(version) || r.RefreshVersions.CompareAndSwap(collectionID, old, version) {

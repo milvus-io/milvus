@@ -7,9 +7,8 @@
 not depend on the QueryCoord balancer or load manager. `NewLegacyViewQueryClient`
 accepts already planned internal requests and returns per-shard reduced results
 and retained `ShardPlan`s. The surrounding Proxy pipeline owns API rendering. A generic ViewQueryClient
-and its Legacy facade share one shard client and replica router; the owning client
-closes that router once. Independently constructed Legacy clients own independent
-routers.
+and its Legacy facade share one shard client and its cancellation scope.
+Independently constructed Legacy clients own independent shard clients.
 
 Proxy Search, Query, Delete, Upsert and Iterator use the legacy QueryView
 client. Coordinator publication and the SN/QN resources are wired in this
@@ -21,52 +20,40 @@ hidden same-node gRPC retries, and wrap a missing session with
 so a racing resolver update cannot be lost. The QN session observer/transport
 implementation and Proxy ownership wiring remain in the parent integration;
 this branch supplies their contracts and verifies retry behavior through injection.
-Inject `streaming.WAL().QueryViewClient()` as QueryPlanClient: it combines
-owner-routed query RPCs with the streaming-owned resuming replica client.
-`HandlerClient.QueryViewClient()` provides only query RPCs and no longer satisfies
-the discovery contract by itself. The parent Proxy must adapt this injection
-when absorbing the extraction. Query clients close their logical subscriptions
-before the shared WALAccesser shuts down; they do not close that shared owner.
+Inject `streaming.WAL().QueryViewClient()` as QueryPlanClient for owner-routed
+query RPCs. `HandlerClient.QueryViewClient()` implements the same planning
+contract. Clients own no replica discovery subscriptions and do not close the
+shared WALAccesser or HandlerClient.
 Both client constructors also require `ViewQueryClientConfig.LoadInfoClient`
 to be supplied by the Coordinator client. This is a separate dependency from
 the streaming transport; parent Proxy wiring must inject its MixCoord client.
 
 ## Planning, dispatch and retries
 
-For each resolved VChannel, the client retains one replica subscription from the
-primary StreamingNode. Its callback updates a local route snapshot and wakes
-queries without per-VChannel workers. The client round-robins explicit ReplicaIDs;
-there is no UnknownReplicaID fallback. Invalid/uninitialized directories wait
-for a valid snapshot from the current stream attempt; a subscription creation
-ACK or an invalid callback does not initialize the list. An initialized empty
-directory triggers `GetQueryViewLoadInfo(CollectionID, version=0)` to check the
-current Coordinator load configuration. Confirmed CollectionNotLoaded is
-returned to the caller, including Proxy's AutoLoad retry when enabled. Existing
-configuration means continue waiting, even before readiness reaches 100%.
-Coordinator errors retain their original identity; transport failure does not
-imply an unloaded collection. A racing directory revision supersedes the probe
-result and is re-evaluated before returning an error.
+For each resolved VChannel, the client sends `GetQueryPlan` with
+`vchannel` and a fresh `QueryRoutingConstraints` snapshot. The WAL owner chooses a replica and its newest locally Up
+eligible View matching the request's exact schema, subject to the handoff policy. The returned plan supplies the actual
+ShardID and full View version; these are the identities used for execution and
+reduction. There is no client-side replica directory or per-VChannel subscription.
+See [server-side replica selection](replica_discovery.md).
 
-Concurrent empty-directory requests share one probe per Collection. Successful
-checks are reused for one second while requests remain active, then checked
-again even without a Watch notification: a collection can be released before SN
-ever receives its first View. Negative results are not cached for future probes.
-Each probe uses its initiating query's context without an additional timeout;
-the one-second interval controls successful-result reuse and rechecks only.
-If that query is canceled, other live waiters retry independently of the RPC
-error's representation. While a probe is in flight, its initiating query
-rechecks Watch updates after the RPC returns or its context is canceled.
-The helper owns no background goroutines and releases its entry after the last
-active waiter exits; normal queries with available replicas do not acquire it.
-AutoLoad's pre-execution EnsureCollectionReady avoids the ordinary initial
-unloaded case, but cannot prevent a subsequent concurrent release.
-`Client.Close`
-unsubscribes and wakes waiters before the underlying handler clients shut down.
-TODO: reclaim idle route subscriptions together with Proxy metadata GC.
+An unbound Phase 1 ViewNotFound triggers `GetQueryViewLoadInfo(CollectionID, version=0)`
+to check current Coordinator load intent. Confirmed CollectionNotLoaded is
+returned to the caller, including Proxy's AutoLoad retry when enabled. A loaded
+collection may still be preparing; keep retrying planning under the caller's
+deadline. Coordinator errors retain their original identity; transport failure
+is not treated as an unloaded collection.
 
-Phase 1 still targets the primary WAL owner. The advertised maximum Up version
-is only a routing-change hint; SN selects the highest Up View matching the request
-schema within the requested replica. The returned plan supplies the exact version.
+Concurrent requests share one load-info probe per collection. Successful checks
+are reused for one second while requests remain active; negative results are
+not cached. Each probe uses its initiating query's context. If that query is
+canceled, other live waiters retry independently. The helper owns no background
+goroutines and releases its entry after the last active waiter exits. Normal
+queries with usable plans do not acquire it. AutoLoad's pre-execution
+EnsureCollectionReady cannot prevent a subsequent concurrent release.
+`Client.Close` cancels outstanding shard planning, execution and retry waits.
+
+Phase 1 still targets the primary WAL owner.
 Strong and Session are sent as Strong; Bounded, Eventually and Customized retain their enum
 values. Strong/Session waits for completed writes; Eventually reuses the current complete
 snapshot, and Bounded also enforces the request guarantee timestamp. Customized
@@ -97,24 +84,22 @@ ordinary WAL RPCs keep their existing picker behavior.
 the same caller deadline, rather than repeatedly generating plans.
 
 QN transport Unavailable and retryable View errors trigger shard replanning.
-Every current candidate is tried before repeating a temporarily failed one.
-The existing attempt budget defaults to three, extended to cover all untried
-current candidates; exhausting it converts the final failure to a business error
-for Proxy's outer recovery (including AutoLoad). Waiting for an empty/uninitialized directory does
-not consume attempts. After all temporary candidates fail, wait 100 ms or a
-route change before retrying. Request cancellation bounds all waits.
+The attempt budget defaults to three. Without a replica directory the client
+cannot extend the budget to guarantee one visit to every replica; server-side
+selection is shared by concurrent requests. Exhausting the budget preserves the
+last failure for Proxy's outer recovery. Waiting for a loaded collection with no
+usable plan does not consume attempts. Replanning after an execution failure waits 100 ms. Request cancellation bounds all waits.
 
-A QN missing from the session resolver is not retried on that timer. Record the
-node and the attempted replica/advertised version; try other replicas, or wait
-for a new maximum Up version or QN session-directory revision. A newly planned
-View still containing a known missing QN is rejected before accepting inline SN
-results or dispatching workers. The parent QN client uses a single shared session observer to broadcast
-resolver revisions without copying topology or creating per-query watches.
-Capture its change channel before RPC dispatch; resolver changes racing with
-failure cannot be lost. On a revision, clear request-local exclusions and
-reconsider candidates: apparent absence may have been discovery lag, rather
-than permanent removal. Missing/temporarily disconnected nodes always fail
-promptly at the QN picker; no dead RPC is kept waiting for readiness.
+QueryViewCircuitBreaker observes raw worker RPC results before reduction.
+Connection failures accumulate per QN across VChannels and recover with exclusive
+probes. Confirmed session deletion and exact ViewNotFound/ViewInvalidated failures
+are TTL exclusions, without probes. Local picker absence alone does not confirm
+session deletion. Every retry carries a fresh bounded exclusion snapshot to SN;
+retained requery observes results but never substitutes a new plan.
+ALL_CANDIDATES_EXCLUDED does not trigger load-info/AutoLoad: admission retries
+poll at most once per second, wake on breaker transitions, and have a separate
+five-second total wait budget in addition to the caller deadline.
+See [circuit breaker](query_view_circuit_breaker.md).
 
 Retries clear partial results only after canceled workers have joined. Statistics
 also clears its inline SN count. Explicit paired MVCC and BarrierMVCC remain
@@ -126,6 +111,27 @@ and hybrid subqueries retain separate selections. Requery uses the original
 selection union. Successful empty shards still contribute an empty result and
 MVCC; fieldless aggregation results use the schema-aware identity (for example,
 count=0). Only the successful attempt's ExecutionSummary contributes feature usage.
+
+## Handoff planning policy
+
+SN chooses the highest already-Up LoadInfoVersion within the exact read schema
+(latest schema for statistics). `queryView.handoffPolicy.type` supports `immediate`
+and `linear` (default). Linear shifts the newest target's share from 10% to 100%
+over 30 seconds by default. Duration and initial ratio are configurable. Only the
+active source/target pair participates; a superseding target retains the original
+eligible source and starts a fresh window. Intermediate targets are not pinned.
+Existing serving leases may retire the source before the window ends. Recovery
+does not restore a window. Policy changes to immediate end an active window.
+
+`QueryRoutingConstraints.bypass_handoff` requests the newest eligible target on
+execution retries. The client sets it after a counted failed attempt; readiness
+and all-excluded admission waits retain that attempt's policy. This hint does not
+relax exclusions, schema/load fences or MVCC, or terminate other requests' windows.
+Without bypass, exclusions filter both active endpoints before sampling. If only
+one survives it receives the request; if neither survives the replica is excluded.
+There is no fallback to arbitrary historical Views. SN filters before issuing a
+lease or executing inline statistics. Exact-version Phase 2 and retained requery
+keep their original View and snapshot.
 
 ## Public error boundary
 
@@ -286,14 +292,11 @@ retain successful results. Empty and growing-only shards still retain the SN
 result even when there are no QN workers. Errors use existing View RPC status
 handling; the new response carries only a successful row count.
 
-## StreamingNode replica discovery
+## StreamingNode replica selection
 
-[Replica Discovery](replica_discovery.md) defines the resumable, PChannel-multiplexed
-VChannel subscriptions exposed by StreamingNodeHandlerService. It supplies each candidate ReplicaID
-and its maximum locally Up QueryViewVersion, including updates when only the
-version changes. These versions are routing hints, not pinned query versions;
-QueryViewClient uses this directory for explicit selection and failover as
-described above. Discovery itself does not choose or pin a query View.
+[Server-side replica selection](replica_discovery.md) describes the local
+VChannel index and selection ownership. The former SubscribeReplicas protocol,
+local/RPC watches and resumable subscription manager have been removed.
 
 ## Filter-first ANN search
 
