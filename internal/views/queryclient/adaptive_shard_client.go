@@ -232,7 +232,7 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 		}
 		started := time.Now()
 		results := make(chan adaptiveReplicaResult, 2)
-		launch := func(candidate qviews.Replica, release func()) *replicaObservation {
+		launch := func(candidate qviews.Replica) *replicaObservation {
 			tried[candidate] = false
 			attempts++
 			var observation *replicaObservation
@@ -243,7 +243,6 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 			knownDead := maps.Clone(deadNodes)
 			attemptStarted := time.Now()
 			go func() {
-				defer release()
 				plan, blocked, err := s.executeReplica(ctx, qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: key.channel}, attempt.params, knownDead)
 				var failure *workNodeFailure
 				qnFailure := errors.As(err, &failure) && failure.node.NodeType() == qviews.NodeTypeQueryNode
@@ -252,7 +251,7 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 			}()
 			return observation
 		}
-		primaryObservation := launch(primary, s.selection.enterPrimary())
+		primaryObservation := launch(primary)
 		pending := 1
 		var terminalErr error
 		hedgeSent := false
@@ -275,24 +274,17 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 				return nil, ctx.Err()
 			case <-hedgeReady:
 				hedgeReady = nil
-				releaseHedge, ok := s.selection.tryAcquireHedge(cfg)
-				if !ok {
-					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_inflight_limit").Inc()
-					continue
-				}
 				if !s.selection.allowHedge(key) {
-					releaseHedge()
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_low_win_rate").Inc()
 					continue
 				}
 				if candidate, ok := route.alternative(primary.ReplicaID, tried, choose); ok {
-					launch(candidate, releaseHedge)
+					launch(candidate)
 					pending++
 					hedgeSent = true
 					hedgedOnce = true
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "sent").Inc()
 				} else {
-					releaseHedge()
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_no_replica").Inc()
 				}
 			case result := <-results:

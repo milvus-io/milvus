@@ -20,7 +20,6 @@ import (
 	"math"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -31,20 +30,16 @@ import (
 
 const (
 	replicaMinLatency = 100 * time.Microsecond
-	// hedgeMinInflight ensures low-QPS traffic can still dispatch hedges when
-	// ceil(inflightPrimaries * maxInflightRatio) rounds below 2.
-	hedgeMinInflight = 2
 )
 
 // ReplicaSelectionConfig is sampled once per shard request. Changing the live
 // configuration never changes which policy owns an outstanding selection.
 type ReplicaSelectionConfig struct {
-	LatencyWeighted       bool
-	Decay                 time.Duration
-	MinShare              float64
-	HedgeEnabled          bool
-	HedgeMinDelay         time.Duration
-	HedgeMaxInflightRatio float64
+	LatencyWeighted bool
+	Decay           time.Duration
+	MinShare        float64
+	HedgeEnabled    bool
+	HedgeMinDelay   time.Duration
 }
 
 func (c ReplicaSelectionConfig) normalized() ReplicaSelectionConfig {
@@ -56,9 +51,6 @@ func (c ReplicaSelectionConfig) normalized() ReplicaSelectionConfig {
 	}
 	if c.HedgeMinDelay < 0 {
 		c.HedgeMinDelay = 200 * time.Millisecond
-	}
-	if math.IsNaN(c.HedgeMaxInflightRatio) || c.HedgeMaxInflightRatio <= 0 || c.HedgeMaxInflightRatio > 1 {
-		c.HedgeMaxInflightRatio = 0.1
 	}
 	return c
 }
@@ -76,12 +68,10 @@ type replicaPolicyStats struct {
 }
 
 type replicaPolicy struct {
-	mu                sync.Mutex
-	keys              map[replicaPolicyKey]*replicaPolicyStats
-	rng               *rand.Rand
-	cleaned           time.Time
-	inflightPrimaries atomic.Int64
-	inflightHedges    atomic.Int64
+	mu      sync.Mutex
+	keys    map[replicaPolicyKey]*replicaPolicyStats
+	rng     *rand.Rand
+	cleaned time.Time
 }
 
 func newReplicaPolicy() *replicaPolicy {
@@ -254,25 +244,6 @@ func replicaAttemptPenalty(ctx context.Context, start, now time.Time) time.Durat
 		penalty = deadline.Sub(start)
 	}
 	return min(max(penalty, now.Sub(start)), time.Hour)
-}
-
-func (p *replicaPolicy) enterPrimary() func() {
-	p.inflightPrimaries.Add(1)
-	return func() { p.inflightPrimaries.Add(-1) }
-}
-
-func (p *replicaPolicy) tryAcquireHedge(cfg ReplicaSelectionConfig) (func(), bool) {
-	for {
-		curHedges := p.inflightHedges.Load()
-		curPrimaries := p.inflightPrimaries.Load()
-		limit := max(int64(hedgeMinInflight), int64(math.Ceil(float64(curPrimaries)*cfg.HedgeMaxInflightRatio)))
-		if curHedges >= limit {
-			return nil, false
-		}
-		if p.inflightHedges.CompareAndSwap(curHedges, curHedges+1) {
-			return func() { p.inflightHedges.Add(-1) }, true
-		}
-	}
 }
 
 func (p *replicaPolicy) hedgeDelay(key replicaPolicyKey, cfg ReplicaSelectionConfig) time.Duration {

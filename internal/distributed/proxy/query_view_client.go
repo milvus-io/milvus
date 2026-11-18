@@ -107,12 +107,11 @@ func proxyReplicaSelectionConfig() func() queryclient.ReplicaSelectionConfig {
 	p := &paramtable.Get().ProxyCfg
 	return func() queryclient.ReplicaSelectionConfig {
 		return queryclient.ReplicaSelectionConfig{
-			LatencyWeighted:       p.ReplicaSelectionPolicy.GetValue() == "latency_weighted",
-			Decay:                 p.LatencyWeightedDecay.GetAsDurationByParse(),
-			MinShare:              p.LatencyWeightedMinShare.GetAsFloat(),
-			HedgeEnabled:          p.HedgingEnabled.GetAsBool(),
-			HedgeMinDelay:         p.HedgingMinDelay.GetAsDurationByParse(),
-			HedgeMaxInflightRatio: p.HedgingMaxInflightRatio.GetAsFloat(),
+			LatencyWeighted: p.ReplicaSelectionPolicy.GetValue() == "latency_weighted",
+			Decay:           p.LatencyWeightedDecay.GetAsDurationByParse(),
+			MinShare:        p.LatencyWeightedMinShare.GetAsFloat(),
+			HedgeEnabled:    p.HedgingEnabled.GetAsBool(),
+			HedgeMinDelay:   p.HedgingMinDelay.GetAsDurationByParse(),
 		}
 	}
 }

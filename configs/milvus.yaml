@@ -487,7 +487,6 @@ proxy:
   hedging:
     enabled: false # Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per shard request across all retry rounds.
     minDelay: 200ms # Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).
-    maxInflightRatio: 0.1 # Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
