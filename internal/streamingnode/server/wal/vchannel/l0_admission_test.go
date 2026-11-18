@@ -33,7 +33,7 @@ func TestFlushWaitsForL1BeforeL0Completion(t *testing.T) {
 			}).Build()
 			defer patch.UnPatch()
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
-			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithTransformStart")).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithPublication")).Return(&viewpb.DataVersion{StreamingVersion: 1}, false, nil).Build()
 			defer commit.UnPatch()
 			meta := newMaterializationBlockerMeta(1, 100, false)
 			meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING

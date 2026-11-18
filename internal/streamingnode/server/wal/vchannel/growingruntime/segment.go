@@ -69,8 +69,10 @@ func newGrowingSegmentFromVisible(ctx context.Context, collection *segcore.CColl
 			return nil, err
 		}
 	}
-	if visible.SealedAtDataVersion != nil {
+	if visible.SealedAtDataVersion != nil || (visible.Assignment.GetFlushDataDurable() && visible.Assignment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED) {
 		segment.markFlushed(visible.Assignment.GetCheckpointTimeTick())
+	}
+	if visible.SealedAtDataVersion != nil {
 		segment.markSealed(qviews.FromProtoDataVersion(visible.SealedAtDataVersion))
 	}
 	return segment, nil

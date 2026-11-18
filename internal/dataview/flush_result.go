@@ -12,7 +12,38 @@ const (
 	flushStreamingVersion = "data_view_streaming_version"
 	flushCompactVersion   = "data_view_compact_version"
 	flushRetired          = "data_view_flush_retired"
+	flushPending          = "data_view_flush_pending"
 )
+
+// FlushGroupProtocol is advertised by writers that distinguish durable
+// registration from the later, versioned growing-to-sealed handoff.
+const FlushGroupProtocol = "flush_group_protocol"
+
+const FlushHandoffAck = "flush_group_handoff_ack"
+
+func FlushHandoffToken(version *viewpb.DataVersion) string {
+	return strconv.FormatInt(version.GetStreamingVersion(), 10) + "/" + strconv.FormatInt(version.GetCompactVersion(), 10)
+}
+
+func PendingFlushResultStatus(through *viewpb.DataVersion) *commonpb.Status {
+	status := FlushResultStatus(through)
+	status.ExtraInfo[flushPending] = "true"
+	return status
+}
+
+func ParseStagedFlushResult(status *commonpb.Status) (version *viewpb.DataVersion, pending bool, err error) {
+	if status.GetExtraInfo()[flushPending] == "true" {
+		if status.GetExtraInfo()[flushRetired] == "true" {
+			return nil, false, merr.WrapErrServiceInternalMsg("conflicting pending L1 flush result")
+		}
+		copy := merr.Success()
+		copy.ExtraInfo = map[string]string{flushStreamingVersion: status.GetExtraInfo()[flushStreamingVersion], flushCompactVersion: status.GetExtraInfo()[flushCompactVersion]}
+		version, err = ParseFlushResult(copy)
+		return version, true, err
+	}
+	version, err = ParseFlushResult(status)
+	return version, false, err
+}
 
 // FlushResultStatus returns the original publication version, or an explicit
 // retired result for an empty/dropped segment that needs no DataView publication.
@@ -33,6 +64,9 @@ func FlushResultStatus(version *viewpb.DataVersion) *commonpb.Status {
 // coordinator explicitly retired the segment, never an unspecified success.
 func ParseFlushResult(status *commonpb.Status) (*viewpb.DataVersion, error) {
 	extra := status.GetExtraInfo()
+	if extra[flushPending] == "true" {
+		return nil, merr.WrapErrServiceUnavailableMsg("L1 flush is durable but query publication is pending")
+	}
 	if extra[flushRetired] == "true" {
 		_, hasStreaming := extra[flushStreamingVersion]
 		_, hasCompact := extra[flushCompactVersion]

@@ -60,23 +60,32 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 }
 
 func (w *segmentLifecycleWriter) CommitL1SegmentWithTransformStart(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, startAfter uint64) (*viewpb.DataVersion, error) {
+	version, pending, err := w.CommitL1SegmentWithPublication(ctx, meta, startAfter)
+	if err == nil && pending {
+		return nil, merr.WrapErrServiceUnavailableMsg("streaming flush %d is awaiting query publication", meta.GetSegmentId())
+	}
+	return version, err
+}
+
+func (w *segmentLifecycleWriter) CommitL1SegmentWithPublication(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, startAfter uint64) (*viewpb.DataVersion, bool, error) {
 	// All data packs have already published their positions. Preserve them on
 	// final commit, including retries recovered from SN metadata.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
 	req := buildCommitL1SegmentRequest(w.serverID, meta)
 	req.GrowingTransformStartAfterTimetick = startAfter
+	req.Base.Properties = map[string]string{dataview.FlushGroupProtocol: "1"}
 	resp, err := w.coord.SaveBinlogPaths(ctx, req)
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			// A retired segment/channel does not need a fabricated publication version.
-			return nil, nil
+			return nil, false, nil
 		}
 		if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
 			err = retry.Unrecoverable(err)
 		}
-		return nil, err
+		return nil, false, err
 	}
-	return dataview.ParseFlushResult(resp)
+	return dataview.ParseStagedFlushResult(resp)
 }
 
 // Existing query recovery loads growing binlogs through DataCoord. QueryView

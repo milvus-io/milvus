@@ -59,6 +59,8 @@ func (c *segmentChangeCleaner) clean(ctx context.Context, groups []*model.Segmen
 			model.SegmentChangeSourceClustering, model.SegmentChangeSourceForceMerge,
 			model.SegmentChangeSourceStorageVersion, model.SegmentChangeSourceBumpSchema:
 			needsCompactionTasks = true
+		case model.SegmentChangeSourceStreamingFlush:
+			needsCompactionTasks = needsCompactionTasks || len(g.SortJobs) > 0
 		}
 	}
 	// Build one task index for the sweep. Looking up each compaction group by
@@ -113,6 +115,19 @@ func (c *segmentChangeCleaner) clean(ctx context.Context, groups []*model.Segmen
 
 func (c *segmentChangeCleaner) producerFinished(ctx context.Context, g *model.SegmentChangeGroup, tasks map[int64]*datapb.CompactionTask) bool {
 	switch g.Source {
+	case model.SegmentChangeSourceStreamingFlush:
+		if !g.StreamingHandoffAcknowledged && !g.StreamingDataRetired {
+			return false
+		}
+		if len(g.SortJobs) > 0 && c.compactionMeta == nil {
+			return false
+		}
+		for planID := range g.SortJobs {
+			if !compactionTaskFinished(tasks[planID]) {
+				return false
+			}
+		}
+		return true
 	case model.SegmentChangeSourceSortCompaction, model.SegmentChangeSourceMixCompaction,
 		model.SegmentChangeSourceClustering, model.SegmentChangeSourceForceMerge,
 		model.SegmentChangeSourceStorageVersion, model.SegmentChangeSourceBumpSchema:

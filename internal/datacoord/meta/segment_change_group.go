@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -125,7 +126,7 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for subgroup %d", g.GroupID, g.PreviousGroupID)
 		}
 	}
-	if g.Source == model.SegmentChangeSourceMixCompaction || g.Source == model.SegmentChangeSourceSortCompaction || g.Source == model.SegmentChangeSourceClustering || g.Source == model.SegmentChangeSourceBumpSchema {
+	if g.Source == model.SegmentChangeSourceMixCompaction || g.Source == model.SegmentChangeSourceSortCompaction || g.Source == model.SegmentChangeSourceClustering || g.Source == model.SegmentChangeSourceBumpSchema || g.Source == model.SegmentChangeSourceStreamingFlush {
 		if m.IsCollectionCompactionBlocked(g.CollectionID) {
 			return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for collection snapshot protection", g.GroupID)
 		}
@@ -236,10 +237,16 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 		abortView  func()
 	)
 	if m.DataViewManager != nil {
+		var growingStarts map[string]uint64
+		if g.Source == model.SegmentChangeSourceStreamingFlush {
+			growingStarts = map[string]uint64{g.VChannel: g.GrowingTransformStartAfterTimetick}
+		}
 		view, commitView, abortView, err = m.DataViewManager.PublishChange(ctx, dataview.ChangeGroupDataViewEvent{
-			CollectionID:         g.CollectionID,
-			NewSegments:          loadable,
-			SupersededSegmentIDs: retired,
+			CollectionID:           g.CollectionID,
+			NewSegments:            loadable,
+			SupersededSegmentIDs:   retired,
+			StreamingFlush:         g.Source == model.SegmentChangeSourceStreamingFlush,
+			GrowingTransformStarts: growingStarts,
 		})
 		if err != nil {
 			// Monotonicity conflict: the manifest version was pushed higher by a
@@ -306,8 +313,27 @@ func (m *Meta) commitSegmentChangeGroupInternal(ctx context.Context, g *model.Se
 		}
 	}
 	operators = append(operators, extraOperators...)
+	if g.Source == model.SegmentChangeSourceStreamingFlush {
+		if view == nil || view.GetDataVersion() == nil {
+			return merr.WrapErrServiceUnavailableMsg("streaming flush group %d requires a publication version", g.GroupID)
+		}
+		operators = append(operators, func(pack *UpdateSegmentPack) bool {
+			source := pack.Get(g.StreamingSegmentID)
+			if source == nil {
+				return pack.Fail(merr.WrapErrDataIntegrityMsg("streaming flush source %d is missing", g.StreamingSegmentID))
+			}
+			if previous := source.GetSealedAtDataVersion(); previous != nil && !proto.Equal(previous, view.GetDataVersion()) {
+				return pack.Fail(merr.WrapErrDataIntegrityMsg("streaming flush source %d changed publication version", g.StreamingSegmentID))
+			}
+			source.SealedAtDataVersion = proto.CloneOf(view.GetDataVersion())
+			return true
+		})
+	}
 
 	committed := g.Clone()
+	if g.Source == model.SegmentChangeSourceStreamingFlush {
+		committed.StreamingDataVersion = proto.CloneOf(view.GetDataVersion())
+	}
 	if committed.PartitionStats != nil {
 		committed.PartitionStats.SegmentIDs = nil
 		for _, id := range g.NewSegmentIDs {
