@@ -42,6 +42,8 @@ ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
+# Milvus provides task-level parallelism; keep BLAS calls single-threaded by default.
+ENV OPENBLAS_NUM_THREADS=1
 
 ENTRYPOINT ["/tini", "--"]
 
