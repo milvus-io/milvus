@@ -88,7 +88,7 @@ insertOption := hp.TNewDataOption().
 ```go
 indexParams := hp.TNewIndexParams(schema).
     TWithFieldIndex(map[string]index.Index{
-        common.DefaultVectorFieldName: index.NewIvfSQ8Index(entity.L2, 128),
+        common.DefaultFloatVecFieldName: index.NewIvfSQ8Index(entity.L2, 128),
     })
 ```
 
