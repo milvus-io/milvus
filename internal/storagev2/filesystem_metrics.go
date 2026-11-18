@@ -105,6 +105,11 @@ func metricsFromSnapshot(snapshot C.LoonFilesystemMetricsSnapshot) FilesystemMet
 	}
 }
 
+// PropertyFSLocalDurabilityRoot is milvus-storage's PROPERTY_FS_LOCAL_DURABILITY_ROOT,
+// which ffi_c.h does not export: the root that bounds directory sync of a
+// local filesystem whose namespace root is "/".
+const PropertyFSLocalDurabilityRoot = "fs.local_durability_root"
+
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
 	propAddress             = C.GoString(C.loon_properties_fs_address)
@@ -157,6 +162,10 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	if v := LoonFSRootPath(storageConfig); v != "" {
 		keys = append(keys, propRootPath)
 		values = append(values, v)
+	}
+	if storageConfig.GetStorageType() == "local" && storageConfig.GetRootPath() != "" {
+		keys = append(keys, PropertyFSLocalDurabilityRoot)
+		values = append(values, storageConfig.GetRootPath())
 	}
 	if v := storageConfig.GetStorageType(); v != "" {
 		keys = append(keys, propStorageType)

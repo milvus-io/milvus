@@ -29,25 +29,49 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
+//
+// Like the C++ DurableLocalChunkManager, it prepares localPath once at
+// construction (see localstorage.PrepareRoot) and bounds directory
+// synchronization of durable writes by that physical boundary. The root must
+// stay in place afterwards; GC may recreate descendants, not the root. An
+// empty localPath has no provisioned root: each file is bounded by its parent.
 type LocalChunkManager struct {
 	localPath string
+	boundary  string
 }
 
 var _ ChunkManager = (*LocalChunkManager)(nil)
 
-// NewLocalChunkManager create a new local manager object.
+// NewLocalChunkManager creates a local manager and panics if its root cannot be
+// prepared. Production code constructs it through ChunkManagerFactory, which
+// returns that failure instead.
 func NewLocalChunkManager(opts ...objectstorage.Option) *LocalChunkManager {
+	lcm, err := newLocalChunkManager(opts...)
+	if err != nil {
+		panic(err)
+	}
+	return lcm
+}
+
+func newLocalChunkManager(opts ...objectstorage.Option) (*LocalChunkManager, error) {
 	c := objectstorage.NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
-	return &LocalChunkManager{
-		localPath: c.RootPath,
+	lcm := &LocalChunkManager{localPath: c.RootPath}
+	if c.RootPath != "" {
+		boundary, err := localstorage.PrepareRoot(c.RootPath)
+		if err != nil {
+			return nil, merr.WrapErrIoFailed(c.RootPath, err)
+		}
+		lcm.boundary = boundary
 	}
+	return lcm, nil
 }
 
 // RootPath returns lcm root path.
@@ -98,18 +122,10 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	dir := path.Dir(filePath)
-	exist, err := lcm.Exist(ctx, dir)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !exist {
-		err := os.MkdirAll(dir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(filePath, err)
-		}
-	}
-	return WriteFile(filePath, content, os.ModePerm)
+	return merr.WrapErrIoFailed(filePath, localstorage.WriteFile(filePath, content, os.ModePerm, lcm.boundary))
 }
 
 // MultiWrite writes the data to local storage.
@@ -308,6 +324,9 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {
@@ -315,33 +334,26 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// Create destination directory if not exists
-	dstDir := path.Dir(dstFilePath)
-	exist, err := lcm.Exist(ctx, dstDir)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		err := os.MkdirAll(dstDir, os.ModePerm)
+	// The destination is truncated in place, so copying a file onto itself
+	// (including through an alias) would destroy the source. No caller does it.
+	if dstInfo, statErr := os.Stat(dstFilePath); statErr == nil {
+		srcInfo, err := srcFile.Stat()
 		if err != nil {
-			return merr.WrapErrIoFailed(dstFilePath, err)
+			return merr.WrapErrIoFailed(srcFilePath, err)
+		}
+		if os.SameFile(srcInfo, dstInfo) {
+			return merr.WrapErrServiceInternalMsg("copy source %s and destination %s are the same file", srcFilePath, dstFilePath)
 		}
 	}
 
-	// Create destination file
-	dstFile, err := os.Create(dstFilePath)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-
-	return nil
+	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := io.Copy(dst, srcFile)
+		return err
+	}, lcm.boundary)
+	return merr.WrapErrIoFailed(dstFilePath, err)
 }
 
 type LocalReader struct {
