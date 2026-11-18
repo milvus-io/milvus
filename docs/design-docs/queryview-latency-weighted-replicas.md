@@ -101,12 +101,13 @@ Selecting a winner does not cancel already dispatched loser RPCs. Existing
 caller cancellation and per-attempt error cancellation remain in force. This
 avoids introducing an earlier cancellation that could interact with QueryNode
 SearchTask merging. Consequently, speculative work can continue after a winner
-is known until it completes or the request context ends, accounted for by the
-in-flight hedge budget above.
+is known until it completes or the request context ends.
 
 All replicas share the primary WAL owner for planning and growing data.
-Hedging therefore cannot bypass that common dependency, though the concurrent
-in-flight cap strictly bounds additional planning and growing load.
+Hedging therefore cannot bypass that common dependency; the per-shard
+single-hedge limit bounds amplification to at most one extra attempt per shard
+request, and the win-rate guard suppresses unproductive hedging after 10
+outcomes via completion-based feedback (rather than a global concurrency cap).
 
 ## Configuration and observability
 
@@ -132,9 +133,7 @@ directory.
 
 Deterministic tests hold the first QueryNode dispatch open to demonstrate the
 baseline wait and the enabled hedge's complete winner, both with
-`latency_weighted` and with decoupled round-robin hedging. Additional tests
-verify the concurrent in-flight hedge ratio limit, lingering-loser slot
-occupancy, single-hedge-per-shard enforcement across retry rounds, fixed MVCC,
+`latency_weighted` and with decoupled round-robin hedging. Additional tests verify single-hedge-per-shard enforcement across retry rounds, fixed MVCC,
 exact retained selections, empty Query, isolated late loser results, two-stage
 Search, retained requery failure, local target selection, feedback attribution,
 and idle replica cleanup. Search and Query regression tests cover wire-encoded
