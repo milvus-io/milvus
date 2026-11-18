@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -241,6 +242,7 @@ func (node *Proxy) ListRunningRequests(ctx context.Context, request *milvuspb.Li
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
 	}
+	featureusage.Hit(featureusage.FeatureRunningRequestsList)
 
 	if ownRequestsOnly(ctx) {
 		user, err := restrictToCaller(ctx, request.GetUser(), commonpb.ObjectPrivilege_PrivilegeListRunningRequests)
@@ -290,6 +292,7 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
 	}
+	featureusage.Hit(featureusage.FeatureRunningRequestsCancel)
 	if len(request.GetRequestIds()) == 0 {
 		return &milvuspb.CancelRequestsResponse{
 			Status: merr.Status(merr.WrapErrParameterMissingMsg("request_ids cannot be empty")),

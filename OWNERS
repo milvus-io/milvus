@@ -46,3 +46,11 @@ filters:
       - maintainers
     labels:
       - area/dependency
+
+  # internal/featureusage golden files pin what the feature usage report emits
+  # and which request fields it has looked at, changes should be reviewed by @czs007
+  "internal/featureusage/testdata/.*\\.golden$":
+    required_reviewers:
+      - czs007
+    approvers:
+      - maintainers
