@@ -148,8 +148,8 @@ func TestTransformGCNotifiesAffectedVChannel(t *testing.T) {
 	defer m.WatchTransform("a")()
 	defer m.WatchTransform("b")()
 	a, b := readNotification(t, m, "a"), readNotification(t, m, "b")
-	m.AdvanceGCTimeTick("a", 10)
-	m.cfg.RetentionMaxBytes = 1
+	m.SetDataViewRetention("a", 10)
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, m.GCOnce(context.Background()))
 	requireNotification(t, a.TransformChanged, true)
 	requireNotification(t, b.TransformChanged, false)

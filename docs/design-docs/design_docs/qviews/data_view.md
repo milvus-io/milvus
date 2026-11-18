@@ -563,6 +563,22 @@ until released, while new lookups return no DataView after the manager removes
 the Collection state. If the process crashes between the two writes, recovery
 recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 
+### WALSummary retention query
+
+`DataViewRetention(pchannel)` selects the smallest DataVersion still present in
+each Collection's version map, including temporary GC tombstones. Since each
+shard's F=min(W,A) is nondecreasing across DataVersions, this covers all retained
+versions. `GetDataViewRetention` returns a map from each matching VChannel to F;
+it does not aggregate the map into one minimum. Collections without a published
+snapshot contribute no entries. RecoveryStorage keeps those channels protected
+by their recovered creation TimeTicks (or zero if unknown).
+
+SN merges returned entries into its per-VChannel retention map before GC. An
+omission never clears a pin. Summary remains a continuous PChannel log: each
+chunk's Transform sections are checked against their own frontiers, and the
+scan stops at the first blocked chunk. The active WAL L0 materializer consumes
+retained WAL handles; durable M is not an additional Summary retirement gate.
+
 ## Removed responsibilities
 
 The manager no longer owns `SegmentStore`, loadability checks, resident/visible

@@ -131,11 +131,7 @@ func (m *Manager) requestMaterializationBacklog(ctx context.Context, now time.Ti
 		c.stats.add(index, c.after, m.readableThrough)
 		candidates[vc] = c
 	})
-	var retained uint64
-	for _, chunk := range m.manifest.Chunks {
-		retained += chunk.GetObjectSize()
-	}
-	if len(m.manifest.Chunks) > 0 && m.overRetentionLocked(retained, len(m.manifest.Chunks)) {
+	if len(m.manifest.Chunks) > 0 && m.retainedBytesLocked() > m.cfg.MaxRetentionBytes {
 		for _, index := range m.manifest.Chunks[0].GetVchannels() {
 			vc, through := index.GetVchannel(), index.GetTransform().GetEndTimeTick()
 			if through > max(m.gcFrontiers[vc], m.materializedFrontiers[vc]) {

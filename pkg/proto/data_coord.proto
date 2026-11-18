@@ -32,6 +32,7 @@ enum SegmentLevel {
 }
 
 service DataCoord {
+  rpc GetDataViewRetention(GetDataViewRetentionRequest) returns (GetDataViewRetentionResponse) {}
   rpc GetStreamingNodeQueryViewResources(GetStreamingNodeQueryViewResourcesRequest) returns (GetStreamingNodeQueryViewResourcesResponse) {}
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   // FlushAll flushes all data in the cluster.
@@ -2485,4 +2486,20 @@ message SnapshotSummary {
   // Same Milvus timestamp and semantics as DescribeSnapshot.create_ts.
   int64 create_ts = 2;
   string description = 3;
+}
+
+// Supplies per-VChannel Summary retention from the oldest retained DataView of each
+// collection. A missing shard is not permission to release its history.
+message GetDataViewRetentionRequest {
+  common.MsgBase base = 1;
+  string pchannel = 2;
+}
+
+message GetDataViewRetentionResponse {
+  common.Status status = 1;
+  // Parallel arrays: entry i identifies one shard on the requested PChannel.
+  // Missing channels keep their local retention; omission never permits GC.
+  repeated int64 collection_ids = 2 [packed = true];
+  repeated uint32 vchannel_indices = 3 [packed = true];
+  repeated uint64 transform_start_after_timeticks = 4 [packed = true];
 }

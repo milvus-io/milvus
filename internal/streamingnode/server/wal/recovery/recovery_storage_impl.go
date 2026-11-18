@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -88,7 +89,7 @@ func RecoverRecoveryStorage(
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	rs.startAckTracker()
-	rs.startSummaryBacklog()
+	rs.startSummaryWorkers()
 	rs.startLiveScanner()
 	return rs, snapshot, nil
 }
@@ -324,11 +325,16 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 			r.channel.Name,
 			r.channel.Term,
 		),
-		Runtime:           runtime,
-		FlushMaxBytes:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
-		CacheMaxBytes:     uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
-		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
-		Logger:            r.Logger(),
+		Runtime:                runtime,
+		FlushMaxBytes:          uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+		CacheMaxBytes:          uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
+		MaxRetentionBytes:      uint64(max(0, paramtable.Get().StreamingCfg.SummaryMaxRetentionBytes.GetAsSize())),
+		MaxRetentionDuration:   max(0, paramtable.Get().StreamingCfg.SummaryMaxRetentionDuration.GetAsDurationByParse()),
+		GCInterval:             paramtable.Get().StreamingCfg.SummaryGCIntervalDuration.GetAsDurationByParse(),
+		OrphanGCInterval:       paramtable.Get().StreamingCfg.SummaryOrphanGCIntervalDuration.GetAsDurationByParse(),
+		IdempotencyRetention:   idempotencyview.LoadRetentionConfig(),
+		FetchDataViewRetention: r.fetchDataViewRetention,
+		Logger:                 r.Logger(),
 		OnFatal: func(err error) {
 			if r.backgroundTaskNotifier.Context().Err() == nil && r.onFatal != nil {
 				r.onFatal(merr.Wrap(err, "WAL summary persistence stopped"))
@@ -411,11 +417,15 @@ func (r *recoveryStorageImpl) startAckTracker() {
 	}()
 }
 
-func (r *recoveryStorageImpl) startSummaryBacklog() {
+func (r *recoveryStorageImpl) startSummaryWorkers() {
 	if r.summaryManager == nil {
 		return
 	}
-	r.summaryWG.Add(1)
+	r.summaryWG.Add(2)
+	go func() {
+		defer r.summaryWG.Done()
+		r.summaryManager.RunGC(r.backgroundTaskNotifier.Context())
+	}()
 	go func() {
 		defer r.summaryWG.Done()
 		var shouldFlush func() bool

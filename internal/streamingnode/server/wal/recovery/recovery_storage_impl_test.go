@@ -1348,7 +1348,7 @@ func newSummaryManagerWithStagedDelete(t *testing.T, vchannel string, timetick u
 		Store:             store,
 		Runtime:           moduleapi.Runtime{Scheduler: immediateTaskScheduler{}},
 		FlushMaxBytes:     1 << 20,
-		RetentionMaxBytes: 1 << 30,
+		MaxRetentionBytes: 1 << 30,
 	})
 	require.NoError(t, manager.Restore(context.Background()))
 	manager.ObserveMessage(context.Background(), newAckTestTimeTickMessage(t, timetick-1, int64(timetick-2)))
@@ -1383,7 +1383,7 @@ func TestRecoverySummaryBacklogRequiresTailPressure(t *testing.T) {
 				rs.summaryWG.Wait()
 				rs.closeRecoveryResources()
 			})
-			rs.startSummaryBacklog()
+			rs.startSummaryWorkers()
 			require.Never(t, func() bool {
 				return rs.summaryManager.LastAcked() == 50
 			}, 1100*time.Millisecond, time.Millisecond,
@@ -1426,7 +1426,7 @@ func TestFlushThresholdsPersistCompletedSummaryWithoutLimiting(t *testing.T) {
 			require.Zero(t, rs.ackTracker.Pending())
 			require.Less(t, rs.Metrics().RecoveryTailBytes, rs.cfg.tailLowWatermarkBytes)
 			require.True(t, rs.tailController.ShouldFlush())
-			rs.startSummaryBacklog()
+			rs.startSummaryWorkers()
 			t.Cleanup(func() {
 				rs.backgroundTaskNotifier.Cancel()
 				rs.summaryWG.Wait()
@@ -1518,7 +1518,7 @@ func TestSummaryKeepsFlushingUntilLimiterRecovery(t *testing.T) {
 	rs.tailController.UpdateTrackerFrontiers(8<<30, 0, 100, time.Now())
 	rs.tailController.Publish(3<<30, 0)
 	require.True(t, rs.tailController.ShouldFlush())
-	rs.startSummaryBacklog()
+	rs.startSummaryWorkers()
 	t.Cleanup(func() {
 		rs.backgroundTaskNotifier.Cancel()
 		rs.summaryWG.Wait()
@@ -1616,7 +1616,7 @@ func TestConsumeDirtySnapshotWaitsForUnobservedSummary(t *testing.T) {
 		Store:             store,
 		Runtime:           moduleapi.Runtime{},
 		FlushMaxBytes:     1 << 20,
-		RetentionMaxBytes: 1 << 30,
+		MaxRetentionBytes: 1 << 30,
 	})
 	require.NoError(t, summary.Restore(context.Background()))
 	rs.summaryManager = summary

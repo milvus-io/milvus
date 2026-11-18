@@ -360,16 +360,23 @@ in the restored dirty manifest submitted to the scheduler.
 
 ### 3.4 Configuration And Checkpoint Integration
 
-`ManagerConfig` supplies `FlushMaxBytes`, `RetentionMaxBytes`,
-`MaxRetainedChunks`, and the scheduler/runtime. WALSummary and Delete transform
-recording are always active; neither has an enable switch. A zero flush
-threshold disables size-triggered sealing; a zero retention bound disables that
-bound. `RequestFlushThrough` can still request progress independently of size.
-RecoveryStorage supplies `FlushL0MaxSize` as the staging threshold and
-`SummaryMaxBytesPerPChannel` as the retained-byte budget. It does not yet pass `MaxRetainedChunks`, so the count bound is disabled
-in production wiring even though the standalone manager supports it.
-The old idempotency-specific retained-byte and chunk-count settings are removed;
-retention of this shared store is controlled by `streaming.summary.maxBytesPerPChannel`.
+`ManagerConfig` supplies flush/cache limits, Summary retention bytes/duration,
+regular/orphan GC intervals, and the idempotency recovery retention configuration.
+WALSummary and Delete recording are always active. A zero flush threshold disables
+size-triggered sealing; `RequestFlushThrough` still requests progress independently.
+RecoveryStorage supplies `FlushL0MaxSize` as the staging threshold. Retention uses:
+
+- `streaming.summary.maxRetentionBytes`: 4GB, a lower bound after whole-chunk GC;
+- `streaming.summary.maxRetentionDuration`: 24h, minimum retained history age;
+- `streaming.summary.gcIntervalDuration`: 10m, regular prefix collection;
+- `streaming.summary.orphanGCIntervalDuration`: 24h, unreferenced file collection.
+
+The old `streaming.summary.maxBytesPerPChannel` key and internal chunk-count policy
+are removed, with no compatibility fallback. Configuration is captured at WAL open.
+Nonpositive GC intervals disable the respective loop; zero bytes/duration remove
+that retention floor, never the DataView, idempotency or publication protections.
+Production wiring clamps negative byte/duration values to zero. GC runs in a
+separate cancellable worker, independently of persistence and incoming traffic.
 
 Publication is scheduled independently of the RecoveryStorage checkpoint tick.
 The integration must combine its own completed frontier with `LastAcked()`;
@@ -390,27 +397,41 @@ not implemented metrics of the standalone manager and do not define its API.
 This section states the agreed retention and deletion-ordering contracts.
 Cross-owner GC coordination remains TODO in §9.
 
-Retention removes the oldest eligible chunks from the retained index. Existing
-byte/count budgets and transform-consumer frontiers determine eligibility.
-Bytes bound storage volume; chunk count bounds index entries and per-object
-read overhead that can grow even with many tiny chunks. Budgets apply to whole
-pchannel objects, not per-vchannel slices. A GC-eligible chunk remains retained
-while the configured retention budgets are not exceeded. This preserves readable
-history after materialization without promising a duration: there is no TTL or
-minimum retention time.
-Either budget can request release, but neither overrides a transform consumer
-that still needs the oldest chunk.
-Unmaterialized transform records cannot be discarded merely to meet a budget;
-missing consumer metadata does not prove cleanup. Restored metadata always
-uses its persisted materialization frontier for GC. New VChannel tombstones
-are published only after L0 completes through Drop, with that frontier captured
-in the snapshot; the state flag does not replace the frontier. A cleaned-up VChannel retains its
-durable tombstone until the recovery-authoritative manifest no longer retains
-its Delete history. `CanCleanupVChannel` also requires confirmed observation
-through its cleanup boundary and completed manifest publication; an in-memory
-retirement is insufficient. This keeps the materialization/GC frontier
-recoverable across restart without adding a manifest GC work queue. Physical
-object deletion can finish after the tombstone is removed.
+Regular GC first requires both retained object bytes above the configured floor
+and the oldest retained chunk's physical start time older than the duration.
+Equality skips the round. The historical manifest coverage start is not the oldest
+retained time: coverage remains stable after retirement.
+
+Scan only the continuous prefix. Each candidate must satisfy all of:
+
+1. Removing the whole chunk leaves at least `maxRetentionBytes` retained bytes.
+2. Its physical end TimeTick is strictly older than `maxRetentionDuration`.
+3. Every Transform section is released by its VChannel's DataView retention.
+4. It lies before the suffix required for idempotency recovery.
+
+Stop on the first failed condition; never skip a pinned chunk. The entire scan
+produces one retirement list and one manifest revision, followed by asynchronous
+physical deletion of that list. Whole-chunk granularity can keep bytes above the
+configured floor indefinitely. No object-store orphan listing occurs in this path.
+
+Idempotency protection shares recovery's durable selection: walk newest chunks
+within `streaming.idempotency.ttlPerPChannel`, charging encoded Insert/Idempotency
+sections against `streaming.idempotency.maxSizePerPChannel`, including the whole
+budget-crossing chunk. If TTL-valid history does not fill the budget, protect all
+valid history without padding with expired records. Pending/sealed records cannot
+reduce the durable protection requirement. Default 24h Summary retention already
+covers the default 1h idempotency TTL; independent protection also handles longer
+idempotency TTL settings. Serialized capacity is not live cache memory usage.
+Transform records required by retained DataViews cannot be discarded to meet a
+budget. The active L0 materializer consumes retained WAL handles, so it does not
+need Summary objects until materialization completes. Its output/metadata and
+WAL checkpoint ordering remain independent safety requirements.
+New VChannel tombstones are published only after L0 completes through Drop.
+A cleaned-up VChannel retains its tombstone until the authoritative Summary
+manifest no longer retains its Delete history. `CanCleanupVChannel` also requires
+confirmed observation through the cleanup boundary and completed manifest
+publication; in-memory retirement is insufficient. Physical object deletion
+can finish after the tombstone is removed.
 
 GC has no persistent work queue inside the manifest:
 
@@ -424,6 +445,13 @@ background sweep may rediscover garbage from the object set and authoritative
 retained index. The sweep must distinguish obsolete objects from in-flight or
 recoverable unpublished tails, respect reader lifetimes, and obey term
 ownership. It must not delete every unreferenced object indiscriminately.
+Orphan GC runs on its own interval. Both unreferenced chunks and superseded
+manifests must have a known object modification time strictly older than the
+configured retention duration. This is the storage provider's last successful
+write time, conservatively delaying cleanup of rewritten files; log TimeTicks do
+not establish file age. Keep the current manifest even when empty, higher-term
+objects, and the current term's unpublished recoverable tail. Failed ordinary
+DELETEs are retried from the same list; restart rediscovers leftovers by orphan GC.
 Its scan cost is outside the Restore path. The local implementation pins reader
 snapshots with `readMu` and captures a fully published retained index and coverage
 under `publishMu`. Acquiring the exclusive reader lock proves that readers of
@@ -443,18 +471,61 @@ that boundary, so an old object awaiting deletion cannot re-enter the index.
 An existing empty manifest is authoritative and must not cause fallback to an
 older manifest that still references retired objects.
 
-L0Materializer's GC position advances only after its corresponding VChannel
-metadata is durable. L0 materialization and Summary persistence remain
-independent. Subscription integration must also supply the minimum historical
-start point required by retained QueryViews,
-DataViews, and protected local replays. The effective release position is the
-minimum of those requirements and the durable materialization/cleanup position;
-subscription delivery cursors are not retention acknowledgements. Unknown
-requirements during recovery keep history pinned until they are reconstructed.
-Summary accepts storage retention constraints, not QueryView-specific types.
-The SN integration supplies retained-segment replay floors via
-`VChannelRecoveryModule.refreshQueryRetentionLocked` and `SetQueryRetention`;
-remote/QN view retention remains separate integration work.
+The active WAL L0 materializer holds Delete handles until output registration
+and completion metadata are installed. Failed materialization retains the WAL
+prefix for retry/replay, independently of Summary. Its durable materialization
+frontier M is therefore not a Summary GC gate. The retained-message consumer's
+checkpoint/metadata ordering is unchanged. Reconnecting the inactive
+Summary-reader materializer would require a separate retention dependency.
+
+WALSummary is a continuous PChannel log summary. Retention is evaluated per
+VChannel, but GC only removes a continuous prefix of whole PChannel chunks.
+RecoveryStorage initializes `dataViewRetention[vchannel]` from each recovered
+`VChannelMeta.create_collection_time_tick`; missing legacy metadata uses zero.
+Initial CreateCollection installs its origin too. Replayed creation and Segment
+lifecycle changes must not reset a frontier already refreshed from Coord.
+
+Each GC round pulls `GetDataViewRetention` with the PChannel name. Coord selects
+each Collection's oldest retained DataVersion, including temporary tombstones
+until durable deletion, and returns `VChannel -> F=min(W,A)` for matching shards.
+It must not aggregate unrelated channels into a single PChannel minimum.
+The response encodes this mapping as three packed parallel arrays:
+`collection_ids`, `vchannel_indices`, and `transform_start_after_timeticks`.
+Entry i uses the request's PChannel to reconstruct its VChannel; the arrays must
+have equal lengths. A malformed response fails the round before any frontier is
+updated. The encoding changes neither the selected versions nor omission semantics.
+Unpublished/missing snapshots produce no entry for those channels. The reply is
+merged under the retirement lock only into registered, unreleased VChannels;
+omitted channels keep their existing pins, and completely unknown channels
+conservatively have zero retention. An RPC
+failure skips the round. There is no whole-response VChannel coverage check.
+
+Above the existing byte/count budgets, scan chunks from oldest to newest. A
+chunk is eligible only if every Transform section ends at or before its own
+VChannel's retention. Stop at the first ineligible chunk; never skip it to delete
+later chunks, and never delete a VChannel slice independently. Stop once the
+remaining retained set satisfies the budgets. Idempotency-only sections retain
+the existing budget-based policy. A low frontier for a VChannel absent from the
+head chunk cannot block that chunk.
+
+An empty reply does not release pins. Once a VChannel's durable tombstone is
+cleanup-ready, all Segment metadata is deleted and query references are gone,
+the VChannel module sets its retention to `DroppedVChannelTimeTick`. This releases
+its Summary dependency before waiting for `CanCleanupVChannel`; waiting for
+tombstone deletion first would create a cleanup cycle. Other VChannels and the
+existing byte/count budgets still constrain continuous-prefix retirement.
+
+After Summary retirement is published and VChannelMeta deletion is persisted,
+`removeModule` removes the retention entry through the final cleanup notification.
+Coord responses cannot register entries or overwrite a Drop release, so an
+in-flight reply cannot resurrect a deleted lifetime or pin a released one again.
+Recovery reconstructs origin pins from surviving VChannelMeta records, then
+re-evaluates the same durable Drop cleanup conditions. No new persistent field
+or RPC change is needed. Manifest fast-forward records are separate history
+boundaries and are not removed with the volatile retention entry.
+
+Subscription delivery cursors do not authorize GC. The RPC has a bounded timeout
+and runs outside Summary locks.
 
 The read contract also requires a durable fast-forward boundary (§5.4).
 Reference removal and that boundary must be published consistently, so restart
@@ -939,7 +1010,7 @@ recovered state is dirty or the new term needs its first manifest.
 Manifest protos contain data indexes and coverage, with no `pending_gc` queue.
 Local GC waits for reference-removal publication and active reader snapshots,
 then deletes asynchronously and rediscovers failed deletions on retry. Older
-manifests are removed after the current term's publication. The cross-owner GC
+manifests are collected by the age-gated orphan sweep after current-term publication. The cross-owner GC
 protocol remains TODO in §9; local locking is not distributed exclusion.
 
 RecoveryStorage supplies ordered observation and scheduler lifetime, combines
@@ -981,7 +1052,7 @@ consumption uses bounded reads exclusively.
 
 RecoveryStorage observes Summary before VChannel modules. The current WAL L0
 consumer holds Delete handles and rebuilds its buffer from WAL replay. It
-reports in-memory materialization completion and durable GC positions as before;
+reports in-memory and durable materialization for backlog accounting;
 both full and base-only VChannel snapshot commits use their captured frontier.
 The manifest persists transform fast-forward TimeTicks, even after the last
 chunk is removed.
@@ -1001,8 +1072,8 @@ only to the upper bound. L0 resolves uncertain admission by bounded async reads.
 Summary backlog similarly resolves a partial section's oldest remaining Delete
 with a bounded read in its existing worker. Object I/O never enters Observe.
 
-Count-budget wiring remains absent (§3.4). Remote/QN subscription retention and
-cross-owner GC fencing remain separate follow-up work.
+Remote/QN subscription retention and cross-owner GC fencing remain separate
+follow-up work.
 
 ## 8. Object Listing And Recovery Cost
 

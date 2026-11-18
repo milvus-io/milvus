@@ -125,11 +125,11 @@ func TestReadReportsDurableFastForwardAfterRestart(t *testing.T) {
 	m, store := newTransformTestManagerWithStore(t)
 	var released bool
 	flushTransform(t, m, "v1", 100, &released)
-	m.AdvanceGCTimeTick("v1", 100)
-	m.cfg.RetentionMaxBytes = 1
+	m.SetDataViewRetention("v1", 100)
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, m))
 	require.Empty(t, m.Manifest().GetChunks())
-	restored := newTestManager(t, store, 1)
+	restored := newTestManager(t, store, 0)
 	require.NoError(t, restored.Restore(ctx))
 	forwarded, err := restored.ReadTransform(ctx, "v1", 99, 200, ReadLimits{})
 	require.NoError(t, err)
@@ -164,8 +164,8 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 		// Copy the mock pointer argument before calling back into the manager.
 		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		require.NoError(t, m.writeChunk(ctx, sc))
-		m.AdvanceGCTimeTick("v1", 100)
-		m.cfg.RetentionMaxBytes = 1
+		m.SetDataViewRetention("v1", 100)
+		m.cfg.MaxRetentionBytes = 0
 		require.NoError(t, m.GCOnce(ctx))
 		require.False(t, m.readMu.TryLock(), "physical GC cannot acquire its lock during a read")
 		return origin(store, ctx, copied, verified)
@@ -219,8 +219,8 @@ func TestFastForwardAndReferenceRemovalPublishTogether(t *testing.T) {
 	m, store := newTransformTestManagerWithStore(t)
 	var released bool
 	flushTransform(t, m, "v1", 100, &released)
-	m.AdvanceGCTimeTick("v1", 100)
-	m.cfg.RetentionMaxBytes = 1
+	m.SetDataViewRetention("v1", 100)
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, m.GCOnce(ctx))
 	patch := mockey.Mock((*Store).WriteManifest).Return(context.DeadlineExceeded).Build()
 	defer patch.UnPatch()

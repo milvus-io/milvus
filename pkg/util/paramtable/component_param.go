@@ -10020,8 +10020,11 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// summary store retention
-	SummaryMaxBytesPerPChannel   ParamItem `refreshable:"true"`
-	SummaryCacheBytesPerPChannel ParamItem `refreshable:"false"`
+	SummaryMaxRetentionBytes        ParamItem `refreshable:"false"`
+	SummaryMaxRetentionDuration     ParamItem `refreshable:"false"`
+	SummaryGCIntervalDuration       ParamItem `refreshable:"false"`
+	SummaryOrphanGCIntervalDuration ParamItem `refreshable:"false"`
+	SummaryCacheBytesPerPChannel    ParamItem `refreshable:"false"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
@@ -10493,17 +10496,38 @@ If the binary size of l0 segment is greater than this size, it will be flushed.`
 	}
 	p.FlushL0MaxSize.Init(base.mgr)
 
-	p.SummaryMaxBytesPerPChannel = ParamItem{
-		Key:     "streaming.summary.maxBytesPerPChannel",
-		Version: "3.0.0",
-		Doc: `The soft budget of the retained WALSummary chunk objects per pchannel, 4GB by default.
-The summary store keeps the transform records of every vchannel so the L0 materializer can read them back;
-chunks are released by the retention GC when the budget is exceeded, but never below the per-vchannel
-materialization frontiers.`,
+	p.SummaryMaxRetentionBytes = ParamItem{
+		Key:          "streaming.summary.maxRetentionBytes",
+		Version:      "3.1.0",
 		DefaultValue: "4GB",
-		Export:       false,
+		Export:       true,
+		Doc:          "Retained WALSummary object capacity per PChannel. Regular GC runs only above this size and never removes a whole chunk if the remaining size would fall below it. Applied when the WAL opens.",
 	}
-	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+	p.SummaryMaxRetentionBytes.Init(base.mgr)
+	p.SummaryMaxRetentionDuration = ParamItem{
+		Key:          "streaming.summary.maxRetentionDuration",
+		Version:      "3.1.0",
+		DefaultValue: "24h",
+		Export:       true,
+		Doc:          "Minimum age of Summary history for regular GC and of object modification time for orphan GC. DataView and idempotency recovery dependencies remain protected. Applied when the WAL opens.",
+	}
+	p.SummaryMaxRetentionDuration.Init(base.mgr)
+	p.SummaryGCIntervalDuration = ParamItem{
+		Key:          "streaming.summary.gcIntervalDuration",
+		Version:      "3.1.0",
+		DefaultValue: "10m",
+		Export:       true,
+		Doc:          "Regular WALSummary GC interval. Nonpositive values disable regular GC. Applied when the WAL opens.",
+	}
+	p.SummaryGCIntervalDuration.Init(base.mgr)
+	p.SummaryOrphanGCIntervalDuration = ParamItem{
+		Key:          "streaming.summary.orphanGCIntervalDuration",
+		Version:      "3.1.0",
+		DefaultValue: "24h",
+		Export:       true,
+		Doc:          "Orphan WALSummary chunk and obsolete manifest GC interval. Nonpositive values disable orphan GC. Applied when the WAL opens.",
+	}
+	p.SummaryOrphanGCIntervalDuration.Init(base.mgr)
 
 	p.SummaryCacheBytesPerPChannel = ParamItem{
 		Key:          "streaming.summary.cacheBytesPerPChannel",

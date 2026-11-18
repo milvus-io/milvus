@@ -385,9 +385,15 @@ The owner of those view requirements reports retention constraints to Summary.
 TransformLog does not own object deletion or infer view lifetime from a stream's
 cursor. Unknown requirements during recovery are not equivalent to no readers.
 New requirements must be installed before GC can remove the requested history.
-For local SN preparation, `VChannelRecoveryModule.refreshQueryRetentionLocked`
-publishes the retained segments' earliest Delete replay requirement through
-`WALSummary.SetQueryRetention`. Remote/QN consumers require their own integration.
+RecoveryStorage initializes per-VChannel `dataViewRetention` from recovered
+collection creation TimeTicks. Each GC round pulls per-VChannel F from Coord's
+oldest retained DataViews, including versions referenced by local SN and remote
+QN QueryViews and versions awaiting durable deletion. Returned entries update
+only their own channels; omitted channels keep their local pins. Failed RPCs
+postpone GC. Whole PChannel chunks are retired only as a continuous prefix,
+checking each Transform section against its own VChannel frontier. The active
+L0 consumer holds WAL handles, so durable materialization is not an additional
+Summary GC gate. Its WAL checkpoint and L0 publication ordering remain required.
 See [Summary retention](summary.md#4-retention-gc) for the shared-store contract
 and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 
