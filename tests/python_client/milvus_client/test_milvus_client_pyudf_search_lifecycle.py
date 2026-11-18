@@ -480,7 +480,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
         ],
     )
     def test_pyudf_d2_vector_index_matrix(self, tmp_path, minio_host, minio_bucket, kind, metric, record_property):
-        """target: M2/M3; method: real indexed D2 and decoded-vector oracle; expected: metric and scalar alignment through two reloads."""
+        """target: exact metric control; method: indexed binary fractions; expected: raw scores and PyUDF alignment through two reloads."""
         vectors, query, requested_index, dimensions = _vector_data(kind)
         score_tolerance = {"rel": 1e-5, "abs": 1e-6}
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE) as (client, control, resource):
@@ -498,15 +498,27 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 self.insert(client, name, rows[5000:])
                 self.flush(client, name)
                 indexes = self.prepare_index_params(client)[0]
+                index_params = {"M": 16, "efConstruction": 128} if requested_index == "HNSW" else {}
+                exact_refinement = kind in (
+                    DataType.FLOAT_VECTOR,
+                    DataType.FLOAT16_VECTOR,
+                    DataType.BFLOAT16_VECTOR,
+                )
+                if exact_refinement:
+                    # The binary-fraction oracle checks raw metric precision;
+                    # default HNSW refinement may quantize these exact inputs.
+                    index_params["refine_quant_type"] = "NONE"
                 indexes.add_index(
                     "vector",
                     index_type=requested_index,
                     metric_type=metric,
-                    params={"M": 16, "efConstruction": 128} if requested_index == "HNSW" else {},
+                    params=index_params,
                 )
                 self.create_index(client, name, indexes)
                 info = client.describe_index(name, "vector")
                 assert info["state"] == "Finished" and info["indexed_rows"] == 10000, info
+                if exact_refinement:
+                    assert info["refine_quant_type"] == "NONE", info
                 metric_failures = []
                 for reload_id in range(3):
                     start = time.time()
