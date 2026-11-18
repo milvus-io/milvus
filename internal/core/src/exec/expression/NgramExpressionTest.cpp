@@ -876,7 +876,7 @@ TEST(NgramExpressionTest, NativeOffsetsDoNotFetchNgram) {
     physical.Eval(context, result);
     EXPECT_EQ(physical.GetExecPath(), exec::ExprExecPath::RawData);
     EXPECT_EQ(observed_pin, &untouched);
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), offsets.size());
     TargetBitmapView bits(column->GetRawData(), column->size());
@@ -962,7 +962,7 @@ struct NgramPhase2Fixture {
                     expression)) {
             EXPECT_EQ(unary->GetExecPath(), exec::ExprExecPath::ScalarIndex);
         }
-        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(column, nullptr);
         ASSERT_EQ(column->size(), rows.size());
         TargetBitmapView bits(column->GetRawData(), column->size());

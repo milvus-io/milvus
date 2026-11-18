@@ -61,23 +61,27 @@ struct StoredRow {
 // RawValueAt), so comparing in place equals comparing the stored row, and
 // strings are viewed without being copied.
 struct InputRow {
-    const std::vector<ColumnVectorPtr>& columns;
+    const std::vector<VectorPtr>& columns;
     vector_size_t index;
 
     bool
     IsNull(int32_t column_index, const RowColumn&) const {
-        return !columns[column_index]->ValidAt(index);
+        return VisitColumnVector(
+            columns[column_index].get(),
+            [&](const auto* column) { return !column->ValidAt(index); });
     }
     template <typename T>
     T
     ValueAt(int32_t column_index, const RowColumn&) const {
         return *static_cast<const T*>(
-            columns[column_index]->RawValueAt(index, sizeof(T)));
+            AsColumnVector<T>(columns[column_index].get())
+                ->RawValueAt(index, sizeof(T)));
     }
     const std::string*
     StrAt(int32_t column_index, const RowColumn&) const {
         return static_cast<const std::string*>(
-            columns[column_index]->RawValueAt(index, sizeof(std::string)));
+            AsColumnVector<std::string>(columns[column_index].get())
+                ->RawValueAt(index, sizeof(std::string)));
     }
 };
 
@@ -115,7 +119,7 @@ SortBuffer::SortBuffer(const std::vector<DataType>& column_types,
 }
 
 void
-SortBuffer::AddRow(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::AddRow(const std::vector<VectorPtr>& columns,
                    vector_size_t row_index) {
     AssertInfo(!sorted_, "Cannot add input after NoMoreInput()");
     AssertInfo(columns.size() == column_types_.size(),
@@ -142,7 +146,7 @@ SortBuffer::AddRow(const std::vector<ColumnVectorPtr>& columns,
 }
 
 void
-SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::AddRows(const std::vector<VectorPtr>& columns,
                     vector_size_t num_rows) {
     AssertInfo(!sorted_, "Cannot add input after NoMoreInput()");
     AssertInfo(columns.size() == column_types_.size(),
@@ -186,7 +190,7 @@ SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
 // candidate unless it can no longer make the top limit_; when the candidates
 // are full, first shrinks them back to limit_ with a selection algorithm.
 void
-SortBuffer::OfferRow(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::OfferRow(const std::vector<VectorPtr>& columns,
                      vector_size_t row_index) {
     // A row that is not strictly better than the threshold can never make the
     // top limit_: at least limit_ candidates already compare <= it, and the
@@ -438,7 +442,7 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
 }
 
 int
-SortBuffer::CompareInput(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::CompareInput(const std::vector<VectorPtr>& columns,
                          vector_size_t row_index,
                          const char* row) const {
     return CompareImpl(InputRow{columns, row_index}, row);

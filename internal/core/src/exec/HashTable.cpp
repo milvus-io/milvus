@@ -35,8 +35,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
     for (auto i = 0; i < numKeys; i++) {
         auto& hasher = hashers[i];
         auto column_idx = hasher->ChannelIndex();
-        ColumnVectorPtr column_ptr =
-            std::dynamic_pointer_cast<ColumnVector>(input->child(column_idx));
+        auto column_ptr = input->child(column_idx);
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
         hasher->setColumnData(column_ptr);

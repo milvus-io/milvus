@@ -211,9 +211,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -312,18 +312,17 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
         }                                                      \
     } while (false)
 
-    auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            ValueType val,
-            ValueType right_operand,
-            const std::string& pointer) {
+    auto execute_sub_batch = [op_type, arith_type]<FilterType filter_type =
+                                                       FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 ValueType val,
+                                 ValueType right_operand,
+                                 const std::string& pointer) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
@@ -781,9 +780,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1312,9 +1311,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
         }
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1441,9 +1440,9 @@ template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
     OffsetVector* input, int64_t real_batch_size) {
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     const auto value = value_arg_.GetValue<ValueType>();
@@ -1585,14 +1584,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
 
-    auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
-            const index::IScalarValueReader<T>* index_ptr,
-            size_t sub_batch_size,
-            HighPrecisionType value,
-            HighPrecisionType right_operand,
-            const int32_t* offsets = nullptr) {
+    auto execute_sub_batch = [op_type, arith_type]<FilterType filter_type =
+                                                       FilterType::sequential>(
+                                 const index::IScalarValueReader<T>* index_ptr,
+                                 size_t sub_batch_size,
+                                 HighPrecisionType value,
+                                 HighPrecisionType right_operand,
+                                 const int32_t* offsets = nullptr) {
         TargetBitmap res;
         switch (op_type) {
             case proto::plan::OpType::Equal: {
@@ -2492,9 +2490,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         return res;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -2509,17 +2507,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
 
-    auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            HighPrecisionType value,
-            HighPrecisionType right_operand) {
+    auto execute_sub_batch = [op_type, arith_type]<FilterType filter_type =
+                                                       FilterType::sequential>(
+                                 const T* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 HighPrecisionType value,
+                                 HighPrecisionType right_operand) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {

@@ -96,7 +96,7 @@ class PhyMatchFilterExpr : public Expr {
 
  private:
     void
-    ApplyStructRowValidity(ColumnVector* col_vec,
+    ApplyStructRowValidity(ColumnVector<int8_t>* col_vec,
                            FieldId field_id,
                            const OffsetVector* input,
                            int64_t batch_rows);

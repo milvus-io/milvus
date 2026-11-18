@@ -735,7 +735,7 @@ class BloomFilterExprEvalTest : public ::testing::Test {
         return segment;
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     EvalPhysical(const SegmentInternalInterface* segment,
                  const expr::TypedExprPtr& logical,
                  TargetBitmap bitmap_input,
@@ -753,7 +753,7 @@ class BloomFilterExprEvalTest : public ::testing::Test {
         eval_ctx.set_bitmap_input(std::move(bitmap_input));
         VectorPtr result;
         compiled[0]->Eval(eval_ctx, result);
-        return std::static_pointer_cast<ColumnVector>(result);
+        return std::static_pointer_cast<ColumnVector<int8_t>>(result);
     }
 
     // Evaluate a bloom filter expr (optionally negated) on a segment and
@@ -1793,13 +1793,13 @@ TEST_F(BloomFilterExprEvalTest,
     VectorPtr result;
     ASSERT_NO_THROW(compiled[0]->Eval(eval_ctx, result));
     // static_pointer_cast, not dynamic: the result is created inside
-    // libmilvus_core while this TU lives in the test binary, and ColumnVector's
+    // libmilvus_core while this TU lives in the test binary, and ColumnVector<int8_t>'s
     // typeinfo is emitted in both images (header-defined class). On macOS
     // arm64 dynamic_cast compares typeinfo by pointer across the dylib
     // boundary and spuriously fails; the concrete type is guaranteed here
-    // (SegmentExpr::Eval always yields a ColumnVector).
+    // (SegmentExpr::Eval always yields a ColumnVector<int8_t>).
     ASSERT_NE(result, nullptr);
-    auto column_result = std::static_pointer_cast<ColumnVector>(result);
+    auto column_result = std::static_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_EQ(column_result->size(), N);
 
     const auto filter = SplitBlockBloomFilterView::Parse(blob);

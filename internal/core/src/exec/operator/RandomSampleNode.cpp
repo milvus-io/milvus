@@ -165,7 +165,7 @@ PhyRandomSampleNode::GetOutput() {
         result = std::make_shared<RowVector>(
             std::vector<VectorPtr>{std::move(input_col)});
     } else {
-        auto sample_output = std::make_shared<ColumnVector>(
+        auto sample_output = std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
         TargetBitmapView data(sample_output->GetRawData(),
                               sample_output->size());

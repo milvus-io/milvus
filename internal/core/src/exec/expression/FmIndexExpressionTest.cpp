@@ -670,7 +670,8 @@ TEST(FmIndexExpressionTest,
                 context.set_bitmap_input(std::move(input));
                 VectorPtr output;
                 compiled[0]->Eval(context, output);
-                auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+                auto result =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(output);
                 ASSERT_NE(result, nullptr);
                 ASSERT_EQ(result->size(), 64);
                 TargetBitmapView hits(result->GetRawData(), 64);
@@ -987,7 +988,7 @@ TEST(FmIndexExpressionTest, RegexSealedColumnExperiment) {
                     compiled[0]->Eval(context, output);
                     total += micros(start);
                     auto result =
-                        std::dynamic_pointer_cast<ColumnVector>(output);
+                        std::dynamic_pointer_cast<ColumnVector<int8_t>>(output);
                     ASSERT_NE(result, nullptr);
                     ASSERT_EQ(result->size(), rows.size());
                     TargetBitmapView hits(result->GetRawData(), rows.size());

@@ -396,7 +396,7 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
             RoaringMembership::Parse(BuildMrb1(members)));
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     EvalPredicate(const segcore::SegmentInternalInterface* segment,
                   const expr::TypedExprPtr& logical,
                   exec::OffsetVector* offsets = nullptr) const {
@@ -406,16 +406,16 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
             filter_node.get(), segment, N, MAX_TIMESTAMP, offsets);
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     AsColumnVector(const VectorPtr& result) const {
-        // Boolean physical expressions return ColumnVector. Keep the cast
+        // Boolean physical expressions return ColumnVector<int8_t>. Keep the cast
         // static, as in test_bloom_filter_expr.cpp: header-defined RTTI can
         // have distinct identities across all_tests and libmilvus_core.dylib
         // in the macOS shared-library build even though typeid names match.
-        return std::static_pointer_cast<ColumnVector>(result);
+        return std::static_pointer_cast<ColumnVector<int8_t>>(result);
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     EvalPhysical(const segcore::SegmentInternalInterface* segment,
                  const expr::TypedExprPtr& logical,
                  TargetBitmap bitmap_input,
@@ -438,8 +438,8 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
     }
 
     void
-    ExpectSameColumn(const ColumnVectorPtr& actual,
-                     const ColumnVectorPtr& expected) const {
+    ExpectSameColumn(const ColumnVectorPtr<int8_t>& actual,
+                     const ColumnVectorPtr<int8_t>& expected) const {
         ASSERT_NE(actual, nullptr);
         ASSERT_NE(expected, nullptr);
         ASSERT_EQ(actual->size(), expected->size());
@@ -1071,7 +1071,7 @@ TEST_F(RoaringFilterExprEvalTest,
                 {conjunction}, &exec_context, {}, false);
             EXPECT_EQ(compiled.size(), 1u);
             if (compiled.empty()) {
-                return ColumnVectorPtr{};
+                return ColumnVectorPtr<int8_t>{};
             }
             auto physical =
                 std::dynamic_pointer_cast<exec::PhyConjunctFilterExpr>(

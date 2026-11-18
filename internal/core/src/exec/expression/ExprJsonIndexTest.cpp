@@ -426,8 +426,8 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
         return milvus::test::gen_filter_res(
             plan.get(), segment, json_strs.size(), MAX_TIMESTAMP, offsets);
     };
-    auto expect_same = [&](const ColumnVectorPtr& raw,
-                           const ColumnVectorPtr& indexed) {
+    auto expect_same = [&](const ColumnVectorPtr<int8_t>& raw,
+                           const ColumnVectorPtr<int8_t>& indexed) {
         ASSERT_EQ(raw->size(), indexed->size());
         TargetBitmapView raw_result(raw->GetRawData(), raw->size());
         TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
@@ -570,7 +570,7 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
 
     exec::OffsetVector offsets = {6, 2, 4, 1, 3, 5, 7, 0, 2};
     auto raw_result = evaluate(raw_segment.get(), &offsets);
-    ColumnVectorPtr flat_result;
+    ColumnVectorPtr<int8_t> flat_result;
     EXPECT_NO_THROW(flat_result = evaluate(flat_segment.get(), &offsets));
     ASSERT_NE(flat_result, nullptr);
     ASSERT_EQ(raw_result->size(), flat_result->size());
@@ -819,7 +819,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
         return milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
     };
-    auto check = [](const ColumnVectorPtr& result,
+    auto check = [](const ColumnVectorPtr<int8_t>& result,
                     const std::vector<bool>& expected_result,
                     const std::vector<bool>& expected_valid) {
         TargetBitmapView result_view(result->GetRawData(), result->size());

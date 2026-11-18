@@ -96,7 +96,7 @@ RowContainer::newRow() {
 }
 
 void
-RowContainer::store(const milvus::ColumnVectorPtr& column_data,
+RowContainer::store(const milvus::VectorPtr& column_data,
                     milvus::vector_size_t index,
                     char* row,
                     int32_t column_index) {

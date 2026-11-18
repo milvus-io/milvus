@@ -21,7 +21,7 @@ class ThreeValuedLogicOp {
     // apply not operation to the left column vector
     // and store the result in the left column vector
     static void
-    Not(const ColumnVectorPtr& left) {
+    Not(const ColumnVectorPtr<int8_t>& left) {
         TargetBitmapView data(left->GetRawData(), left->size());
         TargetBitmapView valid_data(left->GetValidRawData(), left->size());
 
@@ -52,7 +52,8 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | ~left_data) |
     //                right_valid & ~right_data
     static void
-    And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
+    And(const ColumnVectorPtr<int8_t>& left,
+        const ColumnVectorPtr<int8_t>& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
@@ -102,7 +103,8 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | left_data) |
     //                right_valid & right_data
     static void
-    Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
+    Or(const ColumnVectorPtr<int8_t>& left,
+       const ColumnVectorPtr<int8_t>& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);

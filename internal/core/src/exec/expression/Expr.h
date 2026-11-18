@@ -1341,8 +1341,8 @@ class SegmentExpr : public Expr {
         // elements. Do not fetch or inspect ARRAY payloads just to make
         // progress; nullptr is reserved for expression exhaustion.
         MoveCursor();
-        return std::make_shared<ColumnVector>(TargetBitmap(0, false),
-                                              TargetBitmap(0, true));
+        return std::make_shared<ColumnVector<int8_t>>(TargetBitmap(0, false),
+                                                      TargetBitmap(0, true));
     }
 
     // Get the next batch size for element-level processing
@@ -1396,8 +1396,8 @@ class SegmentExpr : public Expr {
         }
         auto result = std::move(func.template operator()<FilterType::random>(
             reader, values..., input->data()));
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_res));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid_res));
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -1418,8 +1418,8 @@ class SegmentExpr : public Expr {
         }
         auto result = func.template operator()<FilterType::random>(
             reader, input->size(), values..., input->data());
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_res));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid_res));
     }
 
     VectorPtr
@@ -1461,7 +1461,7 @@ class SegmentExpr : public Expr {
                    int64_t(cached_index_chunk_valid_res_->size()) ==
                        active_count_) {
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
-            return std::make_shared<ColumnVector>(
+            return std::make_shared<ColumnVector<int8_t>>(
                 std::move(*cached_index_chunk_res_),
                 std::move(*cached_index_chunk_valid_res_));
         } else {
@@ -1484,8 +1484,8 @@ class SegmentExpr : public Expr {
             valid.append(*cached_index_chunk_valid_res_, data_pos, size);
             current_index_chunk_pos_ = data_pos + size;
         }
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid));
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -4392,7 +4392,7 @@ class SegmentExpr : public Expr {
         }
         if (execute_all_at_once_) {
             MoveCursor();
-            return std::make_shared<ColumnVector>(
+            return std::make_shared<ColumnVector<int8_t>>(
                 std::move(*cached_result_), std::move(*cached_valid_result_));
         }
         TargetBitmap result;
@@ -4402,8 +4402,8 @@ class SegmentExpr : public Expr {
         valid_result.append(
             *cached_valid_result_, current_data_global_pos_, real_batch_size);
         MoveCursor();
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid_result));
     }
 
     VectorPtr
@@ -4426,8 +4426,8 @@ class SegmentExpr : public Expr {
             result[i] = cached_res[offset];
             valid_result[i] = cached_valid_res[offset];
         }
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid_result));
     }
 
     // Move or slice a locally-owned cached bitmap.
@@ -4439,15 +4439,15 @@ class SegmentExpr : public Expr {
                       int64_t pos,
                       int64_t size) {
         if (execute_all_at_once_) {
-            return std::make_shared<ColumnVector>(std::move(cached_res),
-                                                  std::move(cached_valid_res));
+            return std::make_shared<ColumnVector<int8_t>>(
+                std::move(cached_res), std::move(cached_valid_res));
         }
         TargetBitmap result;
         TargetBitmap valid_result;
         result.append(cached_res, pos, size);
         valid_result.append(cached_valid_res, pos, size);
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      std::move(valid_result));
     }
 
     // Overload for paths where valid bitmap is always all-true.
@@ -4455,13 +4455,13 @@ class SegmentExpr : public Expr {
     MoveOrSliceBitmap(TargetBitmap& cached_res, int64_t pos, int64_t size) {
         if (execute_all_at_once_) {
             auto valid = TargetBitmap(cached_res.size(), true);
-            return std::make_shared<ColumnVector>(std::move(cached_res),
-                                                  std::move(valid));
+            return std::make_shared<ColumnVector<int8_t>>(std::move(cached_res),
+                                                          std::move(valid));
         }
         TargetBitmap result;
         result.append(cached_res, pos, size);
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              TargetBitmap(size, true));
+        return std::make_shared<ColumnVector<int8_t>>(std::move(result),
+                                                      TargetBitmap(size, true));
     }
 
     void

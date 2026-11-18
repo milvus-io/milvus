@@ -513,7 +513,8 @@ class FixedBitmapExpr : public exec::Expr {
 
     void
     Eval(exec::EvalCtx&, VectorPtr& result) override {
-        result = std::make_shared<ColumnVector>(data_.clone(), valid_.clone());
+        result = std::make_shared<ColumnVector<int8_t>>(data_.clone(),
+                                                        valid_.clone());
     }
 
     std::string
@@ -704,7 +705,8 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
 
                 VectorPtr result;
                 physical_expr.Eval(eval_context, result);
-                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                 ASSERT_NE(output, nullptr);
                 ASSERT_EQ(output->size(), offsets.size());
                 TargetBitmapView output_data(output->GetRawData(),
@@ -779,8 +781,8 @@ class RecordingMatchElementExpr : public exec::Expr {
             data[i] = data_[elements[i]];
             valid[i] = valid_[elements[i]];
         }
-        result =
-            std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+        result = std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                        std::move(valid));
     }
 
     void
@@ -932,7 +934,7 @@ class MatchExprCandidateTest : public ::testing::TestWithParam<bool> {
           const TargetBitmap& candidates,
           expr::MatchType type,
           int64_t threshold) {
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(output, nullptr);
         ASSERT_EQ(output->size(), rows.size());
         TargetBitmapView data(output->GetRawData(), output->size());
@@ -1201,7 +1203,8 @@ TEST_P(MatchExprCandidateTest, AndOrPropagateCandidatesIncludingUnknown) {
                 ASSERT_EQ(child->calls.size(), 1);
                 EXPECT_EQ(child->calls.back(), Elements(active_rows));
                 EXPECT_TRUE(inherited == ctx.get_bitmap_input());
-                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                 ASSERT_NE(output, nullptr);
                 TargetBitmapView data(output->GetRawData(), 4);
                 TargetBitmapView valid(output->GetValidRawData(), 4);
@@ -1387,8 +1390,8 @@ class RecordingBitmapInputExpr : public exec::Expr {
     void
     Eval(exec::EvalCtx& context, VectorPtr& result) override {
         masks.push_back(TargetBitmap(context.get_bitmap_input()));
-        result = std::make_shared<ColumnVector>(TargetBitmap(size_, false),
-                                                TargetBitmap(size_, true));
+        result = std::make_shared<ColumnVector<int8_t>>(
+            TargetBitmap(size_, false), TargetBitmap(size_, true));
     }
     void
     MoveCursor() override {
@@ -1455,7 +1458,8 @@ TEST_P(MatchExprCandidateTest, ElementNullRejectionStopsAtInnerNot) {
                 ASSERT_EQ(later->masks[0].size(), 2);
                 EXPECT_EQ(later->masks[0][0], inner_not);
                 EXPECT_TRUE(later->masks[0][1]);
-                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                 ASSERT_NE(output, nullptr);
                 TargetBitmapView values(output->GetRawData(), 2);
                 TargetBitmapView validity(output->GetValidRawData(), 2);
@@ -1504,7 +1508,7 @@ TEST_P(MatchExprCandidateTest, AllUnknownElementsSkipLaterAndTerms) {
         match.Eval(ctx, result);
         EXPECT_TRUE(later->masks.empty());
         EXPECT_EQ(later->moves, 1);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(output, nullptr);
         EXPECT_TRUE(TargetBitmapView(output->GetRawData(), 2).none());
         EXPECT_TRUE(TargetBitmapView(output->GetValidRawData(), 2).all());
@@ -1524,7 +1528,8 @@ class SequentialOnlyMatchElementExpr : public RecordingMatchElementExpr {
         masks.push_back(TargetBitmap(context.get_bitmap_input()));
         RecordingMatchElementExpr::Eval(context, result);
         if (!context.get_bitmap_input().empty()) {
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(column, nullptr);
             ASSERT_EQ(context.get_bitmap_input().size(), column->size());
             TargetBitmapView data(column->GetRawData(), column->size());
@@ -1689,7 +1694,8 @@ TEST(MatchExprRouting, BothRowAndElementSelectivityGateSparseBatches) {
                 ctx.set_bitmap_input(candidates.view());
                 VectorPtr result;
                 match.Eval(ctx, result);
-                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                 ASSERT_NE(output, nullptr);
                 TargetBitmapView hits(output->GetRawData(), output->size());
                 for (int i = 0; i < batch_rows; ++i) {
@@ -1729,12 +1735,13 @@ TEST(MatchExprRouting, BothRowAndElementSelectivityGateSparseBatches) {
         ctx.set_bitmap_input(candidates.view());
         std::vector<VectorPtr> result;
         expressions.Eval(ctx, result);
-        auto first = std::dynamic_pointer_cast<ColumnVector>(result[0]);
+        auto first = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result[0]);
         ASSERT_NE(first, nullptr);
         EXPECT_FALSE(TargetBitmapView(first->GetRawData(), first->size())[1]);
         ctx.clear_bitmap_input();
         expressions.Eval(ctx, result);
-        auto second = std::dynamic_pointer_cast<ColumnVector>(result[0]);
+        auto second =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result[0]);
         ASSERT_NE(second, nullptr);
         EXPECT_TRUE(
             TargetBitmapView(second->GetRawData(), second->size()).all());
@@ -1868,7 +1875,7 @@ TEST(MatchExprUnknownElements, UnknownElementIsMiss) {
         VectorPtr batch_result;
         batch_expr.Eval(batch_context, batch_result);
         auto batch_output =
-            std::dynamic_pointer_cast<ColumnVector>(batch_result);
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(batch_result);
         ASSERT_NE(batch_output, nullptr);
         ASSERT_EQ(batch_output->size(), row_count);
         TargetBitmapView batch_bits(batch_output->GetRawData(), row_count);
@@ -1900,7 +1907,7 @@ TEST(MatchExprUnknownElements, UnknownElementIsMiss) {
         VectorPtr offset_result;
         offset_expr.Eval(offset_context, offset_result);
         auto offset_output =
-            std::dynamic_pointer_cast<ColumnVector>(offset_result);
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(offset_result);
         ASSERT_NE(offset_output, nullptr);
         ASSERT_EQ(offset_output->size(), 1);
         TargetBitmapView offset_bits(offset_output->GetRawData(), 1);
@@ -2664,7 +2671,7 @@ TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
     EXPECT_EQ(query_context.get_struct_element_offsets(pinned_field)
                   ->GetTotalElementCount(),
               3);
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), 5);
     TargetBitmapView values(output->GetRawData(), output->size());
@@ -3436,7 +3443,8 @@ TEST_F(SealedMatchExprTest, ParentCandidatesPreserveNestedIndexExecution) {
         ctx.set_bitmap_input(parent.view());
         VectorPtr result;
         match->Eval(ctx, result);
-        const auto col = std::dynamic_pointer_cast<ColumnVector>(result);
+        const auto col =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(col, nullptr);
         TargetBitmapView data(col->GetRawData(), col->size());
         for (size_t i = 0; i < 100; ++i) {
@@ -3473,7 +3481,7 @@ TEST_F(SealedMatchExprTest, NoCandidatesSkipRealNestedIndexThenResume) {
     EXPECT_EQ(guard->moves, 1);
     ctx.clear_bitmap_input();
     match->Eval(ctx, result);
-    auto col = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto col = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(col, nullptr);
     ASSERT_EQ(col->size(), 100);
     TargetBitmapView bits(col->GetRawData(), 100);
@@ -4697,8 +4705,9 @@ TEST_F(MatchExprTest, WholeFilterCacheDistinguishesInnerPredicates) {
                     auto fragment = plan::PlanFragment(plans[i]);
                     auto result = query::ExecPlanNodeVisitor::ExecuteTask(
                         fragment, context);
-                    auto column = std::dynamic_pointer_cast<ColumnVector>(
-                        result->childrens()[0]);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector<int8_t>>(
+                            result->childrens()[0]);
                     ASSERT_NE(column, nullptr);
                     BitsetTypeView excluded(column->GetRawData(),
                                             column->size());

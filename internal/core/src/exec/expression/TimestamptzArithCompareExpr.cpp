@@ -213,27 +213,29 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
         return nullptr;
     }
     auto exec_index =
-        [ arith_op,
-          compare_op ]<FilterType filter_type = FilterType::sequential>(
+        [arith_op, compare_op]<FilterType filter_type = FilterType::sequential>(
             const index::IScalarValueReader<T>* index_ptr,
             int64_t size,
             T compare_value,
             const proto::plan::Interval& interval,
             const int32_t* offsets = nullptr) {
-        TargetBitmap result(size, false);
-        for (int64_t i = 0; i < size; ++i) {
-            size_t offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = offsets == nullptr ? i : offsets[i];
+            TargetBitmap result(size, false);
+            for (int64_t i = 0; i < size; ++i) {
+                size_t offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets == nullptr ? i : offsets[i];
+                }
+                auto raw = index_ptr->Lookup(offset);
+                if (raw.has_value()) {
+                    result[i] = EvaluateTimestamp(raw.value(),
+                                                  arith_op,
+                                                  interval,
+                                                  compare_op,
+                                                  compare_value);
+                }
             }
-            auto raw = index_ptr->Lookup(offset);
-            if (raw.has_value()) {
-                result[i] = EvaluateTimestamp(
-                    raw.value(), arith_op, interval, compare_op, compare_value);
-            }
-        }
-        return result;
-    };
+            return result;
+        };
 
     VectorPtr result;
     if (input != nullptr) {
@@ -271,23 +273,22 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
 
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    auto exec_sub_batch =
-        [ arith_op,
-          compare_op ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            T compare_value,
-            proto::plan::Interval interval) {
+    auto exec_sub_batch = [arith_op, compare_op]<FilterType filter_type =
+                                                     FilterType::sequential>(
+                              const T* data,
+                              ValidityView valid_data,
+                              const int32_t* offsets,
+                              const int size,
+                              TargetBitmapView res,
+                              TargetBitmapView valid_res,
+                              T compare_value,
+                              proto::plan::Interval interval) {
         if (data == nullptr) {
             return;
         }

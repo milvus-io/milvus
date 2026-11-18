@@ -299,7 +299,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                    expr_->get_count())) {
                 hits.inplace_or(candidates, batch_rows);
             }
-            auto empty_result = std::make_shared<ColumnVector>(
+            auto empty_result = std::make_shared<ColumnVector<int8_t>>(
                 std::move(hits), TargetBitmap(batch_rows, true));
             ApplyStructRowValidity(
                 empty_result.get(), field_meta.get_id(), input, batch_rows);
@@ -407,10 +407,10 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
-                                            TargetBitmap(batch_rows, true));
+    result = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(batch_rows, false), TargetBitmap(batch_rows, true));
 
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
 
     auto match_type = expr_->get_match_type();
@@ -451,9 +451,9 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         return;
     }
     auto match_result_col_vec =
-        std::dynamic_pointer_cast<ColumnVector>(match_result);
+        std::dynamic_pointer_cast<ColumnVector<int8_t>>(match_result);
     AssertInfo(match_result_col_vec != nullptr,
-               "Match result should be ColumnVector");
+               "Match result should be ColumnVector<int8_t>");
     AssertInfo(match_result_col_vec->IsBitmap(),
                "Match result should be bitmap");
     AssertInfo(match_result_col_vec->size() == elem_count,
@@ -560,7 +560,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 void
-PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
+PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector<int8_t>* col_vec,
                                            FieldId field_id,
                                            const OffsetVector* input,
                                            int64_t batch_rows) {

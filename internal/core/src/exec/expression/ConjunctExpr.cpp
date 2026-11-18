@@ -51,7 +51,7 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 }
 
 TargetBitmap
-PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
+PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr<int8_t>& vec) {
     // Rows that still need the following expressions.
     //
     // For AND: TRUE or NULL rows still need evaluation; only definite FALSE
@@ -189,7 +189,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         VectorPtr input_result;
         inputs_[idx]->Eval(context, input_result);
 
-        ColumnVectorPtr all_flat_result;
+        ColumnVectorPtr<int8_t> all_flat_result;
         if (!has_result) {
             // The first input needs the parent's mask in context. Take it only
             // after that input succeeds, then restore its storage on every exit.

@@ -40,10 +40,10 @@ StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
                   "invalid argument count, expect 2, actual {}",
                   args.childrens().size());
     }
-    auto strs = std::dynamic_pointer_cast<SimpleVector>(args.child(0));
+    auto strs = AsSimpleVector<std::string>(args.child(0));
     Assert(strs != nullptr);
     CheckVarcharOrStringType(strs);
-    auto prefixes = std::dynamic_pointer_cast<SimpleVector>(args.child(1));
+    auto prefixes = AsSimpleVector<std::string>(args.child(1));
     Assert(prefixes != nullptr);
     CheckVarcharOrStringType(prefixes);
 
@@ -51,20 +51,17 @@ StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
     TargetBitmap valid_bitmap(strs->size(), true);
     for (size_t i = 0; i < strs->size(); ++i) {
         if (strs->ValidAt(i) && prefixes->ValidAt(i)) {
-            auto* str_ptr = reinterpret_cast<std::string*>(
-                strs->RawValueAt(i, sizeof(std::string)));
-            auto* prefix_ptr = reinterpret_cast<std::string*>(
-                prefixes->RawValueAt(i, sizeof(std::string)));
-            bitmap.set(
-                i,
-                str_ptr->size() >= prefix_ptr->size() &&
-                    str_ptr->compare(0, prefix_ptr->size(), *prefix_ptr) == 0);
+            auto str = strs->ValueAt(i);
+            auto prefix = prefixes->ValueAt(i);
+            bitmap.set(i,
+                       str.size() >= prefix.size() &&
+                           str.compare(0, prefix.size(), prefix) == 0);
         } else {
             valid_bitmap[i] = false;
         }
     }
-    result = std::make_shared<ColumnVector>(std::move(bitmap),
-                                            std::move(valid_bitmap));
+    result = std::make_shared<ColumnVector<int8_t>>(std::move(bitmap),
+                                                    std::move(valid_bitmap));
 }
 
 }  // namespace function

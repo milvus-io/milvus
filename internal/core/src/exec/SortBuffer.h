@@ -118,8 +118,7 @@ class SortBuffer {
      * @param row_index Index of the row within the column vectors
      */
     void
-    AddRow(const std::vector<ColumnVectorPtr>& columns,
-           vector_size_t row_index);
+    AddRow(const std::vector<VectorPtr>& columns, vector_size_t row_index);
 
     /**
      * @brief Add multiple rows from column vectors
@@ -128,8 +127,7 @@ class SortBuffer {
      * @param num_rows Number of rows to add (starting from index 0)
      */
     void
-    AddRows(const std::vector<ColumnVectorPtr>& columns,
-            vector_size_t num_rows);
+    AddRows(const std::vector<VectorPtr>& columns, vector_size_t num_rows);
 
     //=========================================================================
     // Phase 2: Finalization
@@ -251,8 +249,7 @@ class SortBuffer {
      *        can no longer make the top limit_
      */
     void
-    OfferRow(const std::vector<ColumnVectorPtr>& columns,
-             vector_size_t row_index);
+    OfferRow(const std::vector<VectorPtr>& columns, vector_size_t row_index);
 
     /**
      * @brief With a limit: keep the best limit_ candidate rows, release the
@@ -268,7 +265,7 @@ class SortBuffer {
      * are read directly from the column vectors.
      */
     int
-    CompareInput(const std::vector<ColumnVectorPtr>& columns,
+    CompareInput(const std::vector<VectorPtr>& columns,
                  vector_size_t row_index,
                  const char* row) const;
 

@@ -128,7 +128,7 @@ class MaxStringAggregate final : public Aggregate {
     extractValues(char** groups,
                   int32_t numGroups,
                   VectorPtr* result) override {
-        auto result_column = std::dynamic_pointer_cast<ColumnVector>(*result);
+        auto result_column = AsColumnVector<std::string>(*result);
         AssertInfo(result_column != nullptr,
                    "input vector for extracting aggregation must be of Type "
                    "ColumnVector");
@@ -143,7 +143,7 @@ class MaxStringAggregate final : public Aggregate {
                 AssertInfo(ptr != nullptr,
                            "max string aggregate should not have null pointer "
                            "when group is not null");
-                result_column->SetValueAt<std::string>(i, *ptr);
+                result_column->SetValueAt(i, *ptr);
                 delete ptr;
                 ptr = nullptr;
             }
@@ -156,7 +156,7 @@ class MaxStringAggregate final : public Aggregate {
                 const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
+        auto column = AsColumnVector<std::string>(input[0]);
         AssertInfo(column != nullptr,
                    "max aggregate input must be of type ColumnVector");
         auto raw = column->RawAsValues<std::string>();
@@ -174,7 +174,7 @@ class MaxStringAggregate final : public Aggregate {
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
+        auto column = AsColumnVector<std::string>(input[0]);
         AssertInfo(column != nullptr,
                    "max aggregate input must be of type ColumnVector");
         auto raw = column->RawAsValues<std::string>();

@@ -346,7 +346,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
             std::is_integral_v<IndexInnerType> && !std::is_same_v<bool, T>,
             int64_t,
             IndexInnerType>>
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     PreCheckOverflow(HighPrecisionType& val1,
                      HighPrecisionType& val2,
                      bool& lower_inclusive,

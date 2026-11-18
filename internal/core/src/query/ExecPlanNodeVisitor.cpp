@@ -66,10 +66,9 @@ ExecPlanNodeVisitor::ExecuteTask(
         if (!result) {
             if (ret && !ret->childrens().empty()) {
                 auto first_column =
-                    std::dynamic_pointer_cast<ColumnVector>(ret->child(0));
-                AssertInfo(first_column,
-                           "first column must be a column vector");
-                if (first_column->IsBitmap()) {
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(
+                        ret->child(0));
+                if (first_column && first_column->IsBitmap()) {
                     if (query_context->bitset_is_element_level()) {
                         Assert(processed_num ==
                                query_context->get_active_element_count());
@@ -91,14 +90,11 @@ ExecPlanNodeVisitor::ExecuteTask(
                        childrens.size(),
                        ret->childrens().size());
             for (auto i = 0; i < childrens.size(); i++) {
-                if (auto column_vec =
-                        std::dynamic_pointer_cast<ColumnVector>(childrens[i])) {
-                    auto ret_column_vector =
-                        std::dynamic_pointer_cast<ColumnVector>(ret->child(i));
-                    ret_column_vector->append(*column_vec);
-                } else {
-                    ThrowInfo(UnexpectedError, "expr return type not matched");
-                }
+                VisitColumnVector(childrens[i], [&](const auto& column_vec) {
+                    using T =
+                        typename std::decay_t<decltype(*column_vec)>::ValueType;
+                    AsColumnVector<T>(ret->child(i))->append(*column_vec);
+                });
             }
         } else {
             ret = result;
@@ -132,8 +128,9 @@ fillTypedDataPtrArray(void* src_raw_data,
     }
 }
 
+template <typename T>
 void
-fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
+fillDataArrayFromColumnVector(const ColumnVectorPtr<T>& column_vector,
                               DataArray& data_array) {
     auto column_raw_data = column_vector->GetRawData();
     auto column_data_size = column_vector->size();
@@ -327,13 +324,14 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     }
     AssertInfo(!result->childrens().empty(),
                "Result row vector must have at least one column");
-    auto first_column =
-        std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+    const auto& first_column = result->child(0);
     AssertInfo(first_column,
                "children inside row vector must be of column vector for now");
     tmp_retrieve_result.total_data_cnt_ = first_column->size();
-    if (first_column->IsBitmap()) {
-        BitsetTypeView view(first_column->GetRawData(), first_column->size());
+    auto bitmap_column =
+        std::dynamic_pointer_cast<ColumnVector<int8_t>>(first_column);
+    if (bitmap_column && bitmap_column->IsBitmap()) {
+        BitsetTypeView view(bitmap_column->GetRawData(), bitmap_column->size());
         if (query_context->bitset_is_element_level()) {
             // Element-level query: bitset is element-level, need to convert to (doc_id, element_index)
             tmp_retrieve_result.element_level_ = true;
@@ -397,8 +395,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
         auto column_count = result->childrens().size();
         tmp_retrieve_result.field_data_.resize(column_count);
         for (auto i = 0; i < column_count; i++) {
-            auto column_vec =
-                std::dynamic_pointer_cast<ColumnVector>(result->child(i));
+            const auto& column_vec = result->child(i);
             AssertInfo(
                 column_vec,
                 "children inside row vector must be of column vector for now");
@@ -411,7 +408,9 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                                                    column_vec->type(),
                                                    column_vec->type(),
                                                    true);
-            fillDataArrayFromColumnVector(column_vec, data_array);
+            VisitColumnVector(column_vec, [&](const auto& column) {
+                fillDataArrayFromColumnVector(column, data_array);
+            });
             tmp_retrieve_result.field_data_[i] = std::move(data_array);
         }
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
@@ -493,7 +492,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
-                auto col_vec = std::dynamic_pointer_cast<ColumnVector>(
+                auto col_vec = std::dynamic_pointer_cast<ColumnVector<int8_t>>(
                     result->childrens()[0]);
                 if (col_vec != nullptr) {
                     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());

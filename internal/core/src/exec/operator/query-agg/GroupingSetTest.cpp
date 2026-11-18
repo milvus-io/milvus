@@ -146,11 +146,12 @@ class StringAggregateCleanupTest
 
     RowVectorPtr
     makeInput() {
-        auto keys = std::make_shared<ColumnVector>(DataType::INT64, 3);
-        auto values = std::make_shared<ColumnVector>(DataType::VARCHAR, 3);
+        auto keys = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 3);
+        auto values =
+            std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 3);
         for (int i = 0; i < 3; ++i) {
-            keys->SetValueAt<int64_t>(i, i == 1 ? 2 : 1);
-            values->SetValueAt<std::string>(
+            keys->SetValueAt(i, i == 1 ? 2 : 1);
+            values->SetValueAt(
                 i, std::string(256, i == 0 ? 'z' : (i == 1 ? 'm' : 'a')));
         }
         return std::make_shared<RowVector>(
@@ -191,18 +192,16 @@ TEST_P(StringAggregateCleanupTest, SuccessfulOutputDoesNotDoubleFree) {
     EXPECT_EQ(counts.rows, groupCount());
     EXPECT_EQ(counts.strings, 0);
 
-    auto values = std::dynamic_pointer_cast<ColumnVector>(
-        output->child(grouped() ? 1 : 0));
+    auto values = AsColumnVector<std::string>(output->child(grouped() ? 1 : 0));
     for (size_t i = 0; i < groupCount(); ++i) {
         char expected = minimum() ? 'a' : 'z';
         if (grouped()) {
-            auto keys =
-                std::dynamic_pointer_cast<ColumnVector>(output->child(0));
-            if (keys->ValueAt<int64_t>(i) == 2) {
+            auto keys = AsColumnVector<int64_t>(output->child(0));
+            if (keys->ValueAt(i) == 2) {
                 expected = 'm';
             }
         }
-        EXPECT_EQ(values->ValueAt<std::string>(i), std::string(256, expected));
+        EXPECT_EQ(values->ValueAt(i), std::string(256, expected));
     }
 }
 
@@ -214,11 +213,11 @@ TEST_P(StringAggregateCleanupTest, FailedOutputStillDestroysState) {
     // vector triggers the existing assertion, leaving its state for teardown.
     std::vector<VectorPtr> columns;
     if (grouped()) {
-        columns.push_back(
-            std::make_shared<ColumnVector>(DataType::INT64, groupCount()));
+        columns.push_back(std::make_shared<ColumnVector<int64_t>>(
+            DataType::INT64, groupCount()));
     }
-    columns.push_back(
-        std::make_shared<ColumnVector>(DataType::VARCHAR, groupCount()));
+    columns.push_back(std::make_shared<ColumnVector<std::string>>(
+        DataType::VARCHAR, groupCount()));
     columns.push_back(std::make_shared<RowVector>(std::vector<VectorPtr>{}));
     auto output = std::make_shared<RowVector>(std::move(columns));
     EXPECT_THROW(groups->getOutput(output), SegcoreError);
@@ -231,7 +230,7 @@ TEST_P(StringAggregateCleanupTest, NullGroupsNeedNoStringCleanup) {
     CleanupCounts counts;
     auto groups = makeGroupingSet(counts);
     auto input = makeInput();
-    auto values = std::dynamic_pointer_cast<ColumnVector>(input->child(1));
+    auto values = AsColumnVector<std::string>(input->child(1));
     for (size_t i = 0; i < values->size(); ++i) {
         values->nullAt(i);
     }

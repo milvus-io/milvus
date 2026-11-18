@@ -304,9 +304,9 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -319,16 +319,16 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
     auto target_val = arg_val_.GetValue<ValueType>();
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const ValueType& target_val) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const ArrayView* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -398,9 +398,9 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -426,16 +426,16 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
     }
     int processed_cursor = 0;
     auto make_sub_batch = [&]<typename ArrayType>() {
-        return [&processed_cursor, &
-                bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayType* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            int index,
-            const std::shared_ptr<MultiElement>& term_set) {
+        return [&processed_cursor,
+                &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+                   const ArrayType* data,
+                   ValidityView valid_data,
+                   const int32_t* offsets,
+                   const int size,
+                   TargetBitmapView res,
+                   TargetBitmapView valid_res,
+                   int index,
+                   const std::shared_ptr<MultiElement>& term_set) {
             AssertInfo(index >= 0,
                        "array element term predicate requires nested path");
             // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -494,9 +494,9 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -511,17 +511,17 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const ValueType& target_val) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -604,7 +604,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
 
     if (arg_set_->Empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -785,9 +785,9 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -804,17 +804,17 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     }
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::shared_ptr<MultiElement>& terms) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::shared_ptr<MultiElement>& terms) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -929,8 +929,9 @@ PhyTermFilterExpr::ExecElementLevelEmptyTerm(EvalCtx& context) {
         return res;
     }
     MoveCursor();
-    return std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                          TargetBitmap(real_batch_size, true));
+    return std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
 }
 
 template <typename T>
@@ -980,7 +981,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         std::dynamic_pointer_cast<FlatVectorElement<ReaderType>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -1026,7 +1027,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -1051,9 +1052,9 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         return res;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1135,16 +1136,18 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     const auto str_set_elem = cached_str_set_elem_;
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &simd_filter_fn,
-         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::shared_ptr<MultiElement>& vals) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input,
+                              &simd_filter_fn,
+                              str_set_elem]<FilterType filter_type =
+                                                FilterType::sequential>(
+                                 const T* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::shared_ptr<MultiElement>& vals) {
         if (data == nullptr) {
             processed_cursor += size;
             return;

@@ -161,7 +161,7 @@ SetNullableInt64ArrayFieldData(
 }
 
 void
-AssertColumnVector(const ColumnVectorPtr& vec,
+AssertColumnVector(const ColumnVectorPtr<int8_t>& vec,
                    const std::vector<bool>& expected_bits,
                    const std::vector<bool>& expected_valid,
                    const std::string& label) {
@@ -341,7 +341,7 @@ ExecuteQueryExprWithBatchSize(std::shared_ptr<plan::FilterBitsNode> filter_plan,
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
     auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
-    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector<int8_t>");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
     query_view.flip();
@@ -4910,7 +4910,7 @@ CheckElementNullExpr(SegmentInternalInterface* segment,
                      const ElementNullExpected& expected,
                      const std::string& label) {
     ASSERT_EQ(expected.size(), kElementNullRows) << label;
-    auto check = [&](const ColumnVectorPtr& vec,
+    auto check = [&](const ColumnVectorPtr<int8_t>& vec,
                      const std::vector<int64_t>& rows,
                      bool negated,
                      const std::string& path) {
@@ -5888,7 +5888,7 @@ ElementLevelSegmentPath(const std::string& tag) {
 
 // Evaluate an element-level expression over all rows in two-row batches,
 // crossing chunk boundaries and the zero-element batch.
-ColumnVectorPtr
+ColumnVectorPtr<int8_t>
 EvalElementBatches(SegmentInternalInterface* segment,
                    const expr::TypedExprPtr& typed_expr,
                    int64_t num_rows,
@@ -5919,7 +5919,8 @@ EvalElementBatches(SegmentInternalInterface* segment,
                "two-row batches covered {} elements, expected {}",
                res.size(),
                num_elements);
-    return std::make_shared<ColumnVector>(std::move(res), std::move(valid));
+    return std::make_shared<ColumnVector<int8_t>>(std::move(res),
+                                                  std::move(valid));
 }
 
 void
@@ -5958,7 +5959,7 @@ CheckElementLevelExpr(SegmentInternalInterface* segment,
         partial.push_back(static_cast<int32_t>(id));
     }
 
-    auto check = [&](const ColumnVectorPtr& vec,
+    auto check = [&](const ColumnVectorPtr<int8_t>& vec,
                      const std::vector<int32_t>& ids,
                      bool negated,
                      const std::string& path) {
@@ -6024,7 +6025,7 @@ CheckRowLevelExpr(SegmentInternalInterface* segment,
     std::vector<int64_t> all_rows(num_rows);
     std::iota(all_rows.begin(), all_rows.end(), 0);
     std::vector<int64_t> reversed(all_rows.rbegin(), all_rows.rend());
-    auto check = [&](const ColumnVectorPtr& vec,
+    auto check = [&](const ColumnVectorPtr<int8_t>& vec,
                      const std::vector<int64_t>& rows,
                      bool negated,
                      const std::string& path) {

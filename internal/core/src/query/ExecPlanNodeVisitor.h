@@ -39,16 +39,17 @@
 
 namespace milvus::query {
 
-inline ColumnVectorPtr
+inline ColumnVectorPtr<int8_t>
 GetColumnVectorForTest(const VectorPtr& result) {
-    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+    if (auto convert_vector =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result)) {
         return convert_vector;
     }
 
     if (result != nullptr &&
         std::string_view(typeid(*result).name()) ==
-            std::string_view(typeid(ColumnVector).name())) {
-        return std::static_pointer_cast<ColumnVector>(result);
+            std::string_view(typeid(ColumnVector<int8_t>).name())) {
+        return std::static_pointer_cast<ColumnVector<int8_t>>(result);
     }
 
     return milvus::exec::GetColumnVector(result);
@@ -250,7 +251,7 @@ ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
     auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
-    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector<int8_t>");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
     query_view.flip();

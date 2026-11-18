@@ -307,7 +307,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment(
                "GIS bitmap input has {} rows, expected {}",
                bitmap_input.size(),
                real_batch_size);
-    auto res_vec = std::make_shared<ColumnVector>(
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
@@ -730,8 +730,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment(
                    current_data_global_pos_,
                    current_index_chunk_pos_);
     }
-    return std::make_shared<ColumnVector>(std::move(batch_result),
-                                          std::move(batch_valid));
+    return std::make_shared<ColumnVector<int8_t>>(std::move(batch_result),
+                                                  std::move(batch_valid));
 }
 
 }  //namespace exec

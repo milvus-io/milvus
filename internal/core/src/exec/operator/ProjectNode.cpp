@@ -79,7 +79,7 @@ SelectOffsets(const TargetBitmapView& raw_data_view,
     return selected;
 }
 
-ColumnVectorPtr
+ColumnVectorPtr<int64_t>
 MakeInt64Column(const std::vector<int64_t>& values) {
     auto selected_count = values.size();
     FixedVector<int64_t> output(selected_count);
@@ -88,11 +88,11 @@ MakeInt64Column(const std::vector<int64_t>& values) {
     auto field_data = std::make_shared<FieldData<int64_t>>(
         DataType::INT64, false, std::move(output));
     auto valid_map = TargetBitmap(selected_count, true);
-    return std::make_shared<ColumnVector>(
+    return std::make_shared<ColumnVector<int64_t>>(
         std::move(field_data), std::move(valid_map), 0);
 }
 
-ColumnVectorPtr
+ColumnVectorPtr<int64_t>
 MakeElementIndexColumn(const std::vector<int32_t>& element_indices) {
     auto selected_count = element_indices.size();
     FixedVector<int64_t> output(selected_count);
@@ -102,7 +102,7 @@ MakeElementIndexColumn(const std::vector<int32_t>& element_indices) {
     auto field_data = std::make_shared<FieldData<int64_t>>(
         DataType::INT64, false, std::move(output));
     auto valid_map = TargetBitmap(selected_count, true);
-    return std::make_shared<ColumnVector>(
+    return std::make_shared<ColumnVector<int64_t>>(
         std::move(field_data), std::move(valid_map), 0);
 }
 
@@ -196,7 +196,7 @@ PhyProjectNode::GetOutput() {
             auto field_data =
                 InitScalarFieldDataWithLength(column_type, selected_count);
             auto valid_map = TargetBitmap(selected_count, false);
-            auto col = std::make_shared<ColumnVector>(
+            auto col = MakeColumnVector(
                 std::move(field_data), std::move(valid_map), selected_count);
             column_vectors.emplace_back(std::move(col));
             continue;
@@ -212,7 +212,7 @@ PhyProjectNode::GetOutput() {
                                                  valid_map,
                                                  true);
         auto null_count = selected_count - valid_map.count();
-        auto column_vector = std::make_shared<ColumnVector>(
+        auto column_vector = MakeColumnVector(
             std::move(field_data), std::move(valid_map), null_count);
         column_vectors.emplace_back(std::move(column_vector));
     }

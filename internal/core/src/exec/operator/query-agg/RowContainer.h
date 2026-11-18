@@ -142,7 +142,7 @@ class RowContainer {
     inline bool
     equalsNoNulls(const char* row,
                   int32_t offset,
-                  const ColumnVectorPtr& column,
+                  const VectorPtr& column,
                   vector_size_t index) {
         if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
                       Type == DataType::JSON || Type == DataType::ARRAY) {
@@ -151,7 +151,7 @@ class RowContainer {
                       "rows container for now");
         } else {
             using T = typename TypeTraits<Type>::NativeType;
-            T raw_value = column->ValueAt<T>(index);
+            T raw_value(AsColumnVector<T>(column.get())->ValueAt(index));
             bool equal = false;
             if constexpr (std::is_same_v<T, std::string>) {
                 equal = (raw_value == *(strAt(row, offset)));
@@ -169,10 +169,19 @@ class RowContainer {
                     int32_t offset,
                     int32_t nullByte,
                     uint8_t nullMask,
-                    const ColumnVectorPtr& column,
+                    const VectorPtr& column,
                     vector_size_t index) {
         bool rowIsNull = isNullAt(row, nullByte, nullMask);
-        bool columnIsNull = !column->ValidAt(index);
+        bool columnIsNull = false;
+        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
+                      Type == DataType::JSON || Type == DataType::ARRAY) {
+            ThrowInfo(UnexpectedError,
+                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
+                      "rows container for now");
+        } else {
+            using T = typename TypeTraits<Type>::NativeType;
+            columnIsNull = !AsColumnVector<T>(column.get())->ValidAt(index);
+        }
         if (rowIsNull || columnIsNull) {
             return rowIsNull == columnIsNull;
         }
@@ -182,7 +191,7 @@ class RowContainer {
     inline bool
     equals(const char* row,
            RowColumn column,
-           const ColumnVectorPtr& column_data,
+           const VectorPtr& column_data,
            vector_size_t index) {
         return MILVUS_DYNAMIC_TYPE_DISPATCH(equalsWithNulls,
                                             column_data->type(),
@@ -196,14 +205,14 @@ class RowContainer {
 
     /// Stores the 'index'th value in 'columnVector' into 'row' at 'columnIndex'.
     void
-    store(const ColumnVectorPtr& column_data,
+    store(const VectorPtr& column_data,
           vector_size_t index,
           char* row,
           int32_t column_index);
 
     template <DataType Type>
     inline void
-    storeWithNull(const ColumnVectorPtr& column,
+    storeWithNull(const VectorPtr& column,
                   vector_size_t index,
                   char* row,
                   int32_t offset,
@@ -218,7 +227,7 @@ class RowContainer {
                       "rows container for now");
         } else {
             using T = typename milvus::TypeTraits<Type>::NativeType;
-            if (!column->ValidAt(index)) {
+            if (!AsColumnVector<T>(column.get())->ValidAt(index)) {
                 row[nullByte] |= nullMask;
                 if constexpr (std::is_same_v<T, std::string>) {
                     *reinterpret_cast<std::string**>(row + offset) =
@@ -234,7 +243,7 @@ class RowContainer {
 
     template <DataType Type>
     inline void
-    storeNoNulls(const ColumnVectorPtr& column,
+    storeNoNulls(const VectorPtr& column,
                  vector_size_t index,
                  char* group,
                  int32_t offset) {
@@ -245,7 +254,8 @@ class RowContainer {
                       "Cannot support complex data type:[ROW/JSON/ARRAY] in "
                       "rows container for now");
         } else {
-            auto raw_val_ptr = column->RawValueAt(index, sizeof(T));
+            auto raw_val_ptr =
+                AsColumnVector<T>(column.get())->RawValueAt(index, sizeof(T));
             if constexpr (std::is_same_v<T, std::string>) {
                 // the string object and also the underlying char array are both allocated on the heap
                 // must call clear method to deallocate these memory allocated for varchar type to avoid memory leak
@@ -269,8 +279,7 @@ class RowContainer {
         AssertInfo(numRows == result->size(),
                    "extracted rows number should be equal to the size of "
                    "result vector");
-        auto result_column_vec =
-            std::dynamic_pointer_cast<ColumnVector>(result);
+        auto result_column_vec = AsColumnVector<T>(result);
         AssertInfo(
             result_column_vec != nullptr,
             "Input column to extract result must be of ColumnVector type");
@@ -283,10 +292,10 @@ class RowContainer {
                 if constexpr (std::is_same_v<T, std::string> ||
                               std::is_same_v<T, std::string_view>) {
                     auto* str_ptr = strAt(row, offset);
-                    result_column_vec->SetValueAt<T>(resultIndex, *str_ptr);
+                    result_column_vec->SetValueAt(resultIndex, *str_ptr);
                 } else {
-                    result_column_vec->SetValueAt<T>(resultIndex,
-                                                     valueAt<T>(row, offset));
+                    result_column_vec->SetValueAt(resultIndex,
+                                                  valueAt<T>(row, offset));
                 }
             }
         }
@@ -301,8 +310,7 @@ class RowContainer {
         AssertInfo(numRows == result->size(),
                    "extracted rows number should be equal to the size of "
                    "result vector");
-        auto result_column_vec =
-            std::dynamic_pointer_cast<ColumnVector>(result);
+        auto result_column_vec = AsColumnVector<T>(result);
         AssertInfo(
             result_column_vec != nullptr,
             "Input column to extract result must be of ColumnVector type");
@@ -314,10 +322,9 @@ class RowContainer {
                 if constexpr (std::is_same_v<T, std::string> ||
                               std::is_same_v<T, std::string_view>) {
                     auto* str_ptr = strAt(row, offset);
-                    result_column_vec->SetValueAt<T>(i, *str_ptr);
+                    result_column_vec->SetValueAt(i, *str_ptr);
                 } else {
-                    result_column_vec->SetValueAt<T>(i,
-                                                     valueAt<T>(row, offset));
+                    result_column_vec->SetValueAt(i, valueAt<T>(row, offset));
                 }
             }
         }
@@ -348,7 +355,7 @@ class RowContainer {
     }
 
     template <DataType Type>
-    static ColumnVectorPtr
+    static VectorPtr
     extractColumnVectorTypedInternal(const char* const* rows,
                                      int32_t numRows,
                                      RowColumn column) {
@@ -381,7 +388,7 @@ class RowContainer {
             }
             auto field_data =
                 std::make_shared<FieldData<T>>(Type, false, std::move(values));
-            return std::make_shared<ColumnVector>(
+            return std::make_shared<ColumnVector<T>>(
                 std::move(field_data), std::move(valid_values), null_count);
         }
     }
@@ -396,7 +403,7 @@ class RowContainer {
     }
 
     template <DataType Type>
-    static ColumnVectorPtr
+    static VectorPtr
     extractColumnVectorTyped(const char* const* rows,
                              int32_t numRows,
                              RowColumn column) {
@@ -409,7 +416,7 @@ class RowContainer {
                   RowColumn column,
                   const VectorPtr& result);
 
-    static ColumnVectorPtr
+    static VectorPtr
     extractColumnVector(const char* const* rows,
                         int32_t num_rows,
                         RowColumn column,
@@ -423,7 +430,7 @@ class RowContainer {
         extractColumn(rows, numRows, columnAt(column_idx), result);
     }
 
-    ColumnVectorPtr
+    VectorPtr
     extractColumnVector(const char* const* rows,
                         int32_t numRows,
                         int32_t column_idx) {
@@ -516,7 +523,7 @@ RowContainer::extractColumn(const char* const* rows,
         extractColumnTyped, result->type(), rows, num_rows, column, result);
 }
 
-inline ColumnVectorPtr
+inline VectorPtr
 RowContainer::extractColumnVector(const char* const* rows,
                                   int32_t num_rows,
                                   milvus::exec::RowColumn column,

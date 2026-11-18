@@ -17,6 +17,9 @@
 #pragma once
 
 #include <memory>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "Types.h"
@@ -86,53 +89,101 @@ class BaseVector {
     std::optional<size_t> null_count_;
 };
 
-/**
- * SimpleVector abstracts over various Columnar Storage Formats,
- * it is used in custom functions.
- */
+// T describes the stored scalar type. Strings are read as borrowed views;
+// non-trivial objects retain their existing storage and are read by reference.
+template <typename T>
+using VectorValue = std::conditional_t<
+    std::is_same_v<T, std::string>,
+    std::string_view,
+    std::conditional_t<std::is_arithmetic_v<T>, T, const T&>>;
+
+template <typename T>
+bool
+IsVectorDataType(DataType type) {
+    if constexpr (std::is_same_v<T, bool>) {
+        return type == DataType::BOOL;
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+        return type == DataType::INT8;
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+        return type == DataType::INT16;
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+        return type == DataType::INT32;
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+        return type == DataType::INT64 || type == DataType::TIMESTAMPTZ;
+    } else if constexpr (std::is_same_v<T, float>) {
+        return type == DataType::FLOAT;
+    } else if constexpr (std::is_same_v<T, double>) {
+        return type == DataType::DOUBLE;
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        return type == DataType::STRING || type == DataType::VARCHAR ||
+               type == DataType::TEXT || type == DataType::GEOMETRY;
+    } else if constexpr (std::is_same_v<T, Json>) {
+        return type == DataType::JSON;
+    } else {
+        return false;
+    }
+}
+
+/// Read-only logical access to a scalar column, independent of its encoding.
+/// ValueAt requires an in-range, non-null row. Borrowed results remain valid
+/// only while the vector and its backing values remain alive and unchanged.
+template <typename T>
 class SimpleVector : public BaseVector {
  public:
+    using ValueType = T;
+    using TValueAt = VectorValue<T>;
+
     SimpleVector(DataType data_type,
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
         : BaseVector(data_type, length, null_count) {
+        // ValueExpr uses ConstantVector<bool> with NONE for an untyped NULL.
+        AssertInfo(IsVectorDataType<T>(data_type) ||
+                       (std::is_same_v<T, bool> && data_type == DataType::NONE),
+                   "Vector storage type does not match logical type {}",
+                   data_type);
     }
 
-    virtual void*
-    RawValueAt(size_t index, size_t size_of_element) = 0;
+    virtual TValueAt
+    ValueAt(size_t index) const = 0;
 
     virtual bool
-    ValidAt(size_t index) = 0;
+    ValidAt(size_t index) const = 0;
 };
+
+template <typename T>
+using SimpleVectorPtr = std::shared_ptr<SimpleVector<T>>;
 
 /**
  * @brief Single vector for scalar types
  * @todo using memory pool && buffer replace FieldData
  */
-class ColumnVector final : public SimpleVector {
+template <typename T>
+class ColumnVector final : public SimpleVector<T> {
  public:
+    using typename SimpleVector<T>::TValueAt;
+    using BaseVector::length_;
+    using BaseVector::null_count_;
+    using BaseVector::size;
+    using BaseVector::type;
     ColumnVector(DataType data_type,
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
-        : SimpleVector(data_type, length, null_count),
+        : SimpleVector<T>(data_type, length, null_count),
           is_bitmap_(false),
           valid_values_(length,
                         !null_count.has_value() || null_count.value() == 0) {
         values_ = InitScalarFieldData(data_type, false, length);
     }
 
-    //    ColumnVector(FixedVector<bool>&& data)
-    //        : BaseVector(DataType::BOOL, data.size()) {
-    //        values_ =
-    //            std::make_shared<FieldData<bool>>(DataType::BOOL, std::move(data));
-    //    }
-
     // the size is the number of bits
     // TODO: separate the usage of bitmap from scalar field data
     ColumnVector(TargetBitmap&& bitmap, TargetBitmap&& valid_bitmap)
-        : SimpleVector(DataType::INT8, bitmap.size()),
+        : SimpleVector<T>(DataType::INT8, bitmap.size()),
           is_bitmap_(true),
           valid_values_(std::move(valid_bitmap)) {
+        static_assert(std::is_same_v<T, int8_t>,
+                      "Legacy bitmap columns use int8_t storage tags");
         values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
                                                              std::move(bitmap));
     }
@@ -140,8 +191,8 @@ class ColumnVector final : public SimpleVector {
     ColumnVector(FieldDataPtr&& value,
                  TargetBitmap&& valid_bitmap,
                  size_t null_count)
-        : SimpleVector(value ? value->get_data_type() : DataType::NONE,
-                       value ? value->Length() : 0),
+        : SimpleVector<T>(value ? value->get_data_type() : DataType::NONE,
+                          value ? value->Length() : 0),
           is_bitmap_(false),
           valid_values_(std::move(valid_bitmap)) {
         AssertInfo(value, "ColumnVector value cannot be null");
@@ -164,22 +215,31 @@ class ColumnVector final : public SimpleVector {
     }
 
     void*
-    RawValueAt(size_t index, size_t size_of_element) override {
+    RawValueAt(size_t index, size_t size_of_element) const {
         return reinterpret_cast<char*>(GetRawData()) + index * size_of_element;
     }
 
-    template <typename T>
-    T
-    ValueAt(size_t index) const {
+    TValueAt
+    ValueAt(size_t index) const override {
         AssertInfo(index < length_, "ValueAt index out of range");
-        return *(reinterpret_cast<T*>(GetRawData()) + index);
+        if constexpr (std::is_same_v<T, int8_t>) {
+            if (is_bitmap_) {
+                return TargetBitmapView(GetRawData(), length_)[index] ? 1 : 0;
+            }
+        }
+        return reinterpret_cast<const T*>(GetRawData())[index];
     }
 
-    template <typename T>
     void
     SetValueAt(size_t index, const T& value) {
         AssertInfo(index < length_, "SetValueAt index out of range");
-        *(reinterpret_cast<T*>(values_->Data()) + index) = value;
+        if constexpr (std::is_same_v<T, int8_t>) {
+            if (is_bitmap_) {
+                TargetBitmapView(GetRawData(), length_).set(index, value != 0);
+                return;
+            }
+        }
+        reinterpret_cast<T*>(values_->Data())[index] = value;
     }
 
     void
@@ -206,7 +266,7 @@ class ColumnVector final : public SimpleVector {
     }
 
     bool
-    ValidAt(size_t index) override {
+    ValidAt(size_t index) const override {
         return valid_values_[index];
     }
 
@@ -321,7 +381,7 @@ class ColumnVector final : public SimpleVector {
 
     VectorPtr
     cloneEmpty(vector_size_t size) const override {
-        return std::make_shared<ColumnVector>(type(), size, std::nullopt);
+        return std::make_shared<ColumnVector<T>>(type(), size, std::nullopt);
     }
 
     // Check if all rows are definitely TRUE (valid=1, data=1)
@@ -414,27 +474,31 @@ class ColumnVector final : public SimpleVector {
     TargetBitmap valid_values_;  // false means the value is null
 };
 
-using ColumnVectorPtr = std::shared_ptr<ColumnVector>;
+template <typename T>
+using ColumnVectorPtr = std::shared_ptr<ColumnVector<T>>;
 
 template <typename T>
-class ConstantVector : public SimpleVector {
+class ConstantVector : public SimpleVector<T> {
  public:
+    using typename SimpleVector<T>::TValueAt;
+    using BaseVector::type;
     ConstantVector(DataType data_type,
                    size_t length,
                    const T& val,
                    std::optional<size_t> null_count = std::nullopt)
-        : SimpleVector(data_type, length),
+        : SimpleVector<T>(data_type, length),
           val_(val),
           is_null_(null_count.has_value() && null_count.value() > 0) {
     }
 
-    void*
-    RawValueAt(size_t _index, size_t _size_of_element) override {
-        return &val_;
+    TValueAt
+    ValueAt(size_t index) const override {
+        AssertInfo(index < this->size(), "ValueAt index out of range");
+        return val_;
     }
 
     bool
-    ValidAt(size_t _index) override {
+    ValidAt(size_t _index) const override {
         return !is_null_;
     }
 
@@ -450,14 +514,114 @@ class ConstantVector : public SimpleVector {
 
     VectorPtr
     cloneEmpty(vector_size_t size) const override {
-        return std::make_shared<ConstantVector<T>>(
-            type(), size, val_, std::nullopt);
+        return std::make_shared<ConstantVector<T>>(type(), size, val_);
     }
 
  private:
     T val_;
     bool is_null_;
 };
+
+// ColumnVector is final, so exact dynamic-type checking avoids an RTTI hierarchy
+// walk. The name fallback retains the existing shared-library RTTI compatibility.
+// The raw overload borrows the caller's vector without changing its reference count.
+template <typename T>
+ColumnVector<T>*
+AsColumnVector(BaseVector* vector) {
+    AssertInfo(vector != nullptr, "Column vector cannot be null");
+    const auto& actual = typeid(*vector);
+    const auto& expected = typeid(ColumnVector<T>);
+    AssertInfo(actual == expected ||
+                   std::string_view(actual.name()) == expected.name(),
+               "Expected a matching typed ColumnVector");
+    return static_cast<ColumnVector<T>*>(vector);
+}
+
+template <typename T>
+ColumnVectorPtr<T>
+AsColumnVector(const VectorPtr& vector) {
+    return ColumnVectorPtr<T>(vector, AsColumnVector<T>(vector.get()));
+}
+
+template <typename T>
+SimpleVectorPtr<T>
+AsSimpleVector(const VectorPtr& vector) {
+    auto column = std::dynamic_pointer_cast<SimpleVector<T>>(vector);
+    AssertInfo(column != nullptr, "Expected a matching typed SimpleVector");
+    return column;
+}
+
+/// Dispatch once at a batch boundary. Logical aliases (e.g. TIMESTAMPTZ) keep
+/// their original DataType even when they share the same native storage type.
+template <typename Func>
+decltype(auto)
+DispatchVectorType(DataType type, Func&& func) {
+    switch (type) {
+        case DataType::BOOL:
+            return func.template operator()<bool>();
+        case DataType::INT8:
+            return func.template operator()<int8_t>();
+        case DataType::INT16:
+            return func.template operator()<int16_t>();
+        case DataType::INT32:
+            return func.template operator()<int32_t>();
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return func.template operator()<int64_t>();
+        case DataType::FLOAT:
+            return func.template operator()<float>();
+        case DataType::DOUBLE:
+            return func.template operator()<double>();
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::GEOMETRY:
+            return func.template operator()<std::string>();
+        case DataType::JSON:
+            return func.template operator()<Json>();
+        default:
+            ThrowInfo(DataTypeInvalid, "Unsupported column type {}", type);
+    }
+}
+
+template <typename Func>
+decltype(auto)
+VisitColumnVector(BaseVector* vector, Func&& func) {
+    AssertInfo(vector != nullptr, "Column vector cannot be null");
+    return DispatchVectorType(vector->type(),
+                              [&]<typename T>() -> decltype(auto) {
+                                  return func(AsColumnVector<T>(vector));
+                              });
+}
+
+template <typename Func>
+decltype(auto)
+VisitColumnVector(const VectorPtr& vector, Func&& func) {
+    AssertInfo(vector != nullptr, "Column vector cannot be null");
+    return DispatchVectorType(vector->type(),
+                              [&]<typename T>() -> decltype(auto) {
+                                  return func(AsColumnVector<T>(vector));
+                              });
+}
+
+inline VectorPtr
+MakeColumnVector(DataType type,
+                 size_t size,
+                 std::optional<size_t> null_count = std::nullopt) {
+    return DispatchVectorType(type, [&]<typename T>() -> VectorPtr {
+        return std::make_shared<ColumnVector<T>>(type, size, null_count);
+    });
+}
+
+inline VectorPtr
+MakeColumnVector(FieldDataPtr values, TargetBitmap valid, size_t null_count) {
+    AssertInfo(values != nullptr, "Column values cannot be null");
+    return DispatchVectorType(
+        values->get_data_type(), [&]<typename T>() -> VectorPtr {
+            return std::make_shared<ColumnVector<T>>(
+                std::move(values), std::move(valid), null_count);
+        });
+}
 
 /**
  * @brief Multi vectors for scalar types
@@ -470,8 +634,7 @@ class RowVector : public BaseVector {
               std::optional<size_t> null_count = std::nullopt)
         : BaseVector(DataType::ROW, length, null_count) {
         for (auto& type : data_types) {
-            children_values_.emplace_back(
-                std::make_shared<ColumnVector>(type, length));
+            children_values_.emplace_back(MakeColumnVector(type, length));
         }
     }
 
@@ -501,8 +664,7 @@ class RowVector : public BaseVector {
         auto column_count = rowType->column_count();
         for (auto i = 0; i < column_count; i++) {
             auto column_type = rowType->column_type(i);
-            children_values_.emplace_back(
-                std::make_shared<ColumnVector>(column_type, size));
+            children_values_.emplace_back(MakeColumnVector(column_type, size));
         }
     }
 

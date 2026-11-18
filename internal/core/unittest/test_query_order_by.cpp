@@ -206,7 +206,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
                                                                query_context);
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int64_t>
     createInt64FieldDataColumn(const std::vector<int64_t>& data,
                                TargetBitmap&& valid,
                                size_t null_count) {
@@ -214,7 +214,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
         std::copy(data.begin(), data.end(), values.begin());
         auto field_data = std::make_shared<FieldData<int64_t>>(
             DataType::INT64, false, std::move(values));
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int64_t>>(
             std::move(field_data), std::move(valid), null_count);
     }
 
@@ -296,18 +296,18 @@ TEST_P(QueryOrderByTest, ProjectNodeSegmentOffsetColumnAppendsAfterProjection) {
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), num_rows_);
 
-    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    auto col = AsColumnVector<int64_t>(output->child(0));
     ASSERT_NE(col, nullptr);
     ASSERT_EQ(col->size(), num_rows_);
     for (int64_t i = 0; i < num_rows_; ++i) {
-        EXPECT_EQ(col->ValueAt<int64_t>(i), i);
+        EXPECT_EQ(col->ValueAt(i), i);
     }
 
     auto other =
         createInt64FieldDataColumn({num_rows_}, TargetBitmap(1, true), 0);
     ASSERT_NO_THROW(col->append(*other));
     EXPECT_EQ(col->size(), num_rows_ + 1);
-    EXPECT_EQ(col->ValueAt<int64_t>(num_rows_), num_rows_);
+    EXPECT_EQ(col->ValueAt(num_rows_), num_rows_);
 }
 
 TEST_P(QueryOrderByTest,
@@ -318,7 +318,7 @@ TEST_P(QueryOrderByTest,
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), num_rows_);
 
-    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    auto col = AsColumnVector<int64_t>(output->child(0));
     ASSERT_NE(col, nullptr);
     ASSERT_EQ(col->size(), num_rows_);
     ASSERT_EQ(col->nullCount(), num_rows_);

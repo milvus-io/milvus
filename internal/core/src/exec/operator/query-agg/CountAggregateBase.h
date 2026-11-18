@@ -52,30 +52,29 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                 int numGroups,
                 const std::vector<VectorPtr>& input) override {
         if (!input.empty()) {
-            ColumnVectorPtr input_column = nullptr;
             AssertInfo(input.size() == 1,
                        fmt::format("input column count for count aggregation "
                                    "must be one , but got:{}",
                                    input.size()));
-            input_column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
-            AssertInfo(input_column != nullptr,
-                       "input[0] must be ColumnVector for count aggregation");
-            if (input_column->nullCount() == 0) {
-                for (auto i = 0; i < input_column->size(); i++) {
-                    addToGroup(groups[i], 1);
-                }
-            } else {
-                // Safe: GetValidRawData() returns CustomBitset::data(), which
-                // exposes storage as uint64_t* per the project-wide bitset
-                // API contract (Bitset::data_impl, CustomBitset.h).
-                const uint64_t* validity = reinterpret_cast<const uint64_t*>(
-                    input_column->GetValidRawData());
-                for (auto i = 0; i < input_column->size(); i++) {
-                    if (validity[i >> 6] & (uint64_t(1) << (i & 63))) {
+            VisitColumnVector(input[0], [&](const auto& input_column) {
+                if (input_column->nullCount() == 0) {
+                    for (auto i = 0; i < input_column->size(); i++) {
                         addToGroup(groups[i], 1);
                     }
+                } else {
+                    // Safe: GetValidRawData() returns CustomBitset::data(), which
+                    // exposes storage as uint64_t* per the project-wide bitset
+                    // API contract (Bitset::data_impl, CustomBitset.h).
+                    const uint64_t* validity =
+                        reinterpret_cast<const uint64_t*>(
+                            input_column->GetValidRawData());
+                    for (auto i = 0; i < input_column->size(); i++) {
+                        if (validity[i >> 6] & (uint64_t(1) << (i & 63))) {
+                            addToGroup(groups[i], 1);
+                        }
+                    }
                 }
-            }
+            });
             return;
         }
         for (auto i = 0; i < numGroups; i++) {
@@ -96,17 +95,16 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                    fmt::format("input column count for count aggregation "
                                "must be exactly one for now, but got:{}",
                                input.size()));
-        const auto& column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
-        AssertInfo(column != nullptr,
-                   "input[0] must be ColumnVector for count aggregation");
-        if (column->IsBitmap()) {
-            BitsetTypeView view(column->GetRawData(), column->size());
-            addToGroup(group, view.size() - view.count());
-        } else {
-            addToGroup(
-                group,
-                column->size() - static_cast<int64_t>(column->nullCount()));
-        }
+        VisitColumnVector(input[0], [&](const auto& column) {
+            if (column->IsBitmap()) {
+                BitsetTypeView view(column->GetRawData(), column->size());
+                addToGroup(group, view.size() - view.count());
+            } else {
+                addToGroup(
+                    group,
+                    column->size() - static_cast<int64_t>(column->nullCount()));
+            }
+        });
     }
 
     void

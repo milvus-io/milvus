@@ -672,8 +672,8 @@ TEST_P(SegmentChunkReaderStringTest,
             VectorPtr compared, selected;
             compare.Eval(context, compared);
             column_expr.Eval(context, selected);
-            auto matches = std::dynamic_pointer_cast<ColumnVector>(compared);
-            auto values = std::dynamic_pointer_cast<ColumnVector>(selected);
+            auto matches = AsColumnVector<int8_t>(compared);
+            auto values = AsColumnVector<std::string>(selected);
             ASSERT_NE(matches, nullptr);
             ASSERT_NE(values, nullptr);
             const auto count =

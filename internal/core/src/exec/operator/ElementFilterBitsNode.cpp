@@ -114,7 +114,7 @@ PhyElementFilterBitsNode::GetOutput() {
         TargetBitmap bitset(query_context_->get_active_count(), true);
         TargetBitmap valid_bitset(query_context_->get_active_count(), true);
         std::vector<VectorPtr> col_res;
-        col_res.push_back(std::make_shared<ColumnVector>(
+        col_res.push_back(std::make_shared<ColumnVector<int8_t>>(
             std::move(bitset), std::move(valid_bitset)));
         return std::make_shared<RowVector>(std::move(col_res));
     }
@@ -155,7 +155,7 @@ PhyElementFilterBitsNode::GetOutput() {
         total_cost));
 
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(
+    col_res.push_back(std::make_shared<ColumnVector<int8_t>>(
         std::move(expr_result), std::move(valid_expr_result)));
     return std::make_shared<RowVector>(std::move(col_res));
 }
@@ -217,10 +217,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                    "ElementFilterBitsNode: expression evaluation should return "
                    "exactly one result");
 
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
         if (!col_vec) {
-            ThrowInfo(UnexpectedError,
-                      "ElementFilterBitsNode result should be ColumnVector");
+            ThrowInfo(
+                UnexpectedError,
+                "ElementFilterBitsNode result should be ColumnVector<int8_t>");
         }
         if (!col_vec->IsBitmap()) {
             ThrowInfo(UnexpectedError,
@@ -296,11 +298,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                        "should return "
                        "exactly one result");
 
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            auto col_vec =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
             if (!col_vec) {
-                ThrowInfo(
-                    UnexpectedError,
-                    "ElementFilterBitsNode result should be ColumnVector");
+                ThrowInfo(UnexpectedError,
+                          "ElementFilterBitsNode result should be "
+                          "ColumnVector<int8_t>");
             }
             if (!col_vec->IsBitmap()) {
                 ThrowInfo(UnexpectedError,

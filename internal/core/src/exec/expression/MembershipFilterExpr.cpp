@@ -138,22 +138,23 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
                bitmap_input.size(),
                real_batch_size);
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [ this, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res) {
+    auto execute_sub_batch = [this,
+                              &processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const T* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res) {
         // A null data pointer means evaluation was suppressed because the
         // payload was skipped, the candidate was inactive, or an index
         // reverse-lookup miss already applied its invalid result. Ordinary
@@ -228,9 +229,9 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
     }
     auto real_batch_size = *next_batch_size;
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -334,24 +335,25 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
     }
     auto real_batch_size = *next_batch_size;
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [ this, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer) {
+    auto execute_sub_batch = [this,
+                              &processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer) {
         // A null data pointer means evaluation was suppressed because the
         // payload was skipped or the candidate was inactive. Ordinary
         // nullable Scan/Take rows carry a placeholder plus real validity.
