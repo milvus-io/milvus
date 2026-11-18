@@ -74,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -312,6 +313,14 @@ func (node *QueryNode) registerMetricsRequest() {
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SystemInfoMetrics,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return getSystemInfoMetrics(ctx, req, node)
+		})
+
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.NodeMemoryMetrics,
+		func(context.Context, *milvuspb.GetMetricsRequest, gjson.Result) (string, error) {
+			return metricsinfo.MarshalComponentInfos(metricsinfo.NodeMemory{
+				Memory:      hardware.GetMemoryCount(),
+				MemoryUsage: hardware.GetUsedMemoryCount(),
+			})
 		})
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,

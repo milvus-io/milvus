@@ -35,6 +35,9 @@ const (
 	// SystemInfoMetrics means users request for system information metrics.
 	SystemInfoMetrics = "system_info"
 
+	// NodeMemoryMetrics requests only the node's total and used memory.
+	NodeMemoryMetrics = "node_memory"
+
 	// CollectionStorageMetrics means users request for collection storage metrics.
 	CollectionStorageMetrics = "collection_storage"
 

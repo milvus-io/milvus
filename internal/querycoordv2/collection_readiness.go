@@ -88,7 +88,7 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 			return context.Cause(ctx)
 		}
 		if r.Err == nil {
-			// A long load gets a fresh idle TTL immediately before query execution.
+			// A long load gets a fresh TTI interval immediately before query execution.
 			s.collectionUsage.touch(collectionID)
 		}
 		return r.Err
