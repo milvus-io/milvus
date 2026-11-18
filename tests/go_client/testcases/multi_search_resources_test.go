@@ -176,7 +176,9 @@ func TestMultiSearchProxyRetainedHeap(t *testing.T) {
 	measure := func(completed int) (int64, int64) {
 		blocked := proto.CloneOf(request)
 		blocked.UseDefaultConsistency = false
-		blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+		// Session preserves an explicit guarantee timestamp even when the
+		// QueryNode can use a local WAL to accelerate strong reads.
+		blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
 		blocked.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
 		requests := make([]*milvuspb.SearchRequest, completed+1)
 		for i := range completed {
@@ -252,7 +254,7 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 		WithANNSField("vector").Request()
 	require.NoError(t, err)
 	search.UseDefaultConsistency = false
-	search.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+	search.ConsistencyLevel = commonpb.ConsistencyLevel_Session
 	search.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
 	const workers, waiting, submitted = 8, 64, 80
 	budget := int64(15000)

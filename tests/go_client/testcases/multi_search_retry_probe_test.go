@@ -212,7 +212,7 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 			require.NoError(t, requestErr)
 			blocked := proto.CloneOf(request)
 			blocked.UseDefaultConsistency = false
-			blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+			blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
 			blocked.GuaranteeTimestamp = tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Minute))
 			service := mc.GetService()
 			blockedCtx, release := context.WithCancel(ctx)
