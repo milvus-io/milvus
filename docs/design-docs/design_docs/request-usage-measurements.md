@@ -32,7 +32,7 @@ Proxy classifies a PK equality or membership predicate from the user plan. A fil
 
 ## Collection size
 
-Set `queryView.publishCollectionSize` on the coordinator to sample logical bytes when preparing each new QueryView. The default is false. With sampling enabled, DataCoord supplies the aggregate from resident metadata in the same process as QueryCoord. A sampler failure leaves the existing view in service and the new preparation can retry. The sampled value is persisted with the view. A coordinator restart restores the stored value.
+Set `queryView.publishCollectionSize` on the coordinator to sample logical bytes when preparing each new QueryView. The default is false. At startup, QueryCoord installs DataCoord's collection size reader in the shard registry when sampling is enabled. Each new view pins its DataView before reading the aggregate from local metadata. A sampler failure leaves the existing view in service and the new preparation can retry. The sampled value is persisted with the view. A coordinator restart restores the stored value.
 
 The source starts with the collection ID index across all live partitions, including collection-wide L0 delete logs. It adds insert, stats and delta bytes from healthy, visible segments, text and JSON-key index files and the serialized bytes of current finished field indexes. It excludes dropped partitions, retired builds, importing or fake segments and empty compaction outputs. Unflushed writes contribute as their byte metadata becomes available. A known empty collection has an explicit zero.
 

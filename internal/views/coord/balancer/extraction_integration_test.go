@@ -112,7 +112,7 @@ func TestCoordinatorComponentsSixQNAndTwoSN(t *testing.T) {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, &stubSyncer{}, refs)
+	registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, &stubSyncer{}, coordview.ShardViewSources{DataViews: refs})
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
 	cache := balancercache.New(nil)

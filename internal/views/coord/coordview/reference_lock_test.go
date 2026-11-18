@@ -39,7 +39,7 @@ func TestAddPreparingDoesNotHoldManagerLockDuringDataViewMutation(t *testing.T) 
 		return dataViews.Get(ctx, collectionID, version)
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, stubDataViewRefProvider{})
+	manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, manager.AddPreparing(t.Context(), testBuilder(1, 0, 1)))
 	_, _, abort, err := dataViews.PrepareFlush(t.Context(), dataview.FlushDataViewEvent{
 		CollectionID: testCollectionID,
@@ -103,7 +103,7 @@ func TestAddPreparingRevalidatesAfterReferenceAcquisition(t *testing.T) {
 			t.Cleanup(func() { getPatch.UnPatch() })
 			derefPatch := mockey.Mock((stubDataViewRef).Deref).To(func(stubDataViewRef) { derefs.Add(1) }).Build()
 			t.Cleanup(func() { derefPatch.UnPatch() })
-			manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, stubDataViewRefProvider{})
+			manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 			var workers sync.WaitGroup
 			defer func() {
 				release()

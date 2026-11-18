@@ -49,7 +49,7 @@ func emptyRegistry(t *testing.T, syncCallbacks ...func(context.Context, syncer.S
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	reg, err := coordview.RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &stubSyncer{}, refs)
+	reg, err := coordview.RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &stubSyncer{}, coordview.ShardViewSources{DataViews: refs})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	return reg

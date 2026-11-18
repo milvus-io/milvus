@@ -258,10 +258,9 @@ func TestQueryViewCollectionSizeBytes(t *testing.T) {
 	svr.stateCode.Store(commonpb.StateCode_Healthy)
 	const collectionID int64 = 9020
 	store.PutCollection(&meta.CollectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}, Partitions: []int64{1, 2}})
-	provider := collectionSizeDataViews{server: svr}
 	check := func(want int64) {
 		t.Helper()
-		got, err := provider.CollectionSizeBytes(t.Context(), collectionID)
+		got, err := svr.CollectionSizeBytes(t.Context(), collectionID)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}
@@ -298,7 +297,7 @@ func TestQueryViewCollectionSizeBytes(t *testing.T) {
 	}
 	svr.meta.Segments.SetSegment(l0.ID, meta.NewSegmentInfo(l0))
 	check(41)
-	_, err := provider.CollectionSizeBytes(t.Context(), collectionID+1)
+	_, err := svr.CollectionSizeBytes(t.Context(), collectionID+1)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 }
 

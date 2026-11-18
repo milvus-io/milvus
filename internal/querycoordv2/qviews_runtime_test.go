@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -113,6 +115,45 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	runtime.stop()
 	runtime.stop()
 	require.Equal(t, 4, detached)
+}
+
+func TestQueryViewCollectionSizePublication(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			flag := &paramtable.Get().QueryViewCfg.PublishCollectionSize
+			old := flag.SwapTempValue(strconv.FormatBool(enabled))
+			t.Cleanup(func() { flag.SwapTempValue(old) })
+
+			const id int64 = 100
+			ctx := t.Context()
+			reads := 0
+			runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
+				loadConfigDependencies: loadmgrtest.Dependencies(t),
+				queryViewCatalog:       &fakeQueryViewCatalog{},
+				viewSyncClient:         &fakeRuntimeViewSyncClient{},
+				queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+				resourceGroupManager:   &fakeRuntimeResourceGroupManager{},
+				dataViewProvider:       newRuntimeDataViewProvider(t),
+				readCollectionSize: func(_ context.Context, collectionID int64) (int64, error) {
+					require.Equal(t, id, collectionID)
+					reads++
+					return 42, nil
+				},
+			})
+			require.NoError(t, err)
+			t.Cleanup(runtime.stop)
+			require.NoError(t, runtime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{CollectionID: id}))
+			version := runtime.loadConfigStore.Snapshot().ConfigsMap()[id].Version
+			shard := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
+			builder := qviews.NewQueryViewAtCoordBuilderFromView(testPersistedQueryView(id, shard)).SetLoadInfoVersion(version)
+			require.NoError(t, runtime.shardViewRegistry.Ensure(shard).AddPreparing(ctx, builder))
+			if enabled {
+				require.Equal(t, 1, reads)
+			} else {
+				require.Zero(t, reads)
+			}
+		})
+	}
 }
 
 func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {

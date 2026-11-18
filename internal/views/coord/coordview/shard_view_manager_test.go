@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -294,7 +295,7 @@ func newTestManager(t *testing.T, catalog *mockCatalog, s *mockSyncer, recovered
 	t.Helper()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
 	manager := &testShardViewManager{
-		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered, stubDataViewRefProvider{}),
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered, ShardViewSources{DataViews: stubDataViewRefProvider{}}),
 		t:                t,
 		scheduler:        scheduler,
 	}
@@ -309,7 +310,7 @@ func newTestManagerWithReferences(t *testing.T, catalog *mockCatalog, s *mockSyn
 	t.Helper()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
 	manager := &testShardViewManager{
-		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, nil, refs),
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, nil, ShardViewSources{DataViews: refs}),
 		t:                t,
 		scheduler:        scheduler,
 	}
@@ -366,33 +367,60 @@ func TestShardViewManagerPinsBeforePersist(t *testing.T) {
 
 	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	require.Equal(t, []string{"pin", "persist"}, events)
-}
-
-type measuredDataViews struct {
-	stubDataViewRefProvider
-	size int64
-	err  error
-}
-
-func (p *measuredDataViews) CollectionSizeBytes(context.Context, int64) (int64, error) {
-	return p.size, p.err
+	require.Nil(t, catalog.saved[0].GetMeta().CollectionSizeBytes)
 }
 
 func TestCollectionSizeSampleFollowsQueryView(t *testing.T) {
+	ctx := t.Context()
+	size := int64(1200)
+	var readErr error
+	reads := 0
+	sources := ShardViewSources{
+		DataViews: stubDataViewRefProvider{},
+		ReadCollectionSize: func(_ context.Context, id int64) (int64, error) {
+			require.EqualValues(t, testCollectionID, id)
+			reads++
+			return size, readErr
+		},
+	}
 	catalog := newMockCatalog()
-	provider := &measuredDataViews{size: 1200}
-	mgr := newTestManagerWithReferences(t, catalog, newMockSyncer(), provider)
-	require.NoError(t, mgr.AddPreparing(t.Context(), testBuilder(1, 1, 1)))
-	first := catalog.saved[0].GetMeta()
-	require.EqualValues(t, 1200, *first.CollectionSizeBytes)
-
-	provider.size, provider.err = 0, merr.ErrServiceNotReady
-	require.ErrorIs(t, mgr.AddPreparing(t.Context(), testBuilder(2, 1, 1)), merr.ErrServiceNotReady)
+	registry, err := RecoverShardViewRegistryWithDataViews(ctx, catalog, newMockSyncer(), sources)
+	require.NoError(t, err)
+	defer registry.Close()
+	manager := registry.Ensure(testShardID)
+	require.NoError(t, manager.AddPreparing(ctx, testBuilder(1, 1, 1)))
+	require.NoError(t, registry.flushScheduler.Flush(ctx))
 	require.Len(t, catalog.saved, 1)
-	provider.err = nil
-	require.NoError(t, mgr.AddPreparing(t.Context(), testBuilder(2, 1, 1)))
-	require.EqualValues(t, 1200, *first.CollectionSizeBytes)
-	for _, view := range catalog.saved {
+	first := catalog.saved[0]
+	require.EqualValues(t, 1200, first.GetMeta().GetCollectionSizeBytes())
+
+	// A restarted coordinator must retain the saved value even if DataCoord is unavailable.
+	size, readErr = 0, merr.ErrServiceNotReady
+	recoveredCatalog := &mockCatalog{listed: []*viewpb.QueryViewOfShard{first}}
+	restored, err := RecoverShardViewRegistryWithDataViews(ctx, recoveredCatalog, newMockSyncer(), sources)
+	require.NoError(t, err)
+	defer restored.Close()
+	require.Equal(t, 1, reads)
+	recovered := restored.Get(testShardID)
+	require.NotNil(t, recovered)
+	previousSaves := recoveredCatalog.numSaveCalls()
+	var derefs atomic.Int32
+	patch := mockey.Mock((stubDataViewRef).Deref).To(func(stubDataViewRef) { derefs.Add(1) }).Build()
+	defer patch.UnPatch()
+	require.ErrorIs(t, recovered.AddPreparing(ctx, testBuilder(2, 1, 1)), merr.ErrServiceNotReady)
+	require.EqualValues(t, 1, derefs.Load())
+	require.Equal(t, previousSaves, recoveredCatalog.numSaveCalls())
+	require.Equal(t, 2, reads)
+	recovered.mu.Lock()
+	storedSize := recovered.latestViewLocked().View().GetMeta().GetCollectionSizeBytes()
+	recovered.mu.Unlock()
+	require.EqualValues(t, 1200, storedSize)
+
+	readErr = nil
+	require.NoError(t, recovered.AddPreparing(ctx, testBuilder(2, 1, 1)))
+	require.NoError(t, restored.flushScheduler.Flush(ctx))
+	require.Equal(t, 3, reads)
+	for _, view := range recoveredCatalog.saved {
 		if view.GetMeta().GetVersion().GetDataVersion().GetStreamingVersion() == 2 {
 			require.NotNil(t, view.Meta.CollectionSizeBytes)
 			require.Zero(t, *view.Meta.CollectionSizeBytes)
@@ -471,7 +499,7 @@ func TestShardViewManagerUnpinsOnlyAfterDroppedPersist(t *testing.T) {
 	recoveryCatalog := newMockCatalog()
 	recoverySyncer := newMockSyncer()
 	recoveryScheduler := newTestDirtyViewFlushScheduler(t, recoveryCatalog, recoverySyncer, 128)
-	recoveredManager, err := RecoverShardViewManager(context.Background(), testShardID, recoveryScheduler, stubDataViewRefProvider{}, []*viewpb.QueryViewOfShard{recovered})
+	recoveredManager, err := RecoverShardViewManager(context.Background(), testShardID, recoveryScheduler, ShardViewSources{DataViews: stubDataViewRefProvider{}}, []*viewpb.QueryViewOfShard{recovered})
 	require.NoError(t, err)
 	recoveredTestManager := &testShardViewManager{
 		ShardViewManager: recoveredManager,

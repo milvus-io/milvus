@@ -47,7 +47,7 @@ func TestLoadInfoRegistryRecoveryAndRelease(t *testing.T) {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, stubDataViewRefProvider{}, store)
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, ShardViewSources{DataViews: stubDataViewRefProvider{}, LoadInfo: store})
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
 	store.EnableGC()
@@ -104,7 +104,7 @@ func TestLoadInfoFailedRecoveryRollsBackReferences(t *testing.T) {
 	defer list.UnPatch()
 	transport := mockey.Mock((*mockSyncer).SyncViews).Return(nil).Build()
 	defer transport.UnPatch()
-	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, stubDataViewRefProvider{}, store)
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, ShardViewSources{DataViews: stubDataViewRefProvider{}, LoadInfo: store})
 	require.Error(t, err, "missing history must abort, never substitute the latest version")
 	require.Nil(t, registry)
 	require.Zero(t, transport.Times(), "partial recovery must not publish views")

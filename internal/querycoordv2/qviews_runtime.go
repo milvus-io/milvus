@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -88,6 +89,7 @@ type qviewsRuntimeDependencies struct {
 	queryNodeClient      nodeview.QueryNodeStatePublisher
 	resourceGroupManager nodeview.ResourceGroupStatePublisher
 	dataViewProvider     balancer.DataViewProvider
+	readCollectionSize   coordview.CollectionSizeReader
 
 	queryNodeManager            qnmanager.ManagerClient
 	streamingCoordClient        streamingcoordclient.Client
@@ -143,7 +145,11 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 	feedback := viewfeedback.New(loadConfigStore, deps.dataViewProvider)
 	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, feedback, deps.pchannels)
-	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
+	sources := coordview.ShardViewSources{DataViews: deps.dataViewProvider, LoadInfo: loadConfigStore}
+	if paramtable.Get().QueryViewCfg.PublishCollectionSize.GetAsBool() {
+		sources.ReadCollectionSize = deps.readCollectionSize
+	}
+	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, sources)
 	if err != nil {
 		nodePublisher.Close()
 		_ = reliableSyncer.Close()

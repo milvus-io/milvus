@@ -51,7 +51,7 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	t.Cleanup(func() { list.UnPatch() })
 	save := mockey.Mock(mockey.GetMethod(catalog, "SaveQueryViews")).Return(nil).Build()
 	t.Cleanup(func() { save.UnPatch() })
-	registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, &stubSyncer{}, m)
+	registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, &stubSyncer{}, coordview.ShardViewSources{DataViews: m})
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))

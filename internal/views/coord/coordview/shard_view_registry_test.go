@@ -41,7 +41,7 @@ func (*immediateLostRecoverySyncer) Close() error { return nil }
 // an empty catalog.
 func newTestRegistry(t *testing.T, catalog *mockCatalog, s *mockSyncer) *ShardViewRegistry {
 	t.Helper()
-	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	return reg
@@ -166,7 +166,7 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	removals := 0
 	stop := reg.RegisterShardRemovalListener(100, func() { removals++ })
 	defer stop()
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, stubDataViewRefProvider{})
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
 	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
 
@@ -183,7 +183,7 @@ func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	oldManager := reg.Ensure(shardID)
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, stubDataViewRefProvider{})
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
 	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
 
@@ -229,7 +229,7 @@ func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	// we need to populate the listed views manually.
 	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
 
-	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 
@@ -263,7 +263,7 @@ func TestRegistry_RecoveryPublishesImmediateQueryNodeLoss(t *testing.T) {
 	catalog.listed = []*viewpb.QueryViewOfShard{view}
 	s := &immediateLostRecoverySyncer{}
 
-	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	require.Equal(t, int64(1), s.lostCallbacks.Load())
@@ -538,7 +538,7 @@ func TestRecoverShardViewRegistryRebuildsReferences(t *testing.T) {
 	}).Build()
 	defer mockey.UnPatchAll()
 
-	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
+	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, acquired)
 }
@@ -559,7 +559,7 @@ func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
 	defer mockey.UnPatchAll()
 
 	s := newMockSyncer()
-	registry, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
+	registry, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	manager := registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta()))
 	require.NotNil(t, manager)
@@ -599,7 +599,7 @@ func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
 	mockey.Mock(stubDataViewRef.Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
 	defer mockey.UnPatchAll()
 
-	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
+	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.EqualError(t, err, "recover failed")
 	require.Equal(t, 2, acquisitions)
 	require.Equal(t, 1, derefs)

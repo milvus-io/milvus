@@ -30,7 +30,7 @@ func TestLoadInfoReferenceUntilDurableRemoval(t *testing.T) {
 	defer patch.UnPatch()
 	catalog, transport := newMockCatalog(), newMockSyncer()
 	registry := newTestRegistry(t, catalog, transport)
-	registry.loadInfoRefs = &stubLoadInfoRefs{}
+	registry.sources.LoadInfo = &stubLoadInfoRefs{}
 	manager := registry.Ensure(testShardID)
 	builder := testBuilder(1, 1, 1).SetLoadInfoVersion(55)
 	require.NoError(t, manager.AddPreparing(t.Context(), builder))
@@ -71,7 +71,7 @@ func TestLoadInfoReferenceRollbackAfterReleaseDuringAcquire(t *testing.T) {
 		return sync.OnceFunc(func() { refs.Add(-1) }), nil
 	}).Build()
 	defer patch.UnPatch()
-	manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, nil, &stubLoadInfoRefs{})
+	manager := newShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, nil, ShardViewSources{LoadInfo: &stubLoadInfoRefs{}})
 	done := make(chan error, 1)
 	go func() { done <- manager.AddPreparing(t.Context(), testBuilder(1, 1, 1).SetLoadInfoVersion(55)) }()
 	awaitReferenceOperation(t, started)
@@ -95,7 +95,7 @@ func TestLoadInfoReferenceRecoveredBeforeNodeSync(t *testing.T) {
 	registry.Close()
 	view := testBuilder(1, 1, 1).SetLoadInfoVersion(55).Build()
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
-	manager, err := RecoverShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, stubDataViewRefProvider{}, []*viewpb.QueryViewOfShard{view}, &stubLoadInfoRefs{})
+	manager, err := RecoverShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, ShardViewSources{DataViews: stubDataViewRefProvider{}, LoadInfo: &stubLoadInfoRefs{}}, []*viewpb.QueryViewOfShard{view})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, refs.Load(), "Unrecoverable is still a live metadata owner")
 	manager.abortRecovery()

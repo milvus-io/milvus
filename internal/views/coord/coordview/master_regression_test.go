@@ -73,7 +73,7 @@ func TestRegistryRecoveryRetainsValidFailedViewUntilReplacement(t *testing.T) {
 	old := buildTestViewWithVersion(1, 1, 1, 1)
 	old.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
 	catalog.listed = []*viewpb.QueryViewOfShard{old}
-	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, syncer, stubDataViewRefProvider{})
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, syncer, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	defer registry.Close()
 	manager := registry.Get(qviews.NewShardIDFromQVMeta(old.Meta))
@@ -96,7 +96,7 @@ func TestRecoveryAbortSerializesWithLateSyncCallbacks(t *testing.T) {
 	patch := mockey.Mock((stubDataViewRef).Deref).To(func(stubDataViewRef) { derefs.Add(1) }).Build()
 	defer patch.UnPatch()
 	submitter := &capturedDirtyViewEventSubmitter{}
-	manager := newShardViewManager(t.Context(), testShardID, submitter, nil, stubDataViewRefProvider{})
+	manager := newShardViewManager(t.Context(), testShardID, submitter, nil, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, manager.AddPreparing(t.Context(), testBuilder(1, 1, 1)))
 	view := buildTestViewWithVersion(1, 1, 1, 1)
 	callback := manager.makeOnSyncResponse(testVersion(1, 1, 1), qnReport(view, 1, qviews.QueryViewStatePreparing))
@@ -126,7 +126,7 @@ func TestOriginalRegistryAPIAndExplicitDataViewProvider(t *testing.T) {
 	require.NoError(t, registry.Ensure(testShardID).AddPreparing(t.Context(), testBuilder(1, 1, 1)))
 	require.NoError(t, registry.flushScheduler.Flush(t.Context()))
 	require.Equal(t, 1, catalog.numSaveCalls())
-	_, err = RecoverShardViewRegistryWithDataViews(t.Context(), catalog, syncer, nil)
+	_, err = RecoverShardViewRegistryWithDataViews(t.Context(), catalog, syncer, ShardViewSources{})
 	require.Error(t, err)
 }
 
@@ -151,7 +151,7 @@ func TestRecoveryCancellationStopsFlushBeforeReleasingReferences(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := RecoverShardViewRegistryWithDataViews(ctx, catalog, newMockSyncer(), stubDataViewRefProvider{})
+		_, err := RecoverShardViewRegistryWithDataViews(ctx, catalog, newMockSyncer(), ShardViewSources{DataViews: stubDataViewRefProvider{}})
 		done <- err
 	}()
 	select {
@@ -259,7 +259,7 @@ func TestRegistryRecoversAfterPartialChunkedHandoff(t *testing.T) {
 
 	// Recover through the real registry, then let workers report completion.
 	afterSyncer := newMockSyncer()
-	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, afterSyncer, stubDataViewRefProvider{})
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, afterSyncer, ShardViewSources{DataViews: stubDataViewRefProvider{}})
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
 	manager := registry.Get(testShardID)
