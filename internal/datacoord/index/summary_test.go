@@ -276,7 +276,8 @@ func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {
 		ManifestPath: packed.MarshalManifestPath(base, 2), HasIndexes: proto.Bool(false),
 	}, nil).Build()
 	defer commit.UnPatch()
-	require.NoError(t, mt.CommitSegmentManifest(t.Context(), meta.SegmentManifestCommit{SegmentID: 3,
+	require.NoError(t, mt.CommitSegmentManifest(t.Context(), meta.SegmentManifestCommit{
+		SegmentID: 3,
 		Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{Path: "data.parquet", StartIndex: 0, EndIndex: 10}}}},
 		}},
@@ -307,10 +308,14 @@ func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) 
 				},
 			})
 			for _, record := range []*model.SegmentIndex{
-				{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20,
-					IndexState: commonpb.IndexState_Retry, IsDeleted: true, IndexFileKeys: []string{"task-file"}},
-				{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 11, BuildID: 21,
-					IndexState: commonpb.IndexState_Finished, IsDeleted: true, IndexFileKeys: []string{"finished-file"}},
+				{
+					SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20,
+					IndexState: commonpb.IndexState_Retry, IsDeleted: true, IndexFileKeys: []string{"task-file"},
+				},
+				{
+					SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 11, BuildID: 21,
+					IndexState: commonpb.IndexState_Finished, IsDeleted: true, IndexFileKeys: []string{"finished-file"},
+				},
 			} {
 				require.NoError(t, dm.IndexMeta.AddSegmentIndex(t.Context(), record))
 			}

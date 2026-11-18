@@ -96,6 +96,7 @@ func TestIndexMetadataModeReconcilesFailedConditionalWrite(t *testing.T) {
 		})
 	}
 }
+
 func TestIndexMetadataModeRejectsExistingCluster(t *testing.T) {
 	for _, collections := range []bool{false, true} {
 		k := &indexModeTestKV{occupied: !collections}

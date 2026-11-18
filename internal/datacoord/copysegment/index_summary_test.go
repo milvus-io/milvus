@@ -46,9 +46,11 @@ func TestSummaryCopyPublishesInventoryWithoutBuildRecords(t *testing.T) {
 	result.IndexInfos[9001].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	require.NoError(t, im.CreateIndex(t.Context(), &model.Index{CollectionID: 100, IndexID: 200, FieldID: 102, IndexName: "scalar_idx"}))
 	result.IndexInfos[9002] = &datapb.VectorScalarIndexInfo{IndexId: 200, BuildId: 9002, FieldId: 102, IndexName: "scalar_idx"}
-	entry := packed.ManifestIndexInfo{IndexID: 300, FieldID: 101, BuildID: 9001, IndexVersion: 4, IndexName: "vec_idx", IndexType: "HNSW",
+	entry := packed.ManifestIndexInfo{
+		IndexID: 300, FieldID: 101, BuildID: 9001, IndexVersion: 4, IndexName: "vec_idx", IndexType: "HNSW",
 		Path: "files/insert_log/100/10/2001/_index/9001/4", IndexFileKeys: []string{"index.bin"},
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
 	meta.MockManifestIndexSubmissions(t)
 	read := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
 	defer read.UnPatch()
