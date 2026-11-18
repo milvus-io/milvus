@@ -134,6 +134,11 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 	}
 
 	var lastErr error
+	// overloadErr is the refusal of an overloaded replica, when one of the
+	// attempts met one. The round reports it rather than what another attempt
+	// failed with: the retry loop ends the request on it once no replica is
+	// left.
+	var overloadErr error
 	for {
 		select {
 		case <-ctx.Done():
@@ -187,8 +192,14 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 			}
 			excludeNodes.Insert(r.node)
 			lastErr = errors.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
+			if isOverloadErr(r.err) {
+				overloadErr = lastErr
+			}
 			if pending == 0 {
 				settle(false)
+				if overloadErr != nil {
+					return true, overloadErr
+				}
 				return true, lastErr
 			}
 		}

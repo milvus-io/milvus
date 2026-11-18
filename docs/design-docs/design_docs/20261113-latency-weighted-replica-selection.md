@@ -107,6 +107,7 @@ How an attempt is recorded (`attempt_outcome.go`):
 | success, or `ErrAttemptSuperseded` (it succeeded after the other attempt had published) | its elapsed time, into the mean; resets the failures in a row |
 | input error (`merr.InputError`) | nothing: the request is at fault |
 | context canceled (the caller stopped waiting, or the request returned with another attempt's result) | nothing |
+| refused as overloaded (`ErrServiceTooManyRequests`, see Overload) | nothing: the replica has more work than it gets done, it is not failing |
 | any other error, a timeout of the request included | a failure |
 | still running when a hedge on another replica succeeded | a failure |
 
@@ -178,6 +179,61 @@ With the policy on, a failed attempt is retried on the next replica after
 10ms instead of the default backoff: the failed replica is excluded for the
 request, there is nothing to wait for.
 
+## Overload
+
+The three rules route around a replica that is slow or down. They do nothing
+for a request that already waits in a QueryNode read queue, and under load
+above what the replicas get done every request waits there: the queue is
+limited by task count (`queryNode.scheduler.unsolvedQueueSize`, 1024), which
+says nothing about time, so the whole excess becomes queue time and every
+request gets slow instead of some failing fast. Four changes bound the
+latency of the requests that are answered and make the others fail fast.
+
+**QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
+(default `0`, off) limits how long a read task may wait in the queue:
+
+```
+limit = min(maxQueueWait, maxQueueWaitRatio * time left until the deadline)
+```
+
+`queryNode.scheduler.maxQueueWait` defaults to `1s` and is also the limit of a
+task without a deadline; the intended ratio is `0.1`. The scheduler keeps the
+decayed mean time between two tasks leaving the queue for a worker while
+tasks are waiting. A new task is expected to wait that long for each task
+ahead of it; when that is more than its limit, the task is refused at once
+with `ErrServiceTooManyRequests`, as a full queue refuses it. A task that
+waited longer than its limit after all is refused when it leaves the queue,
+so the wait of an executed task is bounded. Merged search tasks are judged by
+the first task of the group. The estimate counts canceled tasks that still
+sit in the queue, so it errs towards refusing.
+
+**The Proxy moves the request, once per replica.** With the policy on, a
+replica that refuses an attempt as overloaded is excluded for the request and
+the request goes to the next replica after the 10ms retry interval, without
+waiting for the hedge delay. The refusal is not recorded as a failure of the
+replica (see the table in Rule 2). When every replica was tried and an
+attempt was refused as overloaded, the request ends with that error: the
+shard leaders are not refreshed to go around again, which would add to the
+queues that refused it. A replica that is down and one that is overloaded
+end the request the same way. A refused hedge is dropped, and the first
+attempt goes on.
+
+**No resending inside the RPC client.** `ErrServiceTooManyRequests` is a
+retriable error, and the gRPC client of a component sends a request again on
+a retriable status, up to 10 times with backoff. For a refused read that
+keeps the request in the client until its deadline, while the work done for
+its other shards is finished for nothing. `grpcclient.WithFailFastOnOverload`
+makes a call return the refusal instead; the Proxy sets it on reads under
+this policy, the delegator on reads of its workers.
+
+**A failed shard stops the others.** A request over several shards fails with
+its first failed shard. `LBPolicyImpl.Execute` now cancels the attempts on
+the other shards then; they were finished before, for a result nobody got.
+This applies to every replica selection policy.
+
+The client gets `ErrServiceTooManyRequests` (code 4). pymilvus does not retry
+it by itself; it retries the rate limit code (8) only.
+
 ## Configuration
 
 All under `proxy.latencyWeighted.`, all refreshable.
@@ -199,6 +255,16 @@ sent below the minimum win rate (10%), retry interval (10ms).
 
 Metric: `milvus_proxy_replica_hedge_total{decision}` with `sent`, `won`,
 `skipped_low_win_rate`, `skipped_no_replica`.
+
+For overload, on the QueryNode, both refreshable:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `queryNode.scheduler.maxQueueWaitRatio` | 0 | share of the time a read task has left that it may wait in the queue; 0 turns the limit off |
+| `queryNode.scheduler.maxQueueWait` | 1s | longest wait whatever the deadline, and the wait of a task without a deadline |
+
+Metric: `milvus_querynode_read_task_queue_duration{outcome="overloaded"}`
+counts the refused tasks.
 
 ## Measurements
 
@@ -256,6 +322,20 @@ Known issue, to fix before this is used:
 
 Limits:
 
+- The queue wait limit follows the deadline, so on one query node requests
+  with a long timeout outlast requests with a short one: under overload the
+  short ones are refused first. `maxQueueWait` bounds how far this goes.
+- A request that needs several query nodes or shards is admitted by each of
+  them on its own. One refusal ends the attempt on that replica; the tasks
+  already queued for it elsewhere are canceled, but one that has started is
+  finished for nothing.
+- The queue wait limit is meant for this policy. Under another policy the RPC
+  client sends a refused read again, as it does for a full queue today.
+- A replica that is down keeps a share that grows with the latency of the
+  others: its penalty is the attempt timeout, and replicas that queue come
+  closer to it. Measured with two replicas under overload: 15 to 30% of the
+  first attempts still went to the replica that was down, and waited for the
+  request deadline when the hedge was held back.
 - With hedging off, or held back by the win rate, a replica that does not
   answer is only noticed at the request deadline.
 - At a low request rate about a tenth of the requests wait for a hedge

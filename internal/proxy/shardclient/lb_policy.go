@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -290,6 +291,21 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 	return targetNode, selectedByBalancer, nil
 }
 
+// everyLeaderExcluded tells whether the request has no replica of the channel
+// left to try, by the cached shard leaders.
+func (lb *LBPolicyImpl) everyLeaderExcluded(ctx context.Context, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) bool {
+	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
+	if err != nil {
+		return false
+	}
+	for _, leader := range leaders {
+		if !excludeNodes.Contain(leader.NodeID) {
+			return false
+		}
+	}
+	return len(leaders) > 0
+}
+
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
 	log := log.Ctx(ctx).With(
@@ -298,7 +314,23 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	)
 	var lastErr error
 	excludeNodes := typeutil.NewUniqueSet()
+	// With the latency weighted policy, a replica that refuses the request as
+	// overloaded is not asked again, and does not end the request alone: the
+	// request moves to another replica, see isOverloadErr.
+	weighted := latencyWeighted(lb.getBalancer()) != nil
+	if weighted {
+		ctx = grpcclient.WithFailFastOnOverload(ctx)
+	}
+	// overloadErr is the refusal of an overloaded replica, when an attempt of
+	// this request met one.
+	var overloadErr error
 	tryExecute := func() (bool, error) {
+		if overloadErr != nil && lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
+			// Every replica was tried and the request was refused for
+			// overload: it ends here. Going around again would add to the
+			// queues that refused it.
+			return false, overloadErr
+		}
 		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
@@ -324,6 +356,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				shouldRetry, err := lb.executeHedged(ctx, workload, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
 				if err != nil {
 					lastErr = err
+					if weighted && isOverloadErr(err) {
+						overloadErr = err
+					}
 				}
 				return shouldRetry, err
 			}
@@ -360,6 +395,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
+			if weighted && isOverloadErr(err) {
+				overloadErr = lastErr
+			}
 			return true, lastErr
 		}
 
@@ -422,7 +460,9 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
+	// The request fails with its first failed channel: stop the work for the
+	// other channels then, rather than finish it for a result nobody gets.
+	wg, ctx := errgroup.WithContext(ctx)
 	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {

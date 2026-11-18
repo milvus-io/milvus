@@ -70,13 +70,21 @@ func classifyAttempt(ctx context.Context, start, now time.Time, err error) (atte
 	if err == nil || errors.Is(err, ErrAttemptSuperseded) {
 		return attemptSucceeded, elapsed
 	}
-	if merr.GetErrorType(err) == merr.InputError {
+	if merr.GetErrorType(err) == merr.InputError || isOverloadErr(err) {
 		return attemptIgnored, 0
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return attemptIgnored, 0
 	}
 	return attemptFailed, attemptTimeout(ctx, start, elapsed)
+}
+
+// isOverloadErr tells whether err is a replica refusing a request because its
+// read queue is too long. It says the replica has more work than it gets
+// done, not that it is failing: the request moves to another replica, and the
+// refusal does not count against this one.
+func isOverloadErr(err error) bool {
+	return errors.Is(err, merr.ErrServiceTooManyRequests)
 }
 
 // attemptTimeout returns how long the request was willing to wait for an

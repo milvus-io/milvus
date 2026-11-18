@@ -420,3 +420,129 @@ func TestExecutePassesStatsClass(t *testing.T) {
 	_, ok := h.balancer.keys[hedgeTestKey]
 	assert.True(t, ok)
 }
+
+// overloadErr is the refusal of an overloaded replica as the Proxy gets it:
+// through a response status.
+func overloadErr() error {
+	return merr.Error(merr.Status(merr.WrapErrTooManyRequests(200, "read task queue")))
+}
+
+func (h *hedgeHarness) failures(node int64) int {
+	h.balancer.mu.Lock()
+	defer h.balancer.mu.Unlock()
+	return h.balancer.replicas[replicaKey{hedgeTestKey, node}].failures
+}
+
+// A replica that refuses the request as overloaded sends it to the other
+// replica at once, and the refusal does not count against the replica.
+func TestOverloadMovesToOtherReplica(t *testing.T) {
+	for _, hedgeable := range []bool{true, false} {
+		h := newHedgeHarness(t, 1, 2)
+		h.warm(1, 2)
+		start := time.Now()
+		err := h.policy.ExecuteWithRetry(context.Background(), ChannelWorkload{
+			Channel: hedgeTestChannel, Nq: 1, StatsClass: hedgeTestClass, Hedgeable: hedgeable,
+			Exec: h.exec(func(call int32, _ int64) (time.Duration, error) {
+				if call == 1 {
+					return 0, overloadErr()
+				}
+				return 0, nil
+			}),
+		})
+		require.NoError(t, err)
+		assert.Less(t, time.Since(start), time.Second)
+		assert.Equal(t, int32(2), h.calls.Load())
+		h.mu.Lock()
+		first, second := h.callNodes[0], h.callNodes[1]
+		h.mu.Unlock()
+		assert.NotEqual(t, first, second)
+		assert.Equal(t, 0, h.failures(first))
+	}
+}
+
+// When every replica refuses the request as overloaded, it ends with that
+// error after one attempt on each.
+func TestOverloadOnEveryReplicaEndsRequest(t *testing.T) {
+	for _, hedgeable := range []bool{true, false} {
+		h := newHedgeHarness(t, 1, 2)
+		h.warm(1, 2)
+		err := h.policy.ExecuteWithRetry(context.Background(), ChannelWorkload{
+			Channel: hedgeTestChannel, Nq: 1, StatsClass: hedgeTestClass, Hedgeable: hedgeable,
+			Exec: h.exec(func(int32, int64) (time.Duration, error) { return 0, overloadErr() }),
+		})
+		assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+		assert.Equal(t, int32(2), h.calls.Load())
+		assert.Zero(t, h.uncached.Load())
+		assert.Equal(t, 0, h.failures(1))
+		assert.Equal(t, 0, h.failures(2))
+	}
+}
+
+// A replica that is down and one that is overloaded end the request as
+// overloaded too: no replica is left that could take it.
+func TestOverloadAfterFailedReplicaEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2)
+	h.warm(1, 2)
+	err := h.policy.ExecuteWithRetry(context.Background(), ChannelWorkload{
+		Channel: hedgeTestChannel, Nq: 1, StatsClass: hedgeTestClass,
+		Exec: h.exec(func(call int32, _ int64) (time.Duration, error) {
+			if call == 1 {
+				return 0, merr.ErrServiceUnavailable
+			}
+			return 0, overloadErr()
+		}),
+	})
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.Equal(t, int32(2), h.calls.Load())
+}
+
+// A refused hedge leaves the first attempt to answer.
+func TestOverloadedHedgeLeavesPrimary(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2)
+	h.warm(1, 2)
+	_, err := h.run(func(call int32, _ int64) (time.Duration, error) {
+		if call == 1 {
+			return 80 * time.Millisecond, nil
+		}
+		return 0, overloadErr()
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), h.calls.Load())
+	assert.Equal(t, 1, h.publishedCount())
+}
+
+// A request fails with its first failed channel, and stops the work for its
+// other channels then.
+func TestExecuteCancelsOtherChannelsOnFailure(t *testing.T) {
+	paramtable.Init()
+	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]string{"ch-a", "ch-b"}, nil)
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]NodeInfo{{NodeID: 1, Address: "localhost", Serviceable: true}}, nil).Maybe()
+	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(mocks.NewMockQueryNodeClient(t), nil).Maybe()
+	policy := NewLBPolicyImpl(mgr)
+	balancer := NewLatencyWeightedBalancer(mgr)
+	policy.getBalancer = func() LBBalancer { return balancer }
+
+	var canceled atomic.Bool
+	start := time.Now()
+	err := policy.Execute(context.Background(), CollectionWorkLoad{
+		Nq: 1,
+		Exec: func(ctx context.Context, _ UniqueID, _ types.QueryNodeClient, channel string) error {
+			if channel == "ch-a" {
+				return overloadErr()
+			}
+			select {
+			case <-ctx.Done():
+				canceled.Store(true)
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+				return nil
+			}
+		},
+	})
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.True(t, canceled.Load())
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
