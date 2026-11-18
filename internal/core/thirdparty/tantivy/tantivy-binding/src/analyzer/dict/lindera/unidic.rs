@@ -65,12 +65,11 @@ pub fn load_unidic(
 #[cfg(all(test, any(feature = "lindera-unidic", feature = "analyzer-remote-tls")))]
 mod tests {
     use super::load_unidic;
-    use env_logger;
+    use crate::log::init_log;
 
     #[test]
     fn test_load_unidic() {
-        let _env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "info");
-        env_logger::init_from_env(_env);
+        init_log();
 
         let result = load_unidic("/var/lib/milvus/dict/lindera".to_string(), vec![]);
         assert!(result.is_ok(), "err: {}", result.err().unwrap())

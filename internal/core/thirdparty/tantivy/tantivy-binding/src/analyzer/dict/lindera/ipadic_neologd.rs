@@ -73,12 +73,11 @@ pub fn load_ipadic_neologd(
 ))]
 mod tests {
     use super::load_ipadic_neologd;
-    use env_logger;
+    use crate::log::init_log;
 
     #[test]
     fn test_load_ipadic() {
-        let _env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "info");
-        env_logger::init_from_env(_env);
+        init_log();
 
         let result = load_ipadic_neologd("/var/lib/milvus/dict/lindera".to_string(), vec![]);
         assert!(result.is_ok(), "err: {}", result.err().unwrap())

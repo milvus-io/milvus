@@ -66,12 +66,11 @@ pub fn load_ipadic(
 #[cfg(all(test, any(feature = "lindera-ipadic", feature = "analyzer-remote-tls")))]
 mod tests {
     use super::load_ipadic;
-    use env_logger;
+    use crate::log::init_log;
 
     #[test]
     fn test_load_ipadic() {
-        let _env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "info");
-        env_logger::init_from_env(_env);
+        init_log();
 
         let result = load_ipadic("/var/lib/milvus/dict/lindera".to_string(), vec![]);
         assert!(result.is_ok(), "err: {}", result.err().unwrap())

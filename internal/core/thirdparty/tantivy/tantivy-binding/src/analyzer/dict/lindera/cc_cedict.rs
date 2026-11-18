@@ -71,12 +71,11 @@ pub fn load_cc_cedict(
 ))]
 mod tests {
     use super::load_cc_cedict;
-    use env_logger;
+    use crate::log::init_log;
 
     #[test]
     fn test_load_cc_cedict() {
-        let _env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "info");
-        env_logger::init_from_env(_env);
+        init_log();
 
         let result = load_cc_cedict("/var/lib/milvus/dict/lindera".to_string(), vec![]);
         assert!(result.is_ok(), "err: {}", result.err().unwrap())
@@ -89,8 +88,7 @@ mod tests {
         use std::env;
         use tokio::runtime::Runtime;
 
-        let _env = env_logger::Env::default().filter_or("MY_LOG_LEVEL", "info");
-        env_logger::init_from_env(_env);
+        init_log();
 
         env::set_var("LINDERA_CACHE", "/logs/lindera");
         let rt = Runtime::new().unwrap();
