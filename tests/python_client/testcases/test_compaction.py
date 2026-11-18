@@ -501,7 +501,7 @@ class TestCompactionOperation(TestcaseBase):
                 5.load and search
         expected: Verify two delta compaction plans
         """
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
         df = cf.gen_default_dataframe_data(2 * tmp_nb)
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == 2 * tmp_nb
