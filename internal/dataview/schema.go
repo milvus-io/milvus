@@ -73,7 +73,7 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	}
 	next.SchemaVersion = target
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.sampleCollectionSize(ctx, next, nil); err != nil {
+	if err := m.sizeProjector().sample(ctx, next, nil); err != nil {
 		return nil, nil, err
 	}
 	if err := m.persistLockedWithStats(ctx, state, next, stats); err != nil {

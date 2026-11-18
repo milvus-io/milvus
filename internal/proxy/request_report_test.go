@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -47,15 +48,9 @@ func (e requestReportExtension) Report(info any) int { return e.report(info.(map
 func enableUsageReport(t *testing.T, report func(map[string]any) int) {
 	t.Helper()
 	paramtable.Init()
-	key := paramtable.Get().CommonCfg.RequestUsageEnabled.Key
-	oldSetting := paramtable.Get().CommonCfg.RequestUsageEnabled.GetValue()
-	original := hookutil.GetExtension()
-	require.NoError(t, paramtable.Get().Save(key, "true"))
-	hookutil.SetTestExtension(requestReportExtension{report: report})
-	t.Cleanup(func() {
-		hookutil.SetTestExtension(original)
-		require.NoError(t, paramtable.Get().Save(key, oldSetting))
-	})
+	previous := extension.RequestUsageReporter()
+	extension.SetRequestUsageReporter(requestReportExtension{report: report})
+	t.Cleanup(func() { extension.SetRequestUsageReporter(previous) })
 }
 
 func TestRequestReport(t *testing.T) {
@@ -100,6 +95,23 @@ func TestRequestReport(t *testing.T) {
 	require.ErrorIs(t, merr.Error(r.finish(ctx, status)), merr.ErrServiceInternal)
 	require.Equal(t, 1, reports)
 	require.Equal(t, before+float64(size*4), testutil.ToFloat64(counter))
+}
+
+func TestRequestReportKeepsReporterAcrossReload(t *testing.T) {
+	ctx, db := t.Context(), t.Name()
+	var ops []string
+	enableUsageReport(t, func(info map[string]any) int {
+		ops = append(ops, info[hookutil.OpTypeKey].(string))
+		return 0
+	})
+	r := newRequestReport(ctx, hookutil.OpTypeDelete, db)
+	size := int64(16)
+	r.writeBytes, r.readCount, r.collectionSize = 8, 1, &size
+
+	extension.SetRequestUsageReporter(nil)
+	require.Nil(t, newRequestReport(ctx, hookutil.OpTypeQuery, db))
+	require.True(t, merr.Ok(r.finish(ctx, merr.Success())))
+	require.Equal(t, []string{hookutil.OpTypeDelete, hookutil.OpTypeQuery}, ops)
 }
 
 func TestRequestReportLargeRead(t *testing.T) {

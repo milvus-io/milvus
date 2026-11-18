@@ -109,7 +109,7 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		return view, commit, abort, nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.sampleCollectionSize(ctx, next, event.SupersededSegmentIDs); err != nil {
+	if err := m.sizeProjector().sample(ctx, next, event.SupersededSegmentIDs); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}

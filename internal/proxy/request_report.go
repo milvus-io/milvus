@@ -21,7 +21,9 @@ import (
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -30,6 +32,7 @@ import (
 
 // A request keeps its measurements across attempts until the outer RPC completes.
 type requestReport struct {
+	reporter       hook.Extension
 	op, db, user   string
 	writeBytes     int64
 	readCount      int64
@@ -37,13 +40,14 @@ type requestReport struct {
 }
 
 func newRequestReport(ctx context.Context, op, db string) *requestReport {
-	if !paramtable.Get().CommonCfg.RequestUsageEnabled.GetAsBool() {
+	reporter := extension.RequestUsageReporter()
+	if reporter == nil {
 		return nil
 	}
 	if db == "" {
 		db = GetCurDBNameFromContextOrDefault(ctx)
 	}
-	return &requestReport{op: op, db: db, user: GetCurUserFromContextOrDefault(ctx)}
+	return &requestReport{reporter: reporter, op: op, db: db, user: GetCurUserFromContextOrDefault(ctx)}
 }
 
 // Existing extensions report each attempt at its original boundary.
@@ -96,7 +100,7 @@ func (r *requestReport) add(ctx context.Context, op string, info map[string]any,
 	info[hookutil.OpTypeKey] = op
 	info[hookutil.DatabaseKey] = r.db
 	info[hookutil.UsernameKey] = r.user
-	bytes := hookutil.GetExtension().Report(info)
+	bytes := r.reporter.Report(info)
 	if bytes < 0 {
 		mlog.RatedWarn(ctx, 1, "request extension returned negative usage", mlog.String("operation", op), mlog.Int("bytes", bytes))
 		return

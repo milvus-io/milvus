@@ -37,6 +37,8 @@ package extension
 
 func SetHook(h hook.Hook)                     // hookutil uses it; proxy.soPath is ignored
 func InstalledHook() hook.Hook
+func SetRequestUsageReporter(reporter hook.Extension)
+func RequestUsageReporter() hook.Extension
 func SetForm()                                // declares a form installed, in every role
 func FormInstalled() bool                     // reads SetForm's mark; independent of SetHook
 
@@ -95,6 +97,12 @@ configuration without a restart. A failure to initialize follows
 default `true` it stops the proxy, and with `false` the proxy starts on the
 default hook. When a form is installed (`SetForm`), a failure to initialize
 stops the proxy whatever the setting says.
+
+A distribution can register a reporter when its hook configuration selects
+whole-request measurements. Proxy uses the reporter's existing `Report` method.
+DataCoord checks the same registration in its own process when publishing
+collection sizes. The [usage measurement contract](request-usage-measurements.md)
+defines the inputs and configuration rollout.
 
 ### The query hook
 

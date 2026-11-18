@@ -15,8 +15,8 @@
 // limitations under the License.
 
 // Package extension is what a distribution that compiles its own behavior into
-// the milvus binary installs at boot: a request hook, a query hook, a cipher,
-// and an engine the coordinator runs while it is active. Everything else such
+// the milvus binary installs: a request hook, a request usage reporter, a query
+// hook, a cipher, and an engine the coordinator runs while it is active. Everything else such
 // a distribution needs is either the hook's own reach (every proxy RPC passes
 // Mock, Before and After), a coordinator RPC, or a configuration item.
 //
@@ -34,15 +34,17 @@ import (
 )
 
 var (
-	installedHook      atomic.Pointer[hookBox]
-	installedEngine    atomic.Pointer[engineBox]
-	installedQueryHook atomic.Pointer[queryHookBox]
-	installedCipher    atomic.Pointer[cipherBox]
-	formInstalled      atomic.Bool
+	installedHook        atomic.Pointer[hookBox]
+	requestUsageReporter atomic.Pointer[reporterBox]
+	installedEngine      atomic.Pointer[engineBox]
+	installedQueryHook   atomic.Pointer[queryHookBox]
+	installedCipher      atomic.Pointer[cipherBox]
+	formInstalled        atomic.Bool
 )
 
 type (
 	hookBox      struct{ hook hook.Hook }
+	reporterBox  struct{ reporter hook.Extension }
 	engineBox    struct{ engine CoordinatorEngine }
 	queryHookBox struct{ hook QueryHook }
 	cipherBox    struct{ cipher hook.Cipher }
@@ -65,6 +67,26 @@ func SetHook(h hook.Hook) {
 func InstalledHook() hook.Hook {
 	if b := installedHook.Load(); b != nil {
 		return b.hook
+	}
+	return nil
+}
+
+// SetRequestUsageReporter selects whole-request measurements for this process.
+// A distribution sets it from its hook configuration in each role. Passing nil
+// restores ordinary per-attempt reports and skips sizing new DataVersions.
+func SetRequestUsageReporter(reporter hook.Extension) {
+	if reporter == nil {
+		requestUsageReporter.Store(nil)
+		return
+	}
+	requestUsageReporter.Store(&reporterBox{reporter: reporter})
+}
+
+// RequestUsageReporter returns the selected reporter. An RPC keeps the reporter
+// it started with, including when the distribution reloads its configuration.
+func RequestUsageReporter() hook.Extension {
+	if b := requestUsageReporter.Load(); b != nil {
+		return b.reporter
 	}
 	return nil
 }

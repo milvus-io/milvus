@@ -69,8 +69,12 @@ type CollectionSizeProjector func(ctx context.Context, view *viewpb.DataViewOfCo
 
 type Option func(*dataViewManager)
 
-func WithCollectionSizeProjector(project CollectionSizeProjector) Option {
-	return func(m *dataViewManager) { m.collectionSizeProjector = project }
+// WithCollectionSizeProjector selects whether to measure each new DataVersion.
+func WithCollectionSizeProjector(project CollectionSizeProjector, enabled func() bool) Option {
+	return func(m *dataViewManager) {
+		m.collectionSizeProjector = project
+		m.collectionSizeEnabled = enabled
+	}
 }
 
 func WithFrontierProjector(project FrontierProjector) Option {
@@ -240,6 +244,7 @@ type dataViewManager struct {
 	frontierProjector         FrontierProjector
 	pendingTransformProjector PendingTransformProjector
 	collectionSizeProjector   CollectionSizeProjector
+	collectionSizeEnabled     func() bool
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
 	// a process-lifetime context; RecoverManager derives it from the caller's
 	// ctx so the worker stops when the coordinator does.
@@ -510,7 +515,7 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 	}
 	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1}
 	// RootCoord creates the first, empty DataView before registering the collection.
-	if m.collectionSizeProjector != nil {
+	if m.sizeProjector() != nil {
 		view.CollectionSizeBytes = proto.Int64(0)
 	}
 	if err := m.persistLocked(ctx, state, view); err != nil {
@@ -541,7 +546,7 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 	if err := advanceTransformFrontiers(view, bounds); err != nil {
 		return nil, err
 	}
-	if err := m.sampleCollectionSize(ctx, view, nil); err != nil {
+	if err := m.sizeProjector().sample(ctx, view, nil); err != nil {
 		return nil, err
 	}
 	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentStats(event.Segments)); err != nil {
@@ -612,7 +617,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		return dataVersionFromView(base), nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.sampleCollectionSize(ctx, next, nil); err != nil {
+	if err := m.sizeProjector().sample(ctx, next, nil); err != nil {
 		return nil, err
 	}
 	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentStats(segments)); err != nil {
@@ -968,7 +973,8 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceStreaming)
 	flush := &PreparedFlush{view: next}
-	if m.collectionSizeProjector != nil {
+	project := m.sizeProjector()
+	if project != nil {
 		ids := make([]int64, 0, len(event.Segments))
 		for _, segment := range event.Segments {
 			ids = append(ids, segment.SegmentID)
@@ -976,7 +982,7 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		slices.Sort(ids)
 		flush.pending = slices.Compact(ids)
 	}
-	if err := m.sampleCollectionSize(ctx, next, flush.pending); err != nil {
+	if err := project.sample(ctx, next, flush.pending); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}

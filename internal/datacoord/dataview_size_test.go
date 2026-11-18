@@ -43,7 +43,7 @@ func TestQueryViewCollectionSizeBytes(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
 	indexes := index.NewSegmentIndexMeta(nil)
 	mt := &meta.Meta{Ctx: ctx, Catalog: catalog, MetaStore: store, Segments: meta.NewSegmentsInfo(store), IndexCatalog: indexes}
-	options := dataview.WithCollectionSizeProjector(mt.DataViewSizeBytes)
+	options := dataview.WithCollectionSizeProjector(mt.DataViewSizeBytes, func() bool { return true })
 	manager := dataview.NewManager(catalog, nil, options)
 	shards := []string{"a", "b"}
 	create, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: id, VChannels: shards})

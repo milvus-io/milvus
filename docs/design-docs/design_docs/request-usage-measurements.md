@@ -1,10 +1,12 @@
 # Per-request usage measurements
 
-A deployment can account for successful client reads and writes in bytes. Enable `common.requestUsage.enabled` on the coordinator to publish whole-collection size in new QueryViews, and on the Proxy to send measurements to the installed `hook.Extension.Report(any) int`. The setting defaults to false. Enable it on the Proxy after the serving views carry the size and the extension understands the measurements.
+A distribution can account for successful client reads and writes in bytes by registering a `hook.Extension` with `extension.SetRequestUsageReporter` from its own hook configuration. Apply that configuration in both DataCoord and Proxy. A standalone DataCoord can register the reporter without initializing the Proxy RPC hook. A stock binary has no registered usage reporter.
+
+DataCoord checks the registration when preparing a new DataVersion. Proxy captures the reporter when a client RPC starts and keeps it through retries and both parts of a filtered Delete. Passing nil turns off measurement for subsequent operations. When enabling measurement on an existing deployment, apply the hook configuration to the coordinators first, then to the proxies once the intended collections are serving views with a size. Published versions keep their original measurement.
 
 ## Extension contract
 
-Proxy uses the existing `Report` entry point for both compiled-in hooks and plug-ins. A measurement includes `op_type`, `database` and `username`, and one of the following sets of inputs. Numeric fields are Go `int64`.
+The registered reporter uses the existing `Report(any) int` entry point. Ordinary compiled-in hooks and `.so` plug-ins continue to receive their usual reports when the distribution leaves the usage reporter unset. A measurement includes `op_type`, `database` and `username`, and one of the following sets of inputs. Numeric fields are Go `int64`.
 
 | Operation | Measurement supplied to Report |
 | --- | --- |
@@ -26,7 +28,7 @@ Insert and Upsert measure client fields after resolving the schema and before pr
 
 ## Collection size
 
-With `common.requestUsage.enabled` enabled on the coordinator, DataCoord persists one whole-collection measurement in each new DataVersion. The default is false. QueryCoord copies the scalar from the exact DataView reference it pins when preparing a shard. All shards and replicas using that version receive the same value, including shards prepared after compaction or coordinator recovery. An empty collection starts at an explicit zero. Previously published versions retain their original field presence.
+While a request usage reporter is registered, DataCoord persists one whole-collection measurement in each new DataVersion. QueryCoord copies the scalar from the exact DataView reference it pins when preparing a shard. All shards and replicas using that version receive the same value, including shards prepared after compaction or coordinator recovery. An empty collection starts at an explicit zero. Previously published versions retain their original field presence.
 
 For sealed data, the measurement uses the segment IDs in every shard and partition of the candidate DataView. During compaction the old version keeps its parents' bytes and the new version counts the replacement. A selected parent can already be marked Dropped in SegmentMeta. DataCoord also samples visible L0 delete logs and recorded unflushed data in live partitions, including collection-wide L0 logs. It counts each segment once. It adds insert, stats and delta bytes, text and JSON-key index bytes, and the serialized sizes of finished builds of live field indexes. Flush takes the final segment bytes from the same transaction that commits the cumulative statistics and DataView. A missing selected segment prevents publication of an incomplete measurement.
 

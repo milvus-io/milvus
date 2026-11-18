@@ -402,7 +402,6 @@ type commonConfig struct {
 	PasswordHashAlgorithm       ParamItem `refreshable:"true"`
 	RootShouldBindRole          ParamItem `refreshable:"true"`
 	EnablePublicPrivilege       ParamItem `refreshable:"false"`
-	RequestUsageEnabled         ParamItem `refreshable:"false"`
 	FeatureUsageEnabled         ParamItem `refreshable:"false"`
 	FeatureUsageCountersEnabled ParamItem `refreshable:"false"`
 
@@ -1270,15 +1269,6 @@ Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
 		// is off, so an anonymous request cannot persist a disabling value.
 	}
 	p.AdminAuthEnabled.Init(base.mgr)
-
-	p.RequestUsageEnabled = ParamItem{
-		Key:          "common.requestUsage.enabled",
-		Version:      "3.1.0",
-		DefaultValue: "false",
-		Doc:          "Record whole-collection bytes in new QueryViews and report successful client request usage through the Proxy extension. Enable on the coordinator and Proxy.",
-		Export:       true,
-	}
-	p.RequestUsageEnabled.Init(base.mgr)
 
 	p.FeatureUsageEnabled = ParamItem{
 		Key:          "common.security.featureUsageEnabled",

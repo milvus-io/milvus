@@ -1434,8 +1434,6 @@ common:
     credentialBrokerAllowedEndpoints: "[]"
     internaltlsEnabled: false
     tlsMode: 0
-  requestUsage:
-    enabled: false # Record whole-collection bytes in new QueryViews and report successful client request usage through the Proxy extension. Enable on the coordinator and Proxy.
   featureUsage:
     # Whether the components count feature usage on their request paths (Proxy, QueryNode)
     # and at task creation (DataCoord). One branch and one atomic add per counted feature.

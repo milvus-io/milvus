@@ -23,14 +23,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// sampleCollectionSize runs only for a new DataVersion under its collection
-// lock. Recovery and idempotent publications reuse the persisted measurement.
-func (m *dataViewManager) sampleCollectionSize(ctx context.Context, view *viewpb.DataViewOfCollection, omitData []int64) error {
-	view.CollectionSizeBytes = nil
-	if m.collectionSizeProjector == nil {
+func (m *dataViewManager) sizeProjector() CollectionSizeProjector {
+	if m.collectionSizeEnabled == nil || !m.collectionSizeEnabled() {
 		return nil
 	}
-	size, err := m.collectionSizeProjector(ctx, view, omitData)
+	return m.collectionSizeProjector
+}
+
+// sample runs only for a new DataVersion under its collection lock. Recovery
+// and idempotent publications reuse the persisted measurement.
+func (project CollectionSizeProjector) sample(ctx context.Context, view *viewpb.DataViewOfCollection, omitData []int64) error {
+	view.CollectionSizeBytes = nil
+	if project == nil {
+		return nil
+	}
+	size, err := project(ctx, view, omitData)
 	if err != nil {
 		return err
 	}

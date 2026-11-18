@@ -1559,12 +1559,13 @@ func TestDataViewCollectionSizeAcrossFlushRetry(t *testing.T) {
 	initial, err := disabled.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"a"}})
 	require.NoError(t, err)
 
+	enabled := true
 	samples := 0
 	project := WithCollectionSizeProjector(func(_ context.Context, _ *viewpb.DataViewOfCollection, omit []int64) (int64, error) {
 		samples++
 		require.Equal(t, []int64{10}, omit)
 		return 40, nil
-	})
+	}, func() bool { return enabled })
 	manager, err := RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil },
 		projectSegments(), []int64{1}, map[int64][]string{1: {"a"}}, project)
 	require.NoError(t, err)
@@ -1589,6 +1590,7 @@ func TestDataViewCollectionSizeAcrossFlushRetry(t *testing.T) {
 		require.EqualValues(t, 10, id)
 		return 2, nil
 	}
+	enabled = false // A configuration reload after PrepareFlush applies to the next version.
 	first, err := flush.Snapshot(staged)
 	require.NoError(t, err)
 	require.Equal(t, proto.Int64(42), first.CollectionSizeBytes)
@@ -1600,9 +1602,19 @@ func TestDataViewCollectionSizeAcrossFlushRetry(t *testing.T) {
 
 	replay, _, release, err := manager.PrepareFlush(ctx, event)
 	require.NoError(t, err)
-	defer release()
 	unchanged, err := replay.Snapshot(nil)
+	release()
 	require.NoError(t, err)
 	require.Equal(t, proto.Int64(42), unchanged.CollectionSizeBytes)
+	// A new flush while disabled must neither inherit the old scalar nor ask
+	// the segment transaction for sizes, even if reporting resumes before commit.
+	event.Segments = []LoadableSegment{segment(11, "a", 1)}
+	unmeasured, _, release, err := manager.PrepareFlush(ctx, event)
+	require.NoError(t, err)
+	defer release()
+	enabled = true
+	withoutSize, err := unmeasured.Snapshot(nil)
+	require.NoError(t, err)
+	require.Nil(t, withoutSize.CollectionSizeBytes)
 	require.Equal(t, 2, samples)
 }
