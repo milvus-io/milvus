@@ -31,20 +31,41 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+type requestReportExtension struct {
+	hookutil.DefaultExtension
+	publish extension.RequestReport
+}
+
+func (e *requestReportExtension) NewRequestReport() func(map[string]any) (int, error) {
+	return e.publish
+}
+
 func TestRequestReport(t *testing.T) {
+	original := hookutil.GetExtension()
+	t.Cleanup(func() { hookutil.SetTestExtension(original) })
+	ext := &requestReportExtension{}
+	hookutil.SetTestExtension(ext)
+	require.Nil(t, newRequestReport())
+
 	db := t.Name()
 	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeSearch, db, "u")
 	initial := testutil.ToFloat64(counter)
 	calls := 0
-	report := &requestReport{publish: func(info map[string]any) (int, error) {
+	ext.publish = func(info map[string]any) (int, error) {
 		calls++
 		return int(info[hookutil.NqKey].(int64)), nil
-	}}
+	}
+	report := newRequestReport()
+	require.NotNil(t, report)
+	hookutil.SetTestExtension(hookutil.DefaultExtension{})
+	require.Nil(t, newRequestReport())
+
 	attempt := func(nq int64) {
 		report.record(merr.Success(), map[string]any{
 			hookutil.OpTypeKey: hookutil.OpTypeSearch, hookutil.DatabaseKey: db, hookutil.UsernameKey: "u", hookutil.NqKey: nq,

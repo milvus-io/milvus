@@ -48,6 +48,17 @@ type (
 	cipherBox    struct{ cipher hook.Cipher }
 )
 
+// RequestReport publishes the final measurements of one successful RPC and
+// returns its counter increment. The alias keeps the plug-in signature expressible
+// using only built-in types.
+type RequestReport = func(info map[string]any) (int, error)
+
+// RequestReporter is an optional capability of a hook.Extension.
+// NewRequestReport runs at RPC entry. Returning nil selects the usual Report path.
+type RequestReporter interface {
+	NewRequestReport() RequestReport
+}
+
 // SetHook installs a compiled-in request hook. hookutil uses it and ignores
 // proxy.soPath, with a warning, when both are configured. Call it before
 // milvus starts; a nil hook leaves the stock behavior in place.

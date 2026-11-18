@@ -4,10 +4,14 @@ A Proxy extension can measure the fields supplied to a mutation and the whole co
 
 ## Extension contract
 
-The existing `hook.Extension.Report(any) int` interface keeps its existing attempt boundaries and map fields. An interested extension implements the additional method below. Returning a callback opts the current RPC into measurement. Returning nil selects the existing reporting path.
+Milvus checks for `extension.RequestReporter` when it installs a compiled-in reporting hook or loads a plug-in's `MilvusExtension` symbol. A provider returns a callback for each RPC it wants to measure. With no provider or a nil callback, Proxy calls `hook.Extension.Report(any) int` at its existing attempt boundaries with the same map fields.
 
 ```go
-NewRequestReport() func(map[string]any) (int, error)
+type RequestReporter interface {
+	NewRequestReport() RequestReport
+}
+
+type RequestReport = func(info map[string]any) (int, error)
 ```
 
 Proxy obtains the callback once at RPC entry. Each search retry replaces the previous attempt's measurements. A ground-truth search for recall evaluation, a Search-by-ID vector lookup and a shard query run by Delete belong to the enclosing request. Only the final successful request invokes the callback. Validation errors, rate limits, failed tasks and a cancellation observed at completion produce no report. Different RPCs issued by an iterator are independent.

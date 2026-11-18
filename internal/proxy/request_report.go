@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -31,21 +32,17 @@ import (
 // callback pins its configuration across task retries and config reloads.
 // Existing hooks keep reporting each attempt at its original boundary.
 type requestReport struct {
-	publish        func(map[string]any) (int, error)
+	publish        extension.RequestReport
 	info           map[string]any
 	collectionSize *int64
 }
 
 func newRequestReport() *requestReport {
-	ext, ok := hookutil.GetExtension().(interface {
-		NewRequestReport() func(map[string]any) (int, error)
-	})
-	if ok {
-		if publish := ext.NewRequestReport(); publish != nil {
-			return &requestReport{publish: publish}
-		}
+	publish := hookutil.NewRequestReport()
+	if publish == nil {
+		return nil
 	}
-	return nil
+	return &requestReport{publish: publish}
 }
 
 // Legacy reports are emitted immediately. An opt-in hook sees only the final
