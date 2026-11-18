@@ -120,10 +120,13 @@ class LegacyIndexLoadTest : public ::testing::Test {
         old_slots_ = admission.CapacitySlots();
         admission.SetCapacitySlots(4);
         old_slice_ = FILE_SLICE_SIZE.exchange(256);
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = (root_.get() / "objects").string() + "/";
-        std::filesystem::create_directories(config.root_path);
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] =
+            std::string((root_.get() / "objects").string() + "/");
+        std::filesystem::create_directories(
+            milvus::storage::GetStorageProperty<std::string>(
+                config, PROPERTY_FS_ROOT_PATH));
         context_ =
             storage::FileManagerContext({1, 2, 3, 100},
                                         {3,

@@ -263,9 +263,9 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
 
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-    storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = root_path;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(root_path);
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
