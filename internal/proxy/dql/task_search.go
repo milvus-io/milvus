@@ -75,10 +75,6 @@ type SearchTask struct {
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
 
-	// VectorElementCount is set only by callers measuring the input vectors.
-	// A negative value means the input representation could not be measured.
-	VectorElementCount *int64
-
 	tr                     *timerecord.TimeRecorder
 	collectionName         string
 	resolvedDBName         string
@@ -1368,7 +1364,7 @@ func (t *SearchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	if field == nil {
 		return phgBytes, 0, nil
 	}
-	return convertPlaceholderGroup(phgBytes, field, t.VectorElementCount)
+	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
 func (t *SearchTask) tryGeneratePlan(

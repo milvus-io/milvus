@@ -18,18 +18,11 @@
 
 package hookutil
 
+// Measurements supplied to hook.Extension.Report when request usage is enabled.
 const (
-	ClientRequestBytesKey     = "client_request_bytes"
-	PrimaryKeyBytesKey        = "primary_key_bytes"
-	DeletedPKBytesKey         = "deleted_pk_bytes"
-	DeleteExprBytesKey        = "delete_expr_bytes"
-	IsFilterDeleteKey         = "is_filter_delete"
+	WriteBytesKey             = "write_bytes"
+	ReadCountKey              = "read_count"
 	CollectionStorageBytesKey = "collection_storage_bytes"
-	NqKey                     = "nq"
-	SubSearchCountKey         = "sub_req_cnt"
-	SubSearchTotalNqKey       = "sub_total_nq"
-	VectorElementCountKey     = "vector_element_cnt"
-	ExtraReadReportValueKey   = "extra_read_report_value"
 )
 
 var (

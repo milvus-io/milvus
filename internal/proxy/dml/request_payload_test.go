@@ -75,12 +75,3 @@ func TestClientNestedPayload(t *testing.T) {
 	require.EqualValues(t, 16, primaryKeyBytes(&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}}}))
 	require.EqualValues(t, 3, primaryKeyBytes(&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"中", ""}}}}))
 }
-
-func TestDeleteExpressionBytes(t *testing.T) {
-	expr := "name == {p} && age in {a}"
-	params := map[string]*schemapb.TemplateValue{
-		"p": {Val: &schemapb.TemplateValue_StringVal{StringVal: "中"}},
-		"a": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{Data: &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 12}}}}}},
-	}
-	require.EqualValues(t, len(expr)+3+16, deleteExpressionBytes(expr, params))
-}

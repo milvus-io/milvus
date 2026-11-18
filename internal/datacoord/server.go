@@ -939,7 +939,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return c.ID, c.VChannelNames
 	})
 	var sizeProjector dataview.CollectionSizeProjector
-	if Params.QueryViewCfg.PublishCollectionSize.GetAsBool() {
+	if Params.CommonCfg.RequestUsageEnabled.GetAsBool() {
 		sizeProjector = recoveredMeta.DataViewSizeBytes
 	}
 	var manager dataview.Manager

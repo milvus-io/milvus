@@ -1434,6 +1434,8 @@ common:
     credentialBrokerAllowedEndpoints: "[]"
     internaltlsEnabled: false
     tlsMode: 0
+  requestUsage:
+    enabled: false # Record whole-collection bytes in new QueryViews and report successful client request usage through the Proxy extension. Enable on the coordinator and Proxy.
   featureUsage:
     # Whether the components count feature usage on their request paths (Proxy, QueryNode)
     # and at task creation (DataCoord). One branch and one atomic add per counted feature.
@@ -1742,7 +1744,6 @@ streamingNode:
 
 # Any configuration related to query views.
 queryView:
-  publishCollectionSize: false # Record whole-collection data and index bytes with each new DataVersion and return that sample in query plans. Requires coordinator restart.
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.

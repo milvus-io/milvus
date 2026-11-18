@@ -67,17 +67,15 @@ type hookSetter interface {
 // this struct is used to be stored in atomic.Value
 // since different type stored in it will cause panicking.
 type extensionContainer struct {
-	extension       hook.Extension
-	requestReporter ext.RequestReporter
+	extension hook.Extension
 }
 
 func storeHook(hook hook.Hook) {
 	hoo.Store(hookContainer{hook: hook})
 }
 
-func storeExtension(e hook.Extension) {
-	reporter, _ := e.(ext.RequestReporter)
-	extension.Store(extensionContainer{extension: e, requestReporter: reporter})
+func storeExtension(ext hook.Extension) {
+	extension.Store(extensionContainer{extension: ext})
 }
 
 func initHook() error {
@@ -238,18 +236,8 @@ func GetHook() hook.Hook {
 	return hoo.Load().(hookContainer).hook
 }
 
-// GetExtension returns the installed reporting extension.
+// GetHook returns singleton hook.Extension instance.
 func GetExtension() hook.Extension {
 	InitOnceHook()
 	return extension.Load().(extensionContainer).extension
-}
-
-// NewRequestReport opens a report for this RPC when the extension opts in.
-func NewRequestReport() ext.RequestReport {
-	InitOnceHook()
-	reporter := extension.Load().(extensionContainer).requestReporter
-	if reporter == nil {
-		return nil
-	}
-	return reporter.NewRequestReport()
 }

@@ -284,7 +284,6 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		s.NoError(dr.Init(context.Background()))
 
 		s.True(dr.IsFilterDelete())
-		s.EqualValues(len("non_pk == 1"), dr.ExpressionBytes())
 		s.Require().Equal(1, len(dr.partitionIDs))
 		s.True(typeutil.NewSet[int64](100, 101).Contain(dr.partitionIDs[0]))
 		s.Equal([]vChan{"vchan1"}, dr.vChannels)

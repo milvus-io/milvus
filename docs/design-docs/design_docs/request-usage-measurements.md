@@ -1,45 +1,35 @@
 # Per-request usage measurements
 
-A Proxy extension can measure the fields supplied to a mutation and the whole collection addressed by a read. The interface serves deployments that need one final report for a successful client RPC.
+A deployment can account for successful client reads and writes in bytes. Enable `common.requestUsage.enabled` on the coordinator to publish whole-collection size in new QueryViews, and on the Proxy to send measurements to the installed `hook.Extension.Report(any) int`. The setting defaults to false. Enable it on the Proxy after the serving views carry the size and the extension understands the measurements.
 
 ## Extension contract
 
-Milvus checks for `extension.RequestReporter` when it installs a compiled-in reporting hook or loads a plug-in's `MilvusExtension` symbol. A provider returns a callback for each RPC it wants to measure. With no provider or a nil callback, Proxy calls `hook.Extension.Report(any) int` at its existing attempt boundaries with the same map fields.
+Proxy uses the existing `Report` entry point for both compiled-in hooks and plug-ins. A measurement includes `op_type`, `database` and `username`, and one of the following sets of inputs. Numeric fields are Go `int64`.
 
-```go
-type RequestReporter interface {
-	NewRequestReport() RequestReport
-}
+| Operation | Measurement supplied to Report |
+| --- | --- |
+| Insert | `write_bytes` contains the client-supplied field values. |
+| Upsert | `write_bytes` contains the client-supplied field values plus one additional copy of the supplied primary key. A 108-byte payload including an eight-byte key contributes 116 bytes. |
+| Delete by key | `write_bytes` contains the primary keys in the successful tombstone write. Each Int64 key uses eight bytes. A string key uses its UTF-8 length. |
+| Search | `collection_storage_bytes` is the whole logical size of the serving QueryView. `read_count` is the number of query items. Two embedding lists containing three and five vectors contribute two items. Search by ID includes requested rows with null vectors. |
+| HybridSearch | The same whole-collection size and the sum of validated query counts across all subrequests. Three subrequests with two items each contribute six items. |
+| Query | The same whole-collection size and a `read_count` of one. This includes Get and count queries. Each client RPC from an iterator is measured independently. |
+| Filtered Delete | One `delete` report contains the bytes of the successfully written keys. A separate `query` report contains the lookup's whole-collection size and one read. A successful zero-match lookup contributes zero write bytes and one read. |
 
-type RequestReport = func(info map[string]any) (int, error)
-```
+For byte-based metering, the extension returns `write_bytes` for a write and `collection_storage_bytes × read_count` for a read. A search over a 5 GB collection with two query items contributes 10 GB of logical read volume. This quantity measures the whole collection addressed by each item. The existing scanned-byte metrics measure I/O separately. A read against an empty collection contributes zero bytes.
 
-Proxy obtains the callback once at RPC entry. Each search retry replaces the previous attempt's measurements. A ground-truth search for recall evaluation, a Search-by-ID vector lookup and a shard query run by Delete belong to the enclosing request. Only the final successful request invokes the callback. Validation errors, rate limits, failed tasks and a cancellation observed at completion produce no report. Different RPCs issued by an iterator are independent.
+Proxy adds each increment to `milvus_proxy_report_value{node_id,msg_type,db_name,username}`. A filtered Delete contributes to both the `delete` and `query` series. If a read product exceeds the extension's Go `int`, Proxy obtains the size of one item and applies the count when adding to the floating-point Prometheus counter. As with other Prometheus counters, exact representation of every integral byte is limited to 53 bits. Prices and customer billing responses are outside this contract.
 
-The callback returns an integer increment for the existing `milvus_proxy_report_value` counter. The labels are node, operation, database and username. It may also set `extra_read_report_value` to an integer to add to the query counter. Proxy checks that both increments are nonnegative before publishing either metric. A reporting error propagates on a read. On a mutation that has already committed, Proxy logs the reporting error and preserves the mutation result.
+Proxy retains measurements from the final successful attempt and reports at external RPC completion. Rate limits, failed tasks and cancellation observed at completion contribute no usage. Recall evaluation, Search-by-ID lookup and the per-shard key lookup of a filtered Delete belong to the enclosing request. With request usage disabled, the existing extension receives its usual inputs at the original attempt boundaries.
 
-## Measurements
-
-| Input | Operations | Definition |
-| --- | --- | --- |
-| `client_request_bytes` | Insert, Upsert | The supplied field values using schema widths for fixed-width scalars and the supplied representation for vectors. |
-| `primary_key_bytes` | Upsert | The supplied primary-key field, already included in the request byte count. |
-| `deleted_pk_bytes` | Delete | Int64 keys use eight bytes each. Strings use the number of UTF-8 bytes submitted to the successful tombstone write. |
-| `is_filter_delete`, `delete_expr_bytes` | Delete | Classification of the original parsed expression. The byte count includes UTF-8 expression text and supplied typed template values. |
-| `collection_storage_bytes` | Search, HybridSearch, Query, filtered Delete | The whole-collection logical size recorded by the serving QueryView used for this request. |
-| `nq`, `vector_element_cnt` | Search | Query items and underlying input vectors. For embedding lists of three and five vectors these values are two and eight. Search by ID counts the IDs supplied, including rows with null vectors. |
-| `sub_req_cnt`, `sub_total_nq` | HybridSearch | Number of subrequests and sum of their validated query counts. |
-
-Proxy measures Insert and Upsert after resolving the write schema and before conversions, function execution, allocation of IDs and merging old rows for partial updates. The measurement includes dynamic JSON, array elements and struct children. Metadata, protobuf framing and null-validity bitmaps are excluded. A client-supplied old primary key in an AutoID upsert contributes bytes. REST handlers that produce the same field values and representation as gRPC produce the same measurements.
-
-Proxy classifies a PK equality or membership predicate from the user plan. A filtered Delete reports one outer operation across shards. It deduplicates the retrieved keys across batches and records their bytes after the tombstone write succeeds.
+Insert and Upsert measure client fields after resolving the schema and before precision conversion, function execution, ID allocation or merging old rows during a partial update. The byte count includes dynamic JSON, array elements and struct children. Fixed-width values use their schema widths. Protobuf framing, metadata and validity bitmaps are excluded. Client-supplied old primary keys in AutoID Upserts contribute bytes. REST and gRPC requests carrying equivalent field representations have the same measurement.
 
 ## Collection size
 
-With `queryView.publishCollectionSize` enabled, DataCoord persists one whole-collection measurement in each new DataVersion. The default is false. QueryCoord copies the scalar from the exact DataView reference it pins when preparing a shard. All shards and replicas using that version receive the same value, including shards prepared after compaction or coordinator recovery. An empty collection starts at an explicit zero. Previously published versions retain their original field presence.
+With `common.requestUsage.enabled` enabled on the coordinator, DataCoord persists one whole-collection measurement in each new DataVersion. The default is false. QueryCoord copies the scalar from the exact DataView reference it pins when preparing a shard. All shards and replicas using that version receive the same value, including shards prepared after compaction or coordinator recovery. An empty collection starts at an explicit zero. Previously published versions retain their original field presence.
 
 For sealed data, the measurement uses the segment IDs in every shard and partition of the candidate DataView. During compaction the old version keeps its parents' bytes and the new version counts the replacement. A selected parent can already be marked Dropped in SegmentMeta. DataCoord also samples visible L0 delete logs and recorded unflushed data in live partitions, including collection-wide L0 logs. It counts each segment once. It adds insert, stats and delta bytes, text and JSON-key index bytes, and the serialized sizes of finished builds of live field indexes. Flush takes the final segment bytes from the same transaction that commits the cumulative statistics and DataView. A missing selected segment prevents publication of an incomplete measurement.
 
 The StreamingNode includes the sample of its serving view in its existing `GetQueryPlan` reply before partition or segment pruning. The Proxy uses one whole-collection sample across all successful shard plans. During a handoff it picks the newest measured DataVersion, with the vchannel name breaking ties. A smaller sample after compaction takes effect when that view serves a request. Changes to growing data, delete logs or indexes are sampled on the next DataVersion. A placement-only change keeps its pinned version’s value. No per-read metadata RPC or time-based Proxy cache is needed.
 
-Search by IDs uses the vector lookup plan if all requested vectors are null. Filtered Delete obtains the sample from the same internal query that finds matching keys, including a zero-match result, and validates it before writing tombstones. When automatic loading is enabled and that query finds a released collection, Proxy loads its bound collection ID and repeats the key lookup once. The write begins after the successful lookup. All metered hosts need the coordinator publication option and QueryView-aware components.
+Search by IDs uses the vector lookup plan if all requested vectors are null. Filtered Delete obtains the sample from the same internal query that finds matching keys, including a zero-match result, and validates it before writing tombstones. When automatic loading is enabled and that query finds a released collection, Proxy loads its bound collection ID and repeats the key lookup once. The write begins after the successful lookup.

@@ -18,84 +18,88 @@ package proxy
 
 import (
 	"context"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// A hook may opt into one report per successful external request. The
-// callback pins its configuration across task retries and config reloads.
-// Existing hooks keep reporting each attempt at its original boundary.
+// A request keeps its measurements across attempts until the outer RPC completes.
 type requestReport struct {
-	publish        extension.RequestReport
-	info           map[string]any
+	op, db, user   string
+	writeBytes     int64
+	readCount      int64
 	collectionSize *int64
 }
 
-func newRequestReport() *requestReport {
-	publish := hookutil.NewRequestReport()
-	if publish == nil {
+func newRequestReport(ctx context.Context, op, db string) *requestReport {
+	if !paramtable.Get().CommonCfg.RequestUsageEnabled.GetAsBool() {
 		return nil
 	}
-	return &requestReport{publish: publish}
+	if db == "" {
+		db = GetCurDBNameFromContextOrDefault(ctx)
+	}
+	return &requestReport{op: op, db: db, user: GetCurUserFromContextOrDefault(ctx)}
 }
 
-// Legacy reports are emitted immediately. An opt-in hook sees only the final
-// successful attempt after the outer RPC has settled its cancellation status.
-func (r *requestReport) record(status *commonpb.Status, info map[string]any) {
-	if r != nil {
-		r.info = info
-		return
-	}
-	op := info[hookutil.OpTypeKey].(string)
-	db := info[hookutil.DatabaseKey].(string)
-	user := info[hookutil.UsernameKey].(string)
+// Existing extensions report each attempt at its original boundary.
+func reportLegacy(status *commonpb.Status, info map[string]any) {
 	value := hookutil.GetExtension().Report(info)
 	SetReportValue(status, value)
 	if merr.Ok(status) {
+		op := info[hookutil.OpTypeKey].(string)
+		db := info[hookutil.DatabaseKey].(string)
+		user := info[hookutil.UsernameKey].(string)
 		metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), op, db, user).Add(float64(value))
 	}
 }
 
 func (r *requestReport) finish(ctx context.Context, status *commonpb.Status) *commonpb.Status {
-	if r == nil || r.info == nil {
+	if r == nil || r.op == "" {
 		return status
 	}
-	info := r.info
-	r.info = nil
+	op := r.op
+	r.op = ""
 	if status == nil || ctx.Err() != nil || !merr.Ok(status) {
 		return status
 	}
-	db := info[hookutil.DatabaseKey].(string)
-	user := info[hookutil.UsernameKey].(string)
-	op := info[hookutil.OpTypeKey].(string)
-	if r.collectionSize != nil {
-		info[hookutil.CollectionStorageBytesKey] = *r.collectionSize
-	}
-	value, err := r.publish(info)
-	extraRead, _ := info[hookutil.ExtraReadReportValueKey].(int)
-	if err == nil && (value < 0 || extraRead < 0) {
-		err = merr.WrapErrServiceInternalMsg("request reporting hook returned a negative counter increment")
-	}
-	if err != nil {
-		mlog.Error(ctx, "failed to report request usage", mlog.String("operation", op), mlog.Err(err))
-		switch op {
-		case hookutil.OpTypeInsert, hookutil.OpTypeUpsert, hookutil.OpTypeDelete:
-			// A committed mutation cannot be rolled back or safely retried.
+	switch op {
+	case hookutil.OpTypeInsert, hookutil.OpTypeUpsert, hookutil.OpTypeDelete:
+		r.add(ctx, op, map[string]any{hookutil.WriteBytesKey: r.writeBytes}, 1)
+		if r.readCount == 0 {
 			return status
-		default:
-			return merr.Status(merr.Wrap(err, "report request usage"))
 		}
+		// Filtered Delete validated the lookup's size before writing any tombstones.
+		op = hookutil.OpTypeQuery
 	}
-	node := paramtable.GetStringNodeID()
-	metrics.ProxyReportValue.WithLabelValues(node, op, db, user).Add(float64(value))
-	if extraRead > 0 {
-		metrics.ProxyReportValue.WithLabelValues(node, hookutil.OpTypeQuery, db, user).Add(float64(extraRead))
+	if r.collectionSize == nil {
+		return merr.Status(merr.WrapErrServiceInternalMsg("query plan missing collection size for request usage"))
 	}
+	count, copies := r.readCount, int64(1)
+	if count > 1 && *r.collectionSize > int64(math.MaxInt)/count {
+		// Report accepts an int increment. Identical query items have the
+		// same size, so one item's result can be added with its multiplicity.
+		count, copies = 1, count
+	}
+	r.add(ctx, op, map[string]any{
+		hookutil.ReadCountKey:              count,
+		hookutil.CollectionStorageBytesKey: *r.collectionSize,
+	}, copies)
 	return status
+}
+
+func (r *requestReport) add(ctx context.Context, op string, info map[string]any, copies int64) {
+	info[hookutil.OpTypeKey] = op
+	info[hookutil.DatabaseKey] = r.db
+	info[hookutil.UsernameKey] = r.user
+	bytes := hookutil.GetExtension().Report(info)
+	if bytes < 0 {
+		mlog.RatedWarn(ctx, 1, "request extension returned negative usage", mlog.String("operation", op), mlog.Int("bytes", bytes))
+		return
+	}
+	metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), op, r.db, r.user).Add(float64(bytes) * float64(copies))
 }

@@ -358,10 +358,6 @@ func (dr *DeleteRunner) CollectionSizeBytes() int64 { return dr.collectionSizeBy
 
 func (dr *DeleteRunner) DeletedPKBytes() int64 { return dr.deletedPKBytes }
 
-func (dr *DeleteRunner) ExpressionBytes() int64 {
-	return deleteExpressionBytes(dr.req.GetExpr(), dr.req.GetExprTemplateValues())
-}
-
 // ScannedRemoteBytes returns the scanned remote bytes across shards.
 func (dr *DeleteRunner) ScannedRemoteBytes() int64 {
 	return dr.scannedRemoteBytes.Load()

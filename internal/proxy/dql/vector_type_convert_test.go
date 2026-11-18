@@ -55,35 +55,6 @@ func TestIsVectorTypeMatch(t *testing.T) {
 	}
 }
 
-func TestEmbeddingListVectorCount(t *testing.T) {
-	field := &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}}
-	for _, tc := range []struct {
-		kind  commonpb.PlaceholderType
-		width int
-	}{
-		{commonpb.PlaceholderType_EmbListFloatVector, 32},
-		{commonpb.PlaceholderType_EmbListFloat16Vector, 16},
-		{commonpb.PlaceholderType_EmbListBFloat16Vector, 16},
-		{commonpb.PlaceholderType_EmbListBinaryVector, 1},
-		{commonpb.PlaceholderType_EmbListInt8Vector, 8},
-	} {
-		ph := &commonpb.PlaceholderValue{Type: tc.kind, Values: [][]byte{make([]byte, 3*tc.width), make([]byte, 5*tc.width)}}
-		encoded, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{ph}})
-		assert.NoError(t, err)
-		var elements int64
-		out, _, err := convertPlaceholderGroup(encoded, field, &elements)
-		assert.NoError(t, err)
-		assert.Equal(t, encoded, out)
-		assert.EqualValues(t, 8, elements)
-		assert.Len(t, ph.GetValues(), 2)
-	}
-	_, ok := inputVectorCount(&commonpb.PlaceholderValue{Type: commonpb.PlaceholderType_EmbListFloatVector, Values: [][]byte{{1}}}, field)
-	assert.False(t, ok)
-	n, ok := inputVectorCount(&commonpb.PlaceholderValue{Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{}, {}}}, field)
-	assert.True(t, ok)
-	assert.EqualValues(t, 2, n)
-}
-
 func TestConvertPlaceholderGroupAllowsFloat16Underflow(t *testing.T) {
 	vectors := [][]float32{{0.0, 1e-9, -1e-9, 0.5}}
 	phgBytes := createFloat32PlaceholderGroup(vectors)

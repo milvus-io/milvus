@@ -2321,7 +2321,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeInsert, request.GetDbName())
 	if report != nil {
 		it.Payload = &dml.RequestPayload{}
 	}
@@ -2373,23 +2373,22 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
 	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 
-	info := map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
-		hookutil.DatabaseKey:        dbName,
-		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(request),
-		hookutil.SuccessCntKey:      successCnt,
-		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	}
 	if report != nil {
-		info[hookutil.ClientRequestBytesKey] = it.Payload.FieldBytes
+		report.writeBytes = it.Payload.FieldBytes
+	} else {
+		reportLegacy(it.Result().GetStatus(), map[string]any{
+			hookutil.OpTypeKey:          hookutil.OpTypeInsert,
+			hookutil.DatabaseKey:        dbName,
+			hookutil.UsernameKey:        GetCurUserFromContextOrDefault(ctx),
+			hookutil.RequestDataSizeKey: proto.Size(request),
+			hookutil.SuccessCntKey:      successCnt,
+			hookutil.FailCntKey:         len(it.Result().ErrIndex),
+		})
 	}
-	report.record(it.Result().GetStatus(), info)
 	report.finish(ctx, it.Result().GetStatus())
 	metrics.ProxyInsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -2436,7 +2435,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 	dr.SetViewQueryClient(node.viewQueryClient)
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeDelete, request.GetDbName())
 	if report != nil {
 		dr.MeasurePayload()
 	}
@@ -2468,24 +2467,22 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
-	info := map[string]any{
-		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
-		hookutil.DatabaseKey:   dbName,
-		hookutil.UsernameKey:   username,
-		hookutil.SuccessCntKey: successCnt,
-		hookutil.RelatedCntKey: dr.AllQueryCnt(),
-	}
 	if report != nil {
-		info[hookutil.DeletedPKBytesKey] = dr.DeletedPKBytes()
-		info[hookutil.IsFilterDeleteKey] = dr.IsFilterDelete()
+		report.writeBytes = dr.DeletedPKBytes()
 		if dr.IsFilterDelete() {
-			info[hookutil.DeleteExprBytesKey] = dr.ExpressionBytes()
-			info[hookutil.CollectionStorageBytesKey] = dr.CollectionSizeBytes()
+			size := dr.CollectionSizeBytes()
+			report.collectionSize, report.readCount = &size, 1
 		}
+	} else {
+		reportLegacy(dr.Result().GetStatus(), map[string]any{
+			hookutil.OpTypeKey:     hookutil.OpTypeDelete,
+			hookutil.DatabaseKey:   dbName,
+			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+			hookutil.SuccessCntKey: successCnt,
+			hookutil.RelatedCntKey: dr.AllQueryCnt(),
+		})
 	}
-	report.record(dr.Result().GetStatus(), info)
 	report.finish(ctx, dr.Result().GetStatus())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
@@ -2539,7 +2536,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeUpsert, request.GetDbName())
 	if report != nil {
 		it.Payload = &dml.RequestPayload{}
 	}
@@ -2597,24 +2594,22 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		it.Result().UpsertCnt = int64(request.NumRows)
 	}
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	requestSize, mutationSize := it.AccountingSizes()
-	info := map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
-		hookutil.DatabaseKey:        request.DbName,
-		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: requestSize,
-		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
-		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	}
 	if report != nil {
-		info[hookutil.ClientRequestBytesKey] = it.Payload.FieldBytes
-		info[hookutil.PrimaryKeyBytesKey] = it.Payload.PrimaryKeyBytes
+		report.writeBytes = it.Payload.FieldBytes + it.Payload.PrimaryKeyBytes
+	} else {
+		reportLegacy(it.Result().GetStatus(), map[string]any{
+			hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
+			hookutil.DatabaseKey:        request.DbName,
+			hookutil.UsernameKey:        GetCurUserFromContextOrDefault(ctx),
+			hookutil.RequestDataSizeKey: requestSize,
+			hookutil.SuccessCntKey:      it.Result().UpsertCnt,
+			hookutil.FailCntKey:         len(it.Result().ErrIndex),
+		})
 	}
-	report.record(it.Result().GetStatus(), info)
 	report.finish(ctx, it.Result().GetStatus())
 	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
@@ -2653,7 +2648,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	// cancellable for its whole lifetime, including the retries below.
 	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
 	defer node.unregisterRequest(entry)
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeSearch, request.GetDbName())
 
 	var err error
 	rsp := &milvuspb.SearchResults{
@@ -2776,13 +2771,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if len(validData) > 0 && request.GetNq() == 0 {
 		if report != nil && !isRecallEvaluation {
 			report.collectionSize = searchByPK.collectionSize
-			report.info = map[string]any{
-				hookutil.OpTypeKey:             hookutil.OpTypeSearch,
-				hookutil.DatabaseKey:           request.GetDbName(),
-				hookutil.UsernameKey:           GetCurUserFromContextOrDefault(ctx),
-				hookutil.NqKey:                 int64(len(validData)),
-				hookutil.VectorElementCountKey: int64(len(validData)),
-			}
+			report.readCount = int64(len(validData))
 		}
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
@@ -2798,9 +2787,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
-	if report != nil && !isRecallEvaluation {
-		qt.VectorElementCount = new(int64)
-	}
 	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
@@ -2906,29 +2892,21 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	if qt.Result() != nil {
-		username := GetCurUserFromContextOrDefault(ctx)
-		sentSize := proto.Size(qt.Result())
-		info := map[string]any{
-			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
-			hookutil.DatabaseKey:        dbName,
-			hookutil.UsernameKey:        username,
-			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
-		}
-		if !isRecallEvaluation || report == nil {
-			if report != nil {
-				report.collectionSize = qt.CollectionSizeBytes()
-				nq := qt.GetNq()
-				if len(validData) > 0 {
-					nq = int64(len(validData))
-				}
-				info[hookutil.NqKey] = nq
-				if elements := *qt.VectorElementCount; elements >= 0 {
-					info[hookutil.VectorElementCountKey] = elements + nq - qt.GetNq()
-				}
+		if report == nil {
+			reportLegacy(qt.Result().GetStatus(), map[string]any{
+				hookutil.OpTypeKey:          hookutil.OpTypeSearch,
+				hookutil.DatabaseKey:        dbName,
+				hookutil.UsernameKey:        GetCurUserFromContextOrDefault(ctx),
+				hookutil.ResultDataSizeKey:  proto.Size(qt.Result()),
+				hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+				hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			})
+		} else if !isRecallEvaluation {
+			report.collectionSize = qt.CollectionSizeBytes()
+			report.readCount = qt.GetNq()
+			if len(validData) > 0 {
+				report.readCount = int64(len(validData))
 			}
-			report.record(qt.Result().GetStatus(), info)
 		}
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 	}
@@ -2944,7 +2922,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
 	defer node.unregisterRequest(entry)
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeHybridSearch, request.GetDbName())
 
 	var err error
 	rsp := &milvuspb.SearchResults{
@@ -3135,26 +3113,22 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	}
 
 	if qt.Result() != nil {
-		sentSize := proto.Size(qt.Result())
-		username := GetCurUserFromContextOrDefault(ctx)
-		info := map[string]any{
-			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
-			hookutil.DatabaseKey:        dbName,
-			hookutil.UsernameKey:        username,
-			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
-		}
 		if report != nil {
 			report.collectionSize = qt.CollectionSizeBytes()
-			info[hookutil.SubSearchCountKey] = int64(len(request.GetRequests()))
-			var totalNq int64
+			report.readCount = 0
 			for _, sub := range qt.GetSubReqs() {
-				totalNq += sub.GetNq()
+				report.readCount += sub.GetNq()
 			}
-			info[hookutil.SubSearchTotalNqKey] = totalNq
+		} else {
+			reportLegacy(qt.Result().GetStatus(), map[string]any{
+				hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
+				hookutil.DatabaseKey:        dbName,
+				hookutil.UsernameKey:        GetCurUserFromContextOrDefault(ctx),
+				hookutil.ResultDataSizeKey:  proto.Size(qt.Result()),
+				hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+				hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			})
 		}
-		report.record(qt.Result().GetStatus(), info)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 	}
 	succeeded = true
@@ -3732,7 +3706,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	// cancelable while it waits for an automatic load or a view refresh.
 	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
 	defer node.unregisterRequest(entry)
-	report := newRequestReport()
+	report := newRequestReport(ctx, hookutil.OpTypeQuery, request.GetDbName())
 
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
@@ -3817,19 +3791,18 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 
 	mlog.Debug(ctx, rpcDone(method))
 
-	username := GetCurUserFromContextOrDefault(ctx)
-	info := map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeQuery,
-		hookutil.DatabaseKey:        request.DbName,
-		hookutil.UsernameKey:        username,
-		hookutil.ResultDataSizeKey:  proto.Size(res),
-		hookutil.RelatedDataSizeKey: qt.TotalRelatedDataSize(),
-		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
-	}
 	if report != nil {
-		report.collectionSize = qt.CollectionSizeBytes
+		report.collectionSize, report.readCount = qt.CollectionSizeBytes, 1
+	} else {
+		reportLegacy(res.Status, map[string]any{
+			hookutil.OpTypeKey:          hookutil.OpTypeQuery,
+			hookutil.DatabaseKey:        request.DbName,
+			hookutil.UsernameKey:        GetCurUserFromContextOrDefault(ctx),
+			hookutil.ResultDataSizeKey:  proto.Size(res),
+			hookutil.RelatedDataSizeKey: qt.TotalRelatedDataSize(),
+			hookutil.RelatedCntKey:      qt.AllQueryCnt(),
+		})
 	}
-	report.record(res.Status, info)
 	SetStorageCost(res.Status, storageCost)
 
 	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {
