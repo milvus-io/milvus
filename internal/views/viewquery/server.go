@@ -5,10 +5,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Server implements ViewQueryService as a thin provider+scheduler adapter.
@@ -44,6 +46,10 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 		result *internalpb.SearchResults
 		err    error
 	)
+	// The provider records waiting for the view and pinning its segments
+	// here; the search itself reports its stages with each result.
+	profile := searchprofile.NewRecorder(paramtable.GetNodeID())
+	ctx = searchprofile.WithRecorder(ctx, profile)
 	if req.GetLegacyReq().GetIsAdvanced() {
 		result, err = s.executeAdvancedSearch(ctx, req)
 	} else {
@@ -51,6 +57,10 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 	}
 	if err != nil {
 		return nil, err
+	}
+	if result != nil {
+		profile.Merge(result.GetStageCosts())
+		result.StageCosts = profile.Stages()
 	}
 	return &viewpb.SearchOnViewResponse{LegacyResults: result}, nil
 }
@@ -89,6 +99,11 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 	}
 	if err := group.Wait(); err != nil {
 		return nil, err
+	}
+	// The assembled envelope does not carry the sub-searches' stages.
+	profile := searchprofile.FromContext(ctx)
+	for _, result := range results {
+		profile.Merge(result.GetStageCosts())
 	}
 	return assembleAdvancedSearchResults(results), nil
 }

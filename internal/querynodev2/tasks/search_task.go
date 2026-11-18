@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -67,6 +68,10 @@ type SearchTask struct {
 
 	tr           *timerecord.TimeRecorder
 	scheduleSpan trace.Span
+	// queueDur is how long this request waited to be scheduled.
+	queueDur time.Duration
+	// profile records the stages the group ran once for all its requests.
+	profile *searchprofile.Recorder
 }
 
 func NewSearchTask(ctx context.Context,
@@ -126,6 +131,7 @@ func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(t.GetNodeID(), 10)
 	inQueueDuration := t.tr.ElapseSpan()
+	t.queueDur = inQueueDuration
 	inQueueDurationMS := inQueueDuration.Seconds() * 1000
 
 	// Update in queue metric for prometheus.
@@ -157,7 +163,11 @@ func (t *SearchTask) PreExecute() error {
 }
 
 func (t *SearchTask) Execute() error {
-	return t.execute(nil)
+	if err := t.execute(nil); err != nil {
+		return err
+	}
+	t.attachStageCosts()
+	return nil
 }
 
 // TODO(#40451): move selected-segment search and reduction into the shared
@@ -167,7 +177,33 @@ func (t *SearchTask) ExecuteOnSegments(selected []segments.Segment) error {
 	if selected == nil {
 		selected = []segments.Segment{}
 	}
-	return t.execute(selected)
+	if err := t.execute(selected); err != nil {
+		return err
+	}
+	t.attachStageCosts()
+	return nil
+}
+
+// attachStageCosts reports the stages this worker ran with every request of
+// the group. The group searched its segments once for all its requests, so
+// each request reports that whole search; the time in queue is its own.
+func (t *SearchTask) attachStageCosts() {
+	shared := t.profile.Stages()
+	for i := range t.originNqs {
+		task := t.subTaskAt(i)
+		if task.result == nil {
+			continue
+		}
+		// paramtable's node ID, not the task's server ID: a StreamingNode builds
+		// its executor before it has a node ID, so its tasks carry 0.
+		r := searchprofile.NewRecorder(paramtable.GetNodeID())
+		// A task run directly, as on the QueryView path, was never queued.
+		if task.queueDur > 0 {
+			r.Observe(searchprofile.QNQueue, task.queueDur, 0)
+		}
+		r.Merge(shared)
+		task.result.StageCosts = r.Stages()
+	}
 }
 
 func (t *SearchTask) execute(selected []segments.Segment) error {
@@ -179,6 +215,10 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 		defer restore()
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
+	// The segment searches below record into the group's profile through
+	// their context.
+	t.profile = searchprofile.NewRecorder(paramtable.GetNodeID())
+	searchCtx := searchprofile.WithRecorder(t.ctx, t.profile)
 
 	req := t.req
 	err := t.combinePlaceHolderGroups()
@@ -213,10 +253,10 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 	)
 	if selected != nil {
 		searchedSegments = selected
-		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected)
+		results, err = segments.SearchSelectedSegments(searchCtx, searchReq, selected)
 	} else if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
-			t.ctx,
+			searchCtx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -225,7 +265,7 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
-			t.ctx,
+			searchCtx,
 			t.segmentManager,
 			searchReq,
 			req.GetReq().GetCollectionID(),
@@ -432,6 +472,8 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 	}
 	t.attributeStorageCost(results, searchReq.FeatureBits())
 
+	reduceDur := reduceTR.RecordSpan()
+	t.profile.Observe(searchprofile.QNWorkerReduce, reduceDur, 0)
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the
 	// legacy C++ reduce-and-fill boundary so A/B comparisons are meaningful.
@@ -440,7 +482,7 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
-		Observe(float64(reduceTR.RecordSpan().Microseconds()) / 1000.0)
+		Observe(float64(reduceDur.Microseconds()) / 1000.0)
 	return nil
 }
 

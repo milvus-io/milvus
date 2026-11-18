@@ -129,6 +129,23 @@ type SlowQuery struct {
 	QueryParams           *QueryParams `json:"query_params,omitempty"`
 	Type                  string       `json:"type,omitempty"`
 	TraceID               string       `json:"trace_id,omitempty"`
+	// Stages is how long each stage of a slow search took, in execution order.
+	Stages []*SearchStage `json:"stages,omitempty"`
+}
+
+// SearchStage is the time one stage of a search took, summed over every run of
+// the stage (one per segment, worker or shard) on the nodes that served it.
+type SearchStage struct {
+	Stage string `json:"stage"`
+	// Layer is the level of the request the stage belongs to: Planner,
+	// Execution, Fragment, Pipeline or Operator.
+	Layer string `json:"layer,omitempty"`
+	Count int64  `json:"count"`
+	Sum   string `json:"sum"`
+	Max   string `json:"max"`
+	// where the slowest run happened
+	MaxNodeID int64 `json:"max_node_id,omitempty,string"`
+	MaxID     int64 `json:"max_id,omitempty,string"`
 }
 
 type DmChannel struct {

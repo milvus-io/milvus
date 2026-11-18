@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -4695,4 +4696,39 @@ func newTestSchema() *schemapb.CollectionSchema {
 		Fields:             fields,
 		EnableDynamicField: true,
 	}
+}
+
+func TestSetSearchProfile(t *testing.T) {
+	ctx := context.Background()
+	stages := []*internalpb.StageCost{
+		{Stage: searchprofile.ProxyQueue, SumUs: 300, MaxUs: 300, Count: 1, MaxNodeId: 9},
+	}
+	request := &milvuspb.SearchRequest{DbName: "default", CollectionName: "c", Dsl: "id > 0", Nq: 1}
+
+	t.Run("success adds profile and default report_value", func(t *testing.T) {
+		status := merr.Success()
+		SetSearchProfile(ctx, status, request, 2*time.Millisecond, stages)
+		assert.Equal(t, "0", status.GetExtraInfo()["report_value"])
+		assert.JSONEq(t,
+			`{"summary":{"total":"2.000ms","type":"Search","database":"default","collection":"c","segments":0,
+			   "query_params":{"search_params":[{"dsl":["id > 0"],"search_params":[""],"nq":[1]}],"expr":"id > 0"}},
+			  "stages":[{"stage":"proxy.queue","layer":"Planner","count":1,"sum":"0.300ms","max":"0.300ms","max_node_id":"9"}]}`,
+			status.GetExtraInfo()[SearchProfileKey])
+		assert.Contains(t, status.GetExtraInfo()[SearchProfileTextKey], "TotalTime: 2.000ms")
+		assert.Contains(t, status.GetExtraInfo()[SearchProfileTextKey], "proxy.queue [Planner]")
+	})
+
+	t.Run("keeps existing extra info", func(t *testing.T) {
+		status := merr.Success()
+		SetReportValue(status, 7)
+		SetSearchProfile(ctx, status, request, time.Millisecond, stages)
+		assert.Equal(t, "7", status.GetExtraInfo()["report_value"])
+		assert.Contains(t, status.GetExtraInfo(), SearchProfileKey)
+	})
+
+	t.Run("failed request gets no profile", func(t *testing.T) {
+		status := merr.Status(merr.WrapErrServiceInternal("boom"))
+		SetSearchProfile(ctx, status, request, time.Millisecond, stages)
+		assert.NotContains(t, status.GetExtraInfo(), SearchProfileKey)
+	})
 }

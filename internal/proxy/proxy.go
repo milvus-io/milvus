@@ -136,6 +136,8 @@ type Proxy struct {
 	enableComplexDeleteLimit bool
 
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
+	// searchProfiles keeps the latest searches that asked for a profile
+	searchProfiles searchProfileStore
 
 	// requests holds the DQL requests this proxy is currently serving, for
 	// ListRunningRequests / CancelRequests.

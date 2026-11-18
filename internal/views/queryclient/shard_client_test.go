@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -139,6 +140,37 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 	require.Equal(t, 0, planClient.mvccReqCount)
 }
 
+// A shard search profiles its GetQueryPlan and each work node RPC, and keeps
+// the stages the node reported before the reducer, which may drop them.
+func TestShardSearchRecordsStagesBeforeReduce(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{GrowingTimetick: 100})}
+	queryService := &fakeViewQueryServiceClient{searchResp: &viewpb.SearchOnViewResponse{
+		LegacyResults: &internalpb.SearchResults{StageCosts: []*internalpb.StageCost{
+			{Stage: searchprofile.QNSegmentSearch, SumUs: 5, MaxUs: 5, Count: 1, MaxNodeId: 11},
+		}},
+	}}
+	client := newShardViewQueryClient(1, planClient, queryService)
+	profile := searchprofile.NewRecorder(1)
+
+	_, err := client.Search(searchprofile.WithRecorder(context.Background(), profile), &ShardSearchRequest{
+		VChannel: shardID.VChannel,
+		Req:      &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded},
+		Reducer:  fakeSearchResultReducer{},
+	})
+	require.NoError(t, err)
+
+	stages := make(map[string]*internalpb.StageCost)
+	for _, s := range profile.Stages() {
+		stages[s.GetStage()] = s
+	}
+	require.EqualValues(t, 1, stages[searchprofile.ProxyQueryPlan].GetCount())
+	require.EqualValues(t, 1, stages[searchprofile.ProxyShardRPC].GetCount())
+	require.EqualValues(t, 11, stages[searchprofile.ProxyShardRPC].GetMaxId())
+	require.EqualValues(t, 11, stages[searchprofile.QNSegmentSearch].GetMaxNodeId())
+}
+
 type fakeQueryPlanClient struct {
 	QueryPlanClient
 	executionSummary      *viewpb.ExecutionSummary
@@ -164,11 +196,15 @@ func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews
 
 type fakeViewQueryServiceClient struct {
 	ViewQueryServiceClient
-	searchReq *viewpb.SearchOnViewRequest
+	searchReq  *viewpb.SearchOnViewRequest
+	searchResp *viewpb.SearchOnViewResponse
 }
 
 func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 	f.searchReq = req
+	if f.searchResp != nil {
+		return f.searchResp, nil
+	}
 	return &viewpb.SearchOnViewResponse{}, nil
 }
 

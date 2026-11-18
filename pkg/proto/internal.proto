@@ -222,6 +222,23 @@ message SearchResults {
   // OR-merged wherever the results are merged. Zero unless the plan asked
   // for them (PlanOption.collect_feature_bits).
   uint64 feature_bits = 24;
+  // Time each stage of this request took on the QueryNodes that served it,
+  // merged by stage name wherever the results are merged. The Proxy adds its
+  // own stages and reports the whole set for slow requests.
+  repeated StageCost stage_costs = 25;
+}
+
+// StageCost is the time one stage of a search took, merged over every run of
+// the stage (one per segment, worker or shard).
+message StageCost {
+  string stage = 1;
+  int64 sum_us = 2;
+  int64 max_us = 3;
+  int64 count = 4;
+  // where the slowest run happened: its node, and the segment or shard it ran
+  // on when the stage runs per segment or shard
+  int64 max_node_id = 5;
+  int64 max_id = 6;
 }
 
 message CostAggregation {

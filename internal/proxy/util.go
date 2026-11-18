@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -57,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
@@ -2253,6 +2255,40 @@ func SetStorageCost(status *commonpb.Status, storageCost segcore.StorageCost) {
 	status.ExtraInfo["scanned_total_bytes"] = strconv.FormatInt(storageCost.ScannedTotalBytes, 10)
 	cacheHitRatio := float64(storageCost.ScannedTotalBytes-storageCost.ScannedRemoteBytes) / float64(storageCost.ScannedTotalBytes)
 	status.ExtraInfo["cache_hit_ratio"] = strconv.FormatFloat(cacheHitRatio, 'f', -1, 64)
+}
+
+// SearchProfileKey is the key of a search's profile in its Status.ExtraInfo.
+const SearchProfileKey = "search_profile"
+
+// SearchProfileTextKey is the key of the same profile drawn as a tree, the way
+// StarRocks' ANALYZE PROFILE draws a query profile, ready to print.
+const SearchProfileTextKey = "search_profile_text"
+
+// SetSearchProfile adds to a successful search's status how long it took on
+// the Proxy (total) and in each stage, for a client that asked for it.
+func SetSearchProfile(ctx context.Context, status *commonpb.Status, request *milvuspb.SearchRequest, total time.Duration, stages []*internalpb.StageCost) {
+	if !merr.Ok(status) {
+		return
+	}
+	query := metricsinfo.NewSlowQueryWithSearchRequest(request, "", total, "")
+	summary := &searchprofile.Summary{
+		Type:        query.Type,
+		Database:    query.Database,
+		Collection:  query.Collection,
+		QueryParams: query.QueryParams,
+	}
+	report, err := searchprofile.MarshalReport(summary, total, stages)
+	if err != nil {
+		mlog.Warn(ctx, "failed to marshal search profile", mlog.Err(err))
+		return
+	}
+	if status.ExtraInfo == nil {
+		status.ExtraInfo = make(map[string]string)
+		// see SetStorageCost: a client reads report_value whenever ExtraInfo is set
+		status.ExtraInfo["report_value"] = strconv.Itoa(0)
+	}
+	status.ExtraInfo[SearchProfileKey] = report
+	status.ExtraInfo[SearchProfileTextKey] = searchprofile.Render(summary, total, stages)
 }
 
 func GetCostValue(status *commonpb.Status) int {

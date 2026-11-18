@@ -2,7 +2,9 @@ package snview
 
 import (
 	"context"
+	"time"
 
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -47,17 +49,22 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 	)
+	profile := searchprofile.FromContext(ctx)
+	waitStart := time.Now()
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
+	profile.ObserveSince(searchprofile.QNWaitTSafe, waitStart, 0)
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
 	if err != nil {
 		return nil, err
 	}
+	pinStart := time.Now()
 	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}
+	profile.ObserveSince(searchprofile.QNPinSegments, pinStart, 0)
 	mlog.Debug(ctx, "acquired streamingnode search segment tasks",
 		mlog.FieldCollectionID(req.GetCollectionID()),
 		mlog.FieldVChannel(shardID.VChannel),

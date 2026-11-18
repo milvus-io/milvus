@@ -5,14 +5,17 @@ package viewquery
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestServerSearchOnViewDelegatesAndReleasesTasks(t *testing.T) {
@@ -172,8 +175,69 @@ func testVersion() qviews.QueryViewVersion {
 	}
 }
 
+// The response carries the stages the provider recorded through the request
+// context together with those the search reported with its result.
+func TestServerSearchOnViewReportsProviderAndSearchStages(t *testing.T) {
+	provider := &fakeTaskProvider{
+		searchTasks:  &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}},
+		recordStages: true,
+	}
+	scheduler := &fakeScheduler{searchResult: &internalpb.SearchResults{
+		StageCosts: []*internalpb.StageCost{{Stage: searchprofile.QNSegmentSearch, SumUs: 5, MaxUs: 5, Count: 1}},
+	}}
+	server := NewServer(provider, scheduler)
+
+	resp, err := server.SearchOnView(context.Background(), validSearchRequest())
+
+	require.NoError(t, err)
+	stages := stageNames(resp.GetLegacyResults().GetStageCosts())
+	assert.Equal(t, []string{searchprofile.QNWaitTSafe, searchprofile.QNPinSegments, searchprofile.QNSegmentSearch}, stages)
+}
+
+// A hybrid search reports every sub-search's stages, which the assembled
+// envelope would otherwise drop.
+func TestServerAdvancedSearchOnViewReportsSubSearchStages(t *testing.T) {
+	provider := &fakeTaskProvider{
+		searchTasks:  &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}},
+		recordStages: true,
+	}
+	scheduler := &fakeScheduler{searchResult: &internalpb.SearchResults{
+		Status:     merr.Success(),
+		StageCosts: []*internalpb.StageCost{{Stage: searchprofile.QNSegmentSearch, SumUs: 5, MaxUs: 5, Count: 1}},
+	}}
+	server := NewServer(provider, scheduler)
+	req := validSearchRequest()
+	req.LegacyReq.IsAdvanced = true
+	req.LegacyReq.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 1}, {Nq: 1, Topk: 1}}
+
+	resp, err := server.SearchOnView(context.Background(), req)
+
+	require.NoError(t, err)
+	require.True(t, resp.GetLegacyResults().GetIsAdvanced())
+	counts := make(map[string]int64)
+	for _, s := range resp.GetLegacyResults().GetStageCosts() {
+		counts[s.GetStage()] = s.GetCount()
+	}
+	assert.Equal(t, map[string]int64{
+		searchprofile.QNWaitTSafe:     2,
+		searchprofile.QNPinSegments:   2,
+		searchprofile.QNSegmentSearch: 2,
+	}, counts)
+}
+
+func stageNames(stages []*internalpb.StageCost) []string {
+	names := make([]string, 0, len(stages))
+	for _, s := range stages {
+		names = append(names, s.GetStage())
+	}
+	return names
+}
+
 type fakeTaskProvider struct {
 	TaskProvider
+	// recordStages makes AcquireSearchSegmentTasks record the stages a real
+	// provider does into the request's profile.
+	recordStages  bool
 	searchTasks   *fakeSearchSegmentTasks
 	searchErr     error
 	searchShardID qviews.ShardID
@@ -190,13 +254,18 @@ type fakeTaskProvider struct {
 }
 
 func (p *fakeTaskProvider) AcquireSearchSegmentTasks(
-	_ context.Context,
+	ctx context.Context,
 	shardID qviews.ShardID,
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
 	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
+	if p.recordStages {
+		searchprofile.FromContext(ctx).Observe(searchprofile.QNWaitTSafe, time.Millisecond, 0)
+		searchprofile.FromContext(ctx).Observe(searchprofile.QNPinSegments, time.Millisecond, 0)
+		return p.searchTasks, nil
+	}
 	p.searchShardID = shardID
 	p.searchVersion = version
 	p.searchMVCC = mvcc

@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -477,15 +478,23 @@ func (sd *shardDelegator) executeSearchSubTasks(
 		return nil, err
 	}
 
+	profile := searchprofile.FromContext(ctx)
+	fanoutStart := time.Now()
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
 			ctx = workerReadContext(ctx)
-			resp, err := worker.SearchSegments(ctx, req)
+			// A worker on this node is called in process; it reports its
+			// stages with its results instead of into this request's profile.
+			resp, err := worker.SearchSegments(searchprofile.WithRecorder(ctx, nil), req)
 			if grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
 			}
+			if err == nil && merr.Ok(resp.GetStatus()) {
+				profile.Merge(resp.GetStageCosts())
+			}
 			return resp, err
 		}, "Search", log)
+	profile.ObserveSince(searchprofile.QNFanout, fanoutStart, 0)
 	if err != nil {
 		mlog.Warn(ctx, "Delegator search failed", mlog.Err(err))
 		return nil, err
@@ -643,9 +652,11 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		tSafe = sd.GetTSafe()
 	}
 
+	waitDur := waitTr.ElapseSpan()
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		paramtable.GetStringNodeID(), metrics.SearchLabel).
-		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
+		Observe(float64(waitDur.Milliseconds()))
+	searchprofile.FromContext(ctx).Observe(searchprofile.QNWaitTSafe, waitDur, 0)
 
 	if err != nil {
 		mlog.Warn(ctx, "delegator search failed to wait tsafe", mlog.Err(err))
@@ -658,12 +669,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		req.Req.MvccTimestamp = tSafe
 	}
 
+	pinStart := time.Now()
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to search, current distribution is not serviceable", mlog.Err(err))
 		return nil, err
 	}
 	defer sd.distribution.Unpin(version)
+	searchprofile.FromContext(ctx).ObserveSince(searchprofile.QNPinSegments, pinStart, 0)
 
 	if req.GetReq().GetIsAdvanced() {
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))

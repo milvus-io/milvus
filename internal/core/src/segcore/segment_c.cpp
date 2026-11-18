@@ -525,6 +525,31 @@ GetSearchResultValidCount(CSearchResult search_result) {
     return res->valid_count_;
 }
 
+int64_t
+GetSearchResultOperatorCostCount(CSearchResult search_result) {
+    auto res = static_cast<milvus::SearchResult*>(search_result);
+    if (res == nullptr) {
+        return 0;
+    }
+    return res->operator_costs_.size();
+}
+
+void
+GetSearchResultOperatorCost(CSearchResult search_result,
+                            int64_t i,
+                            const char** operator_type,
+                            int64_t* ns) {
+    auto res = static_cast<milvus::SearchResult*>(search_result);
+    if (res == nullptr || i < 0 || i >= static_cast<int64_t>(res->operator_costs_.size())) {
+        *operator_type = "";
+        *ns = 0;
+        return;
+    }
+    const auto& cost = res->operator_costs_[i];
+    *operator_type = cost.first.c_str();
+    *ns = cost.second;
+}
+
 // Verifies the plan's external field references against the loaded manifest,
 // after LazyCheckSchema refreshed the segment schema and manifest view.
 // Optionally ignores fields that the current execution path will not access.

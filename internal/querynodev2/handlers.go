@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -415,8 +416,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		log.Warn(ctx, "Query failed, failed to get shard delegator for search", mlog.Err(err))
 		return nil, err
 	}
+	// The delegator records its stages and its workers' into profile.
+	profile := searchprofile.NewRecorder(node.GetNodeID())
 	// do search
-	results, err := sd.Search(ctx, req)
+	results, err := sd.Search(searchprofile.WithRecorder(ctx, profile), req)
 	if err != nil {
 		log.Warn(ctx, "failed to search on delegator", mlog.Err(err))
 		return nil, err
@@ -439,6 +442,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	if err != nil {
 		return nil, err
 	}
+	profile.Observe(searchprofile.QNShardReduce, reduceLatency, 0)
+	// Replaces whatever the reduce carried over: profile already holds every
+	// worker's stages, whichever way the results were reduced.
+	resp.StageCosts = profile.Stages()
 
 	tr.CtxElapse(ctx, "search with channel done, ch="+channel)
 

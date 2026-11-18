@@ -3,10 +3,12 @@ package queryclient
 import (
 	"context"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -21,6 +23,9 @@ type twoStageSearch struct {
 	options   *viewpb.SearchExecutionOptions
 	filters   map[int64]*internalpb.SearchResults
 	completed bool
+	// profile records the attempt's stages; the caller keeps them only if
+	// the attempt succeeds.
+	profile *searchprofile.Recorder
 }
 
 func (s *shardViewQueryClient) prepareTwoStageSearch(ctx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID, channelNum int32, stage *twoStageSearch) error {
@@ -40,6 +45,7 @@ func (s *shardViewQueryClient) prepareTwoStageSearch(ctx context.Context, respon
 	}
 	stage.filters = make(map[int64]*internalpb.SearchResults, len(nodes))
 	var mu sync.Mutex
+	filterStart := time.Now()
 	err := s.fanOutToWorkNodes(ctx, nodes, plan, shardID, func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
 		response, err := s.queryServiceClient.SearchOnView(ctx, node, &viewpb.SearchOnViewRequest{
 			LegacyReq: legacySearchRequestForNode(plan, node),
@@ -65,6 +71,9 @@ func (s *shardViewQueryClient) prepareTwoStageSearch(ctx context.Context, respon
 	if err != nil {
 		return err
 	}
+	// The filter pass is timed as a whole; its node stages are left out so
+	// that the qn stages describe the search itself.
+	stage.profile.ObserveSince(searchprofile.ProxyTwoStageFilter, filterStart, 0)
 
 	counts := make([]int64, 0, info.GetSealedSegmentCount())
 	seen := make(map[int64]struct{}, info.GetSealedSegmentCount())

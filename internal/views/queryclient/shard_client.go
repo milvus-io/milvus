@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
@@ -74,12 +75,14 @@ type ShardQueryRequest struct {
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+	profile := searchprofile.FromContext(ctx)
 	var stage twoStageSearch
-	return s.executeShard(ctx, req.VChannel, &shardExecParams{
+	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		profile:          profile,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -91,10 +94,11 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			}
 		},
 		beforeDispatch: func(ctx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID) error {
-			stage = twoStageSearch{}
+			stage = twoStageSearch{profile: profile.Child()}
 			return s.prepareTwoStageSearch(ctx, response, shardID, req.TotalChannelNum, &stage)
 		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+			rpcStart := time.Now()
 			resp, err := s.queryServiceClient.SearchOnView(ctx, node, &viewpb.SearchOnViewRequest{
 				ExecutionOptions: stage.options,
 				LegacyReq:        legacySearchRequestForNode(plan, node),
@@ -107,11 +111,30 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			if err != nil {
 				return err
 			}
+			// Taken before the reducer, which may build a new result
+			// without the node's stages.
+			stage.profile.ObserveSince(searchprofile.ProxyShardRPC, rpcStart, workNodeID(node))
+			stage.profile.Merge(resp.GetLegacyResults().GetStageCosts())
 			stage.mergeFeatures(node, resp)
 			return req.Reducer.Add(shardID, resp)
 		},
 		resetShard: req.Reducer.ResetShard,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Only the attempt whose results the reducer kept is profiled.
+	profile.Merge(stage.profile.Stages())
+	return plan, nil
+}
+
+// workNodeID returns the node ID of a QueryNode, or 0 for a StreamingNode,
+// which is addressed by its pchannel.
+func workNodeID(node qviews.WorkNode) int64 {
+	if qn, ok := node.(qviews.QueryNode); ok {
+		return qn.ID
+	}
+	return 0
 }
 
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
@@ -164,6 +187,8 @@ type shardExecParams struct {
 	consistencyLevel commonpb.ConsistencyLevel
 	mvcc             *viewpb.QueryPlanMVCC
 	barrierMVCC      uint64
+	// profile, when set, records how long each GetQueryPlan took.
+	profile *searchprofile.Recorder
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -232,7 +257,9 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
+		planStart := time.Now()
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+		params.profile.ObserveSince(searchprofile.ProxyQueryPlan, planStart, 0)
 		if err != nil {
 			if retryableQueryError(err) {
 				lastErr = err

@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -3094,6 +3096,7 @@ type pipeline struct {
 	name         string
 	nodes        []*Node
 	traceEnabled bool
+	profile      *searchprofile.Recorder
 }
 
 func newPipeline(pipeDef *pipelineDef, t *SearchTask) (*pipeline, error) {
@@ -3105,7 +3108,7 @@ func newPipeline(pipeDef *pipelineDef, t *SearchTask) (*pipeline, error) {
 		}
 		nodes[i] = node
 	}
-	p := &pipeline{name: pipeDef.name, nodes: nodes, traceEnabled: t.traceEnabled}
+	p := &pipeline{name: pipeDef.name, nodes: nodes, traceEnabled: t.traceEnabled, profile: t.profile}
 	p.markSharedOrganizeInputs()
 	return p, nil
 }
@@ -3153,7 +3156,9 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 	for _, node := range p.nodes {
 		var err error
 		mlog.Debug(ctx, "SearchPipeline run node", mlog.String("node", node.name))
+		start := time.Now()
 		msg, err = node.Run(ctx, span, msg)
+		p.profile.ObserveSince(searchprofile.ProxyOpPrefix+node.name, start, 0)
 		if err != nil {
 			mlog.Error(ctx, "Run node failed: ", mlog.String("err", err.Error()))
 			return nil, storageCost, err
