@@ -103,6 +103,8 @@ func contextMilvusError(cause error) error {
 
 func viewMilvusError(code viewpb.ViewCode, cause string) error {
 	switch code {
+	case viewpb.ViewCode_VIEW_CODE_SCHEMA_MISMATCH:
+		return merr.Wrap(merr.ErrQueryViewSchemaMismatch, cause)
 	case viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND, viewpb.ViewCode_VIEW_CODE_VIEW_INVALIDATED:
 		return merr.Wrap(merr.ErrQueryViewNotReady, cause)
 	case viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED:

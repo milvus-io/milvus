@@ -44,6 +44,12 @@ collection may still be preparing; keep retrying planning under the caller's
 deadline. Coordinator errors retain their original identity; transport failure
 is not treated as an unloaded collection.
 
+If only a newer schema can serve and no replica is recovering the requested schema,
+SN returns ViewError with VIEW_CODE_SCHEMA_MISMATCH (6) as a FailedPrecondition
+gRPC status detail. QueryViewClient ends the shard attempt immediately and maps
+the ViewError to merr.ErrQueryViewSchemaMismatch (2203) at the collection boundary. Proxy refreshes the published schema and rebuilds the
+whole request up to three times. Iterators return the error with their binding intact.
+
 Concurrent requests share one load-info probe per collection. Successful checks
 are reused for one second while requests remain active; negative results are
 not cached. Each probe uses its initiating query's context. If that query is
@@ -126,8 +132,8 @@ classification and retryability. Existing business errors are preserved. LocalWA
 protocol errors and remote protocol errors use the same mapping:
 
 - ViewNotFound/ViewInvalidated become retriable `merr.ErrQueryViewNotReady`.
-  Proxy uses that sentinel for whole-request replanning, retaining its existing
-  retry budget, AutoLoad and Iterator restrictions.
+  Proxy checks load intent for this sentinel. Only ErrQueryViewSchemaMismatch
+  triggers the read-schema cache refresh.
 - Shutdown, ownership changes and unavailable transports become retriable
   `merr.ErrServiceUnavailable`. These do not establish that a collection is unloaded.
 - Cancellation/deadline keep the existing business codes and are marked with

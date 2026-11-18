@@ -320,16 +320,20 @@ func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, sh
 		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
 		recovering := false
 		excluded := false
+		var staleSchema error
 		for _, candidate := range candidates {
 			lease, changed, err := candidate.tryAcquireUpViewWithExclusions(ctx, schema, exclusions)
 			if lease != nil {
 				return lease, nil
 			}
-			if err == nil {
+			switch ve := viewerror.AsViewError(err); {
+			case ve == nil:
 				recovering = true
-			} else if viewerror.AsViewError(err).IsAllCandidatesExcluded() {
+			case ve.IsAllCandidatesExcluded():
 				excluded = true
-			} else if !viewerror.AsViewError(err).IsViewNotFound() {
+			case ve.IsSchemaMismatch():
+				staleSchema = err
+			case !ve.IsViewNotFound():
 				return nil, err
 			}
 			if changed != nil {
@@ -340,6 +344,9 @@ func (h *SNQueryViewHandler) acquireUpViewWithExclusions(ctx context.Context, sh
 			return nil, viewerror.NewAllCandidatesExcluded()
 		}
 		if !recovering {
+			if staleSchema != nil {
+				return nil, staleSchema
+			}
 			return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
 		}
 		if membershipChanged != nil {

@@ -63,6 +63,7 @@ func TestToMilvusErrorProtocolMapping(t *testing.T) {
 		want   error
 	}{
 		{viewerror.NewViewInvalidated("retired"), merr.ErrQueryViewNotReady},
+		{viewerror.NewSchemaMismatch("retired schema"), merr.ErrQueryViewSchemaMismatch},
 		{viewerror.NewViewNotFound("missing"), merr.ErrQueryViewNotReady},
 		{viewerror.NewOnShutdownError("stopping"), merr.ErrServiceUnavailable},
 		{viewerror.NewNotPrimaryError("moved"), merr.ErrServiceUnavailable},

@@ -23,6 +23,7 @@ var viewCodeToGRPCStatus = map[viewpb.ViewCode]codes.Code{
 	// Replanning must refresh exclusions in the query orchestrator. Unavailable
 	// would retry the same constraints in both gRPC and the WAL readiness loop.
 	viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED: codes.Aborted,
+	viewpb.ViewCode_VIEW_CODE_SCHEMA_MISMATCH:         codes.FailedPrecondition,
 	viewpb.ViewCode_VIEW_CODE_UNKNOWN:                 codes.Unknown,
 }
 

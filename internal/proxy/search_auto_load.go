@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-// retryDQL replans the entire request when its read view has
-// retired, including schema lookup and all shard results. This also applies to
+// retryDQL refreshes the read schema and rebuilds all shard results when
+// the request schema can no longer be served. This also applies to
 // explicitly loaded collections. Iterators retain their original read binding.
 func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, params []*commonpb.KeyValuePair, execute func(context.Context) (bool, error)) error {
 	iteratorValue, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, params)
@@ -39,15 +39,13 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	refreshes := 0
 	return node.retryDQLWithExecutionRetry(ctx, dbName, collectionName, func(ctx context.Context) (bool, error) {
 		again, err := execute(ctx)
-		if err == nil || isIterator || ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || merr.GetErrorType(err) == merr.InputError || refreshes >= 3 {
-			return again, err
+		if !isIterator && refreshes < 3 && errors.Is(err, merr.ErrQueryViewSchemaMismatch) &&
+			ctx.Err() == nil && !merr.IsCanceledOrTimeout(err) && merr.GetErrorType(err) != merr.InputError {
+			refreshes++
+			node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
+			return true, err
 		}
-		if !errors.Is(err, merr.ErrQueryViewNotReady) {
-			return again, err
-		}
-		refreshes++
-		node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
-		return true, err
+		return again, err
 	}, func(err error) bool {
 		// Iterators cannot switch schema on a whole-request retry. View
 		// refreshes above are bounded independently of AutoLoad.

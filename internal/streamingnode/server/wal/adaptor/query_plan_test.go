@@ -145,13 +145,13 @@ func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
 	req := &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(view.Meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 2}}
 	_, err := w.GetQueryPlan(t.Context(), req)
-	require.True(t, viewerror.AsViewError(err).IsRetryable())
+	require.True(t, viewerror.AsViewError(err).IsSchemaMismatch())
 	req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 2}}
 	_, err = w.GetQueryPlan(t.Context(), req)
-	require.True(t, viewerror.AsViewError(err).IsRetryable())
+	require.True(t, viewerror.AsViewError(err).IsSchemaMismatch())
 	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 0}}
 	_, err = w.GetQueryPlan(t.Context(), req)
-	require.True(t, viewerror.AsViewError(err).IsRetryable(), "newer schema cannot satisfy an old request")
+	require.True(t, viewerror.AsViewError(err).IsSchemaMismatch(), "newer schema cannot satisfy an old request")
 	require.Empty(t, w.queryViewHandler.TakeViewFeedback().Shards)
 }
 

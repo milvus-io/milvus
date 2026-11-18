@@ -352,3 +352,14 @@ func TestCanceledExecutionReleasesSelectedProbe(t *testing.T) {
 	require.Equal(t, time.Second, b.nodes[11].backoff)
 	require.Zero(t, b.nodes[11].failures)
 }
+
+func TestShardRoutingReturnsSchemaMismatchOnFirstAttempt(t *testing.T) {
+	failure := viewerror.ConvertViewError("GetQueryPlan", viewerror.NewGRPCStatusFromError(viewerror.NewSchemaMismatch("schema retired")).Err())
+	patch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).Return(nil, failure).Build()
+	defer patch.UnPatch()
+	client := newShardViewQueryClient(defaultMaxRetries, &fakeQueryPlanClient{}, nil)
+	defer client.Close()
+	_, err := client.Search(t.Context(), &ShardSearchRequest{VChannel: "p_1v0", Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
+	require.ErrorIs(t, toMilvusError(err), merr.ErrQueryViewSchemaMismatch)
+	require.Equal(t, 1, patch.Times())
+}

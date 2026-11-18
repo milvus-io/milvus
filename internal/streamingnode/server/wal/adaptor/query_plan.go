@@ -113,8 +113,8 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, err
 	}
 	defer lease.Release()
-	if req.GetStatisticsRequest() == nil && schemaVersion != lease.Meta.GetSchemaVersion() {
-		return nil, viewerror.NewViewNotFound("query view schema is not ready")
+	if schema != nil && *schema != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewSchemaMismatch("requested schema %d, selected schema %d", *schema, lease.Meta.GetSchemaVersion())
 	}
 	if req.GetCollectionId() != 0 && lease.Meta.GetCollectionId() != req.GetCollectionId() {
 		return nil, viewerror.NewViewNotFound("query view collection mismatch, expected %d, got %d", req.GetCollectionId(), lease.Meta.GetCollectionId())

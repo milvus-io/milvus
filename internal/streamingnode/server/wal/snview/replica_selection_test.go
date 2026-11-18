@@ -176,3 +176,19 @@ func TestReplicaRoutingExcludesBeforeLeaseAndNeverFallsBackToOldVersion(t *testi
 	require.EqualValues(t, 4, lease.Version.QueryVersion)
 	lease.Release()
 }
+
+func TestRoutingStaleSchemaAcrossReplicas(t *testing.T) {
+	resources := newMockResourceManager()
+	h := recoverSNQueryViewHandler(t.Context(), testPChannel, newMockCatalog(), resources, nil)
+	schema := int32(0)
+	publishReplicaView(t, h, resources, 11, testVChannel, 1, 1)
+	_, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil)
+	require.True(t, viewerror.AsViewError(err).IsSchemaMismatch())
+	publishReplicaView(t, h, resources, 22, testVChannel, 2, schema)
+	for range 2 {
+		lease, err := h.AcquireUpViewForRouting(t.Context(), testVChannel, &schema, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, 22, lease.Meta.GetReplicaId())
+		lease.Release()
+	}
+}

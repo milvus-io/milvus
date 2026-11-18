@@ -20,3 +20,12 @@ func TestQueryViewNotReadyRemainsRetriableAcrossStatus(t *testing.T) {
 	require.Equal(t, SystemError, GetErrorType(restored))
 	require.True(t, IsRetryableErr(restored))
 }
+
+func TestQueryViewSchemaMismatchStatus(t *testing.T) {
+	wire := Status(Wrap(ErrQueryViewSchemaMismatch, "read schema has advanced"))
+	require.EqualValues(t, 2203, wire.GetCode())
+	require.True(t, wire.GetRetriable())
+	restored := Error(wire)
+	require.ErrorIs(t, restored, ErrQueryViewSchemaMismatch)
+	require.Equal(t, SystemError, GetErrorType(restored))
+}

@@ -240,6 +240,7 @@ enum ViewCode {
     VIEW_CODE_ON_SHUTDOWN      = 3;  // Node is shutting down.
     VIEW_CODE_NOT_PRIMARY      = 4;  // Node is not the primary replica for this shard (strong consistency requires primary).
     VIEW_CODE_ALL_CANDIDATES_EXCLUDED = 5; // Serving candidates exist, but request routing constraints exclude them.
+    VIEW_CODE_SCHEMA_MISMATCH = 6; // Rebuild the request with the published read schema.
     VIEW_CODE_UNKNOWN          = 999;
 }
 

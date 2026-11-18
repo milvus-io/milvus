@@ -462,9 +462,13 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
 	recovering := false
+	newerSchemaUp := false
 	for version, entry := range s.views {
 		s.advancePendingDownLocked(version, entry)
-		if schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema {
+		if viewSchema := entry.sm.meta.GetSchemaVersion(); schema != nil && viewSchema != *schema {
+			if viewSchema > *schema && !entry.leaseDisabled && entry.sm.State() == qviews.QueryViewStateUp {
+				newerSchemaUp = true
+			}
 			continue
 		}
 		if entry.sm.IsRecovering() {
@@ -496,6 +500,9 @@ func (s *snShardView) tryAcquireUpViewWithExclusions(ctx context.Context, schema
 	}
 	if recovering {
 		return nil, s.recoveryChangedLocked(), nil
+	}
+	if newerSchemaUp {
+		return nil, s.recoveryChangedLocked(), viewerror.NewSchemaMismatch("no serving view for schema %d on %s; a newer schema is serving", *schema, s.shardID.String())
 	}
 	return nil, s.recoveryChangedLocked(), viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
 }

@@ -723,7 +723,7 @@ func TestDQLAutoLoadRetryEnsuresOnEveryAttempt(t *testing.T) {
 	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		if calls == 1 {
-			return false, merr.Wrap(merr.ErrQueryViewNotReady, "view replaced by balance")
+			return false, merr.ErrCollectionNotLoaded
 		}
 		return false, nil
 	})
@@ -755,7 +755,7 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 	err := node.retryDQL(ctx, "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		cancel()
-		return false, merr.Wrap(merr.ErrQueryViewNotReady, "released")
+		return false, merr.ErrCollectionNotLoaded
 	})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, calls)
@@ -767,7 +767,7 @@ func TestDQLViewRetryWithAutoLoadDisabled(t *testing.T) {
 	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
-	want := merr.Wrap(merr.ErrQueryViewNotReady, "released")
+	want := merr.ErrQueryViewSchemaMismatch
 	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		return false, want
@@ -798,7 +798,7 @@ func TestDQLAutoLoadRetryQueryCreatesFreshTask(t *testing.T) {
 		require.EqualValues(t, 1234, qt.Request().GuaranteeTimestamp)
 		qt.Request().Expr = "changed"
 		if len(tasks) == 1 {
-			err := merr.Wrap(merr.ErrQueryViewNotReady, "released")
+			err := merr.ErrCollectionNotLoaded
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
@@ -824,7 +824,7 @@ func TestDQLAutoLoadRetryHonorsDeadline(t *testing.T) {
 	err := node.retryDQL(ctx, "db", "collection", nil, func(ctx context.Context) (bool, error) {
 		calls++
 		<-ctx.Done()
-		return false, merr.Wrap(merr.ErrQueryViewNotReady, "released while request timed out")
+		return false, merr.ErrCollectionNotLoaded
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Equal(t, 1, calls)
@@ -851,7 +851,7 @@ func TestDQLAutoLoadRetryPreservesLatestReadinessTimeout(t *testing.T) {
 	executeCalls := 0
 	err := node.retryDQL(parentCtx, "db", "collection", nil, func(context.Context) (bool, error) {
 		executeCalls++
-		return false, merr.Wrap(merr.ErrQueryViewNotReady, "collection released")
+		return false, merr.ErrCollectionNotLoaded
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.NoError(t, parentCtx.Err())
@@ -884,7 +884,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 				if calls == 2 {
 					require.False(t, optimized)
 					require.Equal(t, mode == "recall", recall)
-					err := merr.Wrap(merr.ErrQueryViewNotReady, "released during extra search")
+					err := merr.ErrCollectionNotLoaded
 					return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, err
 				}
 				return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
@@ -934,7 +934,7 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	query := mockey.Mock((*Proxy).query).To(func(*Proxy, context.Context, *queryTask, trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		calls++
 		if calls <= 2 {
-			err := merr.Wrap(merr.ErrQueryViewNotReady, "retry query")
+			err := merr.ErrQueryViewSchemaMismatch
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
