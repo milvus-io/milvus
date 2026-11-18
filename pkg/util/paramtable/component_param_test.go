@@ -307,6 +307,8 @@ func TestExprCacheConfig(t *testing.T) {
 		fallback int
 	}{
 		{&params.ExprParseCacheMaxEntries, 1024},
+		{&params.ExprParseCacheMaxBytes, 67108864},
+		{&params.ExprParseCacheMaxEntryBytes, 8388608},
 	} {
 		t.Run(tc.item.Key, func(t *testing.T) {
 			require.Equal(t, tc.fallback, tc.item.GetAsInt())
