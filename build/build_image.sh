@@ -47,14 +47,14 @@ echo ${IMAGE_ARCH}
 source "${toplevel}/scripts/sanitizer_env.sh"
 milvus_sanitizer_env "${toplevel}"
 
-if [[ "$USE_ASAN" == "ON" ]]; then
-    if [[ "$OS_NAME" == "ubuntu20.04" ]]; then
-        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH} --build-arg MILVUS_ASAN_LIB=/milvus/lib/libasan.so.6}"
-    elif [[ "$OS_NAME" == "ubuntu22.04" ]]; then
-        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH} --build-arg MILVUS_ASAN_LIB=/milvus/lib/libasan.so.8}"
-    else
-        BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
+if [[ "$USE_ASAN" == "ON" && -z "${BUILD_ARGS:-}" ]]; then
+    # Use the packaged runtime so both old and upgraded builders remain usable.
+    asan_libraries=("${toplevel}"/lib/libasan.so.*)
+    if [[ ${#asan_libraries[@]} -ne 1 || ! -f "${asan_libraries[0]}" ]]; then
+        echo "ERROR: expected exactly one packaged libasan.so.* in ${toplevel}/lib" >&2
+        exit 1
     fi
+    BUILD_ARGS="--build-arg TARGETARCH=${IMAGE_ARCH} --build-arg MILVUS_ASAN_LIB=/milvus/lib/${asan_libraries[0]##*/}"
 else
     BUILD_ARGS="${BUILD_ARGS:---build-arg TARGETARCH=${IMAGE_ARCH}}"
 fi

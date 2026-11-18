@@ -15,10 +15,10 @@ FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 tar xz-utils bzip2 \
     g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake \
-    pkg-config uuid-dev libaio-dev software-properties-common && \
+    pkg-config uuid-dev libaio-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
@@ -38,14 +38,8 @@ RUN uv python install 3.12.13 && \
     uv tool install --python python3.12 conan==2.25.1
 
 
-# Upgrade GCC to 11 (focal default is 9, which folly 2024.08.12.00 rejects)
-RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
-    apt-get update && apt-get install -y gcc-11 g++-11 && \
-    cd /usr/bin && \
-    unlink gcc && ln -s gcc-11 gcc && \
-    unlink g++ && ln -s g++-11 g++ && \
-    unlink gcov && ln -s gcov-11 gcov && \
-    rm -rf /var/lib/apt/lists/*
+COPY build/docker/builder/cpu/install-gcc.sh /tmp/install-gcc.sh
+RUN bash /tmp/install-gcc.sh && rm /tmp/install-gcc.sh
 
 
 RUN echo "target arch $TARGETARCH"

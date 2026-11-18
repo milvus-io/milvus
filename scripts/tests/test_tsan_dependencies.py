@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -126,6 +127,44 @@ class ArtifactTests(unittest.TestCase):
     shutil.which("conan"), "Conan 2 is required for package identity checks"
 )
 class ConanIdentityTests(unittest.TestCase):
+    def test_sasl_c17_override_preserves_effective_profile_flags(self):
+        from conan.api.model import RecipeReference
+        from conan.internal.model.conf import ConfDefinition
+
+        script = (ROOT / "scripts/3rdparty_build.sh").read_text()
+        overrides = re.findall(
+            r"-c:([hb]) '(cyrus-sasl/\*:tools.build:cflags[^']+)'", script
+        )
+        self.assertEqual([context for context, _ in overrides], ["h", "b"])
+        sasl = RecipeReference.loads("cyrus-sasl/2.1.27")
+        other = RecipeReference.loads("libevent/2.1.12")
+        full_tsan = tsan.profile(all_dependencies=True).split("[conf]\n", 1)[1]
+        profiles = ["", full_tsan, 'cyrus-sasl/*:tools.build:cflags=["-fPIC"]']
+        for profile in profiles:
+            for context, override in overrides:
+                with self.subTest(profile=profile, context=context):
+                    config = ConfDefinition()
+                    config.loads(profile, profile=True)
+                    before = config.get_conanfile_conf(sasl).get(
+                        "tools.build:cflags", default=[]
+                    )
+                    other_before = config.get_conanfile_conf(other).get(
+                        "tools.build:cflags", default=[]
+                    )
+                    cli = ConfDefinition()
+                    cli.loads(override, profile=True)
+                    config.update_conf_definition(cli)
+                    self.assertEqual(
+                        config.get_conanfile_conf(sasl).get("tools.build:cflags"),
+                        before + ["-std=gnu17"],
+                    )
+                    self.assertEqual(
+                        config.get_conanfile_conf(other).get(
+                            "tools.build:cflags", default=[]
+                        ),
+                        other_before,
+                    )
+
     def test_manifest_preserves_recipe_and_package_revisions(self):
         from conan.api.model import PkgReference, RecipeReference
 

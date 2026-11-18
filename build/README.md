@@ -66,7 +66,13 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
   - `build/builder.sh make unittest`: Run all unit tests.
   - `build/builder.sh make clean`: Clean up all the generated files.
 
-You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu20.04`. Valid OS are `ubuntu20.04`, `amazonlinux2023`.
+You can specify a different OS for the CPU builder by setting `OS_NAME` in `.env`, which defaults to `ubuntu22.04`. Available builders are `ubuntu20.04`, `ubuntu22.04`, `ubuntu24.04`, `amazonlinux2023`, and `rockylinux9`.
+
+All CPU builder Dockerfiles install GCC 15.3.0 from a checksum-verified source archive, with at most 16 parallel build jobs. GCC is built on each distribution to preserve glibc compatibility. GPU builders retain their CUDA-compatible toolchains. This does not change the compiler installed by `scripts/install_deps.sh` on a developer's host.
+
+The Publish Builder workflow builds the images and then opens a separate update for the CPU image tags in `.env`. Until that update is applied, the pinned images still use the previous toolchain. To build the updated CPU Dockerfile locally, use `CHECK_BUILDER=1 build/builder.sh gcc -dumpfullversion`.
+
+When switching compilers, use a clean CMake build directory and regenerate the default Conan profile with `conan profile detect --force` inside the new builder before rebuilding Milvus and its dependencies.
 
 To specify `amazonlinux2023` builder, use these commands:
 
@@ -74,6 +80,26 @@ To specify `amazonlinux2023` builder, use these commands:
 export OS_NAME=amazonlinux2023
 build/builder.sh make
 ```
+
+## Compiler version checks
+
+Linux CPU builds using GCC require version 15.3 or newer. The dependency build checks the selected C++ compiler before installing Conan packages; the core CMake configuration checks the actual compiler again, including cached or custom toolchains. Explicit Conan profiles and CMake compiler overrides defer the check to core CMake configuration. Clang and GPU builds retain their existing toolchain requirements. This check does not apply to Go-only targets or packaging existing binaries.
+
+To select a GCC installation outside the default system path, set all three variables before regenerating the Conan profile and building:
+
+```shell
+export PATH=/opt/gcc-15.3/bin:$PATH
+export CC=/opt/gcc-15.3/bin/gcc
+export CXX=/opt/gcc-15.3/bin/g++
+conan profile detect --force
+make build-cpp
+```
+
+Use a clean CMake build directory when switching compilers. Setting only `CXX` is insufficient because the dependency script also reads the version from `gcc` on `PATH`; both must refer to the intended toolchain.
+
+For an unsupported GCC version, explicitly opt in with `MILVUS_ALLOW_UNSUPPORTED_GCC=1 make`. For direct CMake builds, prefix the CMake command with the same environment variable. The build will warn that build success and runtime correctness are not guaranteed. This only bypasses the version policy; it does not fix compiler bugs or incompatible dependencies.
+
+When switching compilers, use a clean CMake build directory and regenerate the Conan profile with `conan profile detect --force`. `scripts/install_deps.sh` installs distribution packages and does not guarantee GCC 15.3. CI must switch to the updated CPU builder tags before enabling this requirement without forcing an unsupported build.
 
 ## Dev Containers
 
