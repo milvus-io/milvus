@@ -55,15 +55,15 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 			}{
 				{false, "32", 32},
 				{true, "64", 64},
-				{true, "0", 0},
+				{true, "0", 256 * 1024},
 				{true, "128", 128},
-				{true, "-1", -1},
-				{true, "256KB", 0},
+				{true, "-1", 256 * 1024},
+				{true, "256KB", 256 * 1024},
 				{true, "1", 1},
 				{true, "262144", 262144},
-				{false, "0", 0},
+				{false, "0", 256 * 1024},
 			} {
-				wantStream := tc.enabled && tc.wantBytes > 0
+				wantStream := tc.enabled
 				task := newQueryViewSearchTask(t, legacy, 1)
 				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(tc.enabled)))
 				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, tc.chunkBytes))
@@ -90,7 +90,7 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 				require.Equal(t, wantStream, legacy.lastSearchRequest.AllowStreaming, tc)
 				require.Equal(t, tc.wantBytes, legacy.lastSearchRequest.ReduceStreamChunkBytes)
 				require.Equal(t, wantStream, task.reducedResult != nil || task.reducedSubResults != nil)
-				require.Equal(t, tc.chunkBytes, cfg.ReduceStreamChunkBytes.GetValue())
+				require.Equal(t, strconv.Itoa(tc.wantBytes), cfg.ReduceStreamChunkBytes.GetValue())
 			}
 		})
 	}
@@ -111,15 +111,15 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 			}{
 				{false, "32", 32},
 				{true, "64", 64},
-				{true, "0", 0},
+				{true, "0", 256 * 1024},
 				{true, "128", 128},
-				{true, "-1", -1},
-				{true, "256KB", 0},
+				{true, "-1", 256 * 1024},
+				{true, "256KB", 256 * 1024},
 				{true, "1", 1},
 				{true, "262144", 262144},
-				{false, "0", 0},
+				{false, "0", 256 * 1024},
 			} {
-				wantStream := tc.enabled && tc.wantBytes > 0
+				wantStream := tc.enabled
 				task := newQueryViewQueryTask(t, legacy, 1)
 				task.IsIterator = shape == "iterator"
 				if shape == "grouped" || shape == "grouped_order_by" {
@@ -149,7 +149,7 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 				require.Equal(t, wantStream, legacy.lastQueryRequest.AllowStreaming, tc)
 				require.Equal(t, tc.wantBytes, legacy.lastQueryRequest.ReduceStreamChunkBytes)
 				require.Equal(t, wantStream, len(task.resultBuf.Collect()) > 0)
-				require.Equal(t, tc.chunkBytes, cfg.ReduceStreamChunkBytes.GetValue())
+				require.Equal(t, strconv.Itoa(tc.wantBytes), cfg.ReduceStreamChunkBytes.GetValue())
 			}
 		})
 	}
@@ -163,21 +163,22 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 	defer lookup.UnPatch()
 	for _, operation := range []string{"Search", "Hybrid", "Query"} {
 		for _, tc := range []struct {
-			enabled        bool
-			chunkBytes     string
-			wantBytes      int
-			refreshedBytes string
+			enabled            bool
+			chunkBytes         string
+			wantBytes          int
+			refreshedBytes     string
+			wantRefreshedBytes int
 		}{
-			{false, "64", 64, "128"},
-			{true, "64", 64, "128"},
-			{true, "64", 64, "0"},
-			{true, "64", 64, "256KB"},
-			{true, "0", 0, "64"},
-			{true, "-1", -1, "64"},
-			{true, "256KB", 0, "64"},
+			{false, "64", 64, "128", 128},
+			{true, "64", 64, "128", 128},
+			{true, "64", 64, "0", 256 * 1024},
+			{true, "64", 64, "256KB", 256 * 1024},
+			{true, "0", 256 * 1024, "64", 64},
+			{true, "-1", 256 * 1024, "64", 64},
+			{true, "256KB", 256 * 1024, "64", 64},
 		} {
 			t.Run(operation+"/"+strconv.FormatBool(tc.enabled)+"/"+tc.chunkBytes+"->"+tc.refreshedBytes, func(t *testing.T) {
-				wantStream := tc.enabled && tc.wantBytes > 0
+				wantStream := tc.enabled
 				legacy := &fakeLegacyQueryClient{maxRetries: 2}
 				search := newQueryViewSearchTask(t, legacy, 1)
 				query := newQueryViewQueryTask(t, legacy, 1)
@@ -230,46 +231,9 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 					require.Error(t, err)
 					require.Equal(t, 1, legacy.searchCalled+legacy.queryCalled)
 				}
-				require.Equal(t, tc.refreshedBytes, cfg.ReduceStreamChunkBytes.GetValue())
+				require.Equal(t, tc.wantRefreshedBytes, cfg.ReduceStreamChunkBytes.GetAsInt())
 			})
 		}
-	}
-}
-
-func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
-	legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}, queryResult: &queryclient.LegacyQueryResult{}}
-	search := newQueryViewSearchTask(t, legacy, 1)
-	search.IsIterator = false // DEFAULT without Range/iterative-filter QueryInfo is unsupported.
-	search.request.SearchParams = []*commonpb.KeyValuePair{{Key: "enableReduceStream", Value: "true"}, {Key: "reduceStreamChunkBytes", Value: "invalid"}}
-	require.NoError(t, search.Execute(t.Context()))
-	require.False(t, legacy.lastSearchRequest.AllowStreaming)
-	for _, req := range []*internalpb.RetrieveRequest{
-		{},
-		{Limit: 1, IsCount: true},
-		{Limit: 1, ReduceType: 99},
-		{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp(99)}}},
-		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}, OrderByFields: []*planpb.OrderByField{{FieldId: 101}}},
-	} {
-		query := newQueryViewQueryTask(t, legacy, 1)
-		req.Base = query.Base
-		query.RetrieveRequest = req
-		query.request.QueryParams = search.request.SearchParams
-		require.NoError(t, query.Execute(t.Context()))
-		require.False(t, legacy.lastQueryRequest.AllowStreaming)
-	}
-	for _, hybrid := range []bool{false, true} {
-		search := newQueryViewSearchTask(t, legacy, 1)
-		search.IsIterator, search.IsAdvanced = false, hybrid
-		search.GroupByFieldIds = []int64{100}
-		search.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage(99)}}
-		if hybrid {
-			search.rerankMeta = &legacyRerankMeta{}
-			search.SubReqs = []*internalpb.SubSearchRequest{{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
-			search.request.SubReqs = []*milvuspb.SubSearchRequest{{FunctionChains: search.request.FunctionChains}}
-			search.request.FunctionChains = nil
-		}
-		require.NoError(t, search.Execute(t.Context()))
-		require.False(t, legacy.lastSearchRequest.AllowStreaming)
 	}
 }
 
@@ -290,7 +254,7 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 	}
 }
 
-func TestStreamingEligibilitySchemaCoverage(t *testing.T) {
+func TestStreamingReductionSchemaCoverage(t *testing.T) {
 	for _, tc := range []struct {
 		message   proto.Message
 		reduction string
@@ -360,7 +324,7 @@ func TestStreamingEligibilitySchemaCoverage(t *testing.T) {
 				names[i] = string(fields.Get(i).Name())
 			}
 			require.ElementsMatch(t, strings.Fields(tc.reduction+" "+tc.other), names,
-				"Review new fields for streaming compatibility and classify them as reduction-related or independent; update gate/parity tests where needed")
+				"Review new fields for streaming compatibility and classify them as reduction-related or independent; update parity tests where needed")
 		})
 	}
 	require.Equal(t, map[int32]string{0: "sum", 1: "count", 2: "avg", 3: "min", 4: "max"}, planpb.AggregateOp_name)

@@ -3718,12 +3718,20 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.EnableReduceStream.Init(base.mgr)
 
+	const defaultReduceStreamChunkBytes = "262144"
 	p.ReduceStreamChunkBytes = ParamItem{
 		Key:          "proxy.queryView.reduceStreamChunkBytes",
 		Version:      "3.1.0",
-		DefaultValue: "262144",
-		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request.",
+		DefaultValue: defaultReduceStreamChunkBytes,
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
 		Export:       true,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultReduceStreamChunkBytes
+			}
+			return value
+		},
 	}
 	p.ReduceStreamChunkBytes.Init(base.mgr)
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -49,8 +50,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -5562,11 +5565,102 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 				task := newTask(request)
 				require.NoError(t, task.initSearchRequest(ctx))
 				require.Nil(t, task.rerankMeta)
-				assert.Equal(t, grouped, task.supportsStreamingReduce())
-				task.SearchType = internalpb.SearchType(-1)
-				assert.False(t, task.supportsStreamingReduce())
 			})
 		}
+	}
+
+	for _, tc := range []struct {
+		name                  string
+		boost, order, iterate bool
+	}{
+		{name: "empty_function_score"},
+		{name: "empty_function_score_order_by", order: true},
+		{name: "empty_function_score_iterator_v1", iterate: true},
+		{name: "boost_order_by", boost: true, order: true},
+		{name: "boost_iterator_v1", boost: true, iterate: true},
+	} {
+		t.Run(tc.name+"_batch_stream_parity", func(t *testing.T) {
+			request := newRequest()
+			request.Nq = 1
+			request.FunctionScore = &schemapb.FunctionScore{}
+			if tc.boost {
+				request.FunctionScore.Functions = []*schemapb.FunctionSchema{{
+					Type: schemapb.FunctionType_Rerank,
+					Params: []*commonpb.KeyValuePair{
+						{Key: "reranker", Value: "boost"}, {Key: "filter", Value: "ts > 15"}, {Key: "weight", Value: "2"},
+					},
+				}}
+			}
+			if tc.iterate {
+				request = withSearchIteratorV1(request)
+			}
+			if tc.order {
+				request.SearchParams = append(request.SearchParams,
+					&commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"},
+					&commonpb.KeyValuePair{Key: OffsetKey, Value: "1"},
+				)
+				mockTestTo(t, (*requeryOperator).requery, func(*requeryOperator, context.Context, trace.Span, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+					return &milvuspb.QueryResults{FieldsData: []*schemapb.FieldData{
+						makeTestInt64Field(100, "pk", []int64{1, 2, 3}),
+						makeTestInt64Field(101, "ts", []int64{30, 10, 20}),
+					}}, segcore.StorageCost{}, nil
+				})
+			}
+
+			batch, streamed := newTask(request), newTask(proto.Clone(request).(*milvuspb.SearchRequest))
+			for _, task := range []*SearchTask{batch, streamed} {
+				task.Base = &commonpb.MsgBase{Timestamp: 10}
+				task.Nq, task.queryInfos = task.request.GetNq(), nil
+				require.NoError(t, task.initSearchRequest(ctx))
+				task.IsIterator = task.isIterator
+				task.MvccTimestamp = 10
+				require.Nil(t, task.rerankMeta)
+			}
+			require.Equal(t, batch.SerializedExprPlan, streamed.SerializedExprPlan)
+
+			// Exercise both transport modes with identical worker candidates.
+			params := paramtable.Get()
+			key := params.ProxyCfg.EnableReduceStream.Key
+			old := params.ProxyCfg.EnableReduceStream.GetValue()
+			t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
+			for _, task := range []*SearchTask{batch, streamed} {
+				enable := task == streamed
+				inputs := []*internalpb.SearchResults{
+					newFinalSearchChunk([]int64{1, 3}, []float32{-0.1, -0.3}, "a"),
+					newFinalSearchChunk([]int64{2}, []float32{-0.2}, "b"),
+				}
+				for _, input := range inputs {
+					input.NumQueries, input.TopK, input.MetricType = task.GetNq(), task.GetTopk(), metric.L2
+					input.ResultData.TopK = task.GetTopk()
+				}
+				legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{Results: inputs}}
+				if enable {
+					children := make([]searchreducestream.ReduceStream, 0, len(inputs))
+					for _, input := range inputs {
+						chunks, err := searchreducestream.SplitSearchResult(input, 1)
+						require.NoError(t, err)
+						children = append(children, &searchTaskReduceStream{chunks: chunks})
+					}
+					stream, err := searchreducestream.NewReduceStream(task.SearchRequest, children, 1)
+					require.NoError(t, err)
+					legacy.searchResult = &queryclient.LegacySearchResult{Stream: stream}
+				}
+				task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+				require.NoError(t, params.Save(key, strconv.FormatBool(enable)))
+				require.NoError(t, task.Execute(ctx))
+				require.Equal(t, enable, legacy.lastSearchRequest.AllowStreaming)
+				require.NoError(t, task.PostExecute(ctx))
+			}
+			require.True(t, proto.Equal(batch.result.GetResults(), streamed.result.GetResults()),
+				"Batch=%s, ReduceStream=%s", batch.result.GetResults(), streamed.result.GetResults())
+			require.Equal(t, batch.result.GetSessionTs(), streamed.result.GetSessionTs())
+			if tc.order {
+				require.Equal(t, []int64{3, 1}, streamed.result.GetResults().GetIds().GetIntId().GetData())
+			}
+			if tc.iterate {
+				require.Equal(t, uint64(10), streamed.result.GetSessionTs())
+			}
+		})
 	}
 
 	t.Run("ordinary search initializes function chain rerank meta", func(t *testing.T) {
@@ -5584,7 +5678,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Equal(t, internalpb.SearchType_DEFAULT, task.SearchType)
-		assert.True(t, task.supportsStreamingReduce())
 	})
 
 	t.Run("ordinary boost-only search uses configured reduction", func(t *testing.T) {
@@ -5600,7 +5693,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 			task := newTask(request)
 			require.NoError(t, task.initSearchRequest(ctx))
 			require.Nil(t, task.rerankMeta)
-			require.True(t, task.supportsStreamingReduce())
 			plan := &planpb.PlanNode{}
 			require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
 			require.Len(t, plan.GetScorers(), count)
@@ -5645,7 +5737,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.True(t, task.needRequery)
-		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5660,7 +5751,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
-		assert.True(t, task.supportsStreamingReduce())
 	})
 
 	t.Run("ordinary search rejects missing function score input field", func(t *testing.T) {
@@ -5759,7 +5849,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
-		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5773,7 +5862,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
-		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5786,7 +5874,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		task := newTask(request)
 
 		require.NoError(t, task.initSearchRequest(ctx))
-		assert.True(t, task.supportsStreamingReduce())
 		meta, ok := task.rerankMeta.(*functionChainRerankMeta)
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
@@ -6040,6 +6127,49 @@ func TestSearchTask_HybridSubSearchFunctionChains(t *testing.T) {
 			tr:     timerecord.NewTimeRecorder("test"),
 		}
 	}
+
+	t.Run("legacy iterator sub-search batch stream parity", func(t *testing.T) {
+		task := newTask(nil)
+		task.IsAdvanced, task.Nq = true, 1
+		sub := task.request.SubReqs[0]
+		sub.SearchParams = append(sub.SearchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "true"})
+		require.NoError(t, task.initAdvancedSearchRequest(ctx))
+		require.Equal(t, internalpb.SearchType_DEFAULT, task.SubReqs[0].GetSearchType())
+
+		var expected []*milvuspb.SearchResults
+		var streams []searchreducestream.ReduceStream
+		for i, sub := range task.SubReqs {
+			request, err := viewquery.BuildSubSearchRequest(task.SearchRequest, sub)
+			require.NoError(t, err)
+			input := newFinalSearchChunk([]int64{int64(i + 1)}, []float32{.8}, "a")
+			input.NumQueries, input.TopK, input.MetricType = request.GetNq(), request.GetTopk(), request.GetMetricType()
+			input.ResultData.TopK = request.GetTopk()
+			batchInput := proto.Clone(input.ResultData).(*schemapb.SearchResultData)
+			result, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{batchInput},
+				request.GetNq(), request.GetTopk(), request.GetMetricType(), schemapb.DataType_Int64, request.GetOffset(), false)
+			require.NoError(t, err)
+			expected = append(expected, result)
+			chunks, err := searchreducestream.SplitSearchResult(input, 1)
+			require.NoError(t, err)
+			stream, err := searchreducestream.NewReduceStream(request, []searchreducestream.ReduceStream{&searchTaskReduceStream{chunks: chunks}}, 1)
+			require.NoError(t, err)
+			streams = append(streams, stream)
+		}
+		params := paramtable.Get()
+		item := &params.ProxyCfg.EnableReduceStream
+		old := item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(item.Key, old)) })
+		require.NoError(t, params.Save(item.Key, "true"))
+		legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{SubStreams: streams}}
+		task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+		require.NoError(t, task.executeByQueryView(ctx))
+		require.True(t, legacy.lastSearchRequest.AllowStreaming)
+		for i := range expected {
+			actual := task.reducedSubResults[i].GetResults()
+			require.True(t, proto.Equal(expected[i].GetResults(), actual),
+				"Batch=%s, ReduceStream=%s", expected[i].GetResults(), actual)
+		}
+	})
 
 	t.Run("routes by index and disables optimization only for chained sub-search", func(t *testing.T) {
 		l1Chain := l1LimitFunctionChain(5)

@@ -28,37 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestHybridStreamingEligibility(t *testing.T) {
-	task := newQueryViewSearchTask(t, nil, 1)
-	task.IsIterator, task.IsAdvanced = false, true
-	task.rerankMeta = &legacyRerankMeta{}
-	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 4, SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
-	require.True(t, task.supportsStreamingReduce())
-	for _, kind := range []hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructEmbList} {
-		task.hybridSubSearchInfos = []hybridSubSearchInfo{{Kind: kind}}
-		for _, elementLevel := range []bool{false, true} {
-			task.hybridElementLevel = elementLevel
-			require.True(t, task.supportsStreamingReduce())
-		}
-	}
-	task.GroupByFieldIds = []int64{101}
-	require.True(t, task.supportsStreamingReduce())
-	task.GroupByFieldIds = nil
-	task.orderByFields = []OrderByField{{FieldID: 101}}
-	require.False(t, task.supportsStreamingReduce())
-	task.orderByFields = nil
-	task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
-	require.True(t, task.supportsStreamingReduce())
-	task.SubReqs[0].SearchType = internalpb.SearchType_DEFAULT
-	require.False(t, task.supportsStreamingReduce())
-	task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
-	task.SubReqs[0].GroupByFieldId = 101
-	require.True(t, task.supportsStreamingReduce())
-	task.SubReqs[0].GroupByFieldId = 0
-	task.rerankMeta = &functionChainRerankMeta{}
-	require.True(t, task.supportsStreamingReduce())
-}
-
 func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	firstChunk := newFinalSearchChunk([]int64{10, 20, 30, 40}, []float32{.9, .8, .7, .6}, "first")
 	secondChunk := newFinalSearchChunk([]int64{50, 60}, []float32{-.1, -.2}, "second")
@@ -375,7 +344,6 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 								streams[index], err = searchreducestream.NewReduceStream(request, children, 20)
 								s.Require().NoError(err)
 							}
-							s.Require().True(task.supportsStreamingReduce())
 							streamed, scoreInfos, err := task.consumeHybridResultStreams(streams, func(*internalpb.SearchResults) {})
 							s.Require().NoError(err)
 							for i := range batch {

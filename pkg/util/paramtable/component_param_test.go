@@ -251,7 +251,7 @@ func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MILVUSCONF", dir)
 	path := filepath.Join(dir, "milvus.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("proxy:\n  queryView:\n    enableReduceStream: false\n    reduceStreamChunkBytes: 262144\n"), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte("proxy:\n  queryView:\n    enableReduceStream: true\n    reduceStreamChunkBytes: 0\n"), 0o600))
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(10*time.Millisecond))
 	t.Cleanup(base.mgr.Close)
 	cfg := proxyConfig{}
@@ -261,17 +261,18 @@ func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "true", field.Tag.Get("refreshable"))
 	}
-	require.False(t, cfg.EnableReduceStream.GetAsBool())
-	require.Equal(t, 262144, cfg.ReduceStreamChunkBytes.GetAsInt())
+	require.True(t, cfg.EnableReduceStream.GetAsBool())
+	require.Equal(t, 256*1024, cfg.ReduceStreamChunkBytes.GetAsInt())
 	for _, tc := range []struct {
-		enabled bool
-		bytes   int
-	}{{true, 64}, {true, 128}, {false, 256}} {
-		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %d\n", tc.enabled, tc.bytes)
+		enabled   bool
+		bytes     string
+		wantBytes int
+	}{{true, "64", 64}, {true, "256KB", 256 * 1024}, {true, "128", 128}, {true, "-1", 256 * 1024}, {false, "256", 256}} {
+		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %s\n", tc.enabled, tc.bytes)
 		require.NoError(t, os.WriteFile(path+".tmp", []byte(body), 0o600))
 		require.NoError(t, os.Rename(path+".tmp", path))
 		require.Eventually(t, func() bool {
-			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.bytes
+			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.wantBytes
 		}, 5*time.Second, 10*time.Millisecond)
 	}
 }

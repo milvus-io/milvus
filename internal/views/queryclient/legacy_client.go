@@ -43,7 +43,7 @@ type LegacySearchRequest struct {
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
 	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
 	BarrierMVCC uint64
-	// AllowStreaming is resolved by Proxy from server configuration and Search eligibility.
+	// AllowStreaming is resolved by Proxy from server configuration.
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
@@ -82,7 +82,7 @@ type LegacyQueryRequest struct {
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
 	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
 	BarrierMVCC uint64
-	// AllowStreaming is resolved by Proxy from server configuration and Query eligibility.
+	// AllowStreaming is resolved by Proxy from server configuration for Queries without retained plans.
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int

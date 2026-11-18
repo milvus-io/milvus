@@ -191,7 +191,6 @@ func TestSearchAggregationStreamingMatchesBatch(t *testing.T) {
 						require.True(t, proto.Equal(candidates.GetResults(), task.reducedResult.GetResults()),
 							"Batch=%s\nStreaming=%s", candidates.GetResults(), task.reducedResult.GetResults())
 					}
-					require.True(t, task.supportsStreamingReduce())
 					pipeline, err := newSearchPipeline(task)
 					require.NoError(t, err)
 					expected, _, err := pipeline.Run(ctx, span, batchShards, segcore.StorageCost{})

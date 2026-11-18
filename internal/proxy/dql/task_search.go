@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -1572,21 +1571,20 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 
 	legacy := t.viewQueryClient.Legacy()
 	// Refresh applies to new requests, not retries or Hybrid sub-searches.
-	allowStreaming := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() && t.supportsStreamingReduce()
-	chunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
-	if allowStreaming && chunkBytes <= 0 {
-		mlog.Warn(ctx, "invalid reduceStreamChunkBytes, falling back to Batch", mlog.Int("chunkBytes", chunkBytes))
-		allowStreaming = false
-	}
-	retryStreaming := allowStreaming
+	enableReduceStream := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
+	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
 	searchRequest := t.SearchRequest
-	if retryStreaming && len(t.orderByFields) > 0 &&
+	if enableReduceStream && len(t.orderByFields) > 0 &&
 		(t.GetGroupByFieldId() > 0 || len(t.GetGroupByFieldIds()) > 0) {
+		// Batch ORDER BY reduces with offset zero. The stream would otherwise skip
+		// groups in score order. Clone so final sorting still has the original offset.
 		searchRequest = proto.Clone(searchRequest).(*internalpb.SearchRequest)
-		searchRequest.Offset = 0 // Scalar ordering applies group pagination after reduction.
+		searchRequest.Offset = 0
 	}
+	// Batch retries within each shard before returning. Streaming may fail after
+	// a shard emits a Chunk, so Proxy bounds whole-request retries here.
 	maxAttempts := 1
-	if retryStreaming {
+	if enableReduceStream {
 		maxAttempts = max(1, legacy.MaxRetries())
 	}
 
@@ -1596,15 +1594,15 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		result, err := legacy.Search(ctx, &queryclient.LegacySearchRequest{
 			Req:                    searchRequest,
 			BarrierMVCC:            t.MvccTimestamp,
-			AllowStreaming:         allowStreaming,
-			ReduceStreamChunkBytes: chunkBytes,
+			AllowStreaming:         enableReduceStream,
+			ReduceStreamChunkBytes: reduceStreamChunkBytes,
 			RetryErrors:            retryErrors,
 		})
 		if err != nil {
-			if retryStreaming && ctx.Err() != nil {
+			if enableReduceStream && ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if retryStreaming && viewerror.AsViewError(err).IsRetryable() {
+			if enableReduceStream && viewerror.AsViewError(err).IsRetryable() {
 				lastErr = err
 				continue
 			}
@@ -1692,141 +1690,6 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		return nil
 	}
 	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)
-}
-
-func (t *SearchTask) supportsStreamingReduce() bool {
-	req := t.SearchRequest
-	if req == nil {
-		// A missing request cannot be streamed.
-		return false
-	}
-	grouped := req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0
-	if t.aggCtx != nil && (len(req.GetGroupByFieldIds()) == 0 || req.GetIsIterator()) {
-		// Search aggregation streaming requires grouping and does not support iterators.
-		return false
-	}
-	if grouped && req.GetIsIterator() {
-		// Grouped Search iterators are not supported by streaming reduction.
-		return false
-	}
-	// Grouping, aggregation and iterator classification must not bypass other feature checks.
-	functionRerank := hasFunctionRerank(t.request)
-	if !req.GetIsAdvanced() && grouped && len(t.request.GetFunctionChains()) == 0 &&
-		len(t.request.GetFunctionScore().GetFunctions()) == 0 {
-		// Preserve grouped Search's existing empty-FunctionScore no-op behavior.
-		functionRerank = false
-	}
-	if functionRerank {
-		if req.GetIsIterator() || len(t.orderByFields) > 0 ||
-			(!req.GetIsAdvanced() && req.GetSearchType() != internalpb.SearchType_DEFAULT) {
-			// Function reranking requires non-iterator Search without ORDER BY; ordinary Search uses DEFAULT.
-			return false
-		}
-		if t.request.GetFunctionScore() != nil && t.rerankMeta == nil {
-			// Boost executes on workers and does not require Proxy rerank metadata.
-			functions := t.request.GetFunctionScore().GetFunctions()
-			if len(functions) == 0 {
-				// An empty FunctionScore has no worker operation or prepared Proxy reranker.
-				return false
-			}
-			for _, function := range functions {
-				if function == nil || rerank.GetRerankName(function) != rerank.BoostName {
-					// Other FunctionScore operations require prepared Proxy metadata.
-					return false
-				}
-			}
-		}
-		for _, chain := range t.request.GetFunctionChains() {
-			if chain == nil {
-				// A missing function chain cannot be streamed.
-				return false
-			}
-			switch chain.GetStage() {
-			case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
-				schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
-				if req.GetIsAdvanced() || (t.aggCtx != nil && chain.GetStage() == schemapb.FunctionChainStage_FunctionChainStageL1Rerank) {
-					// Hybrid worker chains belong to sub-searches; L1 cannot precede Search aggregation.
-					return false
-				}
-			case schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
-				if t.rerankMeta == nil {
-					// L2 reranking needs prepared Proxy metadata.
-					return false
-				}
-			default:
-				// Other function-chain stages are not supported by this Search path.
-				return false
-			}
-		}
-	}
-	if req.GetIsAdvanced() {
-		switch t.rerankMeta.(type) {
-		case *legacyRerankMeta, *functionChainRerankMeta, *funcScoreRerankMeta:
-		default:
-			// Hybrid streaming requires a prepared, supported reranker.
-			return false
-		}
-		// Hybrid iterators are not supported here; aggregation and ORDER BY are rejected by validation.
-		// An advanced request must also have at least one sub-search.
-		if req.GetIsIterator() || t.aggCtx != nil ||
-			len(t.orderByFields) > 0 || len(req.GetSubReqs()) == 0 {
-			return false
-		}
-		for _, sub := range req.GetSubReqs() {
-			if sub == nil {
-				// A missing sub-search cannot be planned or streamed.
-				return false
-			}
-		}
-	} else if len(req.GetSubReqs()) > 0 {
-		// Only advanced requests may contain sub-searches.
-		return false
-	}
-
-	for index := 0; index < max(1, len(req.GetSubReqs())); index++ {
-		searchType := req.GetSearchType()
-		if req.GetIsAdvanced() {
-			searchType = req.GetSubReqs()[index].GetSearchType()
-		}
-		switch searchType {
-		case internalpb.SearchType_DEFAULT, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER:
-		default:
-			// Known grouping or reranking must not hide an unknown Search classification.
-			return false
-		}
-		subFunctionRerank := functionRerank
-		if req.GetIsAdvanced() && index < len(t.request.GetSubReqs()) &&
-			len(t.request.GetSubReqs()[index].GetFunctionChains()) > 0 {
-			for _, chain := range t.request.GetSubReqs()[index].GetFunctionChains() {
-				if chain == nil || (chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL0Rerank &&
-					chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL1Rerank) {
-					// Hybrid sub-search chains support L0/L1 only.
-					return false
-				}
-			}
-			subFunctionRerank = true
-		}
-		if searchType == internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER ||
-			searchType == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER {
-			continue
-		}
-		if !req.GetIsAdvanced() && (grouped || t.aggCtx != nil || req.GetIsIterator() || functionRerank) {
-			continue
-		}
-		if index >= len(t.queryInfos) || t.queryInfos[index] == nil {
-			// Other DEFAULT Search shapes need prepared query information to be classified safely.
-			return false
-		}
-		info := t.queryInfos[index]
-		groupedHybrid := req.GetIsAdvanced() && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
-		if !subFunctionRerank && !groupedHybrid && !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
-			info.GetHints() != iterativeFilterKey &&
-			gjson.Get(info.GetSearchParams(), common.HintsKey).String() != iterativeFilterKey {
-			// Other DEFAULT Search shapes are not qualified for streaming reduction.
-			return false
-		}
-	}
-	return true
 }
 
 // find the last bound based on reduced results and metric type

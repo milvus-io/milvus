@@ -1169,78 +1169,20 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 	return nil
 }
 
-func (t *QueryTask) supportsStreamingReduce() bool {
-	req := t.RetrieveRequest
-	if req == nil || req.GetIsCount() {
-		// Missing requests and legacy count results cannot use the Query stream reducer.
-		return false
-	}
-	// Check every feature before accepting a combination such as Group By + ORDER BY.
-	switch reduce.IReduceType(req.GetReduceType()) {
-	case reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest:
-	default:
-		// Unknown stopping policies must not silently become unordered reduction.
-		return false
-	}
-	for _, aggregate := range req.GetAggregates() {
-		if aggregate == nil {
-			// Missing aggregate descriptors cannot be reduced.
-			return false
-		}
-		switch aggregate.GetOp() {
-		case planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max:
-			// AVG is prepared as SUM + COUNT before reaching this gate.
-		default:
-			// The partial-aggregation reducer does not implement other operators.
-			return false
-		}
-	}
-	for _, chain := range t.plan.GetQuerynodeFunctionChains() {
-		if chain == nil || chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageQueryScan {
-			// Only QueryScan computed columns are supported by Query streaming.
-			return false
-		}
-		if req.GetIsIterator() || len(req.GetGroupByFieldIds()) > 0 ||
-			len(req.GetAggregates()) > 0 || len(req.GetOrderByFields()) > 0 {
-			// QueryScan has only been integrated with plain Query row assembly.
-			return false
-		}
-	}
-	if len(req.GetOrderByFields()) > 0 {
-		// Plain ORDER BY drains and resolves worker versions before sorting.
-		// Group By + ORDER BY merges all groups before Proxy sorts them. Shared Query validation
-		// requires an explicit limit for ORDER BY in either reduction mode.
-		// Iterators and ungrouped aggregates with ORDER BY are not supported.
-		if req.GetIsIterator() || req.GetLimit() <= 0 || (len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) > 0) {
-			return false
-		}
-	}
-	if len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) == 0 &&
-		req.GetLimit() <= 0 && req.GetLimit() != typeutil.Unlimited {
-		// Plain Query needs a positive limit or the Unlimited sentinel.
-		return false
-	}
-	return true
-}
-
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
 	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
-	allowStreaming := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() &&
-		t.supportsStreamingReduce()
-	chunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
-	if allowStreaming && chunkBytes <= 0 {
-		mlog.Warn(ctx, "invalid reduceStreamChunkBytes, falling back to Batch", mlog.Int("chunkBytes", chunkBytes))
-		allowStreaming = false
-	}
+	enableReduceStream := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
+	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
-		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
-		ReduceStreamChunkBytes: chunkBytes,
+		BarrierMVCC: t.MvccTimestamp, AllowStreaming: enableReduceStream,
+		ReduceStreamChunkBytes: reduceStreamChunkBytes,
 	}
-	retryStreaming := allowStreaming
+	// Batch retries within each shard before returning. Streaming may fail after
+	// a shard emits a Chunk, so Proxy bounds whole-request retries here.
 	maxAttempts := 1
-	if retryStreaming {
+	if enableReduceStream {
 		maxAttempts = max(1, legacy.MaxRetries())
 	}
 
@@ -1248,10 +1190,10 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := legacy.Query(ctx, request)
 		if err != nil {
-			if retryStreaming && ctx.Err() != nil {
+			if enableReduceStream && ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if retryStreaming && viewerror.AsViewError(err).IsRetryable() {
+			if enableReduceStream && viewerror.AsViewError(err).IsRetryable() {
 				lastErr = err
 				continue
 			}
@@ -1456,7 +1398,8 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 	}
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var outputSize int64
-	// The internal limit already includes the offset; the pipeline slices the page once.
+	// For bounded Query, the internal limit includes the offset. The shared
+	// pipeline, not the stream, applies the offset when it slices the page.
 	limit := t.GetLimit()
 	if len(t.GetGroupByFieldIds()) > 0 && len(t.GetOrderByFields()) > 0 {
 		// Grouped Chunks are unordered. Retain every group for final ordering and pagination.

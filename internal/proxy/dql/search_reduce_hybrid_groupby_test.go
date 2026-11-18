@@ -139,14 +139,6 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			for _, sub := range task.SubReqs {
 				require.Equal(t, internalpb.SearchType_DEFAULT, sub.GetSearchType())
 			}
-			require.True(t, task.supportsStreamingReduce(), "initialized Hybrid Group By must use the streaming path")
-			task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{{}}
-			require.False(t, task.supportsStreamingReduce(), "Hybrid sub-search function chains remain Batch-only")
-			if tc.workerChain {
-				task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
-			} else {
-				task.request.SubReqs[0].FunctionChains = nil
-			}
 			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
 			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
 			streamKey := paramtable.Get().ProxyCfg.EnableReduceStream.Key
