@@ -489,16 +489,18 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                 )
         return hits
 
-    def _assert_schema_alignment(self, source_info, target_info, mapping, target_owned=()):
+    def _assert_schema_mapping(self, source_info, target_info, mapping, target_owned=()):
         source_fields = {field["name"]: field for field in source_info["fields"]}
         target_fields = {field["name"]: field for field in target_info["fields"]}
         source_ids = {int(field["field_id"]) for field in source_info["fields"]}
+        target_ids = {int(field["field_id"]) for field in target_info["fields"]}
+        assert len(target_ids) == len(target_fields)
 
         for target_name, source_name in mapping.items():
             target_field = target_fields[target_name]
             source_field = source_fields[source_name]
             assert target_field.get("external_field") == source_name
-            assert int(target_field["field_id"]) == int(source_field["field_id"])
+            assert target_field["type"] == source_field["type"]
 
         for target_name in target_owned:
             assert int(target_fields[target_name]["field_id"]) not in source_ids
@@ -613,7 +615,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
 
         target_info = self.describe_collection(client, target)[0]
         assert target_info["external_source"] == snapshot.external_source
-        self._assert_schema_alignment(source_info, target_info, CORE_FIELD_MAPPING)
+        self._assert_schema_mapping(source_info, target_info, CORE_FIELD_MAPPING)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_table_snapshot_virtual_pk_user_reads(self, request):
@@ -668,13 +670,11 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         fields = {field["name"]: field for field in target_info["fields"]}
         assert fields["__virtual_pk__"]["is_primary"] is True
         assert fields["__virtual_pk__"]["auto_id"] is True
+        assert fields["__virtual_pk__"].get("external_field") in (None, "")
         assert fields["source_pk"].get("is_primary", False) is False
-        self._assert_schema_alignment(
-            source_info,
-            target_info,
-            CORE_FIELD_MAPPING,
-            target_owned=("__virtual_pk__",),
-        )
+        source_pk_field = next(field for field in source_info["fields"] if field["name"] == "pk")
+        assert int(fields["source_pk"]["field_id"]) != int(source_pk_field["field_id"])
+        self._assert_schema_mapping(source_info, target_info, CORE_FIELD_MAPPING)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_table_snapshot_includes_unflushed_dml(self, request):
@@ -983,7 +983,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert _hit_id(hits[0]) == survivor_key
         assert all(isinstance(_hit_id(hit), str) for hit in hits)
         assert all(_row_value(hit, "group_alias") == 3 for hit in hits)
-        self._assert_schema_alignment(
+        self._assert_schema_mapping(
             source_info,
             self.describe_collection(client, target)[0],
             CORE_FIELD_MAPPING,
@@ -1491,7 +1491,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             assert _row_value(hit, "source_pk") == row_id
             assert float(_row_value(hit, "distance")) == pytest.approx(0.0, abs=tolerance)
 
-        self._assert_schema_alignment(
+        self._assert_schema_mapping(
             source_info,
             self.describe_collection(client, target)[0],
             mixed_mapping,
@@ -1636,7 +1636,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         bm25_field = fields["bm25_sparse"]
         assert bm25_field.get("external_field") in (None, "")
         assert bm25_field.get("is_function_output") is True
-        self._assert_schema_alignment(
+        self._assert_schema_mapping(
             source_info,
             target_info,
             {"source_pk": "pk", "vector": "embedding", "text_alias": "text_field"},

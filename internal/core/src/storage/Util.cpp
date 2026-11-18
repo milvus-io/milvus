@@ -2172,6 +2172,9 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
     }
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         GetLoonManifest(manifest_path, properties)->columnGroups());
+    if (ReadMilvusTableFieldIdMapping(*column_groups) != nullptr) {
+        return std::nullopt;
+    }
     for (size_t i = 0; i < column_groups->size(); ++i) {
         const auto& group = column_groups->at(i);
         if (std::find(group->columns.begin(), group->columns.end(), column) ==
@@ -2342,6 +2345,7 @@ VisitFieldDataFromManifestPaged(
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
+    const auto field_id_mapping = ReadMilvusTableFieldIdMapping(*column_groups);
 
     // Determine the column name to use. New index-build callers pass the
     // storage column mapping through FileManagerContext. The fallback keeps
@@ -2363,6 +2367,39 @@ VisitFieldDataFromManifestPaged(
         column_name = std::to_string(field_meta.field_id);
     }
 
+    const auto missing_field = [&]() {
+        // External mappings become readable only after explicit refresh.
+        // FieldMissing allows index builders to synthesize NULL/default rows;
+        // report a retriable error instead so they retry the refreshed manifest.
+        if (is_external) {
+            ThrowInfo(FieldNotLoaded,
+                      "mapped external field {} ({}) is not available in the "
+                      "current segment manifest; run RefreshExternalCollection "
+                      "before accessing this field",
+                      field_meta.field_id,
+                      ext_field);
+        }
+        return VisitOutcome::FieldMissing;
+    };
+
+    if (field_id_mapping != nullptr) {
+        const auto mapped =
+            field_id_mapping->physical_columns.find(field_meta.field_id);
+        if (mapped != field_id_mapping->physical_columns.end()) {
+            column_name = mapped->second;
+            is_external = true;
+        } else {
+            // An unmapped field can be a target-local output, but a mapped
+            // source column must never be selected through numeric identity.
+            const auto candidate = column_name;
+            if (!HasMilvusTableLocalColumn(*column_groups, candidate) ||
+                field_id_mapping->target_fields.find(candidate) !=
+                    field_id_mapping->target_fields.end()) {
+                return missing_field();
+            }
+        }
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     auto column_exists = [&](const std::string& name) {
         for (size_t i = 0; i < column_groups->size(); i++) {
@@ -2377,7 +2414,7 @@ VisitFieldDataFromManifestPaged(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return VisitOutcome::FieldMissing;
+        return missing_field();
     }
 
     std::vector<std::string> needed_columns = {column_name};

@@ -3847,6 +3847,43 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 	})
 }
 
+func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
+	node := createTestProxy()
+	defer node.sched.Close()
+	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Name: "external", ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, ExternalField: "id", DataType: schemapb.DataType_Int64}},
+		},
+	}, nil).Build()
+	defer describe.UnPatch()
+	boundary := merr.WrapErrServiceUnavailableMsg("reached DDL queue")
+	enqueueCalls := 0
+	enqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(*scheduler.DdTaskQueue, taskmodel.Task) error {
+		enqueueCalls++
+		return boundary
+	}).Build()
+	defer enqueue.UnPatch()
+	resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+		CollectionName: "external",
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+						FieldSchema: &schemapb.FieldSchema{
+							Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
+						},
+					}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrOperationNotSupported)
+	require.Zero(t, enqueueCalls)
+}
+
 func TestProxy_AlterCollectionSchema(t *testing.T) {
 	t.Run("unhealthy node", func(t *testing.T) {
 		proxy := &Proxy{}
@@ -3873,28 +3910,38 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 		})
 	})
 
-	t.Run("external collection rejected", func(t *testing.T) {
-		mockey.PatchConvey("external collection", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
+	t.Run("parquet add field preserves SDK fallback", func(t *testing.T) {
+		node := createTestProxy()
+		defer node.sched.Close()
 
-			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(),
-				Schema: &schemapb.CollectionSchema{
-					Name: "ext_col",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
+		describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Name: "ext_col", ExternalSource: "s3://bucket/table", ExternalSpec: `{"format":"parquet"}`,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
+				},
+			},
+		}, nil).Build()
+		defer describe.UnPatch()
+
+		resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			CollectionName: "ext_col",
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+							FieldSchema: &schemapb.FieldSchema{
+								Name: "score", DataType: schemapb.DataType_Double, Nullable: true, ExternalField: "score",
+							},
+						}},
 					},
 				},
-			}, nil).Build()
-
-			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
-				CollectionName: "ext_col",
-			})
-			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp.GetAlterStatus()))
-			assert.Contains(t, resp.GetAlterStatus().GetReason(), "external collection")
+			},
 		})
+		require.NoError(t, err)
+		require.EqualValues(t, 1100, resp.GetAlterStatus().GetCode())
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "alter collection schema operation is not supported for external collection ext_col")
 	})
 
 	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {
