@@ -395,7 +395,6 @@ proxy:
   hedging:
     enabled: false # Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per channel request across all retry rounds.
     minDelay: 200ms # Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).
-    maxInflightRatio: 0.1 # Maximum ratio of concurrent in-flight hedged attempts to concurrent in-flight hedgeable primary attempts on the Proxy, held until the hedged attempt finishes.
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     # Enable the REST value handling fixes, including exact numbers, input validation,
