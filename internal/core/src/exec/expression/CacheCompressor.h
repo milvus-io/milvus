@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <span>
 
 #include "common/Types.h"
 
@@ -111,22 +112,56 @@ class CacheCompressor {
                TargetBitmap& out_result,
                TargetBitmap& out_valid);
 
+    // Immutable view into an EntryPool payload. Parse and validate once before
+    // publication; Gather/Decode never deserialize Roaring containers. The owner
+    // must keep the byte buffer alive and unchanged for the view's lifetime.
+    class ReadView {
+     public:
+        ReadView(const char* data, size_t size, uint8_t encoding, int64_t rows);
+        bool
+        IsValid() const {
+            return valid_;
+        }
+        size_t
+        HeapBytes() const;
+        bool
+        Gather(std::span<const int32_t> offsets,
+               TargetBitmap& result,
+               TargetBitmap& valid) const;
+        bool
+        Decode(TargetBitmap& result, TargetBitmap& valid) const;
+
+     private:
+        enum class ContainerType { Array, Bitset, Run };
+        struct Container {
+            const char* data;
+            uint32_t count;
+            uint16_t key;
+            ContainerType type;
+        };
+        struct BitmapView {
+            const char* raw{nullptr};
+            uint8_t encoding{kCompTypeRaw};
+            std::vector<Container> containers;
+            bool
+            Init(const char* data, size_t size, uint8_t codec, uint32_t rows);
+            bool
+            Contains(uint32_t offset) const;
+            TargetBitmap
+            Decode(uint32_t rows) const;
+        };
+        bool
+        Init(const char* data, size_t size, uint8_t encoding, int64_t rows);
+        uint32_t rows_{0};
+        bool all_valid_{false};
+        bool valid_{false};
+        BitmapView result_;
+        BitmapView validity_;
+    };
+
  private:
     static std::vector<char>
     CompressRoaring(const TargetBitmap& bset, bool inverted = false);
-
-    static bool
-    DecompressBitmap(const char* data,
-                     uint32_t data_len,
-                     uint32_t num_bits,
-                     uint8_t comp_type,
-                     TargetBitmap& out);
-
-    static bool
-    DecompressRoaring(const char* data,
-                      uint32_t data_len,
-                      uint32_t num_bits,
-                      TargetBitmap& out);
 };
 
 }  // namespace exec

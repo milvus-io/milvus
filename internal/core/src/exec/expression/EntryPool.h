@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/ExprCacheSignature.h"
 #include "exec/expression/ExprCacheGeneration.h"
 #include "exec/expression/CacheCompressor.h"
 
@@ -83,13 +84,12 @@ class EntryPool {
  public:
     struct Key {
         ExprCacheSegmentKey segment_id;
-        uint64_t sig_hash{0};
-        std::string signature;
+        ExprCacheSignature signature;
 
         bool
         operator==(const Key& other) const {
             return segment_id == other.segment_id &&
-                   sig_hash == other.sig_hash && signature == other.signature;
+                   signature == other.signature;
         }
     };
 
@@ -97,8 +97,7 @@ class EntryPool {
         size_t
         operator()(const Key& k) const noexcept {
             return ExprCacheSegmentKeyHasher{}(k.segment_id) * 1315423911u ^
-                   std::hash<uint64_t>()(k.sig_hash) ^
-                   std::hash<std::string>()(k.signature);
+                   ExprCacheSignatureHasher {}(k.signature);
         }
     };
 
@@ -114,12 +113,15 @@ class EntryPool {
                 }
             }
         };
-        // Destroy the byte buffer before returning its reservation.
+        // Destroy the read view and byte buffer before returning their reservation.
         Charge charge_;
 
      public:
         Payload(int64_t rows, uint8_t encoding, std::vector<char> bytes)
-            : active_count(rows), comp_type(encoding), data(std::move(bytes)) {
+            : active_count(rows),
+              comp_type(encoding),
+              data(std::move(bytes)),
+              view_(data.data(), data.size(), encoding, rows) {
         }
         Payload(const Payload&) = delete;
         Payload&
@@ -128,9 +130,27 @@ class EntryPool {
         bool
         Decode(TargetBitmap& result, TargetBitmap& valid) const;
 
+        bool
+        Gather(std::span<const int32_t> offsets,
+               TargetBitmap& result,
+               TargetBitmap& valid) const {
+            return view_.Gather(offsets, result, valid);
+        }
+        size_t
+        ReadViewBytes() const {
+            return view_.HeapBytes();
+        }
+        bool
+        IsValid() const {
+            return view_.IsValid();
+        }
+
         const int64_t active_count;
         const uint8_t comp_type;
         const std::vector<char> data;
+
+     private:
+        const CacheCompressor::ReadView view_;
     };
     using Handle = std::shared_ptr<const Payload>;
 
@@ -177,7 +197,7 @@ class EntryPool {
     // destruction. No iterator, Entry reference, or pool lock escapes Lookup.
     Handle
     Lookup(ExprCacheSegmentKey segment_id,
-           const std::string& signature,
+           ExprCacheSignature signature,
            int64_t active_count);
 
     // Insert a compressed entry. Compression is done internally.
@@ -186,7 +206,7 @@ class EntryPool {
     // admission before calling this method.
     void
     Put(ExprCacheSegmentKey segment_id,
-        const std::string& signature,
+        ExprCacheSignature signature,
         int64_t active_count,
         const TargetBitmap& result,
         const TargetBitmap& valid,

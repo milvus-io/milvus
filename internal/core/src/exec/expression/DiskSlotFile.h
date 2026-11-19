@@ -22,15 +22,43 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <span>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "common/Types.h"
+#include "common/ExprCacheSignature.h"
+
+namespace prometheus {
+class Gauge;
+}
 
 namespace milvus {
 namespace exec {
+
+// Shared across backend rebuilds. Detached files and staged writes retain their
+// reservations until the owning file is closed and removed.
+class ExprCacheDiskBudget {
+ public:
+    explicit ExprCacheDiskBudget(size_t capacity);
+    bool
+    TryAcquire(size_t bytes);
+    void
+    Release(size_t bytes) noexcept;
+    void
+    SetCapacity(size_t capacity);
+    size_t
+    GetUsedBytes() const;
+
+ private:
+    mutable std::mutex mutex_;
+    size_t capacity_;
+    size_t used_{0};
+    prometheus::Gauge& gauge_;
+};
 
 // Disk-backed expression cache for one sealed segment.
 // Fixed-size slots, pread/pwrite IO, Clock eviction.
@@ -41,17 +69,17 @@ namespace exec {
 // File layout:
 //   [FileHeader 64B][slot_0][slot_1]...[slot_N-1]
 //
-// Each slot has a fixed header (17B) + raw bitset data.
-// Slot size = 17 + ((row_count + 63) / 64) * 8
+// Each slot has a fixed header (25B) + raw result and validity bitsets.
+// Slot size = 25 + 2 * ((row_count + 63) / 64) * 8
 // All slots in one file are the same size.
 
 class DiskSlotFile {
  public:
     static constexpr uint32_t kMagic = 0x45584352;  // "EXCR"
-    static constexpr uint32_t kVersion = 2;
+    static constexpr uint32_t kVersion = 3;
     static constexpr size_t kFileHeaderSize = 64;
     static constexpr size_t kSlotHeaderSize =
-        17;  // sig_hash(8) + active_count(8) + flags(1)
+        25;  // sig_hash(16) + active_count(8) + flags(1)
 
 #pragma pack(push, 1)
     struct FileHeader {
@@ -65,21 +93,40 @@ class DiskSlotFile {
     };
 
     struct SlotHeader {
-        uint64_t sig_hash;
+        uint64_t sig_low;
+        uint64_t sig_high;
         int64_t active_count;
         uint8_t flags;  // bit 0 = valid_all_ones
     };
 #pragma pack(pop)
 
     static_assert(sizeof(FileHeader) == 64, "FileHeader must be 64 bytes");
-    static_assert(sizeof(SlotHeader) == 17, "SlotHeader must be 17 bytes");
+    static_assert(sizeof(SlotHeader) == 25, "SlotHeader must be 25 bytes");
+
+    class Reservation {
+     public:
+        Reservation(std::shared_ptr<ExprCacheDiskBudget> budget,
+                    std::function<bool(size_t)> acquire);
+        ~Reservation();
+        Reservation(const Reservation&) = delete;
+        Reservation&
+        operator=(const Reservation&) = delete;
+        bool
+        Grow(size_t bytes);
+
+     private:
+        std::shared_ptr<ExprCacheDiskBudget> budget_;
+        std::function<bool(size_t)> acquire_;
+        size_t bytes_{0};
+    };
 
     // Create/open a disk slot file for a sealed segment.
     // row_count determines slot size. max_file_size determines number of slots.
     DiskSlotFile(int64_t segment_id,
                  const std::string& path,
                  int64_t row_count,
-                 uint64_t max_file_size);
+                 uint64_t max_file_size,
+                 std::unique_ptr<Reservation> reservation = {});
 
     ~DiskSlotFile();
 
@@ -93,18 +140,23 @@ class DiskSlotFile {
     // holding its shared lock and before any pread or bitmap allocation.
     // Returning false skips the read; the callback must not reenter the file.
     bool
-    Get(const std::string& signature,
+    Get(ExprCacheSignature signature,
         int64_t active_count,
         TargetBitmap& out_result,
         TargetBitmap& out_valid,
-        const std::function<bool()>& before_materialize = {});
+        const std::function<bool()>& before_materialize = {},
+        const std::span<const int32_t>* offsets = nullptr);
+
+    bool
+    Contains(ExprCacheSignature signature, int64_t active_count) const;
 
     // Store raw bitsets into a slot. May evict via Clock if full.
     void
-    Put(const std::string& signature,
+    Put(ExprCacheSignature signature,
         int64_t active_count,
         const TargetBitmap& result,
-        const TargetBitmap& valid);
+        const TargetBitmap& valid,
+        const std::function<void()>& before_write = {});
 
     void
     Close();
@@ -134,8 +186,7 @@ class DiskSlotFile {
 
     struct SlotMeta {
         uint32_t slot_id;
-        std::string signature;
-        uint64_t sig_hash;
+        ExprCacheSignature sig_hash;
         int64_t active_count;
         std::atomic<uint8_t> usage_count{0};
     };
@@ -152,6 +203,9 @@ class DiskSlotFile {
     void
     RebuildClockKeys();
 
+    // Destroyed after the destructor body closes/unlinks the file.
+    std::unique_ptr<Reservation> reservation_;
+    uint32_t reserved_slots_{0};
     int64_t segment_id_;
     std::string path_;
     int64_t row_count_;
@@ -161,13 +215,18 @@ class DiskSlotFile {
     uint32_t next_unused_slot_{0};
     uint32_t bitset_bytes_{0};  // raw bitset size = ((row_count+63)/64)*8
 
+    std::mutex writer_mutex_;
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, std::unique_ptr<SlotMeta>> slot_index_;
+    std::atomic<uint32_t> used_count_{0};
+    std::unordered_map<ExprCacheSignature,
+                       std::unique_ptr<SlotMeta>,
+                       ExprCacheSignatureHasher>
+        slot_index_;
     // Recycled IDs only; never-used slots are represented by next_unused_slot_.
     std::vector<uint32_t> free_slots_;
 
     // Clock state
-    std::vector<std::string> clock_keys_;
+    std::vector<ExprCacheSignature> clock_keys_;
     uint32_t clock_hand_{0};
     bool clock_dirty_{true};
 };

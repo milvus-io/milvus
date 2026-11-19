@@ -1742,22 +1742,6 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
     segment->RemoveFieldFile(milvus::FieldId(field_id));
 }
 
-CStatus
-ExprResCacheEraseLegacySegment(int64_t segment_id) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        milvus::exec::ExprResCacheManager::Instance().EraseLegacySegment(
-            segment_id);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "unknown exception");
-    }
-}
-
 //////////////////////////////    interfaces for growing segment flush    //////////////////////////////
 
 namespace {

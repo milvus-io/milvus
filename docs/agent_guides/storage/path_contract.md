@@ -88,13 +88,19 @@ See [design and compatibility](../../design-docs/design_docs/20261019-segment-ro
 ## Expression cache files
 
 Sealed expression caches are disposable local files under
-`<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>.cache`.
-The process-local generation belongs to a published sealed snapshot. Retirement
-uses the file object's original path and unlinks after publication/cache locks
-are released; it must never reconstruct a path from only the segment ID.
-Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
-The cache manager removes `.cache` files on rebuild and does not restore them
-across restarts. These files are not manifests or DataCoord GC objects.
+`<localStorage.path>/cache/<nodeID>/expr_cache/` with names
+`seg_<segment_id>_<generation>_p<pid>_<process_nonce>_<file_sequence>.cache`.
+The generation belongs to a published sealed snapshot; the process/file suffix
+also distinguishes replacement files after eviction or reconfiguration.
+Retirement and eviction detach shared file owners. The last owner closes and
+unlinks its exact original path outside publication/cache locks, so outstanding
+reads/writes can finish without deleting a newer file. File headers and allocated
+slot reservations remain charged through this last-owner cleanup, including
+retired files held by offset readers; detachment does not reclaim disk budget.
+Missing generations and
+growing segments are ineligible. Rebuild cleans abandoned `.cache` files while
+excluding this process's still-live files. Cache files are never restored across
+restarts and are not manifests or DataCoord GC objects.
 
 ## Local upgrade compatibility
 
