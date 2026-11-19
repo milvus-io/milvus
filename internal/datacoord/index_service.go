@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1262,58 +1263,74 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 
 	segmentsIndexes := s.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
-		segIdxes := segmentsIndexes[segID]
-		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
-			CollectionID: req.GetCollectionID(),
-			SegmentID:    segID,
-			EnableIndex:  false,
-			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
+		info, err := s.getSegmentIndexInfos(ctx, req.GetCollectionID(), segID, segmentsIndexes[segID])
+		if errors.Is(err, meta.ErrSegmentManifestStale) && ctx.Err() == nil {
+			info, err = s.getSegmentIndexInfos(ctx, req.GetCollectionID(), segID, s.indexMeta.GetSegmentIndexes(req.GetCollectionID(), segID))
 		}
-		if len(segIdxes) != 0 {
-			ret.SegmentInfo[segID].EnableIndex = true
-			for _, segIdx := range segIdxes {
-				if segIdx.IndexState == commonpb.IndexState_Finished {
-					indexFilePaths, err := s.meta.SegmentIndexFilePaths(ctx, segIdx, nil)
-					if err != nil {
-						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
-					}
-					indexParams := s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-					indexParams = append(indexParams, s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
-					// respect segment-based index type
-					for _, param := range indexParams {
-						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
-							param.Value = segIdx.IndexType
-							break
-						}
-					}
-					indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
-					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
-						indexName = segIdx.IndexType
-					}
-					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
-						&indexpb.IndexFilePathInfo{
-							SegmentID:                 segID,
-							FieldID:                   s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-							IndexID:                   segIdx.IndexID,
-							BuildID:                   segIdx.BuildID,
-							IndexName:                 indexName,
-							IndexType:                 segIdx.IndexType,
-							IndexParams:               indexParams,
-							IndexFilePaths:            indexFilePaths,
-							SerializedSize:            segIdx.IndexSerializedSize,
-							MemSize:                   segIdx.IndexMemSize,
-							IndexVersion:              segIdx.IndexVersion,
-							NumRows:                   segIdx.NumRows,
-							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
-							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
-							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
-						})
-				}
+		if err != nil {
+			return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+		}
+		ret.SegmentInfo[segID] = info
+	}
+	return ret, nil
+}
+
+func (s *Server) getSegmentIndexInfos(ctx context.Context, collectionID, segID int64, indexes map[UniqueID]*model.SegmentIndex) (*indexpb.SegmentInfo, error) {
+	info := &indexpb.SegmentInfo{
+		CollectionID: collectionID,
+		SegmentID:    segID,
+		EnableIndex:  len(indexes) != 0,
+		IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0, len(indexes)),
+	}
+	var descriptor *datapb.SegmentInfo
+	for _, segIdx := range indexes {
+		if segIdx.IndexState != commonpb.IndexState_Finished {
+			continue
+		}
+		if descriptor == nil && segIdx.NumIndexFiles() > 0 && (segIdx.ManifestPublished || metautil.IsSegmentRooted(segIdx.IndexStorePathVersion)) {
+			segment := s.meta.GetSegment(ctx, segID)
+			if segment == nil {
+				return nil, merr.WrapErrSegmentNotFound(segID, "cannot resolve index files")
+			}
+			descriptor = segment.SegmentInfo
+		}
+		indexFilePaths, err := s.meta.SegmentIndexFilePaths(ctx, segIdx, descriptor)
+		if err != nil {
+			return nil, err
+		}
+		indexParams := s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+		indexParams = append(indexParams, s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+		// respect segment-based index type
+		for _, param := range indexParams {
+			if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
+				param.Value = segIdx.IndexType
+				break
 			}
 		}
+		indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+		if segIdx.IndexType != "" && segIdx.IndexType != indexName {
+			indexName = segIdx.IndexType
+		}
+		info.IndexInfos = append(info.IndexInfos,
+			&indexpb.IndexFilePathInfo{
+				SegmentID:                 segID,
+				FieldID:                   s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+				IndexID:                   segIdx.IndexID,
+				BuildID:                   segIdx.BuildID,
+				IndexName:                 indexName,
+				IndexType:                 segIdx.IndexType,
+				IndexParams:               indexParams,
+				IndexFilePaths:            indexFilePaths,
+				SerializedSize:            segIdx.IndexSerializedSize,
+				MemSize:                   segIdx.IndexMemSize,
+				IndexVersion:              segIdx.IndexVersion,
+				NumRows:                   segIdx.NumRows,
+				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+				IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+			})
 	}
-
-	return ret, nil
+	return info, nil
 }
 
 // ListIndexes returns all indexes created on provided collection.

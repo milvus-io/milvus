@@ -224,7 +224,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.True(t, ok)
 			_, err = m.SegmentIndexFilePaths(ctx, build, beforeStats.SegmentInfo)
 			require.ErrorIs(t, err, meta.ErrSegmentManifestStale, "a snapshot must recapture its segment instead of mixing revisions")
-			require.Zero(t, missing.MockTimes(), "the old segment revision must never be opened")
+			require.Equal(t, 1, missing.MockTimes(), "try the captured revision before requesting fresh segment metadata")
 			meta.WithSegmentIndexManifestWrites(t, false)
 			restarted := boot()
 			for _, record := range []*model.SegmentIndex{first, second} {

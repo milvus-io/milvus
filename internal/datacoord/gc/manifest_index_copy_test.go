@@ -125,7 +125,7 @@ func TestManifestIndexRetirementAfterSegmentRemoval(t *testing.T) {
 	}
 	require.NoError(t, m.DropSegment(ctx, record.SegmentID))
 	reads := store.ReadCount
-	_, err := m.SegmentIndexFilePaths(ctx, record, nil)
+	_, err := m.ResolveIndexFileKeys(ctx, nil, record)
 	require.ErrorIs(t, err, merr.ErrSegmentNotFound)
 	files, err := gc.resolveRetainedIndexFiles(ctx, nil, record)
 	require.NoError(t, err)

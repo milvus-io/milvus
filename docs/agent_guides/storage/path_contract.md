@@ -83,9 +83,10 @@ Readers and cleanup use each artifact's persisted version.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. `SegmentInfo.ManifestPath` is the sole source of the published
-revision for ordinary manifest-backed index file reads. If the captured segment
-revision has changed when resolving index files, QueryView and snapshot creation
-recapture segment metadata.
+revision for ordinary manifest-backed index file reads. QueryView and snapshot
+creation read index files from the captured segment revision. If that lookup
+fails and the segment has since published a different revision, the caller
+recaptures the segment and its indexes together.
 Once a snapshot is created, restore uses the revision recorded in that snapshot.
 When a new build replaces the same index, DataCoord keeps the displaced build's
 exact keys with its retained task record until rollback or cleanup.

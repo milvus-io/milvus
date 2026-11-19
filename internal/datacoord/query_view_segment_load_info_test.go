@@ -247,6 +247,7 @@ func TestQueryViewSegmentLoadInfoManifestErrorIsolation(t *testing.T) {
 	require.Len(t, results[3].LoadInfo.IndexInfos, 1)
 	require.Equal(t, []string{"legacy/other/segment/_index/30/4/index.bin"}, results[3].LoadInfo.IndexInfos[0].IndexFilePaths)
 	require.Equal(t, 1, patchIndexes.Times())
+	require.Equal(t, len(manifests), patchSegment.Times(), "each load result uses its captured segment")
 	for i, manifest := range manifests {
 		require.Equal(t, manifest, segments[int64(i+1)].GetManifestPath())
 	}

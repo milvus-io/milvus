@@ -2425,53 +2425,76 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
 }
 
-func TestIndexDescriptorsFollowCurrentSegmentManifest(t *testing.T) {
-	for _, consumer := range []string{"snapshot", "query view"} {
-		t.Run(consumer, func(t *testing.T) {
-			ctx := t.Context()
-			m, _, store, _ := index.RollbackFixture(t)
-			s := &Server{meta: m, domainMetas: domainMetas{indexMeta: m.IndexCatalog.(*index.IndexMeta)}}
-			s.UpdateStateCode(commonpb.StateCode_Healthy)
-			before := m.GetSegment(ctx, meta.RestartSegID).Clone()
-			before.InsertChannel = "ch"
-			before.TransformStartAfterTimetick = 1
-			m.Segments.SetSegment(before.GetID(), before)
-			seedCollections(s, &meta.CollectionInfo{ID: before.GetCollectionID(), Schema: meta.NewTestSchema()})
-			current, err := meta.AdvanceManifest(before.GetManifestPath(), 1)
-			require.NoError(t, err)
-			store.Revisions[current] = store.BackfillEntriesAt(before.GetManifestPath())
-			// Advance the segment after the consumer has taken its descriptor.
-			advance := mockey.Mock((*meta.Meta).SegmentIndexFilePaths).When(func(_ *meta.Meta, _ context.Context, _ *model.SegmentIndex, desc *datapb.SegmentInfo) bool {
-				if desc.GetManifestPath() == before.GetManifestPath() {
-					require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(before.GetID(), current)))
-					delete(store.Revisions, before.GetManifestPath())
+func TestIndexFilesUseCapturedSegmentManifest(t *testing.T) {
+	for _, consumer := range []string{"query view", "snapshot", "get index infos"} {
+		for _, revision := range []string{"retained", "removed"} {
+			t.Run(consumer+"/"+revision, func(t *testing.T) {
+				ctx := t.Context()
+				m, _, store, _ := index.RollbackFixture(t)
+				s := &Server{meta: m, domainMetas: domainMetas{indexMeta: m.IndexCatalog.(*index.IndexMeta)}}
+				s.UpdateStateCode(commonpb.StateCode_Healthy)
+				segment := m.GetSegment(ctx, meta.RestartSegID).Clone()
+				segment.InsertChannel = "ch"
+				segment.TransformStartAfterTimetick = 1
+				m.Segments.SetSegment(segment.GetID(), segment)
+				seedCollections(s, &meta.CollectionInfo{ID: segment.GetCollectionID(), Schema: meta.NewTestSchema()})
+				before := segment.GetManifestPath()
+				after, err := meta.AdvanceManifest(before, 1)
+				require.NoError(t, err)
+				store.Revisions[after] = store.BackfillEntriesAt(before)
+				// Publish after this consumer has captured its segment.
+				advance := mockey.Mock((*meta.Meta).SegmentIndexFilePaths).When(func(_ *meta.Meta, _ context.Context, _ *model.SegmentIndex, desc *datapb.SegmentInfo) bool {
+					require.NotNil(t, desc)
+					if desc.GetManifestPath() == before {
+						require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(segment.GetID(), after)))
+						if revision == "removed" {
+							delete(store.Revisions, before)
+						}
+					}
+					return false
+				}).Build()
+				defer advance.UnPatch()
+				var reads []string
+				read := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, path string, _ *indexpb.StorageConfig) bool {
+					reads = append(reads, path)
+					return false
+				}).Build()
+				defer read.UnPatch()
+
+				want := before
+				wantReads := []string{before}
+				if revision == "removed" {
+					want = after
+					wantReads = append(wantReads, after)
 				}
-				return false
-			}).Build()
-			defer advance.UnPatch()
-			read := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) bool {
-				require.Equal(t, current, manifest)
-				return false
-			}).Build()
-			defer read.UnPatch()
-			if consumer == "snapshot" {
-				snap, err := (&ServerHandler{s: s}).GenSnapshot(ctx, before.GetCollectionID(), []*msgpb.MsgPosition{{ChannelName: "ch", Timestamp: 1000}})
-				require.NoError(t, err)
-				require.Len(t, snap.Segments, 1)
-				require.Equal(t, current, snap.Segments[0].GetManifestPath())
-				require.Len(t, snap.Segments[0].GetIndexFiles(), 1)
-				require.Len(t, snap.Segments[0].GetIndexFiles()[0].GetIndexFilePaths(), 2)
-			} else {
-				views, _, err := s.GetQueryViewSegmentLoadInfos(ctx, before.GetCollectionID(), []int64{before.GetID()})
-				require.NoError(t, err)
-				require.Len(t, views, 1)
-				require.NoError(t, merr.Error(views[0].GetStatus()))
-				require.Equal(t, current, views[0].GetLoadInfo().GetManifestPath())
-				require.Len(t, views[0].GetLoadInfo().GetIndexInfos(), 1)
-				require.Len(t, views[0].GetLoadInfo().GetIndexInfos()[0].GetIndexFilePaths(), 2)
-			}
-			require.Positive(t, read.Times())
-		})
+				switch consumer {
+				case "query view":
+					views, _, err := s.GetQueryViewSegmentLoadInfos(ctx, segment.GetCollectionID(), []int64{segment.GetID()})
+					require.NoError(t, err)
+					require.Len(t, views, 1)
+					require.NoError(t, merr.Error(views[0].GetStatus()))
+					info := views[0].GetLoadInfo()
+					require.Equal(t, want, info.GetManifestPath())
+					require.Len(t, info.GetIndexInfos(), 1)
+					require.Len(t, info.GetIndexInfos()[0].GetIndexFilePaths(), 2)
+				case "snapshot":
+					snap, err := (&ServerHandler{s: s}).GenSnapshot(ctx, segment.GetCollectionID(), []*msgpb.MsgPosition{{ChannelName: "ch", Timestamp: 1000}})
+					require.NoError(t, err)
+					require.Len(t, snap.Segments, 1)
+					require.Equal(t, want, snap.Segments[0].GetManifestPath())
+					require.Len(t, snap.Segments[0].GetIndexFiles(), 1)
+					require.Len(t, snap.Segments[0].GetIndexFiles()[0].GetIndexFilePaths(), 2)
+				case "get index infos":
+					reply, err := s.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{CollectionID: segment.GetCollectionID(), SegmentIDs: []int64{segment.GetID()}})
+					require.NoError(t, err)
+					require.NoError(t, merr.Error(reply.GetStatus()))
+					infos := reply.GetSegmentInfo()[segment.GetID()].GetIndexInfos()
+					require.Len(t, infos, 1)
+					require.Len(t, infos[0].GetIndexFilePaths(), 2)
+				}
+				require.Equal(t, wantReads, reads)
+			})
+		}
 	}
 }
 

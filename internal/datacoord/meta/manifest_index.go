@@ -131,7 +131,19 @@ func (m *Meta) ResolveIndexFileKeys(ctx context.Context, io *packed.ManifestIOCo
 		}
 		index = current
 	}
-	keys, _, err := m.currentManifestIndexFileKeys(ctx, io, index, nil)
+	var keys []string
+	var err error
+	for range 2 {
+		segment := m.GetSegment(ctx, index.SegmentID)
+		if segment == nil {
+			err = merr.WrapErrSegmentNotFound(index.SegmentID, "cannot resolve index files")
+			break
+		}
+		keys, err = m.indexFileKeysAtSegment(ctx, io, index, segment.SegmentInfo)
+		if !errors.Is(err, ErrSegmentManifestStale) {
+			break
+		}
+	}
 	if err == nil {
 		return keys, nil
 	}
@@ -147,57 +159,50 @@ func (m *Meta) ResolveIndexFileKeys(ctx context.Context, io *packed.ManifestIOCo
 	return nil, err
 }
 
-// Only the segment's published pointer selects a revision. The object store
-// may already contain a newer revision whose catalog transaction failed.
-func (m *Meta) currentIndexManifest(ctx context.Context, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) (string, error) {
-	segment := m.GetSegment(ctx, index.SegmentID)
-	if segment == nil {
-		return "", merr.WrapErrSegmentNotFound(index.SegmentID, "cannot resolve index files")
-	}
-	if segment.GetCollectionID() != index.CollectionID || segment.GetPartitionID() != index.PartitionID {
-		return "", merr.Wrapf(merr.ErrDataIntegrity, "segment identity disagrees with index build %d", index.BuildID)
-	}
-	manifest := segment.GetManifestPath()
+// The descriptor selects the published revision for this read.
+func currentIndexManifest(descriptor *datapb.SegmentInfo) (string, error) {
+	manifest := descriptor.GetManifestPath()
 	base, version, err := packed.UnmarshalManifestPath(manifest)
-	if (segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing) &&
+	if (descriptor.GetIsImporting() || descriptor.GetState() == commonpb.SegmentState_Importing) &&
 		(manifest == "" || (err == nil && base != "" && version == packed.ManifestEarliest)) {
-		return "", merr.WrapErrServiceNotReadyMsg("segment %d has not published its copied manifest", index.SegmentID)
+		return "", merr.WrapErrServiceNotReadyMsg("segment %d has not published its copied manifest", descriptor.GetID())
 	}
 	if err != nil {
-		return "", merr.WrapErrDataIntegrity(err, "invalid manifest path for segment %d index files", index.SegmentID)
+		return "", merr.WrapErrDataIntegrity(err, "invalid manifest path for segment %d index files", descriptor.GetID())
 	}
 	if base == "" || version <= packed.ManifestEarliest {
-		return "", merr.WrapErrDataIntegrityMsg("segment %d has no published manifest for index files", index.SegmentID)
-	}
-	if descriptor != nil {
-		if descriptor.GetID() != index.SegmentID || descriptor.GetCollectionID() != index.CollectionID || descriptor.GetPartitionID() != index.PartitionID {
-			return "", merr.Wrapf(merr.ErrDataIntegrity, "segment descriptor disagrees with index build %d", index.BuildID)
-		}
-		if !packed.SameManifestPath(descriptor.GetManifestPath(), manifest) {
-			return "", StaleSegmentManifestError(index.SegmentID, descriptor.GetManifestPath(), manifest)
-		}
+		return "", merr.WrapErrDataIntegrityMsg("segment %d has no published manifest for index files", descriptor.GetID())
 	}
 	return manifest, nil
 }
 
-func (m *Meta) currentManifestIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) ([]string, string, error) {
-	manifest, err := m.currentIndexManifest(ctx, index, descriptor)
-	if err != nil {
-		return nil, "", err
+func manifestForIndexBuild(index *model.SegmentIndex, descriptor *datapb.SegmentInfo) (string, error) {
+	if descriptor == nil {
+		return "", merr.WrapErrSegmentNotFound(index.SegmentID, "cannot resolve index files")
 	}
-	keys, err := m.readManifestIndexFileKeys(ctx, io, index, manifest)
+	if descriptor.GetID() != index.SegmentID || descriptor.GetCollectionID() != index.CollectionID || descriptor.GetPartitionID() != index.PartitionID {
+		return "", merr.Wrapf(merr.ErrDataIntegrity, "segment identity disagrees with index build %d", index.BuildID)
+	}
+	return currentIndexManifest(descriptor)
+}
+
+func (m *Meta) indexFileKeysAtSegment(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) ([]string, error) {
+	manifest, err := manifestForIndexBuild(index, descriptor)
 	if err != nil {
-		// The segment may have advanced and released this revision during I/O.
-		latest, lookupErr := m.currentIndexManifest(ctx, index, descriptor)
-		if lookupErr != nil {
-			return nil, "", lookupErr
+		return nil, err
+	}
+	keys, err := m.readManifestIndexFileKeys(ctx, io, index, descriptor)
+	if err != nil && ctx.Err() == nil {
+		// A published revision can be reclaimed after the descriptor was captured.
+		latest := m.GetSegment(ctx, index.SegmentID)
+		if latest == nil {
+			return nil, merr.WrapErrSegmentNotFound(index.SegmentID, "cannot resolve index files")
 		}
-		if !packed.SameManifestPath(manifest, latest) {
-			manifest = latest
-			keys, err = m.readManifestIndexFileKeys(ctx, io, index, manifest)
+		if !packed.SameManifestPath(manifest, latest.GetManifestPath()) {
+			return nil, StaleSegmentManifestError(index.SegmentID, manifest, latest.GetManifestPath())
 		}
 	}
-	return keys, manifest, err
+	return keys, err
 }
 
 func (m *Meta) sameIndexBuild(index *model.SegmentIndex) *model.SegmentIndex {
@@ -227,13 +232,13 @@ func (m *Meta) catalogIndexFileKeys(ctx context.Context, index *model.SegmentInd
 	return record.IndexFileKeys, nil
 }
 
-func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex, manifest string) ([]string, error) {
+func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) ([]string, error) {
 	if io == nil {
 		io = packed.NewManifestIOContext(1)
 		defer io.Close()
 	}
 	cfg := CreateStorageConfig()
-	entries, err := m.ReadManifestIndexesWithIO(ctx, io, manifest, cfg)
+	entries, err := m.ReadManifestIndexesWithIO(ctx, io, descriptor.GetManifestPath(), cfg)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read index files for manifest build %d", index.BuildID)
 	}
@@ -241,13 +246,12 @@ func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.Manifes
 	if m.ChunkManager != nil {
 		root = m.ChunkManager.RootPath()
 	}
-	segment := &datapb.SegmentInfo{ID: index.SegmentID, CollectionID: index.CollectionID, PartitionID: index.PartitionID, ManifestPath: manifest}
 	var keys []string
 	for _, entry := range entries {
 		if entry.BuildID != index.BuildID {
 			continue
 		}
-		if _, ok := ManifestIndexFilePathInfoForSegment(root, segment, entry); !ok || keys != nil ||
+		if _, ok := ManifestIndexFilePathInfoForSegment(root, descriptor, entry); !ok || keys != nil ||
 			entry.IndexID != index.IndexID || entry.IndexVersion != index.IndexVersion ||
 			entry.IndexStorePathVersion != index.IndexStorePathVersion || len(entry.IndexFileKeys) != index.IndexFileCount {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid file metadata for manifest index build %d", index.BuildID)
@@ -260,30 +264,27 @@ func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.Manifes
 	return keys, nil
 }
 
-// SegmentIndexFilePaths resolves files for serving. A descriptor that includes
-// segment metadata can require its revision to match the one actually read.
+// SegmentIndexFilePaths uses the captured segment for every manifest-dependent path.
 func (m *Meta) SegmentIndexFilePaths(ctx context.Context, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) ([]string, error) {
 	if index.NumIndexFiles() == 0 {
 		return []string{}, nil
 	}
 	var keys []string
-	var manifest string
 	var err error
 	if index.ManifestPublished {
-		keys, manifest, err = m.currentManifestIndexFileKeys(ctx, nil, index, descriptor)
+		keys, err = m.indexFileKeysAtSegment(ctx, nil, index, descriptor)
 	} else {
 		keys, err = m.ResolveIndexFileKeys(ctx, nil, index)
 		if err == nil && metautil.IsSegmentRooted(index.IndexStorePathVersion) {
-			manifest, err = m.currentIndexManifest(ctx, index, descriptor)
+			_, err = manifestForIndexBuild(index, descriptor)
 		}
 	}
-
 	if err != nil {
 		return nil, err
 	}
 	return metautil.NewIndexPathBuilder(m.ChunkManager.RootPath(), index.IndexStorePathVersion,
 		index.CollectionID, index.PartitionID, index.SegmentID, index.BuildID, index.IndexVersion).
-		WithManifestPath(manifest).BuildFilePaths(keys), nil
+		WithManifestPath(descriptor.GetManifestPath()).BuildFilePaths(keys), nil
 }
 
 // manifestIndexFilePathInfo projects one manifest index entry into the load
