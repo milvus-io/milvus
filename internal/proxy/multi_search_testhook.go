@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -40,7 +41,7 @@ func NewMultiSearchTestProxy(t *testing.T, queueCapacity, workers int) *Proxy {
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(s.Close)
-	p := &Proxy{sched: s}
+	p := &Proxy{sched: s, requests: reqregistry.New()}
 	p.setMetaCache(&multiSearchTestCache{})
 	p.UpdateStateCode(commonpb.StateCode_Healthy)
 	return p

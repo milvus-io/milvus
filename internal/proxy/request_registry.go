@@ -51,6 +51,13 @@ func (node *Proxy) registerRequest(ctx context.Context, info reqregistry.Info) (
 	if node.requests == nil {
 		return ctx, nil
 	}
+	if parent := reqregistry.FromContext(ctx); parent != nil &&
+		parent.Type() == reqregistry.TypeMultiSearch && info.Type == reqregistry.TypeSearch {
+		// A batch's Search attempts share its identity and task linkage. Return
+		// no owned entry: finishing or unregistering a child must not end the
+		// batch, including when that child is about to be retried.
+		return ctx, nil
+	}
 	// The registry names the request itself, from the proxy id, the process
 	// start and a local sequence: registration takes no lock and no call to
 	// the coordinator, so it cannot fail.

@@ -2629,8 +2629,8 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	// Register the request before anything else so that it is listable and
-	// cancellable for its whole lifetime, including the retries below.
+	// Register before the retry loop, or reuse the owning MultiSearch's entry.
+	// A child gets no entry to finish or unregister independently of its batch.
 	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
 	defer node.unregisterRequest(entry)
 

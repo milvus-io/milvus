@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -99,6 +100,19 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	if s == nil || execute == nil {
 		return nil, merr.WrapErrServiceInternalMsg("MultiSearch scheduler or Search entry is unavailable")
 	}
+	// Register once for both transports, before queueing or preparing any item.
+	// A batch has no single database, collection, NQ, topk or expression.
+	ctx, entry := node.registerRequest(ctx, reqregistry.Info{Type: reqregistry.TypeMultiSearch})
+	defer node.unregisterRequest(entry)
+	defer func() {
+		// Linearize the response against CancelRequests before releasing the
+		// registration. An accepted operator cancel wins even if the last item
+		// completed while the response was being finalized.
+		entry.Finish()
+		if cause := reqregistry.CancelCause(ctx); cause != nil {
+			results, err = nil, cause
+		}
+	}()
 	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return nil, err
 	}
@@ -133,6 +147,9 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	}
 	// Freeze the ordered results on success, queue expiry, or cancellation.
 	unfinished := contextutil.ErrOrDeadlineExceeded(executionCtx)
+	if cause := reqregistry.CancelCause(executionCtx); cause != nil {
+		unfinished = cause
+	}
 	if unfinished == nil {
 		unfinished = err
 	}

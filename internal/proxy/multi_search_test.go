@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -44,6 +45,108 @@ import (
 func multiSearchTestPrepare(collection string) MultiSearchPrepare {
 	return func(context.Context) (*milvuspb.SearchRequest, error) {
 		return &milvuspb.SearchRequest{DbName: "default", CollectionName: collection}, nil
+	}
+}
+
+func TestMultiSearchOperatorCancelDuringPreparation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		p.requests = newTestRequests()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		finished := make(chan error, 1)
+		preparationStopped := make(chan error, 1)
+		prepare := func(ctx context.Context) (*milvuspb.SearchRequest, error) {
+			<-ctx.Done()
+			preparationStopped <- context.Cause(ctx)
+			return nil, ctx.Err()
+		}
+		go func() {
+			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1},
+				[]MultiSearchPrepare{prepare, multiSearchTestPrepare("not started")},
+				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					t.Error("started a Search after cancellation during preparation")
+					return &milvuspb.SearchResults{Status: merr.Success()}, nil
+				})
+			if len(results) != 0 {
+				t.Error("operator cancellation returned a result list")
+			}
+			finished <- err
+		}()
+		synctest.Wait()
+		listed, err := p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
+		require.NoError(t, err)
+		require.Len(t, listed.GetRequests(), 1)
+		batch := listed.Requests[0]
+		require.Equal(t, "MultiSearch", batch.GetType())
+		require.Equal(t, reqregistry.StateRunning, batch.GetState())
+		require.True(t, batch.GetCancellable())
+		require.Len(t, batch.GetTaskIds(), 1)
+		canceled, err := p.CancelLocalRequests(t.Context(), &milvuspb.CancelRequestsRequest{
+			RequestIds: []string{batch.GetRequestId()}, Reason: "stop this batch",
+		})
+		require.NoError(t, err)
+		require.Len(t, canceled.GetCanceled(), 1)
+		require.Empty(t, canceled.GetNotFound())
+		batchErr := <-finished
+		require.ErrorIs(t, batchErr, merr.ErrRequestCanceled)
+		require.Contains(t, batchErr.Error(), "stop this batch")
+		require.False(t, merr.Status(batchErr).GetRetriable())
+		require.ErrorIs(t, <-preparationStopped, merr.ErrRequestCanceled)
+		require.NoError(t, ctx.Err(), "the client can still receive the cancellation response")
+		synctest.Wait()
+		listed, err = p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
+		require.NoError(t, err)
+		require.Empty(t, listed.GetRequests())
+	})
+}
+
+func TestMultiSearchCancelAndCompletionAgree(t *testing.T) {
+	p := NewMultiSearchTestProxy(t, 1, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	type outcome struct {
+		results []*milvuspb.SearchResults
+		err     error
+	}
+	for range 50 {
+		started, release := make(chan struct{}), make(chan struct{})
+		done := make(chan outcome, 1)
+		go func() {
+			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("last")},
+				func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					close(started)
+					select {
+					case <-release:
+						return &milvuspb.SearchResults{Status: merr.Success()}, nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				})
+			done <- outcome{results, err}
+		}()
+		awaitAutoLoadSchedulerResult(t, started)
+		listed, err := p.ListLocalRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
+		require.NoError(t, err)
+		require.Len(t, listed.GetRequests(), 1)
+		batchID := listed.Requests[0].GetRequestId()
+		go close(release)
+		canceled, err := p.CancelLocalRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batchID}})
+		require.NoError(t, err)
+		got := awaitAutoLoadSchedulerResult(t, done)
+		if len(canceled.GetCanceled()) == 1 {
+			require.Empty(t, canceled.GetNotFound())
+			require.ErrorIs(t, got.err, merr.ErrRequestCanceled)
+			require.Empty(t, got.results)
+		} else {
+			require.Equal(t, []string{batchID}, canceled.GetNotFound())
+			require.NoError(t, got.err)
+			require.Len(t, got.results, 1)
+			require.NoError(t, merr.Error(got.results[0].GetStatus()))
+		}
+		listed, err = p.ListLocalRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
+		require.NoError(t, err)
+		require.Empty(t, listed.GetRequests())
 	}
 }
 
@@ -472,29 +575,61 @@ func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
 }
 
 func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
-		retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
-		beforeRetries := testutil.ToFloat64(retries)
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		finished := make(chan error, 1)
-		attempts := 0
-		go func() {
-			items := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("undispatched")}
-			_, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1}, items, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-				attempts++
-				return nil, merr.ErrServiceRateLimit
+	for name, operator := range map[string]bool{"client": false, "operator": true} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := NewMultiSearchTestProxy(t, 1, 1)
+				retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
+				beforeRetries := testutil.ToFloat64(retries)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				finished := make(chan error, 1)
+				attempts := 0
+				go func() {
+					items := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("undispatched")}
+					results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1}, items, func(_ context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+						if request.GetCollectionName() != "limited" {
+							t.Error("started an item after cancellation during backoff")
+						}
+						attempts++
+						return nil, merr.ErrServiceRateLimit
+					})
+					if len(results) != 0 {
+						t.Error("canceled batch returned results")
+					}
+					finished <- err
+				}()
+				synctest.Wait()
+				var batchID string
+				if operator {
+					listed, err := p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
+					require.NoError(t, err)
+					require.Len(t, listed.GetRequests(), 1)
+					batchID = listed.Requests[0].GetRequestId()
+				}
+				// Cross a retry boundary and cancel during the next backoff.
+				time.Sleep(250 * time.Millisecond)
+				synctest.Wait()
+				require.Equal(t, 2, attempts)
+				if operator {
+					listed, err := p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
+					require.NoError(t, err)
+					require.Len(t, listed.GetRequests(), 1)
+					require.Equal(t, batchID, listed.Requests[0].GetRequestId(), "retry keeps the batch identity")
+					canceled, err := p.CancelLocalRequests(t.Context(), &milvuspb.CancelRequestsRequest{RequestIds: []string{batchID}})
+					require.NoError(t, err)
+					require.Len(t, canceled.GetCanceled(), 1)
+					require.ErrorIs(t, <-finished, merr.ErrRequestCanceled)
+				} else {
+					cancel()
+					require.ErrorIs(t, <-finished, context.Canceled)
+				}
+				synctest.Wait()
+				require.Equal(t, 2, attempts)
+				require.Equal(t, beforeRetries+1, testutil.ToFloat64(retries), "cancellation during backoff does not start another retry")
 			})
-			finished <- err
-		}()
-		synctest.Wait()
-		cancel()
-		require.ErrorIs(t, <-finished, context.Canceled)
-		synctest.Wait()
-		require.Equal(t, 1, attempts)
-		require.Equal(t, beforeRetries, testutil.ToFloat64(retries), "cancellation during backoff does not start a retry")
-	})
+		})
+	}
 }
 
 func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
@@ -622,55 +757,76 @@ func TestMultiSearchTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
 }
 
 func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
-		release := make(chan struct{})
-		releaseSearch := sync.OnceFunc(func() { close(release) })
-		defer releaseSearch()
-		started := make(chan struct{})
-		running := make(chan error, 1)
-		go func() {
-			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("running")},
-				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-					close(started)
-					<-release
+	for name, operator := range map[string]bool{"client": false, "operator": true} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := NewMultiSearchTestProxy(t, 1, 1)
+				release := make(chan struct{})
+				releaseSearch := sync.OnceFunc(func() { close(release) })
+				defer releaseSearch()
+				started := make(chan struct{})
+				running := make(chan error, 1)
+				go func() {
+					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("running")},
+						func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+							close(started)
+							<-release
+							return &milvuspb.SearchResults{Status: merr.Success()}, nil
+						})
+					running <- err
+				}()
+				<-started
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				queued := make(chan error, 1)
+				prepare := func(context.Context) (*milvuspb.SearchRequest, error) {
+					t.Error("prepared canceled queued batch")
+					return nil, merr.ErrServiceInternal
+				}
+				execute := func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					return &milvuspb.SearchResults{Status: merr.Success()}, nil
-				})
-			running <- err
-		}()
-		<-started
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		queued := make(chan error, 1)
-		prepare := func(context.Context) (*milvuspb.SearchRequest, error) {
-			t.Error("prepared canceled queued batch")
-			return nil, merr.ErrServiceInternal
-		}
-		execute := func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-			return &milvuspb.SearchResults{Status: merr.Success()}, nil
-		}
-		go func() {
-			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{prepare}, execute)
-			if len(results) != 0 {
-				t.Error("returned results after parent cancellation")
-			}
-			queued <- err
-		}()
-		synctest.Wait()
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
-		cancel()
-		require.ErrorIs(t, <-queued, context.Canceled)
-		require.NoError(t, p.CheckMultiSearchAdmission())
-		go func() {
-			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("replacement")}, execute)
-			queued <- err
-		}()
-		synctest.Wait()
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
-		releaseSearch()
-		require.NoError(t, <-running)
-		require.NoError(t, <-queued)
-	})
+				}
+				go func() {
+					results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{prepare}, execute)
+					if len(results) != 0 {
+						t.Error("returned results after parent cancellation")
+					}
+					queued <- err
+				}()
+				synctest.Wait()
+				require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+				if operator {
+					listed, err := p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
+					require.NoError(t, err)
+					require.Len(t, listed.GetRequests(), 2)
+					var queuedID string
+					for _, request := range listed.GetRequests() {
+						if request.GetState() == reqregistry.StateQueued {
+							queuedID = request.GetRequestId()
+						}
+					}
+					require.NotEmpty(t, queuedID)
+					canceled, err := p.CancelLocalRequests(t.Context(), &milvuspb.CancelRequestsRequest{RequestIds: []string{queuedID}})
+					require.NoError(t, err)
+					require.Len(t, canceled.GetCanceled(), 1)
+					require.ErrorIs(t, <-queued, merr.ErrRequestCanceled)
+				} else {
+					cancel()
+					require.ErrorIs(t, <-queued, context.Canceled)
+				}
+				require.NoError(t, p.CheckMultiSearchAdmission())
+				go func() {
+					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("replacement")}, execute)
+					queued <- err
+				}()
+				synctest.Wait()
+				require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+				releaseSearch()
+				require.NoError(t, <-running)
+				require.NoError(t, <-queued)
+			})
+		})
+	}
 }
 
 func TestMultiSearchSchedulerCloseCancelsAndWaits(t *testing.T) {

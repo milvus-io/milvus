@@ -17,8 +17,8 @@
 // Package reqregistry keeps track of the client requests a proxy is currently
 // serving, so that they can be listed and canceled.
 //
-// The unit of registration is one client RPC (a Search, HybridSearch or
-// Query call), not one scheduler task: a single RPC can spawn several tasks
+// The unit of registration is one client RPC (Search, HybridSearch, Query or
+// MultiSearch), not one scheduler task: a single RPC can spawn several tasks
 // (a requery, a search-by-primary-key vector fetch, a retried attempt) and
 // those tasks share the request's context, so cancellation can only ever stop
 // the whole tree. Registration therefore happens at the very top of the RPC
@@ -63,6 +63,7 @@ const (
 	TypeSearch       = "Search"
 	TypeHybridSearch = "HybridSearch"
 	TypeQuery        = "Query"
+	TypeMultiSearch  = "MultiSearch"
 )
 
 // ExprPrefixLimit bounds the expression text kept per request.
@@ -138,6 +139,11 @@ type Entry struct {
 	canceledAfter time.Duration
 	seq           uint64  // key in Registry.entries
 	prefix        *string // the registry's id prefix when this entry was registered
+}
+
+// Type is fixed at registration and identifies which request owns this entry.
+func (e *Entry) Type() string {
+	return e.info.Type
 }
 
 // User returns the name of the user who issued the request.

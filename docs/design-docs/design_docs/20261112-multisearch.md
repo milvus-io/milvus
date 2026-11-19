@@ -125,6 +125,30 @@ Completed results are retained until the response is serialized. Per-Search
 limits and the concurrency setting bound individual work. Retained result
 memory grows with the number and size of successful items in the batch.
 
+## List and cancel
+
+Both transports register the admitted batch as one `MultiSearch` request before
+it enters the MSearch queue. `ListRunningRequests` exposes its stable request ID,
+caller, trace, queue state and scheduler task IDs. The registration remains in
+place during item preparation and between retries. Child Searches reuse this
+registration; completing a child does not finish or unregister the batch.
+
+`CancelRequests` on that ID stops further dispatch and cancels all unfinished
+preparation, Searches and retry waits. The batch returns the existing
+non-retriable `RequestCanceled` status (3002), including the cancel reason, with
+no result list. Execution-budget expiry retains its existing partial-result
+semantics. Cancellation and completion use the registry's finish boundary: a
+cancel accepted before it wins the response; a later cancel is not found.
+Cancellation is asynchronous, so the response does not promise that every
+QueryNode has already released its resources.
+
+A batch can span databases and collections. Its single-target fields (`db_name`,
+`collection_name`, `nq`, `topk`, `expr`) are therefore left empty or zero. List
+without database/collection filters, optionally filtering by user or elapsed
+time, to find batches. Independent child cancellation and target-set filtering
+are outside this change; neither a Search attempt nor a scheduler task ID is a
+separate MultiSearch cancellation handle.
+
 ## Verification
 
 Compare the REST and gRPC results with ordinary Search using the same request
@@ -132,6 +156,10 @@ parameters. Exercise mixed and all-item failures, multiple databases with the
 same collection name, multi-vector results, and authorization for each target.
 Control the scheduler and quota boundaries in Proxy tests to verify admission,
 requery progress, bounded retries, cancellation, and timeout finalization.
+List and cancel the batch while queued, preparing, executing and backing off;
+verify one stable registration, child completion isolation, cancellation/result
+races and capacity recovery. Exercise the public List/Cancel path against both
+gRPC and REST batches and check the outer 3002 response.
 
 Measure ordinary Search fan-out and MultiSearch with matching requests and
 concurrency. Record round latency, success rate, resource usage, and ordinary

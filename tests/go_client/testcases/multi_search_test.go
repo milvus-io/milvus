@@ -1,7 +1,11 @@
 package testcases
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -19,6 +23,165 @@ import (
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
+
+// TestMultiSearchListAndCancel uses a WAL barrier for gRPC and a collection's
+// rate limit for REST, so neither case depends on a search happening to be slow.
+// Each caller has its own identity: listing and cancellation cannot select a
+// concurrent test's requests. Run on an auth- and DQL-quota-enabled deployment.
+func TestMultiSearchListAndCancel(t *testing.T) {
+	for _, transport := range []string{"grpc", "rest"} {
+		t.Run(transport, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			defer cancel()
+			root := hp.CreateDefaultMilvusClient(ctx, t)
+			name := common.GenRandomString("multisearch_cancel", 8)
+			createMultiSearchCollection(ctx, t, root, name, 1)
+			user, password := common.GenRandomString("multisearch_caller", 8), common.GenRandomString("pwd", 12)
+			require.NoError(t, root.CreateUser(ctx, client.NewCreateUserOption(user, password)))
+			granted := false
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				if granted {
+					require.NoError(t, root.RevokeRole(cleanupCtx, client.NewRevokeRoleOption(user, "admin")))
+				}
+				require.NoError(t, root.DropUser(cleanupCtx, client.NewDropUserOption(user)))
+			})
+			require.NoError(t, root.GrantRole(ctx, client.NewGrantRoleOption(user, "admin")))
+			granted = true
+			caller := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Username: user, Password: password})
+			service := caller.GetService()
+			ready, err := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).
+				WithANNSField("vector").WithConsistencyLevel(entity.ClEventually).Request()
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				response, callErr := service.Search(ctx, ready)
+				return merr.CheckRPCCall(response, callErr) == nil
+			}, 20*time.Second, 50*time.Millisecond, "the test caller must be ready")
+
+			type outcome struct {
+				httpStatus int
+				code       int32
+				reason     string
+				items      int
+				retriable  bool
+				err        error
+			}
+			finished := make(chan outcome, 1)
+			if transport == "grpc" {
+				blocked := multiSearchBlockingRequest(ready)
+				go func() {
+					response, callErr := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+						Requests: []*milvuspb.SearchRequest{ready, blocked, proto.CloneOf(blocked), ready}, MaxConcurrency: 2,
+					})
+					finished <- outcome{
+						code: response.GetStatus().GetCode(), reason: response.GetStatus().GetReason(),
+						items: len(response.GetResults()), retriable: response.GetStatus().GetRetriable(), err: callErr,
+					}
+				}()
+			} else {
+				limitedName := common.GenRandomString("multisearch_cancel_limited", 8)
+				createMultiSearchCollection(ctx, t, root, limitedName, 101)
+				require.NoError(t, root.AlterCollectionProperties(ctx,
+					client.NewAlterCollectionPropertiesOption(limitedName).WithProperty("collection.searchRate.max.vps", "1")))
+				limited, requestErr := client.NewSearchOption(limitedName, 1, []entity.Vector{
+					entity.FloatVector{1, 0}, entity.FloatVector{1, 0}, entity.FloatVector{1, 0}, entity.FloatVector{1, 0},
+				}).WithANNSField("vector").Request()
+				require.NoError(t, requestErr)
+				require.Eventually(t, func() bool {
+					response, callErr := service.Search(ctx, limited)
+					return merr.Code(merr.CheckRPCCall(response, callErr)) == merr.Code(merr.ErrServiceRateLimit)
+				}, 20*time.Second, 50*time.Millisecond, "the collection quota must reach the Proxy")
+				payload, marshalErr := json.Marshal(map[string]any{
+					"maxConcurrency": 1,
+					"requests": []any{
+						map[string]any{"search": map[string]any{"collectionName": name, "data": [][]float32{{1, 0}}, "limit": 1}},
+						map[string]any{"search": map[string]any{"collectionName": limitedName, "data": [][]float32{{1, 0}, {1, 0}, {1, 0}, {1, 0}}, "limit": 1}},
+						map[string]any{"search": map[string]any{"collectionName": name, "data": [][]float32{{1, 0}}, "limit": 1}},
+					},
+				})
+				require.NoError(t, marshalErr)
+				endpoint, _ := multiSearchRESTConfig()
+				request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost,
+					endpoint+"/v2/vectordb/entities/multi_search", bytes.NewReader(payload))
+				require.NoError(t, requestErr)
+				request.Header.Set("Authorization", "Bearer "+user+":"+password)
+				request.Header.Set("Content-Type", "application/json")
+				go func() {
+					response, callErr := http.DefaultClient.Do(request)
+					got := outcome{err: callErr}
+					if callErr == nil {
+						defer response.Body.Close()
+						got.httpStatus = response.StatusCode
+						var body struct {
+							Code    int32             `json:"code"`
+							Message string            `json:"message"`
+							Data    []json.RawMessage `json:"data"`
+						}
+						got.err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&body)
+						got.code, got.reason, got.items = body.Code, body.Message, len(body.Data)
+					}
+					finished <- got
+				}()
+			}
+
+			var batch *milvuspb.RunningRequestInfo
+			require.Eventually(t, func() bool {
+				list, callErr := service.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{User: user, MinElapsedMs: 100})
+				require.NoError(t, merr.CheckRPCCall(list, callErr))
+				for _, node := range list.GetNodeResults() {
+					require.NoError(t, merr.Error(node.GetStatus()))
+					require.False(t, node.GetUnimplemented())
+				}
+				if len(list.GetRequests()) == 0 {
+					return false
+				}
+				require.Len(t, list.GetRequests(), 1, "a batch must not expose independent child Search requests")
+				batch = list.Requests[0]
+				require.Equal(t, "MultiSearch", batch.GetType())
+				require.Equal(t, user, batch.GetUser())
+				require.True(t, batch.GetCancellable())
+				// The first Search completed before the controlled wait. Its
+				// completion must not remove or finish the batch registration.
+				return batch.GetState() == "Running" && len(batch.GetTaskIds()) >= 2
+			}, 10*time.Second, 20*time.Millisecond)
+			const reason = "cancel the complete MultiSearch batch"
+			canceled, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{
+				RequestIds: []string{batch.GetRequestId()}, Reason: reason,
+			})
+			require.NoError(t, merr.CheckRPCCall(canceled, err))
+			require.Len(t, canceled.GetCanceled(), 1)
+			require.Equal(t, batch.GetRequestId(), canceled.Canceled[0].GetRequestId())
+			require.Empty(t, canceled.GetNotFound())
+			require.Empty(t, canceled.GetUndetermined())
+			select {
+			case got := <-finished:
+				require.NoError(t, got.err)
+				if transport == "rest" {
+					require.Equal(t, http.StatusOK, got.httpStatus)
+				}
+				require.Equal(t, merr.RequestCanceledCode, got.code)
+				require.Contains(t, got.reason, reason)
+				require.Zero(t, got.items)
+				require.False(t, got.retriable)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the canceled batch did not return")
+			}
+			require.Eventually(t, func() bool {
+				list, callErr := service.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{User: user})
+				return merr.CheckRPCCall(list, callErr) == nil && len(list.GetRequests()) == 0
+			}, 5*time.Second, 20*time.Millisecond)
+			again, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batch.GetRequestId()}})
+			require.NoError(t, merr.CheckRPCCall(again, err))
+			require.Equal(t, []string{batch.GetRequestId()}, again.GetNotFound())
+			recovery, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{Requests: []*milvuspb.SearchRequest{ready}})
+			require.NoError(t, merr.CheckRPCCall(recovery, err))
+			require.Len(t, recovery.GetResults(), 1)
+			require.NoError(t, merr.Error(recovery.Results[0].GetStatus()))
+			t.Logf("MULTISEARCH_CANCEL transport=%s code=3002 task_count=%d recovered=true", transport, len(batch.GetTaskIds()))
+		})
+	}
+}
 
 func createMultiSearchCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient, name string, pk int64) {
 	t.Helper()

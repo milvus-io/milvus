@@ -18,14 +18,14 @@ package entity
 
 import "time"
 
-// RunningRequest is a Search, HybridSearch or Query that a proxy is
+// RunningRequest is a Search, HybridSearch, Query or MultiSearch that a proxy is
 // executing, as reported by ListRunningRequests. ID is the handle that
 // CancelRequests takes: an opaque string such as "25-to03zu-rs", to be
 // passed back unchanged.
 type RunningRequest struct {
 	ID             string
 	ProxyID        int64
-	Type           string // "Search", "HybridSearch" or "Query"
+	Type           string // "Search", "HybridSearch", "Query" or "MultiSearch"
 	DBName         string
 	CollectionName string
 	User           string

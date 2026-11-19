@@ -17,6 +17,7 @@
 package proxy_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -59,8 +60,9 @@ const multiSearchRESTPath = "/v2/vectordb/entities/multi_search"
 const readySearch = `{"search":{"collectionName":"ready","data":[[1,0]]}}`
 
 type multiSearchRESTResponse struct {
-	Code int32
-	Data []struct {
+	Code    int32
+	Message string
+	Data    []struct {
 		Search struct {
 			Code  int32
 			Data  []map[string]any
@@ -89,6 +91,16 @@ func (p *multiSearchHTTPProxy) GetMetaCache() proxy.Cache { return p.cache }
 
 func (p *multiSearchHTTPProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return p.search(ctx, req)
+}
+
+// The HTTP fixture has one Proxy; these methods stand in for the coordinator's
+// fan-out while keeping the real local registry and cancellation handlers.
+func (p *multiSearchHTTPProxy) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return p.ListLocalRunningRequests(ctx, req)
+}
+
+func (p *multiSearchHTTPProxy) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return p.CancelLocalRequests(ctx, req)
 }
 
 type multiSearchHTTPCache struct {
@@ -170,6 +182,83 @@ func TestMultiSearchRESTExplicitZeroBudget(t *testing.T) {
 	for _, item := range body.Data {
 		require.Equal(t, merr.TimeoutCode, item.Search.Code)
 	}
+}
+
+func TestMultiSearchRESTListAndCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stopped := make(chan error, 2)
+		p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			<-ctx.Done()
+			stopped <- context.Cause(ctx)
+			return nil, ctx.Err()
+		})
+		handler := newMultiSearchRESTHandler(p)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		request := httptest.NewRequestWithContext(ctx, http.MethodPost, multiSearchRESTPath,
+			strings.NewReader(`{"maxConcurrency":2,"requests":[`+readySearch+`,`+readySearch+`,`+readySearch+`]}`))
+		response := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			handler.ServeHTTP(response, request)
+		}()
+		synctest.Wait()
+
+		list := httptest.NewRecorder()
+		handler.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/v2/vectordb/requests/running/list", strings.NewReader(`{"user":"root"}`)))
+		require.Equal(t, http.StatusOK, list.Code)
+		var listed struct {
+			Code int32
+			Data struct {
+				Requests []struct {
+					RequestID string `json:"requestId"`
+					Type      string
+					User      string
+				}
+			}
+		}
+		require.NoError(t, json.Unmarshal(list.Body.Bytes(), &listed))
+		require.Zero(t, listed.Code)
+		require.Len(t, listed.Data.Requests, 1)
+		batch := listed.Data.Requests[0]
+		require.Equal(t, "MultiSearch", batch.Type)
+		require.Equal(t, "root", batch.User)
+		body, err := json.Marshal(map[string]any{"requestIds": []string{batch.RequestID}, "reason": "stop the batch"})
+		require.NoError(t, err)
+		canceled := httptest.NewRecorder()
+		handler.ServeHTTP(canceled, httptest.NewRequest(http.MethodPost, "/v2/vectordb/requests/running/cancel", bytes.NewReader(body)))
+		require.Equal(t, http.StatusOK, canceled.Code)
+		var cancelResponse struct {
+			Code int32
+			Data struct {
+				Canceled []struct {
+					RequestID string `json:"requestId"`
+				}
+				NotFound     []string `json:"notFound"`
+				Undetermined []string
+			}
+		}
+		require.NoError(t, json.Unmarshal(canceled.Body.Bytes(), &cancelResponse))
+		require.Zero(t, cancelResponse.Code)
+		require.Len(t, cancelResponse.Data.Canceled, 1)
+		require.Equal(t, batch.RequestID, cancelResponse.Data.Canceled[0].RequestID)
+		require.Empty(t, cancelResponse.Data.NotFound)
+		require.Empty(t, cancelResponse.Data.Undetermined)
+		<-done
+		require.Equal(t, http.StatusOK, response.Code)
+		var result multiSearchRESTResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+		require.Equal(t, merr.RequestCanceledCode, result.Code)
+		require.Contains(t, result.Message, "stop the batch")
+		require.Empty(t, result.Data)
+		require.NoError(t, ctx.Err())
+		synctest.Wait()
+		require.Len(t, stopped, 2, "only the two dispatched items should run")
+		for range 2 {
+			require.ErrorIs(t, <-stopped, merr.ErrRequestCanceled)
+		}
+	})
 }
 
 func TestMultiSearchRESTDeliversPartialResultsAfterExpiry(t *testing.T) {
