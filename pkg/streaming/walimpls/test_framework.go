@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -236,19 +237,13 @@ func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALIm
 	}
 	s.Close()
 
-	// Test different scan policy, Latest.
+	// Deprecated Latest must fail instead of creating a reader at a moving tail.
 	s, err = w.Read(ctx, ReadOption{
 		Name:          "scanner_deliver_latest",
 		DeliverPolicy: options.DeliverPolicyLatest(),
 	})
-	assert.NoError(f.t, err)
-	timeoutCh := time.After(1 * time.Second)
-	select {
-	case <-s.Chan():
-		f.t.Errorf("should be blocked")
-	case <-timeoutCh:
-	}
-	s.Close()
+	assert.ErrorIs(f.t, err, merr.ErrParameterInvalid)
+	assert.Nil(f.t, s)
 	return true
 }
 

@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -71,6 +70,9 @@ func RecoverRecoveryStorage(
 		rs.closeRecoveryResources()
 		return nil, nil, err
 	}
+	if rs.recoveryComplete != nil {
+		rs.recoveryComplete(snapshot)
+	}
 	// Register recovered QueryView references before background cleanup can
 	// advance the segment-version floor or reclaim their bootstrap resources.
 	if rs.recoverQueryViews != nil {
@@ -92,6 +94,12 @@ func RecoverRecoveryStorage(
 }
 
 type RecoveryStorageOption func(*recoveryStorageImpl)
+
+// WithRecoveryComplete installs the live WAL only after bounded replay succeeds,
+// before starting persistence, truncation or live consumption.
+func WithRecoveryComplete(complete func(*RecoverySnapshot)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.recoveryComplete = complete }
+}
 
 // WithQueryViewRecovery installs query references at the startup barrier, before
 // background persistence and cleanup begin. The callback must not block on I/O.
@@ -179,6 +187,8 @@ type recoveryStorageImpl struct {
 	currentClusterID        string
 	channel                 types.PChannelInfo
 	checkpoint              *WALCheckpoint
+	minimumRecoveryMagic    int64
+	walSwitchReady          chan struct{}
 	pchannelControl         *streamingpb.PChannelRecoveryControlMeta
 	ackTracker              *messageack.Tracker
 	tailController          *recoveryTailController
@@ -198,6 +208,7 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	scannerWG              sync.WaitGroup
 	recoveryStream         RecoveryStream
+	recoveryComplete       func(*RecoverySnapshot)
 	ackTrackerWG           sync.WaitGroup
 	summaryWG              sync.WaitGroup
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -456,7 +467,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	frozenCheckpoint := &WALCheckpoint{
 		MessageID: completedPoint.MessageID,
 		TimeTick:  completedPoint.TimeTick,
-		Magic:     r.checkpoint.Magic,
+		Magic:     max(r.checkpoint.Magic, r.minimumRecoveryMagic),
 		Term:      r.channel.Term,
 	}
 	// Freeze the latest control state with its own applied frontier. Its
@@ -511,8 +522,7 @@ func consumeCheckpointEqual(left, right *utility.WALCheckpoint) bool {
 		return false
 	}
 	if !proto.Equal(left.ReplicateConfig, right.ReplicateConfig) ||
-		!proto.Equal(left.ReplicateCheckpoint, right.ReplicateCheckpoint) ||
-		!proto.Equal(left.AlterWalState, right.AlterWalState) {
+		!proto.Equal(left.ReplicateCheckpoint, right.ReplicateCheckpoint) {
 		return false
 	}
 	if left.MessageID == nil || right.MessageID == nil {
@@ -539,7 +549,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	// confirmations enter the recovery tracker and dirty a snapshot.
 	defer func() {
 		r.observeQueryBarriers(ctx, msg)
-		if r.consumedThrough != nil && messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+		if r.consumedThrough != nil && (message.IsTimeTickConfirmBarrier(msg)) {
 			r.consumedThrough(msg.TimeTick())
 		}
 	}()
@@ -676,19 +686,6 @@ func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage
 					changed = true
 				}
 			}
-		}
-	}
-	if msg.MessageType() == message.MessageTypeAlterWAL {
-		alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
-		header := alterWAL.Header()
-		if r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE {
-			r.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
-				TargetWalName: header.TargetWalName,
-				TimeTick:      msg.TimeTick(),
-				Configs:       header.Config,
-				Stage:         streamingpb.AlterWALStage_FLUSHING,
-			}
-			changed = true
 		}
 	}
 	// update the replicate checkpoint.
