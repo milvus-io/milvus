@@ -244,12 +244,20 @@ class SortBuffer {
     std::vector<VectorPtr>
     ExtractOutput(int64_t num_rows);
 
+    struct InputBatch {
+        std::vector<RowContainer::InputColumn> columns;
+        std::vector<std::function<int(vector_size_t, const char*)>> compare;
+    };
+
+    InputBatch
+    BindInput(const std::vector<VectorPtr>& columns) const;
+
     /**
      * @brief With a limit: add one input row to the candidate rows, unless it
      *        can no longer make the top limit_
      */
     void
-    OfferRow(const std::vector<VectorPtr>& columns, vector_size_t row_index);
+    OfferRow(const InputBatch& input, vector_size_t row_index);
 
     /**
      * @brief With a limit: keep the best limit_ candidate rows, release the
@@ -265,19 +273,9 @@ class SortBuffer {
      * are read directly from the column vectors.
      */
     int
-    CompareInput(const std::vector<VectorPtr>& columns,
+    CompareInput(const InputBatch& input,
                  vector_size_t row_index,
                  const char* row) const;
-
-    /**
-     * @brief Shared implementation of Compare() and CompareInput()
-     *
-     * @tparam Lhs Accessor for the left-hand row (a stored row, or an input
-     *             row read from column vectors)
-     */
-    template <typename Lhs>
-    int
-    CompareImpl(const Lhs& lhs, const char* rhs) const;
 
     //=========================================================================
     // Data Members

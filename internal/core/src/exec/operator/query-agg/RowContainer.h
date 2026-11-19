@@ -15,6 +15,7 @@
 // limitations under the License.
 #pragma once
 
+#include <functional>
 #include <vector>
 #include <folly/Range.h>
 #include "common/Types.h"
@@ -138,133 +139,71 @@ class RowContainer {
         return *reinterpret_cast<const T*>(group + offset);
     }
 
-    template <DataType Type>
-    inline bool
-    equalsNoNulls(const char* row,
-                  int32_t offset,
-                  const VectorPtr& column,
-                  vector_size_t index) {
-        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
-                      Type == DataType::JSON || Type == DataType::ARRAY) {
-            ThrowInfo(UnexpectedError,
-                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
-                      "rows container for now");
-        } else {
-            using T = typename TypeTraits<Type>::NativeType;
-            T raw_value(AsColumnVector<T>(column.get())->ValueAt(index));
-            bool equal = false;
-            if constexpr (std::is_same_v<T, std::string>) {
-                equal = (raw_value == *(strAt(row, offset)));
-            } else {
-                equal = (milvus::comparePrimitiveAsc(
-                             raw_value, valueAt<T>(row, offset)) == 0);
-            }
-            return equal;
-        }
-    }
+    // Batch-bound row operations borrow their input vector. The caller keeps
+    // that vector alive and unchanged until all operations on the batch finish.
+    // No type dispatch or checked downcast runs inside the row loops.
+    struct InputColumn {
+        std::function<void(vector_size_t, char*)> store;
+        std::function<bool(const char*, vector_size_t)> equals;
+    };
 
-    template <DataType Type>
-    inline bool
+    InputColumn
+    bindColumn(const VectorPtr& column, int32_t column_index) const;
+
+    template <typename TVector>
+    static bool
     equalsWithNulls(const char* row,
-                    int32_t offset,
-                    int32_t nullByte,
-                    uint8_t nullMask,
-                    const VectorPtr& column,
+                    RowColumn location,
+                    const TVector* column,
                     vector_size_t index) {
-        bool rowIsNull = isNullAt(row, nullByte, nullMask);
-        bool columnIsNull = false;
-        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
-                      Type == DataType::JSON || Type == DataType::ARRAY) {
-            ThrowInfo(UnexpectedError,
-                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
-                      "rows container for now");
-        } else {
-            using T = typename TypeTraits<Type>::NativeType;
-            columnIsNull = !AsColumnVector<T>(column.get())->ValidAt(index);
-        }
+        using T = typename TVector::ValueType;
+        const bool rowIsNull =
+            isNullAt(row, location.nullByte(), location.nullMask());
+        const bool columnIsNull = !column->ValidAt(index);
         if (rowIsNull || columnIsNull) {
             return rowIsNull == columnIsNull;
         }
-        return equalsNoNulls<Type>(row, offset, column, index);
+        if constexpr (std::is_same_v<T, std::string>) {
+            return column->ValueAt(index) == *strAt(row, location.offset());
+        } else {
+            return milvus::comparePrimitiveAsc(
+                       column->ValueAt(index),
+                       valueAt<T>(row, location.offset())) == 0;
+        }
     }
 
-    inline bool
-    equals(const char* row,
-           RowColumn column,
-           const VectorPtr& column_data,
-           vector_size_t index) {
-        return MILVUS_DYNAMIC_TYPE_DISPATCH(equalsWithNulls,
-                                            column_data->type(),
-                                            row,
-                                            column.offset(),
-                                            column.nullByte(),
-                                            column.nullMask(),
-                                            column_data,
-                                            index);
-    }
-
-    /// Stores the 'index'th value in 'columnVector' into 'row' at 'columnIndex'.
+    // Convenience for single-row callers. Batch consumers use bindColumn once.
     void
     store(const VectorPtr& column_data,
           vector_size_t index,
           char* row,
           int32_t column_index);
 
-    template <DataType Type>
-    inline void
-    storeWithNull(const VectorPtr& column,
+    template <typename TVector>
+    static void
+    storeWithNull(const TVector* column,
                   vector_size_t index,
                   char* row,
-                  int32_t offset,
-                  int32_t nullByte,
-                  uint8_t nullMask) {
-        static std::string null_string_val = "";
-        static std::string* null_string_val_ptr = &null_string_val;
-        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
-                      Type == DataType::JSON || Type == DataType::ARRAY) {
-            ThrowInfo(UnexpectedError,
-                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
-                      "rows container for now");
-        } else {
-            using T = typename milvus::TypeTraits<Type>::NativeType;
-            if (!AsColumnVector<T>(column.get())->ValidAt(index)) {
-                row[nullByte] |= nullMask;
-                if constexpr (std::is_same_v<T, std::string>) {
-                    *reinterpret_cast<std::string**>(row + offset) =
-                        null_string_val_ptr;
-                } else {
-                    *reinterpret_cast<T*>(row + offset) = T();
-                }
-                return;
-            }
-            storeNoNulls<Type>(column, index, row, offset);
-        }
-    }
-
-    template <DataType Type>
-    inline void
-    storeNoNulls(const VectorPtr& column,
-                 vector_size_t index,
-                 char* group,
-                 int32_t offset) {
-        using T = typename milvus::TypeTraits<Type>::NativeType;
-        if constexpr (Type == DataType::NONE || Type == DataType::ROW ||
-                      Type == DataType::JSON || Type == DataType::ARRAY) {
-            ThrowInfo(UnexpectedError,
-                      "Cannot support complex data type:[ROW/JSON/ARRAY] in "
-                      "rows container for now");
-        } else {
-            auto raw_val_ptr =
-                AsColumnVector<T>(column.get())->RawValueAt(index, sizeof(T));
+                  RowColumn location) {
+        using T = typename TVector::ValueType;
+        static std::string null_string_val;
+        if (!column->ValidAt(index)) {
+            row[location.nullByte()] |= location.nullMask();
             if constexpr (std::is_same_v<T, std::string>) {
-                // the string object and also the underlying char array are both allocated on the heap
-                // must call clear method to deallocate these memory allocated for varchar type to avoid memory leak
-                *reinterpret_cast<std::string**>(group + offset) =
-                    new std::string(*static_cast<std::string*>(raw_val_ptr));
+                *reinterpret_cast<std::string**>(row + location.offset()) =
+                    &null_string_val;
             } else {
-                *reinterpret_cast<T*>(group + offset) =
-                    *(static_cast<T*>(raw_val_ptr));
+                *reinterpret_cast<T*>(row + location.offset()) = T();
             }
+            return;
+        }
+        if constexpr (std::is_same_v<T, std::string>) {
+            // Group keys outlive input batches, so their strings must be owned.
+            *reinterpret_cast<std::string**>(row + location.offset()) =
+                new std::string(column->ValueAt(index));
+        } else {
+            *reinterpret_cast<T*>(row + location.offset()) =
+                column->ValueAt(index);
         }
     }
 

@@ -60,7 +60,7 @@ class BaseVector {
         return GetDataTypeSize(type_kind_);
     };
 
-    size_t
+    virtual size_t
     nullCount() const {
         return null_count_.has_value() ? null_count_.value() : 0;
     }
@@ -149,6 +149,17 @@ class SimpleVector : public BaseVector {
 
     virtual bool
     ValidAt(size_t index) const = 0;
+
+    // Encoded vectors may not have cached NULL statistics. Count logical rows
+    // by default; representations with cheap statistics override this method.
+    size_t
+    nullCount() const override {
+        size_t count = 0;
+        for (size_t i = 0; i < this->length_; ++i) {
+            count += !ValidAt(i);
+        }
+        return count;
+    }
 };
 
 template <typename T>
@@ -212,6 +223,11 @@ class ColumnVector final : public SimpleVector<T> {
     virtual ~ColumnVector() override {
         values_.reset();
         valid_values_.reset();
+    }
+
+    size_t
+    nullCount() const override {
+        return BaseVector::nullCount();
     }
 
     void*
@@ -512,6 +528,11 @@ class ConstantVector : public SimpleVector<T> {
         return is_null_;
     }
 
+    size_t
+    nullCount() const override {
+        return is_null_ ? this->size() : 0;
+    }
+
     VectorPtr
     cloneEmpty(vector_size_t size) const override {
         return std::make_shared<ConstantVector<T>>(type(), size, val_);
@@ -544,11 +565,17 @@ AsColumnVector(const VectorPtr& vector) {
 }
 
 template <typename T>
-SimpleVectorPtr<T>
-AsSimpleVector(const VectorPtr& vector) {
-    auto column = std::dynamic_pointer_cast<SimpleVector<T>>(vector);
+SimpleVector<T>*
+AsSimpleVector(BaseVector* vector) {
+    auto column = dynamic_cast<SimpleVector<T>*>(vector);
     AssertInfo(column != nullptr, "Expected a matching typed SimpleVector");
     return column;
+}
+
+template <typename T>
+SimpleVectorPtr<T>
+AsSimpleVector(const VectorPtr& vector) {
+    return SimpleVectorPtr<T>(vector, AsSimpleVector<T>(vector.get()));
 }
 
 /// Dispatch once at a batch boundary. Logical aliases (e.g. TIMESTAMPTZ) keep
@@ -599,6 +626,28 @@ template <typename Func>
 decltype(auto)
 VisitColumnVector(const VectorPtr& vector, Func&& func) {
     return VisitColumnVector(vector.get(), std::forward<Func>(func));
+}
+
+// Choose the representation once per batch. Keeping the concrete final type
+// in the flat case lets the compiler inline reads; other encodings use the
+// same logical interface without exposing their layout to the consumer.
+template <typename T, typename Func>
+decltype(auto)
+VisitSimpleVector(const VectorPtr& vector, Func&& func) {
+    if (auto* flat = dynamic_cast<ColumnVector<T>*>(vector.get())) {
+        return func(flat);
+    }
+    return func(AsSimpleVector<T>(vector.get()));
+}
+
+template <typename Func>
+decltype(auto)
+VisitSimpleVector(const VectorPtr& vector, Func&& func) {
+    AssertInfo(vector != nullptr, "Simple vector cannot be null");
+    return DispatchVectorType(vector->type(),
+                              [&]<typename T>() -> decltype(auto) {
+                                  return VisitSimpleVector<T>(vector, func);
+                              });
 }
 
 VectorPtr

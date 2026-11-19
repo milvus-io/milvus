@@ -58,6 +58,10 @@ struct HashLookup {
     /// One entry per group-by
     const std::vector<std::unique_ptr<VectorHasher>>& hashers_;
 
+    /// Typed row operations, rebound for every input batch. The hashers retain
+    /// ownership of the vectors borrowed by these operations.
+    std::vector<RowContainer::InputColumn> columns_;
+
     /// Set of row numbers of row to probe.
     std::vector<vector_size_t> rows_;
 

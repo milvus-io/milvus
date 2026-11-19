@@ -153,14 +153,14 @@ class MaxStringAggregate final : public Aggregate {
                 const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = AsColumnVector<std::string>(input[0]);
-        auto raw = column->RawAsValues<std::string>();
-        for (auto i = 0; i < column->size(); i++) {
-            if (!column->ValidAt(i)) {
-                continue;
+        VisitSimpleVector<std::string>(input[0], [&](const auto* column) {
+            for (auto i = 0; i < column->size(); i++) {
+                if (!column->ValidAt(i)) {
+                    continue;
+                }
+                updateOne(groups[i], column->ValueAt(i));
             }
-            updateOne(groups[i], raw[i]);
-        }
+        });
     }
 
     void
@@ -169,14 +169,14 @@ class MaxStringAggregate final : public Aggregate {
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = AsColumnVector<std::string>(input[0]);
-        auto raw = column->RawAsValues<std::string>();
-        for (auto i = 0; i < column->size(); i++) {
-            if (!column->ValidAt(i)) {
-                continue;
+        VisitSimpleVector<std::string>(input[0], [&](const auto* column) {
+            for (auto i = 0; i < column->size(); i++) {
+                if (!column->ValidAt(i)) {
+                    continue;
+                }
+                updateOne(group, column->ValueAt(i));
             }
-            updateOne(group, raw[i]);
-        }
+        });
     }
 
     void
@@ -190,7 +190,7 @@ class MaxStringAggregate final : public Aggregate {
 
  private:
     inline void
-    updateOne(char* group, const std::string& candidate) {
+    updateOne(char* group, std::string_view candidate) {
         if (isNull(group)) {
             clearNull(group);
             *value<std::string*>(group) = new std::string(candidate);

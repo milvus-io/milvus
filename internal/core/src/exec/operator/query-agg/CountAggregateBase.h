@@ -56,20 +56,14 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                        fmt::format("input column count for count aggregation "
                                    "must be one , but got:{}",
                                    input.size()));
-            VisitColumnVector(input[0], [&](const auto& input_column) {
+            VisitSimpleVector(input[0], [&](const auto& input_column) {
                 if (input_column->nullCount() == 0) {
                     for (auto i = 0; i < input_column->size(); i++) {
                         addToGroup(groups[i], 1);
                     }
                 } else {
-                    // Safe: GetValidRawData() returns CustomBitset::data(), which
-                    // exposes storage as uint64_t* per the project-wide bitset
-                    // API contract (Bitset::data_impl, CustomBitset.h).
-                    const uint64_t* validity =
-                        reinterpret_cast<const uint64_t*>(
-                            input_column->GetValidRawData());
                     for (auto i = 0; i < input_column->size(); i++) {
-                        if (validity[i >> 6] & (uint64_t(1) << (i & 63))) {
+                        if (input_column->ValidAt(i)) {
                             addToGroup(groups[i], 1);
                         }
                     }
@@ -95,15 +89,19 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                    fmt::format("input column count for count aggregation "
                                "must be exactly one for now, but got:{}",
                                input.size()));
-        VisitColumnVector(input[0], [&](const auto& column) {
-            if (column->IsBitmap()) {
-                BitsetTypeView view(column->GetRawData(), column->size());
-                addToGroup(group, view.size() - view.count());
-            } else {
-                addToGroup(
-                    group,
-                    column->size() - static_cast<int64_t>(column->nullCount()));
-            }
+        // The count(*) filter path still passes the legacy exclusion bitmap.
+        // This compatibility case is separate from logical scalar NULL counts.
+        const auto* bitmap =
+            dynamic_cast<const ColumnVector<int8_t>*>(input[0].get());
+        if (bitmap != nullptr && bitmap->IsBitmap()) {
+            BitsetTypeView view(bitmap->GetRawData(), bitmap->size());
+            addToGroup(group, view.size() - view.count());
+            return;
+        }
+        VisitSimpleVector(input[0], [&](const auto* column) {
+            addToGroup(
+                group,
+                column->size() - static_cast<int64_t>(column->nullCount()));
         });
     }
 

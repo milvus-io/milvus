@@ -24,12 +24,244 @@
 
 #include "common/Vector.h"
 #include "exec/VectorHasher.h"
+#include "exec/SortBuffer.h"
+#include "exec/operator/query-agg/CountAggregateBase.h"
+#include "exec/operator/query-agg/SumAggregateBase.h"
 #include "exec/operator/query-agg/GroupingSet.h"
 #include "exec/operator/query-agg/MaxAggregateBase.h"
 #include "exec/operator/query-agg/MinAggregateBase.h"
 
 namespace milvus::exec {
 namespace {
+
+// A test-only logical vector: no flat buffer, duplicate/out-of-order rows,
+// and NULLs inherited through the mapping. Production DictionaryVector is a
+// separate change; consumers must already work through SimpleVector here.
+template <typename T>
+class MappedTestVector final : public SimpleVector<T> {
+ public:
+    MappedTestVector(SimpleVectorPtr<T> base, std::vector<size_t> indices)
+        : SimpleVector<T>(base->type(), indices.size()),
+          base_(std::move(base)),
+          indices_(std::move(indices)) {
+    }
+
+    typename SimpleVector<T>::TValueAt
+    ValueAt(size_t index) const override {
+        return base_->ValueAt(indices_.at(index));
+    }
+
+    bool
+    ValidAt(size_t index) const override {
+        return base_->ValidAt(indices_.at(index));
+    }
+
+    VectorPtr
+    cloneEmpty(vector_size_t size) const override {
+        return std::make_shared<MappedTestVector<T>>(
+            base_, std::vector<size_t>(size, 0));
+    }
+
+ private:
+    SimpleVectorPtr<T> base_;
+    std::vector<size_t> indices_;
+};
+
+class SimpleVectorAggregationTest : public testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(GroupedAndGlobal,
+                         SimpleVectorAggregationTest,
+                         testing::Bool());
+
+TEST_P(SimpleVectorAggregationTest, MappedAndConstantInputsAcrossBatches) {
+    const bool grouped = GetParam();
+    std::vector<std::unique_ptr<VectorHasher>> hashers;
+    if (grouped) {
+        hashers.push_back(VectorHasher::create(DataType::VARCHAR, 0));
+    }
+    std::vector<AggregateInfo> aggregates;
+    column_index_t channel = grouped ? 1 : 0;
+    aggregates.push_back(
+        {std::make_unique<SumAggregateBase<int64_t, int64_t, int64_t, false>>(
+             DataType::INT64),
+         {1},
+         channel++});
+    aggregates.push_back(
+        {std::make_unique<MinAggregateBase<int64_t, int64_t, int64_t>>(
+             DataType::INT64),
+         {1},
+         channel++});
+    aggregates.push_back(
+        {std::make_unique<MaxAggregateBase<int64_t, int64_t, int64_t>>(
+             DataType::INT64),
+         {1},
+         channel++});
+    aggregates.push_back({std::make_unique<CountAggregate>(), {1}, channel++});
+    aggregates.push_back({std::make_unique<CountAggregate>(), {}, channel++});
+    aggregates.push_back(
+        {std::make_unique<MinStringAggregate>(DataType::VARCHAR),
+         {2},
+         channel++});
+    aggregates.push_back(
+        {std::make_unique<MaxStringAggregate>(DataType::VARCHAR),
+         {2},
+         channel++});
+    aggregates.push_back({std::make_unique<CountAggregate>(), {2}, channel++});
+    auto type = std::make_shared<RowType>(
+        std::vector<std::string>{"key", "number", "text"},
+        std::vector<DataType>{
+            DataType::VARCHAR, DataType::INT64, DataType::VARCHAR});
+    GroupingSet groups(type, std::move(hashers), std::move(aggregates));
+    const std::string a(256, 'a'), b(256, 'b'), m(256, 'm'), z(256, 'z');
+    std::weak_ptr<BaseVector> borrowed;
+    {
+        auto keys =
+            std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 4);
+        auto numbers =
+            std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 4);
+        auto strings =
+            std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 4);
+        keys->SetValueAt(0, "unselected");
+        keys->SetValueAt(1, b);
+        keys->SetValueAt(2, a);
+        keys->nullAt(3);
+        numbers->SetValueAt(0, 999);
+        numbers->SetValueAt(1, 20);
+        numbers->SetValueAt(2, 10);
+        numbers->nullAt(3);
+        strings->SetValueAt(0, "unselected");
+        strings->SetValueAt(1, z);
+        strings->SetValueAt(2, a);
+        strings->nullAt(3);
+        borrowed = keys;
+        const std::vector<size_t> indices{2, 1, 2, 3, 3};
+        groups.addInput(std::make_shared<RowVector>(std::vector<VectorPtr>{
+            std::make_shared<MappedTestVector<std::string>>(keys, indices),
+            std::make_shared<MappedTestVector<int64_t>>(numbers, indices),
+            std::make_shared<MappedTestVector<std::string>>(strings,
+                                                            indices)}));
+    }
+    groups.addInput(std::make_shared<RowVector>(std::vector<VectorPtr>{
+        std::make_shared<ConstantVector<std::string>>(DataType::VARCHAR, 2, a),
+        std::make_shared<ConstantVector<int64_t>>(DataType::INT64, 2, 5),
+        std::make_shared<ConstantVector<std::string>>(
+            DataType::VARCHAR, 2, m)}));
+    EXPECT_TRUE(borrowed.expired());
+    groups.addInput(std::make_shared<RowVector>(std::vector<VectorPtr>{
+        std::make_shared<ConstantVector<std::string>>(
+            DataType::VARCHAR, 2, "", 2),
+        std::make_shared<ConstantVector<int64_t>>(DataType::INT64, 2, 0, 2),
+        std::make_shared<ConstantVector<std::string>>(
+            DataType::VARCHAR, 2, "", 2)}));
+
+    std::vector<DataType> output_types{DataType::INT64,
+                                       DataType::INT64,
+                                       DataType::INT64,
+                                       DataType::INT64,
+                                       DataType::INT64,
+                                       DataType::VARCHAR,
+                                       DataType::VARCHAR,
+                                       DataType::INT64};
+    if (grouped) {
+        output_types.insert(output_types.begin(), DataType::VARCHAR);
+    }
+    auto output = std::make_shared<RowVector>(output_types, grouped ? 3 : 1);
+    ASSERT_TRUE(groups.getOutput(output));
+    ASSERT_EQ(output->size(), grouped ? 3 : 1);
+    for (size_t i = 0; i < output->size(); ++i) {
+        bool null_key = false, key_a = false;
+        if (grouped) {
+            const auto keys = AsSimpleVector<std::string>(output->child(0));
+            null_key = !keys->ValidAt(i);
+            key_a = !null_key && keys->ValueAt(i) == a;
+            if (!null_key && !key_a)
+                EXPECT_EQ(keys->ValueAt(i), b);
+        }
+        const size_t first = grouped ? 1 : 0;
+        auto count = [&](size_t column) {
+            return AsSimpleVector<int64_t>(output->child(first + column))
+                ->ValueAt(i);
+        };
+        EXPECT_EQ(count(3), !grouped ? 5 : null_key ? 0 : key_a ? 4 : 1);
+        EXPECT_EQ(count(4), !grouped ? 9 : null_key ? 4 : key_a ? 4 : 1);
+        EXPECT_EQ(count(7), count(3));
+        for (size_t col : {0, 1, 2, 5, 6}) {
+            VisitSimpleVector(output->child(first + col),
+                              [&](const auto* values) {
+                                  EXPECT_EQ(values->ValidAt(i), !null_key);
+                              });
+        }
+        if (!null_key) {
+            EXPECT_EQ(count(0), !grouped ? 50 : key_a ? 30 : 20);
+            EXPECT_EQ(count(1), !grouped || key_a ? 5 : 20);
+            EXPECT_EQ(count(2), !grouped || !key_a ? 20 : 10);
+            EXPECT_EQ(AsSimpleVector<std::string>(output->child(first + 5))
+                          ->ValueAt(i),
+                      !grouped || key_a ? a : z);
+            EXPECT_EQ(AsSimpleVector<std::string>(output->child(first + 6))
+                          ->ValueAt(i),
+                      !grouped || !key_a ? z : m);
+        }
+    }
+}
+
+TEST(SimpleVectorAggregationTest, MappedKeysWithForcedHashCollisions) {
+    std::vector<std::unique_ptr<VectorHasher>> hashers;
+    hashers.push_back(VectorHasher::create(DataType::VARCHAR, 0));
+    HashTable table(std::move(hashers), std::vector<Accumulator>{}, 100);
+    auto base =
+        std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 3);
+    base->SetValueAt(0, std::string(128, 'a'));
+    base->SetValueAt(1, std::string(128, 'b'));
+    base->nullAt(2);
+    auto mapped = std::make_shared<MappedTestVector<std::string>>(
+        base, std::vector<size_t>{1, 0, 1, 2, 2, 0});
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{mapped});
+    HashLookup lookup(table.hashers());
+    for (int batch = 0; batch < 2; ++batch) {
+        table.prepareForGroupProbe(lookup, input);
+        std::fill(lookup.hashes_.begin(), lookup.hashes_.end(), 42);
+        table.groupProbe(lookup);
+        ASSERT_EQ(table.rows()->allRows().size(), 3);
+        EXPECT_EQ(lookup.hits_[0], lookup.hits_[2]);
+        EXPECT_EQ(lookup.hits_[1], lookup.hits_[5]);
+        EXPECT_EQ(lookup.hits_[3], lookup.hits_[4]);
+        EXPECT_NE(lookup.hits_[0], lookup.hits_[1]);
+        EXPECT_NE(lookup.hits_[0], lookup.hits_[3]);
+        if (batch)
+            EXPECT_TRUE(lookup.newGroups_.empty());
+    }
+}
+
+TEST(SimpleVectorAggregationTest, SortBindsLogicalColumnsAtBatchBoundary) {
+    auto base = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 5);
+    for (size_t i = 0; i < 5; ++i) base->SetValueAt(i, i);
+    base->nullAt(2);
+    auto mapped = std::make_shared<MappedTestVector<int64_t>>(
+        base, std::vector<size_t>{4, 3, 2, 1, 0, 0});
+    for (int64_t limit : {-1, 2}) {
+        SortBuffer sort({DataType::INT64}, {{0, true, false}}, limit);
+        sort.AddRows({mapped}, mapped->size());
+        sort.AddRow(
+            {std::make_shared<ConstantVector<int64_t>>(DataType::INT64, 1, -1)},
+            0);
+        sort.NoMoreInput();
+        auto output = sort.GetOutput(10);
+        ASSERT_EQ(output.size(), 1);
+        const auto values = AsSimpleVector<int64_t>(output[0]);
+        ASSERT_EQ(values->size(), limit < 0 ? 7 : 2);
+        EXPECT_EQ(values->ValueAt(0), -1);
+        EXPECT_EQ(values->ValueAt(1), 0);
+        if (limit < 0)
+            EXPECT_FALSE(values->ValidAt(6));
+    }
+    SortBuffer sort({DataType::INT64}, {{0, true, false}}, 1);
+    EXPECT_THROW(sort.AddRows({std::make_shared<ConstantVector<double>>(
+                                  DataType::DOUBLE, 2, 0)},
+                              2),
+                 SegcoreError);
+    EXPECT_EQ(sort.NumInputRows(), 0);
+}
 
 struct CleanupCounts {
     size_t rows = 0;

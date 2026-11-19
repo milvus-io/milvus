@@ -100,19 +100,34 @@ RowContainer::store(const milvus::VectorPtr& column_data,
                     milvus::vector_size_t index,
                     char* row,
                     int32_t column_index) {
-    auto numKeys = keyTypes_.size();
-    bool isKey = column_index < numKeys;
-    AssertInfo(isKey || accumulators_.empty(),
+    bindColumn(column_data, column_index).store(index, row);
+}
+
+RowContainer::InputColumn
+RowContainer::bindColumn(const VectorPtr& column, int32_t column_index) const {
+    AssertInfo(column_index >= 0 && column_index < keyTypes_.size(),
                "Should only store into rows for key");
-    auto rowColumn = rowColumns_[column_index];
-    MILVUS_DYNAMIC_TYPE_DISPATCH(storeWithNull,
-                                 keyTypes_[column_index],
-                                 column_data,
-                                 index,
-                                 row,
-                                 rowColumn.offset(),
-                                 rowColumn.nullByte(),
-                                 rowColumn.nullMask());
+    AssertInfo(column != nullptr && column->type() == keyTypes_[column_index],
+               "RowContainer input type must match key type");
+    AssertInfo(column->type() != DataType::TEXT &&
+                   column->type() != DataType::GEOMETRY,
+               "Unsupported RowContainer key type {}",
+               column->type());
+    const auto location = rowColumns_[column_index];
+    return VisitSimpleVector(column, [&](const auto* typed) -> InputColumn {
+        using T = typename std::decay_t<decltype(*typed)>::ValueType;
+        if constexpr (std::is_same_v<T, Json>) {
+            ThrowInfo(UnexpectedError,
+                      "JSON keys are not supported by RowContainer");
+        } else {
+            return {[typed, location](vector_size_t index, char* row) {
+                        storeWithNull(typed, index, row, location);
+                    },
+                    [typed, location](const char* row, vector_size_t index) {
+                        return equalsWithNulls(row, location, typed, index);
+                    }};
+        }
+    });
 }
 
 Accumulator::Accumulator(milvus::exec::Aggregate* aggregate)

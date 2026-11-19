@@ -47,10 +47,11 @@ class SimpleNumericAggregate : public exec::Aggregate {
     template <bool tableHasNulls,
               typename TData = TResult,
               typename TValue = TInput,
-              typename UpdateSingle>
+              typename UpdateSingle,
+              typename TVector>
     void
     updateOneGroupAtIndex(char* group,
-                          const ColumnVectorPtr<TValue>& column_data,
+                          const TVector* column_data,
                           int32_t index,
                           UpdateSingle updateSingleValue) {
         if (column_data->ValidAt(index)) {
@@ -66,11 +67,12 @@ class SimpleNumericAggregate : public exec::Aggregate {
     updateOneGroup(char* group,
                    const VectorPtr& vector,
                    UpdateSingle updateSingleValue) {
-        auto column_data = AsColumnVector<TValue>(vector);
-        for (auto i = 0; i < column_data->size(); i++) {
-            updateOneGroupAtIndex<true, TData, TValue>(
-                group, column_data, i, updateSingleValue);
-        }
+        VisitSimpleVector<TValue>(vector, [&](const auto* column_data) {
+            for (auto i = 0; i < column_data->size(); i++) {
+                updateOneGroupAtIndex<true, TData, TValue>(
+                    group, column_data, i, updateSingleValue);
+            }
+        });
     }
 
     template <bool tableHasNulls,
@@ -81,11 +83,12 @@ class SimpleNumericAggregate : public exec::Aggregate {
     updateGroups(char** groups,
                  const VectorPtr& vector,
                  UpdateSingleValue updateSingleValue) {
-        auto column_data = AsColumnVector<TValue>(vector);
-        for (auto i = 0; i < column_data->size(); i++) {
-            updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
-                groups[i], column_data, i, updateSingleValue);
-        }
+        VisitSimpleVector<TValue>(vector, [&](const auto* column_data) {
+            for (auto i = 0; i < column_data->size(); i++) {
+                updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
+                    groups[i], column_data, i, updateSingleValue);
+            }
+        });
     }
 
     template <bool tableHasNulls,

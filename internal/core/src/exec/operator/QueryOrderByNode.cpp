@@ -102,10 +102,6 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
     }
 
     const auto& columns = input->childrens();
-    for (const auto& child : columns) {
-        // Validate concrete storage once before adding rows to the sort buffer.
-        VisitColumnVector(child, [](const auto&) {});
-    }
 
     AssertInfo(columns.size() == column_types_.size(),
                "QueryOrderByNode: input column count ({}) differs from "
