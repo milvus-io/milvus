@@ -179,7 +179,9 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     RowVectorPtr
     runProjectOnlyPlan(const std::vector<FieldId>& field_ids,
                        const std::vector<std::string>& field_names,
-                       const std::vector<DataType>& field_types) {
+                       const std::vector<DataType>& field_types,
+                       const SegmentInternalInterface* source = nullptr) {
+        source = source == nullptr ? segment_.get() : source;
         std::vector<PlanNodePtr> sources;
         PlanNodePtr mvcc_node =
             std::make_shared<MvccNode>(GetNextPlanNodeId(), sources);
@@ -192,7 +194,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
                                           sources);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
             "test_project_node",
-            segment_.get(),
+            source,
             num_rows_,
             MAX_TIMESTAMP,
             0,
@@ -201,7 +203,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
             std::make_shared<milvus::exec::QueryConfig>(
                 std::unordered_map<std::string, std::string>{}));
         query_context->set_op_context(&project_op_context_);
-        query_context->set_read_snapshot(segment_->CaptureReadSnapshot());
+        query_context->set_read_snapshot(source->CaptureReadSnapshot());
         auto plan_fragment = plan::PlanFragment(project_node);
         return milvus::query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment,
                                                                query_context);
@@ -333,6 +335,37 @@ TEST_P(QueryOrderByTest, ProjectProducesDictionaryColumns) {
         if (strings->ValidAt(i)) {
             EXPECT_EQ(strings->ValueAt(i), expected_strings[i]);
         }
+    }
+}
+
+TEST_P(QueryOrderByTest, ProjectFallsBackToFlatForGrowingSegment) {
+    auto growing = CreateGrowingWithFieldDataLoaded(
+        schema_, empty_index_meta, SegcoreConfig::default_config(), raw_data_);
+    const auto integer_id = field_map_.at(int64_field);
+    const auto string_id = field_map_.at(string_field);
+    ASSERT_EQ(growing->GetChunkedColumn(integer_id), nullptr);
+    auto output = runProjectOnlyPlan(
+        {integer_id, string_id, SegmentOffsetFieldID},
+        {int64_field, string_field, "__segment_offset__"},
+        {DataType::INT64, DataType::VARCHAR, DataType::INT64},
+        growing.get());
+    ASSERT_NE(output, nullptr);
+    auto numbers = AsColumnVector<int64_t>(output->child(0));
+    auto strings = AsColumnVector<std::string>(output->child(1));
+    auto offsets = AsSimpleVector<int64_t>(output->child(2));
+    auto expected_numbers = raw_data_.get_col<int64_t>(integer_id);
+    auto expected_strings = raw_data_.get_col<std::string>(string_id);
+    auto validity = GetParam() ? raw_data_.get_col_valid(integer_id)
+                               : FixedVector<bool>(num_rows_, true);
+    // Growing selection can deduplicate primary keys; compare by the emitted
+    // segment offset rather than assuming the original row count/order.
+    for (int64_t i = 0; i < output->size(); ++i) {
+        const auto source_row = offsets->ValueAt(i);
+        EXPECT_EQ(numbers->ValidAt(i), validity[source_row]);
+        if (numbers->ValidAt(i)) {
+            EXPECT_EQ(numbers->ValueAt(i), expected_numbers[source_row]);
+        }
+        EXPECT_EQ(strings->ValueAt(i), expected_strings[source_row]);
     }
 }
 
