@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
@@ -23,12 +24,14 @@ import (
 
 type Client interface {
 	QueryViewClient() QueryViewClient
+	UnavailableNodes() ([]int64, <-chan struct{})
 	Close()
 }
 
 func NewClient(etcdCli *clientv3.Client) Client {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.QueryNodeRole)
-	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
+	availability := balancer.NewNodeAvailability()
+	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDStateAttributes(availability.ResolverAttributes()), discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
 	dialTimeout := paramtable.Get().QueryNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
@@ -43,6 +46,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 	client := &clientImpl{
 		lifetime:       typeutil.NewLifetime(),
 		rb:             rb,
+		availability:   availability,
 		sessionChanges: newSessionChanges(rb.Resolver()),
 	}
 	client.queryViewClient = newQueryViewClient(client, conn)

@@ -21,6 +21,7 @@ func TestRetryClassificationSurvivesGRPCRoundTrip(t *testing.T) {
 		retry bool
 	}{
 		{NewViewInvalidated("version %d is Down", 7), codes.FailedPrecondition, true},
+		{NewSchemaMismatch("old read schema"), codes.FailedPrecondition, false},
 		{NewViewNotFound("missing"), codes.NotFound, true},
 		{NewOnShutdownError("closed"), codes.Unavailable, true},
 		{NewNotPrimaryError("secondary"), codes.FailedPrecondition, true},

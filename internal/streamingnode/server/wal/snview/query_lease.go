@@ -61,16 +61,18 @@ func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryVie
 			s.mu.Unlock()
 			return nil, viewerror.NewViewInvalidated("query view %s is not up, current state is %s", version.String(), state.String())
 		}
-		lease := s.newQueryViewLeaseLocked(version, entry, withTopology)
+		lease := s.newQueryViewLeaseLocked(version, entry, withTopology, true)
 		s.mu.Unlock()
 		return lease, nil
 	}
 }
 
 // Caller holds the shard mutex.
-func (s *snShardView) newQueryViewLeaseLocked(version qviews.QueryViewVersion, entry *snViewEntry, withTopology bool) *QueryViewLease {
+func (s *snShardView) newQueryViewLeaseLocked(version qviews.QueryViewVersion, entry *snViewEntry, withTopology, renew bool) *QueryViewLease {
 	entry.queryRefs++
-	s.renewServingLeaseLocked(entry)
+	if renew {
+		s.renewServingLeaseLocked(entry)
+	}
 	// A pending Down command must not appear as the locally leased state.
 	meta := proto.Clone(entry.sm.meta).(*viewpb.QueryViewMeta)
 	meta.State = viewpb.QueryViewState(entry.sm.coordVisibleState())

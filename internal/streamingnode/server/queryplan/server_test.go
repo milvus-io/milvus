@@ -70,7 +70,7 @@ func TestServerGetQueryPlanDelegatesToLocalWALProvider(t *testing.T) {
 	server := NewServer(manager)
 
 	resp, err := server.GetQueryPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), &viewpb.GetQueryPlanRequest{
-		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+		Vchannel: testVChannel,
 	})
 
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestServerGetQueryPlanDelegatesToWrappedLocalWALProvider(t *testing.T) {
 	server := NewServer(manager)
 
 	resp, err := server.GetQueryPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), &viewpb.GetQueryPlanRequest{
-		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+		Vchannel: testVChannel,
 	})
 
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestServerGetQueryPlanPreservesViewError(t *testing.T) {
 	server := NewServer(manager)
 
 	_, err := server.GetQueryPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), &viewpb.GetQueryPlanRequest{
-		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+		Vchannel: testVChannel,
 	})
 
 	require.Error(t, err)
@@ -135,7 +135,7 @@ func TestServerGetQueryPlanProjectsReleasedLoadInfoAsViewInvalidated(t *testing.
 	server := NewServer(manager)
 
 	_, err := server.GetQueryPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), &viewpb.GetQueryPlanRequest{
-		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+		Vchannel: testVChannel,
 	})
 
 	require.Error(t, err)
@@ -157,7 +157,7 @@ func TestServerGetQueryPlanRejectsMismatchedPChannelMetadata(t *testing.T) {
 	server := NewServer(manager)
 
 	_, err := server.GetQueryPlan(newIncomingPChannelContext("other-pchannel"), &viewpb.GetQueryPlanRequest{
-		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+		Vchannel: testVChannel,
 	})
 
 	require.Error(t, err)

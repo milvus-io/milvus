@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	streaminginterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -133,7 +132,7 @@ func TestQueryPlanOrdinaryErrorsBypassAssignmentRecovery(t *testing.T) {
 					return nil, rpcErr
 				},
 			}, nil, nil)
-			_, err := client.QueryViewClient().GetQueryPlan(context.Background(), qviews.ShardID{VChannel: "p0"}, &viewpb.GetQueryPlanRequest{})
+			_, err := client.QueryViewClient().GetQueryPlan(context.Background(), "p0", &viewpb.GetQueryPlanRequest{})
 			require.Equal(t, status.Code(rpcErr), status.Code(err))
 			require.Equal(t, 1, calls)
 		})
@@ -233,7 +232,7 @@ func (f *nodeMismatchFixture) read(ctx context.Context, method string) error {
 		_, err := f.client.QueryViewClient().GetMVCCTimestamp(ctx, shard, &viewpb.GetMVCCTimestampRequest{Vchannel: f.vchannel})
 		return err
 	}
-	_, err := f.client.QueryViewClient().GetQueryPlan(ctx, shard, &viewpb.GetQueryPlanRequest{ShardId: shard.IntoProto()})
+	_, err := f.client.QueryViewClient().GetQueryPlan(ctx, shard.VChannel, &viewpb.GetQueryPlanRequest{Vchannel: shard.VChannel})
 	return err
 }
 
@@ -288,21 +287,7 @@ type recordingQueryPlanClient struct {
 	codes []codes.Code
 }
 
-func (c *recordingQueryPlanClient) SubscribeReplicas(_ string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
-	subscription := staticReplicaSubscription{}
-	handler(subscription.Snapshot())
-	return subscription, nil
-}
-
-type staticReplicaSubscription struct{}
-
-func (staticReplicaSubscription) Snapshot() qviews.ReplicaSnapshot {
-	return qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 22}}}
-}
-
-func (staticReplicaSubscription) Close() error { return nil }
-
-func (c *recordingQueryPlanClient) GetQueryPlan(ctx context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *recordingQueryPlanClient) GetQueryPlan(ctx context.Context, shard string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	resp, err := c.QueryViewClient.GetQueryPlan(ctx, shard, req)
 	c.codes = append(c.codes, status.Code(err))
 	return resp, err

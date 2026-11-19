@@ -24,7 +24,10 @@ time.
 
 Successful acquisition of an Up view through GetQueryPlan, SearchOnView, or
 QueryOnView renews its local deadline to `max(deadline, now + duration)`.
-GetQueryPlan renews again immediately before a successful return so time spent
+When a planning request excludes QNs, acquisition takes the call reference and
+defers timed retention until worker admission. A rejected candidate releases its
+reference without extending the deadline.
+GetQueryPlan renews immediately before a successful return so time spent
 planning does not consume the entire inter-phase window. Failed acquisition,
 Coord state pushes, and repeated Down requests do not renew the deadline.
 The Search ignore-growing fast path does not access an Up view and grants no
@@ -129,8 +132,8 @@ On receiving controlled Down, SN closes that View's serving lease: disable
 future grants/renewal, clear the deadline, and stop its timer. The existing
 pending-Down check then waits only for call references to reach zero. The closed
 lease cannot reopen on a delayed ordinary push. Existing leases can release
-normally, but cannot renew; new acquisition is rejected and the View is removed
-from replica discovery while its existing calls drain.
+normally, but cannot renew; new acquisition and StreamingNode replica selection
+exclude the View while its existing calls drain.
 
 This control introduces no per-call cancellation context or separate recovery
 protocol. Active calls retain their original caller context and reference

@@ -20,7 +20,7 @@ import (
 // QueryViewClient is the QueryView domain client under HandlerClient.
 type QueryViewClient interface {
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the shard pchannel.
-	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
+	GetQueryPlan(ctx context.Context, vchannel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 
 	// GetMVCCTimestamp returns query-plan MVCC frontiers from the StreamingNode owning the shard pchannel.
 	GetMVCCTimestamp(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error)
@@ -56,8 +56,8 @@ func (hc *handlerClientImpl) QueryViewClient() QueryViewClient {
 	return hc.queryViewClient
 }
 
-func (qvc *queryViewClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	result, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, viewpb.QueryPlanService_GetQueryPlan_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
+func (qvc *queryViewClient) GetQueryPlan(ctx context.Context, vchannel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	result, err := executeQueryPlanRPC(ctx, qvc, vchannel, viewpb.QueryPlanService_GetQueryPlan_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
 		return client.GetQueryPlan(ctx, req)
 	})
 	return result, err

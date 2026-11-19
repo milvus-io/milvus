@@ -28,7 +28,6 @@ func shardTestField(id int64, values ...int64) *schemapb.FieldData {
 }
 
 func TestLegacyShardQueryReduction(t *testing.T) {
-	setupTestReplicaRouting(t)
 	paramtable.Init()
 	id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 	plan := ShardPlan{ShardID: id, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}}
@@ -63,7 +62,6 @@ func TestLegacyShardQueryReduction(t *testing.T) {
 }
 
 func TestLegacyShardSearchReduction(t *testing.T) {
-	setupTestReplicaRouting(t)
 	paramtable.Init()
 	for _, advanced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "plain", true: "hybrid"}[advanced], func(t *testing.T) {
@@ -118,7 +116,6 @@ func TestLegacyShardSearchReduction(t *testing.T) {
 }
 
 func TestLegacyExplicitMVCCSurvivesShardRetry(t *testing.T) {
-	setupTestReplicaRouting(t)
 	mockey.PatchConvey("explicit read frontiers survive failed attempts on both worker types", t, func() {
 		id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 		fixed := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}
@@ -127,10 +124,11 @@ func TestLegacyExplicitMVCCSurvivesShardRetry(t *testing.T) {
 		fail.Store(true)
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			attempts.Add(1)
 			require.True(t, proto.Equal(fixed, req.GetQueryPlanMvcc()))
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
+			plan.Version.QueryVersion = int64(attempts.Load())
 			plan.Mvcc = proto.Clone(req.GetQueryPlanMvcc()).(*viewpb.QueryPlanMVCC)
 			plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
 			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
@@ -154,7 +152,6 @@ func TestLegacyExplicitMVCCSurvivesShardRetry(t *testing.T) {
 }
 
 func TestLegacyCostsPreserveZeroLatencyAndDoNotMutateInputs(t *testing.T) {
-	setupTestReplicaRouting(t)
 	first := &internalpb.CostAggregation{ServiceTime: 7, TotalNQ: 3, TotalRelatedDataSize: 10}
 	result := mergeLegacyCosts([]*internalpb.CostAggregation{nil, first, {TotalRelatedDataSize: 20}})
 	require.EqualValues(t, 7, result.ServiceTime)
@@ -164,7 +161,6 @@ func TestLegacyCostsPreserveZeroLatencyAndDoNotMutateInputs(t *testing.T) {
 }
 
 func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
-	setupTestReplicaRouting(t)
 	mockey.PatchConvey("explicit read frontiers survive failed attempts on both worker types", t, func() {
 		id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 		fixed := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 100}
@@ -173,10 +169,11 @@ func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
 		fail.Store(true)
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			attempts.Add(1)
 			require.EqualValues(t, 100, req.GetBarrierMvcc())
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
+			plan.Version.QueryVersion = int64(attempts.Load())
 			plan.Mvcc = proto.Clone(fixed).(*viewpb.QueryPlanMVCC)
 			plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
 			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
@@ -200,18 +197,18 @@ func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
 }
 
 func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardSnapshot(t *testing.T) {
-	setupTestReplicaRouting(t)
 	mockey.PatchConvey("a failed shard is drained before replanning and only the successful snapshot survives", t, func() {
 		id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 		var attempts atomic.Int32
 		started := make(chan struct{})
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			attempt := attempts.Add(1)
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, req.GetConsistencyLevel())
 			require.EqualValues(t, 3, req.GetLegacyRetrieveRequest().GetSchemaVersion())
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
+			plan.Version.QueryVersion = int64(attempts.Load())
 			plan.Mvcc = &viewpb.QueryPlanMVCC{
 				GrowingTimetick: uint64(attempt+1) * 100, TransformingTimetick: 90,
 			}

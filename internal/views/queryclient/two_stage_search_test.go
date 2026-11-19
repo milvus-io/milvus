@@ -107,13 +107,12 @@ func TestTwoStageSearchStatistics(t *testing.T) {
 
 func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	enableTwoStageSearch(t)
-	setupTestReplicaRouting(t)
 	id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 	source := &fakeQueryPlanClient{}
 	service := &fakeViewQueryServiceClient{}
 	var mu sync.Mutex
 	plans, filters, anns := 0, 0, 0
-	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ string, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 		plans++
 		planResponse := twoStageResponse(id)
 		plan := planResponse.GetPlan()
@@ -143,7 +142,7 @@ func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	}).Build()
 	defer tune.UnPatch()
 	client := newShardViewQueryClient(3, source, service)
-	defer client.replicas.Close()
+	defer client.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: id.VChannel, Req: twoStageResponse(id).GetPlan().GetLegacySearchRequest(), Reducer: fakeSearchResultReducer{}})

@@ -13,10 +13,11 @@ import (
 )
 
 func TestViewFeedbackWindowOwnershipAndViewIndependence(t *testing.T) {
-	h := &SNQueryViewHandler{shards: make(map[qviews.ShardID]*snShardView)}
+	h := &SNQueryViewHandler{shards: make(map[qviews.ShardID]*snShardView), vchannels: make(map[string]*replicaGroup)}
 	id := qviews.ShardID{ReplicaID: 1, VChannel: "p_1v0"}
-	shard := &snShardView{}
+	shard := &snShardView{shardID: id}
 	h.shards[id] = shard
+	h.addReplicaLocked(shard)
 	h.RecordShardAccess(id)
 	h.makeOnEmpty(id)(shard)
 	require.Empty(t, h.shards)

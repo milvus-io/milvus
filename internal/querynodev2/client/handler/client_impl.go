@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -8,6 +9,7 @@ import (
 var _ Client = (*clientImpl)(nil)
 
 type clientImpl struct {
+	availability    *balancer.NodeAvailability
 	sessionChanges  *sessionChanges
 	lifetime        *typeutil.Lifetime
 	rb              resolver.Builder
@@ -17,6 +19,8 @@ type clientImpl struct {
 func (c *clientImpl) QueryViewClient() QueryViewClient {
 	return c.queryViewClient
 }
+
+func (c *clientImpl) UnavailableNodes() ([]int64, <-chan struct{}) { return c.availability.Snapshot() }
 
 func (c *clientImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)

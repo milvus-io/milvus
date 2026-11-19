@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -30,4 +31,14 @@ func TestBusinessErrorDetailsPreserveCodeAndClassification(t *testing.T) {
 		require.Equal(t, source.Code, AsViewError(ConvertViewError("QueryOnView", wire.Err())).Code)
 	}
 	require.NoError(t, NewGRPCStatusFromError(nil).Err())
+}
+
+func TestPlanningExclusionSurvivesWire(t *testing.T) {
+	excluded := NewAllCandidatesExcluded()
+	decoded := AsViewError(ConvertViewError("GetQueryPlan", NewGRPCStatusFromError(excluded).Err()))
+	require.True(t, decoded.IsAllCandidatesExcluded())
+	require.True(t, decoded.IsRetryable())
+	require.False(t, decoded.IsViewNotFound())
+	require.Equal(t, codes.Aborted, NewGRPCStatusFromError(excluded).Code())
+	require.Equal(t, excluded.Cause, decoded.Cause)
 }

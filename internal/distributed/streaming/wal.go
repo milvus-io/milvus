@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/consumer"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	resumablereplicas "github.com/milvus-io/milvus/internal/distributed/streaming/internal/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -36,7 +35,6 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		streamingCoordClient: streamingCoordClient,
 		handlerClient:        handlerClient,
 		schemaClient:         newSchemaClient(handlerClient, paramtable.Get().StreamingCfg.SchemaCacheTTL.GetAsDuration(time.Second)),
-		replicaClient:        resumablereplicas.NewResumingClient(handlerClient.AcquireReplicaWatchStream),
 		producerMutex:        sync.Mutex{},
 		producers:            make(map[string]*producer.ResumableProducer),
 
@@ -60,7 +58,6 @@ type walAccesserImpl struct {
 	streamingCoordClient client.Client
 	handlerClient        handler.HandlerClient
 	schemaClient         *schemaClient
-	replicaClient        *resumablereplicas.Client
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer
@@ -167,9 +164,6 @@ func (w *walAccesserImpl) Close() {
 		w.schemaClient.close()
 	}
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	if w.replicaClient != nil {
-		w.replicaClient.Close()
-	}
 	w.lifetime.Wait()
 
 	w.producerMutex.Lock()

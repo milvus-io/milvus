@@ -28,6 +28,8 @@ import (
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/resolver"
+
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 )
 
 var (
@@ -71,6 +73,8 @@ func (bb *baseBuilder) Name() string {
 
 // baseBalancer is the base balancer for all balancers.
 type baseBalancer struct {
+	availability *NodeAvailability
+
 	cc            balancer.ClientConn
 	pickerBuilder PickerBuilder
 
@@ -98,13 +102,10 @@ func (b *baseBalancer) ResolverError(err error) {
 		return
 	}
 	b.regeneratePicker()
-	b.cc.UpdateState(balancer.State{
-		ConnectivityState: b.state,
-		Picker:            b.picker,
-	})
 }
 
 func (b *baseBalancer) UpdateClientConnState(s balancer.ClientConnState) error {
+	b.availability, _ = s.ResolverState.Attributes.Value(availabilityKey{}).(*NodeAvailability)
 	// Successful resolution; clear resolver error and ensure we return nil.
 	b.resolverErr = nil
 	// addrsSet is the set converted from addrs, it's used for quick lookup of an address.
@@ -144,7 +145,6 @@ func (b *baseBalancer) UpdateClientConnState(s balancer.ClientConnState) error {
 	}
 
 	b.regeneratePicker()
-	b.cc.UpdateState(balancer.State{ConnectivityState: b.state, Picker: b.picker})
 	return nil
 }
 
@@ -174,11 +174,20 @@ func (b *baseBalancer) regeneratePicker() {
 	readySCs := make(map[balancer.SubConn]base.SubConnInfo)
 	unReadySCs := make(map[balancer.SubConn]base.SubConnInfo)
 
+	var ready map[int64]bool
+	if b.availability != nil {
+		ready = make(map[int64]bool, b.subConns.Len())
+	}
 	// Filter out all ready SCs from full subConn map.
 	for _, addr := range b.subConns.Keys() {
 		sci, _ := b.subConns.Get(addr)
 		sc := sci.(balancer.SubConn)
 		if st, ok := b.scStates[sc]; ok {
+			if ready != nil {
+				if id := attributes.GetServerID(addr.BalancerAttributes); id != nil {
+					ready[*id] = ready[*id] || st == connectivity.Ready
+				}
+			}
 			if st == connectivity.Ready {
 				readySCs[sc] = base.SubConnInfo{Address: addr}
 				continue
@@ -191,6 +200,10 @@ func (b *baseBalancer) regeneratePicker() {
 		ReadySCs:   readySCs,
 		UnReadySCs: unReadySCs,
 	})
+	b.cc.UpdateState(balancer.State{ConnectivityState: b.state, Picker: b.picker})
+	if b.availability != nil {
+		b.availability.publish(ready)
+	}
 }
 
 func (b *baseBalancer) UpdateSubConnState(sc balancer.SubConn, state balancer.SubConnState) {
@@ -231,13 +244,16 @@ func (b *baseBalancer) UpdateSubConnState(sc balancer.SubConn, state balancer.Su
 	if (s == connectivity.Ready) != (oldS == connectivity.Ready) ||
 		b.state == connectivity.TransientFailure {
 		b.regeneratePicker()
+		return
 	}
 	b.cc.UpdateState(balancer.State{ConnectivityState: b.state, Picker: b.picker})
 }
 
-// Close is a nop because base balancer doesn't have internal state to clean up,
-// and it doesn't need to call RemoveSubConn for the SubConns.
+// Discard connectivity from the retiring picker (including gRPC idle shutdown).
 func (b *baseBalancer) Close() {
+	if b.availability != nil {
+		b.availability.publish(nil)
+	}
 }
 
 // ExitIdle is a nop because the base balancer attempts to stay connected to

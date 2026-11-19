@@ -41,6 +41,10 @@ func (e *ViewError) IsViewNotFound() bool {
 	return e.Code == viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND
 }
 
+func (e *ViewError) IsSchemaMismatch() bool {
+	return e.Code == viewpb.ViewCode_VIEW_CODE_SCHEMA_MISMATCH
+}
+
 // IsOnShutdown returns true if the node is shutting down.
 func (e *ViewError) IsOnShutdown() bool {
 	return e.Code == viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN
@@ -51,9 +55,21 @@ func (e *ViewError) IsNotPrimary() bool {
 	return e.Code == viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY
 }
 
+func (e *ViewError) IsAllCandidatesExcluded() bool {
+	return e.Code == viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED
+}
+
 // IsRetryable returns true if the error should trigger a retry from Phase 1.
 func (e *ViewError) IsRetryable() bool {
-	return e.IsViewInvalidated() || e.IsViewNotFound() || e.IsOnShutdown() || e.IsNotPrimary()
+	return e.IsViewInvalidated() || e.IsViewNotFound() || e.IsOnShutdown() || e.IsNotPrimary() || e.IsAllCandidatesExcluded()
+}
+
+func NewAllCandidatesExcluded() *ViewError {
+	return New(viewpb.ViewCode_VIEW_CODE_ALL_CANDIDATES_EXCLUDED, "all serving query view candidates are excluded")
+}
+
+func NewSchemaMismatch(format string, args ...interface{}) *ViewError {
+	return New(viewpb.ViewCode_VIEW_CODE_SCHEMA_MISMATCH, format, args...)
 }
 
 // NewViewInvalidated creates a ViewError with VIEW_CODE_VIEW_INVALIDATED.

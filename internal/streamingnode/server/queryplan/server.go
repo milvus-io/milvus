@@ -29,7 +29,7 @@ func NewServer(walManager walManager) *Server {
 }
 
 func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel())
+	p, err := s.providerForVChannel(ctx, req.GetVchannel())
 	if err != nil {
 		return nil, normalizeQueryPlanError(err)
 	}

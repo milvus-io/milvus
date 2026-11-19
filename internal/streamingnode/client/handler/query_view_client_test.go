@@ -25,7 +25,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 		ReplicaID: 1,
 		VChannel:  funcutil.GetVirtualChannel("p0", 100, 0),
 	}
-	planReq := &viewpb.GetQueryPlanRequest{ShardId: shardID.IntoProto()}
+	planReq := &viewpb.GetQueryPlanRequest{Vchannel: shardID.VChannel}
 	planResp := &viewpb.GetQueryPlanResponse{Plan: &viewpb.QueryPlan{ShardId: shardID.IntoProto()}}
 	queryPlanService := &fakeQueryPlanServiceClient{
 		getQueryPlan: func(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
@@ -45,7 +45,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 	}
 	client := newTestHandlerClient(queryPlanService, nil, nil)
 
-	resp, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID, planReq)
+	resp, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID.VChannel, planReq)
 
 	require.NoError(t, err)
 	require.Same(t, planResp, resp)

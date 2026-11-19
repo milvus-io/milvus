@@ -3,19 +3,16 @@ package queryclient
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // QueryPlanClient provides Phase 1 operations against StreamingNode.
 // Implementation handles StreamingNode resolution and gRPC connection management internally.
-// ShardID is used as the routing key to locate the owning StreamingNode.
+// VChannel is used as the planning routing key to locate the owning StreamingNode.
 type QueryPlanClient interface {
-	SubscribeReplicas(vchannel string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error)
-
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the given shard.
-	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
+	GetQueryPlan(ctx context.Context, vchannel string, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 
 	// GetMVCCTimestamp returns the MVCC frontiers from the primary replica's WAL.
 	// Used for cross-replica strong consistency.
@@ -27,8 +24,8 @@ type QueryPlanClient interface {
 // WorkNode is used as the routing key to locate the target node.
 // QN implementations must return connection failures promptly, without hidden
 // same-node retries. Missing sessions carry viewerror.NodeSessionUnavailable
-// with the resolver change channel captured before dispatch. This lets shard
-// orchestration retry other replicas and reconsider a racing session update.
+// with the picker change channel captured before dispatch. This lets shard
+// orchestration retry other replicas and reconsider a racing connectivity update.
 type ViewQueryServiceClient interface {
 	StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 

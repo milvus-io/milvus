@@ -166,7 +166,7 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
 			released := make(chan struct{})
 			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
-			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewForRouting).Return(lease, nil).Build()
 			entered := make(chan struct{})
 			mockey.Mock((*roWALAdaptorImpl).Channel).Return(streamingtypes.PChannelInfo{AccessMode: streamingtypes.AccessModeRW}).Build()
 			mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "BarrierUntil")).To(func(ctx context.Context, _ uint64) error {
@@ -182,7 +182,7 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := w.GetQueryPlan(caller, &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}})
+				_, err := w.GetQueryPlan(caller, &viewpb.GetQueryPlanRequest{Vchannel: qviews.NewShardIDFromQVMeta(meta).VChannel, Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}})
 				done <- err
 			}()
 			select {

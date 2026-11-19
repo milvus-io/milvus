@@ -293,6 +293,9 @@ var (
 	// retired or became unavailable. It does not imply collection release.
 	ErrQueryViewNotReady = newMilvusError("query view not ready", 2202, true)
 
+	// ErrQueryViewSchemaMismatch asks Proxy to rebind a DQL request to the published read schema.
+	ErrQueryViewSchemaMismatch = newMilvusError("query view schema mismatch", 2203, true)
+
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
 	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2301, false)

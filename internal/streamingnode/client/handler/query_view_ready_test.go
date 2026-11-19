@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -69,13 +70,13 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 			reports := mockey.Mock((*analyzerTrigger).ReportAssignmentError).Return(nil).Build()
 			switch method {
 			case "plan":
-				req := &viewpb.GetQueryPlanRequest{ShardId: shard.IntoProto()}
+				req := &viewpb.GetQueryPlanRequest{Vchannel: shard.VChannel}
 				before := proto.Clone(req)
 				mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).To(func(_ *fakeQueryPlanServiceClient, ctx context.Context, actual *viewpb.GetQueryPlanRequest, _ ...grpc.CallOption) (*viewpb.GetQueryPlanResponse, error) {
 					require.True(t, proto.Equal(before, actual))
 					return &viewpb.GetQueryPlanResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
-				_, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
+				_, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard.VChannel, req)
 				require.NoError(t, err)
 			case "mvcc":
 				mockey.Mock((*fakeQueryPlanServiceClient).GetMVCCTimestamp).To(func(_ *fakeQueryPlanServiceClient, ctx context.Context, _ *viewpb.GetMVCCTimestampRequest, _ ...grpc.CallOption) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -134,6 +135,27 @@ func TestQueryViewRPCDoesNotWaitForViewOrRequestErrors(t *testing.T) {
 	}
 }
 
+func TestQueryPlanExclusionReturnsToOrchestratorWithoutReadinessRetry(t *testing.T) {
+	for _, converted := range []bool{false, true} {
+		t.Run(fmt.Sprint(converted), func(t *testing.T) {
+			failure := viewerror.NewGRPCStatusFromError(viewerror.NewAllCandidatesExcluded()).Err()
+			if converted {
+				failure = viewerror.ConvertViewError(viewpb.QueryPlanService_GetQueryPlan_FullMethodName, failure)
+			}
+			call := mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).Return(nil, failure).Build()
+			defer call.UnPatch()
+			wait := mockey.Mock(fakeAssignmentWatcher.Watch).Return(context.Canceled).Build()
+			defer wait.UnPatch()
+			client := newTestHandlerClient(&fakeQueryPlanServiceClient{}, nil, nil)
+			_, err := client.QueryViewClient().GetQueryPlan(t.Context(), "p0_100v0", &viewpb.GetQueryPlanRequest{})
+			require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err)).IsAllCandidatesExcluded())
+			require.Equal(t, codes.Aborted, grpcstatus.Code(err))
+			require.Equal(t, 1, call.Times())
+			require.Zero(t, wait.Times())
+		})
+	}
+}
+
 func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 	for _, scenario := range []string{"deadline", "cancel", "already canceled", "closed client"} {
 		mockey.PatchConvey(scenario, t, func() {
@@ -156,7 +178,7 @@ func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 			if scenario == "closed client" {
 				client.lifetime.SetState(typeutil.LifetimeStateStopped)
 			}
-			_, err := client.QueryViewClient().GetQueryPlan(ctx, qviews.ShardID{VChannel: "p0_100v0"}, &viewpb.GetQueryPlanRequest{})
+			_, err := client.QueryViewClient().GetQueryPlan(ctx, "p0_100v0", &viewpb.GetQueryPlanRequest{})
 			switch scenario {
 			case "closed client":
 				require.ErrorIs(t, err, ErrClientClosed)
@@ -194,6 +216,9 @@ func TestQueryViewRPCUsesWALWaitForReady(t *testing.T) {
 			require.NotNil(t, cfg.WaitForReady, method)
 			require.True(t, *cfg.WaitForReady, method)
 			require.Equal(t, walConfig.RetryPolicy, cfg.RetryPolicy, method)
+			// Exclusion requires fresh constraints from Proxy, never a transparent
+			// gRPC retry of the same request.
+			require.NotContains(t, cfg.RetryPolicy.RetryableStatusCodes, codes.Aborted, method)
 		}
 	})
 }

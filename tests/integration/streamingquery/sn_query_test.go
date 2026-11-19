@@ -206,7 +206,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 	plans := viewpb.NewQueryPlanServiceClient(sn)
 	queries := viewpb.NewViewQueryServiceClient(sn)
 	getPlan := func() *viewpb.QueryPlan {
-		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: &viewpb.ShardID{ReplicaId: 40451, Vchannel: vc}, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SchemaVersion: view.GetMeta().GetSchemaVersion(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
+		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), Vchannel: vc, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SchemaVersion: view.GetMeta().GetSchemaVersion(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())
 		return response.GetPlan()
 	}
@@ -271,7 +271,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 	vectorField, err := schema.GetFieldFromName("vector")
 	require.NoError(t, err)
 	searchReq := &internalpb.SearchRequest{CollectionID: desc.GetCollectionID(), SchemaVersion: view.GetMeta().GetSchemaVersion(), FieldId: vectorField.GetFieldID(), SerializedExprPlan: searchBytes, PlaceholderGroup: placeholder, Nq: 1, Topk: 3, MetricType: metric}
-	optimized := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
+	optimized := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), Vchannel: plan.GetShardId().GetVchannel(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 	searchPlanRPC := optimized.GetPlan()
 	if bm25 {
 		var debugPlan planpb.PlanNode
@@ -345,7 +345,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 		finishRetention = verifyConcurrentSNViews(t, ctx, rpcctx, proxy, sn, etcd, namespace, name, view, getPlan(), searchPlanRPC.GetLegacySearchRequest())
 	}
 	if bm25 && os.Getenv("SN_QUERY_TEST_MULTIVERSION") == "1" {
-		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
+		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), Vchannel: plan.GetShardId().GetVchannel(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 		require.True(t, proto.Equal(view.Meta.Version, response.GetPlan().GetVersion()))
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())
 		t.Log("old Up view still builds BM25 plans while another replica retains the newer DataView")
