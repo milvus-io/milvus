@@ -10,7 +10,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261117181559-b4d8319ce112
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
@@ -50,5 +50,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/XuanYang-cn/milvus-proto/go-api/v3 v3.0.0-20261117065039-b73095319886
