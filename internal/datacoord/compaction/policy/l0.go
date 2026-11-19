@@ -100,7 +100,7 @@ func (policy *L0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	return events, err
 }
 
-func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, collectionID int64) ([]view.CompactionView, int64, error) {
+func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, collectionID int64, filters ...meta.SegmentFilter) ([]view.CompactionView, int64, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "start trigger collection l0 compaction")
 	collection := policy.Meta.GetCollection(collectionID)
@@ -112,7 +112,7 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 		log.Info(ctx, "skip trigger l0 compaction for external collection")
 		return nil, 0, nil
 	}
-	allL0Segments := policy.Meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
+	filters = append(filters, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 		return meta.IsSegmentHealthy(segment) &&
 			meta.IsFlushed(segment) &&
 			!segment.IsCompacting && // not compacting now
@@ -120,6 +120,7 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 			segment.GetLevel() == datapb.SegmentLevel_L0
 	}))
 
+	allL0Segments := policy.Meta.SelectSegments(ctx, filters...)
 	if len(allL0Segments) == 0 {
 		return nil, 0, nil
 	}

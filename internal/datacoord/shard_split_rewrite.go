@@ -254,14 +254,7 @@ func (s *Server) ResumeShardSplitL0(ctx context.Context, taskID int64) error {
 			return err
 		}
 	}
-	if err := s.splitStore.ResumeL0(ctx, taskID); err != nil {
-		return err
-	}
-	if s.compactionTriggerManager != nil {
-		_, err := s.compactionTriggerManager.ManualTrigger(ctx, &milvuspb.ManualCompactionRequest{CollectionID: task.GetCollectionId(), L0Compaction: true})
-		return err
-	}
-	return nil
+	return s.splitStore.ResumeL0(ctx, taskID)
 }
 
 // ReleaseShardSplitPins closes only the fixed history through each F_i. Newer
@@ -284,6 +277,7 @@ func (s *Server) ReleaseShardSplitPins(ctx context.Context, taskID int64) (bool,
 	// The handover driver always calls Resume under its lifecycle guard,
 	// including for legacy already-resumed tasks. Polling runs outside that
 	// guard and must never create or replace a missing F.
+	bounds := make([]uint64, 0, len(task.GetTargets()))
 	for _, target := range task.GetTargets() {
 		through, err := catalog.LoadSplitHistoryBoundary(ctx, task, target)
 		if err != nil {
@@ -292,18 +286,14 @@ func (s *Server) ReleaseShardSplitPins(ctx context.Context, taskID int64) (bool,
 		if through == 0 {
 			return false, merr.WrapErrServiceNotReadyMsg("split task %d has no fixed target history boundary; resume it before pin release", taskID)
 		}
+		bounds = append(bounds, through)
 	}
 	if s.meta.StreamingNodeCatalog == nil {
 		return false, nil
 	}
-	for _, target := range task.GetTargets() {
-		through, err := catalog.LoadSplitHistoryBoundary(ctx, task, target)
-		if err != nil {
-			return false, err
-		}
-		if through == 0 {
-			return false, nil
-		}
+	ready := true
+	for i, target := range task.GetTargets() {
+		through := bounds[i]
 		// Capture persisted M before SegmentMeta. Append acknowledgement or dirty M
 		// cannot prove that every earlier Delete's L0 registration is durable.
 		base, err := s.meta.StreamingNodeCatalog.GetVChannelBase(ctx, funcutil.ToPhysicalChannel(target.GetVchannel()), target.GetVchannel())
@@ -311,10 +301,19 @@ func (s *Server) ReleaseShardSplitPins(ctx context.Context, taskID int64) (bool,
 			return false, err
 		}
 		if base == nil || base.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED || base.GetTransformMaterializedTimeTick() < through {
-			return false, nil
+			ready = false
+			continue
 		}
-		if err := s.meta.AdvanceSplitFoldedCursors(ctx, task.GetCollectionId(), target.GetVchannel(), through); err != nil {
+		blockers, err := s.meta.AdvanceSplitFoldedCursors(ctx, task.GetCollectionId(), target.GetVchannel(), through)
+		if err != nil {
 			return false, err
+		}
+		if len(blockers) > 0 {
+			if err := s.compactionTriggerManager.TriggerL0Segments(ctx, task.GetCollectionId(), blockers); err != nil {
+				return false, err
+			}
+			ready = false
+			continue
 		}
 		for _, segment := range s.meta.GetSegmentsByChannel(target.GetVchannel()) {
 			if segment.GetLevel() == datapb.SegmentLevel_L0 {
@@ -324,9 +323,13 @@ func (s *Server) ReleaseShardSplitPins(ctx context.Context, taskID int64) (bool,
 			// at commit; replacements inherit C. Rely on that explicit proof,
 			// never infer coverage from an output's later physical timestamp.
 			if segment.GetTransformStartAfterTimetick() < through {
-				return false, nil
+				ready = false
+				break
 			}
 		}
+	}
+	if !ready {
+		return false, nil
 	}
 	if err := s.splitStore.ReleasePins(ctx, taskID); err != nil {
 		return false, err

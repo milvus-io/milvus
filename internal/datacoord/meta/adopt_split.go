@@ -176,7 +176,7 @@ func (m *Meta) FinishSplitAdoption(ctx context.Context, record *model.SplitAdopt
 // reading SegmentMeta. A live L0 starting at/before through is a hole for its
 // partition (including straddling L0s). Strictly newer L0s do not obstruct the
 // finite history certificate. This also certifies empty/no-hit histories.
-func (m *Meta) AdvanceSplitFoldedCursors(ctx context.Context, collectionID int64, channel string, through uint64) error {
+func (m *Meta) AdvanceSplitFoldedCursors(ctx context.Context, collectionID int64, channel string, through uint64) ([]int64, error) {
 	locks := newSegmentLockSet(m.GetSegmentLocks())
 	defer locks.release()
 	ids := lockSelection(locks, func() []int64 {
@@ -187,7 +187,7 @@ func (m *Meta) AdvanceSplitFoldedCursors(ctx context.Context, collectionID int64
 		return ids
 	})
 	segments := m.GetSegmentInfos(ids)
-	holes := make(map[int64]bool)
+	holes := make(map[int64][]int64)
 	for _, segment := range segments {
 		if !IsSegmentHealthy(segment) || segment.GetCollectionID() != collectionID || segment.GetLevel() != datapb.SegmentLevel_L0 {
 			continue
@@ -197,16 +197,19 @@ func (m *Meta) AdvanceSplitFoldedCursors(ctx context.Context, collectionID int64
 		// even after IsImporting is cleared by commit.
 		start := segment.GetStartPosition().GetTimestamp()
 		if segment.GetIsImporting() || segment.GetCommitTimestamp() != 0 || start <= through {
-			holes[segment.GetPartitionID()] = true
+			holes[segment.GetPartitionID()] = append(holes[segment.GetPartitionID()], segment.GetID())
 		}
 	}
+	blocked := make(map[int64]bool)
 	var updates []*SegmentInfo
 	var actions []metastore.UpdateAction
 	for _, segment := range segments {
 		if !IsSegmentHealthy(segment) || segment.GetCollectionID() != collectionID || segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetTransformStartAfterTimetick() >= through {
 			continue
 		}
-		if holes[segment.GetPartitionID()] || holes[common.AllPartitionsID] {
+		if len(holes[segment.GetPartitionID()]) > 0 || len(holes[common.AllPartitionsID]) > 0 {
+			blocked[segment.GetPartitionID()] = true
+			blocked[common.AllPartitionsID] = true
 			continue
 		}
 		next := segment.Clone()
@@ -214,12 +217,15 @@ func (m *Meta) AdvanceSplitFoldedCursors(ctx context.Context, collectionID int64
 		updates = append(updates, next)
 		actions = append(actions, metastore.UpdateSegment(next.SegmentInfo))
 	}
-	if len(actions) == 0 {
-		return nil
+	if len(actions) > 0 {
+		if err := m.Catalog.Update(ctx, actions...); err != nil {
+			return nil, err
+		}
+		m.Segments.PublishSegments(updates)
 	}
-	if err := m.Catalog.Update(ctx, actions...); err != nil {
-		return err
+	var blockers []int64
+	for partition := range blocked {
+		blockers = append(blockers, holes[partition]...)
 	}
-	m.Segments.PublishSegments(updates)
-	return nil
+	return blockers, nil
 }
