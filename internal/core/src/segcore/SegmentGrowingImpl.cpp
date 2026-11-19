@@ -4814,8 +4814,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     FieldId representative = field_meta.get_id();
     bool first_child = true;
     for (auto field_id : schema.get_field_ids()) {
-        auto existing_struct_name =
-            GetElementOffsetsGroup(schema[field_id]);
+        auto existing_struct_name = GetElementOffsetsGroup(schema[field_id]);
         if (existing_struct_name != struct_name) {
             continue;
         }

@@ -929,7 +929,10 @@ class MatchExpr : public ITypeFilterExpr {
               int64_t count,
               const TypedExprPtr& predicate,
               std::optional<FieldId> array_field = std::nullopt)
-        : struct_name_(struct_name), match_type_(match_type), count_(count), array_field_(array_field) {
+        : struct_name_(struct_name),
+          match_type_(match_type),
+          count_(count),
+          array_field_(array_field) {
         inputs_.push_back(predicate);
     }
 
@@ -937,7 +940,8 @@ class MatchExpr : public ITypeFilterExpr {
     ToString() const override {
         const auto predicate = inputs_[0]->ToString();
         return fmt::format(
-            "MatchExpr(struct_name_length={}, struct_name={}, array_field={}, match_type={}, "
+            "MatchExpr(struct_name_length={}, struct_name={}, array_field={}, "
+            "match_type={}, "
             "count={}, predicate_length={}, predicate={})",
             struct_name_.size(),
             struct_name_,

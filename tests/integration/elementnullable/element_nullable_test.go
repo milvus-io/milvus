@@ -1037,6 +1037,12 @@ func (s *ElementNullableSuite) TestScalarArrayMatch() {
 		TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8")},
 	})
 	s.Require().NoError(merr.Error(s.create(ctx, schema)))
+	status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: name, FieldName: "legacy", IndexName: "legacy_inverted",
+		ExtraParams: []*commonpb.KeyValuePair{kv(common.IndexTypeKey, "INVERTED")},
+	})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForIndexBuilt(ctx, name, "legacy")
 	s.indexAndLoad(ctx, name)
 	arr := scalarField("scores", 110, longRow([]int64{7, 7}, true, false, true), longRow(nil))
 	typeutil.SetFieldDataValidData(arr, []bool{true, true, false})
@@ -1057,13 +1063,18 @@ func (s *ElementNullableSuite) TestScalarArrayMatch() {
 			{"not MATCH_ANY(scores, $ IS NULL)", []int64{2}},
 			{"MATCH_ALL(legacy, $ in [1, 3])", []int64{1, 2, 3}},
 			{"MATCH_ANY(legacy, 1 < $ <= 3)", []int64{3}},
+			{"MATCH_ANY(legacy, $ is not null)", []int64{1, 3}},
+			{"MATCH_ANY(legacy, $ is null)", nil},
 		} {
 			result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 				CollectionName: name, Expr: tc.filter, OutputFields: []string{"pk"},
 			})
 			s.Require().NoError(merr.CheckRPCCall(result, err), "%s: %s", phase, tc.filter)
-			s.Require().Len(result.GetFieldsData(), 1)
-			s.ElementsMatch(tc.pks, result.GetFieldsData()[0].GetScalars().GetLongData().GetData(), "%s: %s", phase, tc.filter)
+			var ids []int64
+			if fields := result.GetFieldsData(); len(fields) != 0 {
+				ids = fields[0].GetScalars().GetLongData().GetData()
+			}
+			s.ElementsMatch(tc.pks, ids, "%s: %s", phase, tc.filter)
 		}
 	}
 }

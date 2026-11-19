@@ -4242,7 +4242,12 @@ class SegmentExpr : public Expr {
             try {
                 auto self = const_cast<SegmentExpr*>(this);
                 if (is_scalar_array_ && IsElementLevelExpression()) {
-                    // Ordinary ARRAY indexes produce row ids; MATCH consumes element ids.
+                    // A scalar ARRAY index produces row ids. MATCH consumes element ids.
+                    if (!has_field_data_at_init_) {
+                        ThrowInfo(ExprInvalid,
+                                  "MATCH requires raw data for ARRAY field {}",
+                                  field_id_.get());
+                    }
                     self->exec_path_ = ExprExecPath::RawData;
                 } else {
                     self->DetermineExecPath();

@@ -1539,8 +1539,7 @@ ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
                 op_ctx);
             for (auto& [field_id, alias] : runtime.struct_element_offsets_map) {
                 if (schema.has_field(field_id) &&
-                    GetElementOffsetsGroup(schema[field_id]) ==
-                        struct_name) {
+                    GetElementOffsetsGroup(schema[field_id]) == struct_name) {
                     alias = offsets;
                 }
             }
