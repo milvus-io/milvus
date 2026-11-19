@@ -962,6 +962,10 @@ func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*
 	return s.proxy.Upsert(ctx, request)
 }
 
+func (s *Server) UpdateRecords(ctx context.Context, request *milvuspb.UpdateRecordsRequest) (*milvuspb.MutationResult, error) {
+	return s.proxy.UpdateRecords(ctx, request)
+}
+
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxy.Search(ctx, request)
 }

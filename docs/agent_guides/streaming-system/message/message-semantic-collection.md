@@ -24,6 +24,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
+| Update (V2, activation fenced) | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Broadcast: collection VChannels + CChannel, AckSyncUp, Unreplicable (`_ur`) | Yes (data VChannels) | SharedDBName + ExclusiveCollectionName |
@@ -48,6 +49,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
 - **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
+- **Update (V2)**: PK-update ingress contract, with collection ID and an explicit schema version in the header. The encrypted body carries partition scope (`-1` for all partitions), `schemapb.IDs`, and a shared list of field-ID assignments. `UpdateLiteral` distinguishes an explicit NULL from typed scalar and whole-array values; an omitted field is unchanged. There is no expression payload. Proxy resolves fields against the current SN write schema, validates every assignment, and prepares all size-bounded messages before append. Multiple messages on the same VChannel use the existing transaction and its effective commit timestamp; separate VChannels are not atomic. Native CDC forwards the unchanged body and transaction order. Proxy and the SN append interceptor reject writes while `message.PKUpdateEnabled` is false. Materialization, TransformLog/query apply and legacy msgstream adaptation are not enabled by this protocol registration; complete consumer integration is required before activation.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Flushes the collection on the receiving cluster, on either replication role. Broadcasts to all collection VChannels plus CChannel and waits for local L1/L0 completion with AckSyncUp. See [Local Flush Control](../wal/local-flush.md) for ordering between replicated transactions.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.

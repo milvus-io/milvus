@@ -6,11 +6,8 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
 	federpb "github.com/milvus-io/milvus-proto/go-api/v3/federpb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -8675,6 +8672,65 @@ func (_c *MilvusServiceServer_UpdateCredential_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// UpdateRecords provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) UpdateRecords(_a0 context.Context, _a1 *milvuspb.UpdateRecordsRequest) (*milvuspb.MutationResult, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRecords")
+	}
+
+	var r0 *milvuspb.MutationResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRecordsRequest) (*milvuspb.MutationResult, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRecordsRequest) *milvuspb.MutationResult); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.MutationResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateRecordsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_UpdateRecords_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRecords'
+type MilvusServiceServer_UpdateRecords_Call struct {
+	*mock.Call
+}
+
+// UpdateRecords is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateRecordsRequest
+func (_e *MilvusServiceServer_Expecter) UpdateRecords(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_UpdateRecords_Call {
+	return &MilvusServiceServer_UpdateRecords_Call{Call: _e.mock.On("UpdateRecords", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_UpdateRecords_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateRecordsRequest)) *MilvusServiceServer_UpdateRecords_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateRecordsRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_UpdateRecords_Call) Return(_a0 *milvuspb.MutationResult, _a1 error) *MilvusServiceServer_UpdateRecords_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_UpdateRecords_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateRecordsRequest) (*milvuspb.MutationResult, error)) *MilvusServiceServer_UpdateRecords_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateReplicateConfiguration provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) UpdateReplicateConfiguration(_a0 context.Context, _a1 *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8916,7 +8972,8 @@ func (_c *MilvusServiceServer_Upsert_Call) RunAndReturn(run func(context.Context
 func NewMilvusServiceServer(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MilvusServiceServer {
+},
+) *MilvusServiceServer {
 	mock := &MilvusServiceServer{}
 	mock.Mock.Test(t)
 

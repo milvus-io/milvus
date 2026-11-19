@@ -292,6 +292,7 @@ dependencies = [
  "memchr",
  "prost",
  "prost-build",
+ "prost-types",
  "regex-syntax",
 ]
 

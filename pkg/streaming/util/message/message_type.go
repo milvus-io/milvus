@@ -40,6 +40,11 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		CipherEnabled:  true,
 		DMLMessageType: true,
 	},
+	MessageTypeUpdate: {
+		LogLevel:       mlog.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
+	},
 	MessageTypeCreateCollection: {
 		ExclusiveRequired: true,
 	},

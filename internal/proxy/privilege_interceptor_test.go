@@ -127,6 +127,10 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.UpdateRecordsRequest{DbName: "default", CollectionName: "col1"})
+		assert.Error(t, err, "load-only role must not update records")
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.UpdateRecordsRequest{DbName: "default", CollectionName: "col1"})
+		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: "col1",
 		})
