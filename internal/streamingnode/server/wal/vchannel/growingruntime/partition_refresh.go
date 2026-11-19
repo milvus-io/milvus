@@ -15,7 +15,9 @@ type partitionRefresh struct {
 	timeTick uint64
 	version  qviews.DataVersion
 	pending  []walview.VChannelResourceEvent
-	err      error
+	// After catching up to the source fence, its live suffix is applied directly.
+	live *Runtime
+	err  error
 }
 
 func (s *partitionRefresh) includes(event walview.VChannelResourceEvent) bool {
@@ -125,13 +127,30 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 			}
 			continue
 		}
-		// Merged segments of a split source take the target deletes the
-		// residual has applied so far; the lock keeps new ones out until the
-		// merge is visible to the stream goroutines.
-		unlockLineage, err := r.replayLineageInto(ctx, next.segmentsSnapshot())
-		if err != nil {
+		unlockLineage := func() {}
+		r.mu.RLock()
+		fenced := r.lineage != nil
+		r.mu.RUnlock()
+		if fenced {
+			// Every source event through the fence is in next. Later source
+			// events cannot insert rows. Forward barriers and seal notifications
+			// directly while target history and its live suffix reach these rows.
+			segments := next.segmentsSnapshot()
+			stage.live = next
 			r.eventMu.Unlock()
-			return err
+			var err error
+			unlockLineage, err = r.replayLineageInto(ctx, segments)
+			r.eventMu.Lock()
+			stage.live = nil
+			if err != nil {
+				r.eventMu.Unlock()
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				unlockLineage()
+				r.eventMu.Unlock()
+				return err
+			}
 		}
 		r.mu.Lock()
 		if r.closed {

@@ -341,37 +341,88 @@ func TestResidualLineageFollowsRealSummaryReplayAndLiveProgress(t *testing.T) {
 }
 
 func TestResidualLineagePartitionRefreshReplaysTargetHistoryBeforeMerge(t *testing.T) {
-	r := newRuntime()
-	defer r.Close()
-	m := &lineageTestManager{requests: make(chan *lineageTestStream, 2)}
-	snapshot := walview.VChannelWALView{BaseGrowingTimeTick: 100, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 2, PartitionID: 20}}}}
-	view := walview.VChannelWALView{LineageStreams: m, PartitionIDs: []int64{10}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 1, PartitionID: 10}}}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
-		capture(snapshot)
-		return true
-	}}
-	require.NoError(t, r.Prepare(context.Background(), view))
-	r.markGrowingTimeTick(100)
-	r.observeSplitLineage(&lineageSpec{vchannels: []string{"p1_1v1"}, switchTimeTick: 100})
-	stream := takeLineageStream(t, m)
-	entry := messageutil.BuildTransformLogEntry(newPartitionDeleteMessage(t, 20, false), messageutil.TransformEntryOption{})
-	entry.TimeTick = 110
-	m.history = []*streamingpb.TransformLogEntry{entry}
-	stream.opt.Handler.Handle(wal.TransformLogStreamEvent{Entry: entry})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	require.NoError(t, r.WaitLineageVisible(ctx, map[string]uint64{"p1_1v1": 110}))
-	recording := &lineageRecordingSegment{deleted: map[int64]uint64{}}
-	segment := newGrowingSegment(nil, 2, 20)
-	segment.segment = recording
-	patch := mockey.Mock(newGrowingSegmentFromVisible).Return(segment, nil).Build()
-	defer patch.UnPatch()
-	require.NoError(t, r.PreparePartitions(ctx, &viewpb.QueryViewMeta{LoadInfoVersion: 2}, []int64{20}))
-	recording.mu.Lock()
-	require.Equal(t, uint64(110), recording.deleted[1])
-	recording.mu.Unlock()
-	require.True(t, r.partitionLoaded(20))
-	require.Same(t, segment, r.segments[2])
-	require.Empty(t, m.requests, "refresh stage must not open its own subscriptions")
+	for _, outcome := range []string{"merged", "truncated", "canceled"} {
+		t.Run(outcome, func(t *testing.T) {
+			r := newRuntime()
+			defer r.Close()
+			m := &lineageTestManager{requests: make(chan *lineageTestStream, 2)}
+			snapshot := walview.VChannelWALView{BaseGrowingTimeTick: 100, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 2, PartitionID: 20}}}}
+			view := walview.VChannelWALView{LineageStreams: m, PartitionIDs: []int64{10}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 1, PartitionID: 10}}}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+				capture(snapshot)
+				return true
+			}}
+			require.NoError(t, r.Prepare(context.Background(), view))
+			r.markGrowingTimeTick(100)
+			r.observeSplitLineage(&lineageSpec{vchannels: []string{"p1_1v1"}, switchTimeTick: 100})
+			stream := takeLineageStream(t, m)
+			entry := messageutil.BuildTransformLogEntry(newPartitionDeleteMessage(t, 20, false), messageutil.TransformEntryOption{})
+			entry.TimeTick = 110
+			m.history = []*streamingpb.TransformLogEntry{entry}
+			stream.opt.Handler.Handle(wal.TransformLogStreamEvent{Entry: entry})
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			require.NoError(t, r.WaitLineageVisible(ctx, map[string]uint64{"p1_1v1": 110}))
+			recording := &lineageRecordingSegment{deleted: map[int64]uint64{}}
+			segment := newGrowingSegment(nil, 2, 20)
+			segment.segment = recording
+			patch := mockey.Mock(newGrowingSegmentFromVisible).Return(segment, nil).Build()
+			defer patch.UnPatch()
+			entered, release := make(chan struct{}), make(chan struct{})
+			replay := mockey.Mock(wal.ReplayTransformPage).To(func(ctx context.Context, _ wal.TransformLogStreamManager, _ string, _, through uint64, apply func(context.Context, *streamingpb.TransformLogEntry) error) (uint64, error) {
+				close(entered)
+				<-release
+				if outcome == "truncated" {
+					return 0, wal.ErrTransformLogStartPointTruncated
+				}
+				return through, apply(ctx, entry)
+			}).Build()
+			defer replay.UnPatch()
+			refreshDone := make(chan error, 1)
+			go func() {
+				refreshDone <- r.PreparePartitions(ctx, &viewpb.QueryViewMeta{LoadInfoVersion: 2}, []int64{20})
+			}()
+			<-entered
+			delivered := make(chan struct{})
+			go func() {
+				// Exceed the staging queue capacity while the remote history call is held.
+				for tick := uint64(101); tick <= 1200; tick++ {
+					r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: tick}})
+				}
+				close(delivered)
+			}()
+			select {
+			case <-delivered:
+			case <-time.After(500 * time.Millisecond):
+				t.Error("serving WAL events stalled during remote lineage replay")
+			}
+			if outcome == "canceled" {
+				cancel()
+			}
+			close(release)
+			refreshErr := <-refreshDone
+			<-delivered
+			require.EqualValues(t, 1200, r.AppliedGrowingTimeTick())
+			switch outcome {
+			case "truncated":
+				require.ErrorIs(t, refreshErr, wal.ErrTransformLogStartPointTruncated)
+			case "canceled":
+				require.ErrorIs(t, refreshErr, context.Canceled)
+			default:
+				require.NoError(t, refreshErr)
+			}
+			if refreshErr != nil {
+				require.False(t, r.partitionLoaded(20))
+				require.NotContains(t, r.segments, int64(2))
+				return
+			}
+			recording.mu.Lock()
+			require.Equal(t, uint64(110), recording.deleted[1])
+			recording.mu.Unlock()
+			require.True(t, r.partitionLoaded(20))
+			require.Same(t, segment, r.segments[2])
+			require.Empty(t, m.requests, "refresh stage must not open its own subscriptions")
+		})
+	}
 }
 
 type lineageCountSegment struct {
