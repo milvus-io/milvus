@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -41,16 +43,29 @@ type pagedValueRoot struct {
 	Bytes        int
 	Pages        int
 	CollectionID int64
+	Version      *viewpb.DataVersion
 }
 
-func (kc *Catalog) preparePagedValue(ctx context.Context, collectionID int64, value []byte) (string, error) {
+func dataViewPagesPrefix(collectionID int64, version *viewpb.DataVersion) string {
+	return fmt.Sprintf("datacoord-meta/pages/%d/views/%d/%d/", collectionID, version.GetStreamingVersion(), version.GetCompactVersion())
+}
+
+func (root pagedValueRoot) pageKey(i int) string {
+	if root.Version != nil {
+		return fmt.Sprintf("%s%s/%d", dataViewPagesPrefix(root.CollectionID, root.Version), root.Hash, i)
+	}
+	return fmt.Sprintf("datacoord-meta/pages/%d/%s/%d", root.CollectionID, root.Hash, i)
+}
+
+func (kc *Catalog) preparePagedValue(ctx context.Context, collectionID int64, version *viewpb.DataVersion, value []byte) (string, error) {
 	if len(value) <= metadataPageBytes {
 		return string(value), nil
 	}
 	sum := sha256.Sum256(value)
 	hash := hex.EncodeToString(sum[:])
 	count := (len(value) + metadataPageBytes - 1) / metadataPageBytes
-	root, err := json.Marshal(pagedValueRoot{Hash: hash, Bytes: len(value), Pages: count, CollectionID: collectionID})
+	descriptor := pagedValueRoot{Hash: hash, Bytes: len(value), Pages: count, CollectionID: collectionID, Version: version}
+	root, err := json.Marshal(descriptor)
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +74,7 @@ func (kc *Catalog) preparePagedValue(ctx context.Context, collectionID int64, va
 	}
 	for i := 0; i < count; i++ {
 		end := min(len(value), (i+1)*metadataPageBytes)
-		if err := kc.MetaKv.Save(ctx, fmt.Sprintf("datacoord-meta/pages/%d/%s/%d", collectionID, hash, i), string(value[i*metadataPageBytes:end])); err != nil {
+		if err := kc.MetaKv.Save(ctx, descriptor.pageKey(i), string(value[i*metadataPageBytes:end])); err != nil {
 			return "", err
 		}
 	}
@@ -82,7 +97,7 @@ func (kc *Catalog) readPagedValue(ctx context.Context, value string) ([]byte, er
 	}
 	var out []byte
 	for i := 0; i < root.Pages; i++ {
-		page, err := kc.MetaKv.Load(ctx, fmt.Sprintf("datacoord-meta/pages/%d/%s/%d", root.CollectionID, root.Hash, i))
+		page, err := kc.MetaKv.Load(ctx, root.pageKey(i))
 		if err != nil {
 			return nil, err
 		}
@@ -101,9 +116,18 @@ func (kc *Catalog) readPagedValue(ctx context.Context, value string) ([]byte, er
 
 // Never-split collections preserve their existing on-disk format. A durable
 // split epoch is the local capability boundary for later flush/manifest views.
-func (kc *Catalog) prepareDataViewValue(ctx context.Context, view *viewpb.DataViewOfCollection, encoded []byte) (string, error) {
-	if view.GetShardSetEpoch() < 2 {
-		return string(encoded), nil
+func (kc *Catalog) prepareDataView(ctx context.Context, view *viewpb.DataViewOfCollection) (key, value string, err error) {
+	encoded, err := proto.Marshal(view)
+	if err != nil {
+		return "", "", err
 	}
-	return kc.preparePagedValue(ctx, view.GetCollectionId(), encoded)
+	version := view.GetDataVersion()
+	key = buildDataViewVersionKey(view.GetCollectionId(), version.GetStreamingVersion(), version.GetCompactVersion())
+	if view.GetShardSetEpoch() < 2 {
+		return key, string(encoded), nil
+	}
+	// A directory boundary makes a range deletion of compact version 1
+	// disjoint from version 10. Page blobs stay outside the root scan.
+	value, err = kc.preparePagedValue(ctx, view.GetCollectionId(), version, encoded)
+	return key + "/root", value, err
 }

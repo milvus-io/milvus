@@ -39,7 +39,7 @@ import (
 type Catalog interface {
 	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
 	ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error)
-	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
+	DropDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
 	DropDataViews(ctx context.Context, collectionID int64) error
 }
 
@@ -705,8 +705,8 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	// cluster-wide recompute worker (recomputeNow -> lockStateForMutation) and
 	// the flush path for the whole sweep.
 	type collectableVersion struct {
-		version *viewpb.DataVersion
-		key     qviews.DataVersion
+		view *viewpb.DataViewOfCollection
+		key  qviews.DataVersion
 	}
 	state.mu.Lock()
 	entries := make([]*versionEntry, 0, len(state.versions))
@@ -728,14 +728,14 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 		// version whose snapshot key is about to be gone.
 		entry.isTombstone = true
 		collectable = append(collectable, collectableVersion{
-			version: version,
-			key:     protoVersionToStruct(version),
+			view: entry.view,
+			key:  protoVersionToStruct(version),
 		})
 	}
 	state.mu.Unlock()
 
 	for i, candidate := range collectable {
-		if err := m.catalog.DropDataView(ctx, collectionID, candidate.version); err != nil {
+		if err := m.catalog.DropDataView(ctx, candidate.view); err != nil {
 			// The drop failed. Candidates up to i already lost their etcd key
 			// and stay tombstoned (refused by Get, reclaimed on a later GC
 			// retry by the cleanup loop); the remaining candidates kept their

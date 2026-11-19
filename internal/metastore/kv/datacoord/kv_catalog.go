@@ -551,16 +551,7 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 }
 
 func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
-	key := buildDataViewVersionKey(
-		dataView.GetCollectionId(),
-		dataView.GetDataVersion().GetStreamingVersion(),
-		dataView.GetDataVersion().GetCompactVersion(),
-	)
-	encoded, err := proto.Marshal(dataView)
-	if err != nil {
-		return err
-	}
-	value, err := kc.prepareDataViewValue(ctx, dataView, encoded)
+	key, value, err := kc.prepareDataView(ctx, dataView)
 	if err != nil {
 		return err
 	}
@@ -603,12 +594,13 @@ func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) (
 	return dataViews, nil
 }
 
-func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
-	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(
-		collectionID,
-		dataVersion.GetStreamingVersion(),
-		dataVersion.GetCompactVersion(),
-	))
+func (kc *Catalog) DropDataView(ctx context.Context, view *viewpb.DataViewOfCollection) error {
+	version := view.GetDataVersion()
+	key := buildDataViewVersionKey(view.GetCollectionId(), version.GetStreamingVersion(), version.GetCompactVersion())
+	if view.GetShardSetEpoch() < 2 {
+		return kc.MetaKv.Remove(ctx, key)
+	}
+	return kc.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, nil, []string{key + "/", dataViewPagesPrefix(view.GetCollectionId(), version)})
 }
 
 func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {

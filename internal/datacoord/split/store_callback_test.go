@@ -119,7 +119,7 @@ func (c *fakeCatalog) ListAllDataViews(context.Context) ([]*viewpb.DataViewOfCol
 	return c.views, nil
 }
 
-func (c *fakeCatalog) DropDataView(context.Context, int64, *viewpb.DataVersion) error { return nil }
+func (c *fakeCatalog) DropDataView(context.Context, *viewpb.DataViewOfCollection) error { return nil }
 
 func (c *fakeCatalog) DropDataViews(context.Context, int64) error { return nil }
 

@@ -18,12 +18,18 @@ package datacoord
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/dataview"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -168,7 +174,7 @@ func TestPagedMetadataFailsClosedOnMissingAndCorruptPages(t *testing.T) {
 	ctx := context.Background()
 	store := &adoptionKV{dataViewMetaKV: newDataViewMetaKV()}
 	catalog := NewCatalog(store, "", "")
-	root, err := catalog.preparePagedValue(ctx, 100, []byte(strings.Repeat("a", metadataPageBytes+1)))
+	root, err := catalog.preparePagedValue(ctx, 100, nil, []byte(strings.Repeat("a", metadataPageBytes+1)))
 	require.NoError(t, err)
 	for key := range store.values {
 		store.values[key] = "corrupt"
@@ -195,7 +201,7 @@ func TestLargeNeverSplitDataViewKeepsLegacyEncoding(t *testing.T) {
 	view.ShardSetEpoch = 2
 	view.DataVersion.StreamingVersion = 2
 	require.NoError(t, catalog.SaveDataView(ctx, view))
-	require.True(t, strings.HasPrefix(store.values[buildDataViewVersionKey(100, 2, 0)], pagedValueMagic))
+	require.True(t, strings.HasPrefix(store.values[buildDataViewVersionKey(100, 2, 0)+"/root"], pagedValueMagic))
 }
 
 // etcd/TiKV Load accepts a logical key while WalkWithPrefix callbacks contain
@@ -276,13 +282,13 @@ func TestAdoptionUncertainPreparedReadFencesDelayedTransactionAndABA(t *testing.
 			durable, err := catalog.LoadSplitAdoption(ctx, 100, 7)
 			require.NoError(t, err)
 			require.Equal(t, "Preparing", durable.State)
-			require.NotContains(t, store.values, buildDataViewVersionKey(100, 1, 1))
+			require.NotContains(t, store.values, buildDataViewVersionKey(100, 1, 1)+"/root")
 			// Recreating the same move set must never recreate an old commit's guard.
 			record, err = catalog.PrepareSplitAdoption(ctx, adoptionFixture(1))
 			require.NoError(t, err)
 			require.NotEqual(t, firstAttempt, record.AttemptID)
 			require.Error(t, store.pending(), "late original transaction must fail its old attempt guard")
-			require.NotContains(t, store.values, buildDataViewVersionKey(100, 1, 1))
+			require.NotContains(t, store.values, buildDataViewVersionKey(100, 1, 1)+"/root")
 			require.NoError(t, catalog.CommitSplitAdoption(ctx, record, view))
 		})
 	}
@@ -359,4 +365,85 @@ func TestRecoveryFenceLosesToPreviousCommit(t *testing.T) {
 	require.ErrorIs(t, catalog.FencePreparedSplitAdoptions(ctx), merr.ErrDataIntegrity)
 	store.values[key] = `{"TaskID":8,"CollectionID":100,"State":"Prepared"}`
 	require.ErrorIs(t, catalog.FencePreparedSplitAdoptions(ctx), merr.ErrDataIntegrity)
+}
+
+func TestDataViewGCReclaimsEachLargeVersion(t *testing.T) {
+	ctx := t.Context()
+	cfg := embed.NewConfig()
+	cfg.Dir = t.TempDir()
+	cfg.LogLevel = "error"
+	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: "127.0.0.1:0"}}
+	cfg.ListenPeerUrls = cfg.ListenClientUrls
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	server, err := embed.StartEtcd(cfg)
+	require.NoError(t, err)
+	t.Cleanup(server.Close)
+	select {
+	case <-server.Server.ReadyNotify():
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedded etcd did not become ready")
+	}
+	store := etcdkv.NewEtcdKV(v3client.New(server.Server), "/test/view-gc")
+	t.Cleanup(store.Close)
+	catalog := NewCatalog(store, "", "")
+	record, err := catalog.PrepareSplitAdoption(ctx, adoptionFixture(400))
+	require.NoError(t, err)
+	// The move pages have their own lifetime, independent of any DataVersion.
+	usage := func() (int, int) {
+		keys, values, err := store.LoadWithPrefix(ctx, "")
+		require.NoError(t, err)
+		var size int
+		for _, v := range values {
+			size += len(v)
+		}
+		return len(keys), size
+	}
+	moveKeys, moveBytes := usage()
+	const segments = 100000
+	part := &viewpb.DataViewOfPartition{
+		PartitionId: 1, SegmentIds: make([]int64, segments), SegmentManifestVersions: make([]int64, segments),
+		SegmentTransformStartAfterTimeticks: make([]uint64, segments),
+	}
+	for i := range part.SegmentIds {
+		part.SegmentIds[i] = int64(i + 1)
+		part.SegmentTransformStartAfterTimeticks[i] = 100
+	}
+	view := &viewpb.DataViewOfCollection{
+		CollectionId: 100, ShardSetEpoch: 2, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{Vchannel: "t", Partitions: []*viewpb.DataViewOfPartition{part}}},
+	}
+	for i := 1; i <= 11; i++ {
+		view.DataVersion.CompactVersion = int64(i)
+		part.SegmentManifestVersions[0] = int64(i)
+		require.NoError(t, catalog.SaveDataView(ctx, view))
+	}
+	keys, size := usage()
+	t.Logf("11 versions after single-segment changes: %d keys, %d bytes", keys-moveKeys, size-moveBytes)
+	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
+	require.NoError(t, err)
+	pin, err := manager.Get(ctx, 100, &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1})
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	require.NoError(t, manager.GarbageCollect(ctx, 100, 1))
+	stored, err := catalog.ListDataViews(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	pin.Deref()
+	require.NoError(t, manager.GarbageCollect(ctx, 100, 1))
+	keys, size = usage()
+	t.Logf("one retained version: %d keys, %d bytes", keys-moveKeys, size-moveBytes)
+	require.Less(t, size-moveBytes, 3*metadataPageBytes)
+	stored, err = catalog.ListDataViews(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.True(t, proto.Equal(view, stored[0]))
+	require.NoError(t, catalog.DropDataView(ctx, view))
+	keys, size = usage()
+	require.Equal(t, moveKeys, keys)
+	require.Equal(t, moveBytes, size)
+	loaded, err := catalog.LoadSplitAdoption(ctx, 100, 7)
+	require.NoError(t, err)
+	require.Equal(t, record.Moves, loaded.Moves)
 }
