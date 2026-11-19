@@ -6255,6 +6255,7 @@ func TestArrayTextMatchOperand(t *testing.T) {
 		`MATCH_ANY(struct_array, PHRASE_MATCH($, "x"))`,
 		`MATCH_ANY(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
 		`element_filter(struct_array, TEXT_MATCH($[sub_str], "x"))`,
+		`element_filter(struct_array, PHRASE_MATCH($[sub_str], "new york"))`,
 	} {
 		_, err := ParseExpr(helper, filter, nil)
 		require.Error(t, err, filter)
