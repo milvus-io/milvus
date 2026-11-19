@@ -1714,13 +1714,13 @@ runDataSkewDetectionTestUnified(
     // "clustering was not allowed to complete", which is what this test asserts.
     // Only a successful run (`true`) is a failure.
     try {
-        bool success = runClustering<T>(job, cfg);
-        ASSERT_FALSE(success)
-            << "Expected clustering to be skipped due to data skew, but it "
-               "completed successfully";
-        std::cout
-            << "[INFO] DataSkewDetection test correctly detected skip for "
-            << storage_version << "\n";
+        // Call Run directly so a data-skew SegcoreError propagates here.
+        // (The runClustering helper intentionally swallows data-skew and
+        // returns false, which would defeat this test's expectation.)
+        job->Run<T>(transforConfigToPB(cfg));
+        // If no exception is thrown → test fails
+        FAIL() << "Expected SegcoreError::ClusterSkip but clustering completed "
+                  "successfully";
     } catch (const milvus::SegcoreError& e) {
         std::cout << "[INFO] DataSkewDetection test correctly triggered "
                      "ClusterSkip for "
