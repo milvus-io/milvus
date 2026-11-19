@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -327,4 +329,37 @@ func TestCollectionRuntimePreservesEmptySnapshotPartitions(t *testing.T) {
 	require.False(t, retryable)
 	defer guard.Release()
 	require.Empty(t, guard.Collection().GetPartitions(), "the snapshot is authoritative; do not infer scope from a node's View")
+}
+
+func TestQueryViewCollectionRuntimeRetainsFlatReferenceWithoutPhysicalBinding(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{Name: "coll", Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "json", DataType: schemapb.DataType_JSON},
+	}}
+	schemaPatch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).Return(&schemautil.SchemaInfo{CollectionSchema: schema}, nil).Build()
+	defer schemaPatch.UnPatch()
+	info := qnview.QueryViewLoadInfo{
+		CollectionID: 1, Version: 7,
+		RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 101, IndexIds: []int64{10, 11}}},
+		IndexInfos: []*indexpb.IndexInfo{
+			{IndexID: 10, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: "json_cast_type", Value: "JSON"}}},
+			{IndexID: 11, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: "json_cast_type", Value: "DOUBLE"}}},
+		},
+	}
+	loadPatch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).Return(info, nil).Build()
+	defer loadPatch.UnPatch()
+	collection := &fakeQVCollectionManager{}
+	manager := newTestQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, collection, &queryViewSchemaClient{})
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7}, &viewpb.QueryViewOfQueryNode{}).(*qviews.QueryViewAtQueryNode)
+	guard, retryable, err := manager.Acquire(t.Context(), view)
+	require.NoError(t, err)
+	require.False(t, retryable)
+	defer guard.Release()
+	require.Len(t, guard.IndexInfos(), 1)
+	require.EqualValues(t, 11, guard.IndexInfos()[0].IndexID)
+	require.Len(t, collection.putIndexMeta.IndexMetas, 1)
+	require.EqualValues(t, 11, collection.putIndexMeta.IndexMetas[0].IndexId)
+	require.Equal(t, []int64{10, 11}, info.RequiredFields[0].IndexIds)
+	require.Len(t, info.IndexInfos, 2, "resolved historical metadata must remain owned by its provider")
 }

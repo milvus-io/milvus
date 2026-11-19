@@ -1178,20 +1178,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     return res_vec;
 }
 
-std::pair<std::string, std::string>
-PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    // Find pattern /\d+ (slash followed by ASCII digits) without regex
-    // Use explicit ASCII range check to avoid locale-dependent std::isdigit behavior
-    auto is_ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
-    for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '/' && i + 1 < input.size() &&
-            is_ascii_digit(input[i + 1])) {
-            return {input.substr(0, i), input.substr(i)};
-        }
-    }
-    return {input, ""};
-}
-
 template <typename ExprValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
@@ -1209,12 +1195,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
     } else if (cached_index_chunk_id_ != 0 &&
                segment_->type() == SegmentType::Sealed) {
         auto cache_compute_start = CacheClock::now();
-        auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
-        auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
-        std::string pointer = pointerpair.first;
-        size_t array_index = pointerpair.second.empty()
-                                 ? INVALID_ARRAY_INDEX
-                                 : std::stoi(pointerpair.second);
+        // Integer path components are excluded by CanUseJsonStatsAtInit.
+        // Digit-leading object keys are strings, not array offsets; preserve
+        // the complete escaped JSON pointer for the stats lookup.
+        const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+        const size_t array_index = INVALID_ARRAY_INDEX;
 
         ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
         // for NotEqual: compute Equal and flip the result

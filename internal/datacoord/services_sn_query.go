@@ -171,9 +171,10 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs .
 	if len(indexIDs) == 0 {
 		return s.queryViewCollectionIndexInfos(collectionID)
 	}
-	indexes := s.indexMeta.GetIndexesByID(collectionID, indexIDs)
-	isPhysical := s.indexMeta.PhysicalIndexFilter(collectionID)
-	return packQueryViewCollectionIndexInfos(lo.Filter(indexes, func(index *model.Index, _ int) bool { return isPhysical(index) }))
+	// Historical load configurations retain exact index IDs, including retired
+	// flat definitions. Resolving those references is independent of selecting
+	// loadable artifacts. Current configurations still use the physical view.
+	return packQueryViewCollectionIndexInfos(s.indexMeta.GetIndexesByID(collectionID, indexIDs))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {

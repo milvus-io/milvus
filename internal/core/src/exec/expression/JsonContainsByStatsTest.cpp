@@ -951,6 +951,89 @@ TEST(JsonStatsAsyncLoadTest, UsesFullColumnGroupProjectionWithWarmup) {
                                   /*expect_multi_field_group=*/true);
 }
 
+TEST(JsonStatsUnaryRangeTest, PreservesObjectKeysAndArrayOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto segment = segcore::CreateSealedSegment(schema);
+    const std::vector<std::string> rows = {
+        R"({"1b":1,"2024-01-01":1,"outer":{"1b":1},"a/b":1,"a~b":1,"1/b":1,"outer/":{"~1b":1},"0":1,"arr":[1,2],"objects":[{"1b":1}]})",
+        R"({"1b":2,"2024-01-01":2,"outer":{"1b":2},"a/b":2,"a~b":2,"1/b":2,"outer/":{"~1b":2},"0":2,"arr":[2,1],"objects":[{"1b":2}]})",
+        R"({})",
+    };
+    auto stats = BuildAndLoadJsonKeyStats(rows,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1190,
+                                          2190,
+                                          3190,
+                                          json_fid.get(),
+                                          5190,
+                                          1);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
+    auto field = milvus::test::expr_index::JsonField(rows);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    segment->LoadFieldData(
+        PrepareSingleFieldInsertBinlog(0, 0, 0, json_fid.get(), {field}, cm));
+
+    const std::vector<std::pair<std::vector<std::string>, bool>> paths = {
+        {{"1b"}, true},
+        {{"2024-01-01"}, true},
+        {{"outer", "1b"}, true},
+        {{"a/b"}, true},
+        {{"a~b"}, true},
+        {{"1/b"}, true},
+        {{"outer/", "~1b"}, true},
+        {{"0"}, false},
+        {{"arr", "0"}, false},
+        {{"objects", "0", "1b"}, false},
+        {{"2missing"}, true},
+    };
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    for (const auto& [path, uses_stats] : paths) {
+        SCOPED_TRACE(milvus::Json::pointer(path));
+        for (auto op : {proto::plan::OpType::Equal,
+                        proto::plan::OpType::NotEqual,
+                        proto::plan::OpType::GreaterThan,
+                        proto::plan::OpType::LessEqual}) {
+            SCOPED_TRACE(static_cast<int>(op));
+            auto expression = std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, path),
+                op,
+                one,
+                std::vector<proto::plan::GenericValue>{});
+            exec::PhyUnaryRangeFilterExpr phy({},
+                                              expression,
+                                              "pointer-probe",
+                                              nullptr,
+                                              segment.get(),
+                                              rows.size(),
+                                              rows.size(),
+                                              0);
+            phy.EnsureExecPathDetermined();
+            EXPECT_EQ(phy.GetExecPath(),
+                      uses_stats ? exec::ExprExecPath::JsonStats
+                                 : exec::ExprExecPath::RawData);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto result = query::ExecuteQueryExpr(
+                plan, segment.get(), rows.size(), MAX_TIMESTAMP);
+            ASSERT_EQ(result.size(), rows.size());
+            const bool missing = path[0] == "2missing";
+            const bool matches_one = op == proto::plan::OpType::Equal ||
+                                     op == proto::plan::OpType::LessEqual;
+            EXPECT_EQ(result[0], !missing && matches_one);
+            EXPECT_EQ(result[1], !missing && !matches_one);
+            EXPECT_FALSE(result[2]);
+        }
+    }
+}
+
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);

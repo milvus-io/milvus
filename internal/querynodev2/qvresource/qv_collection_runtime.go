@@ -63,6 +63,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
+	physicalIndexes := segcore.PhysicalIndexInfos(loadInfo.IndexInfos, collection.CollectionSchema)
 	// The parsed native Schema is shared by collection and SchemaVersion; each
 	// LoadInfoVersion gets its own immutable index-metadata binding. Per-channel
 	// WAL ticks do not identify either resource.
@@ -71,7 +72,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	defer m.mu.Unlock()
 	collections := m.collections[key]
 	if collections == nil {
-		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.CollectionSchema)
+		indexMeta := segments.ComposeIndexMeta(ctx, physicalIndexes, collection.CollectionSchema)
 		collections = m.newCollections()
 		if err := collections.PutOrRef(
 			meta.GetCollectionId(), collection.CollectionSchema, indexMeta,
@@ -102,7 +103,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		schema:        collection.CollectionSchema,
 		schemaVersion: int64(meta.GetSchemaVersion()),
 		ccollection:   ccollection,
-		indexes:       loadInfo.IndexInfos,
+		indexes:       physicalIndexes,
 	}, false, nil
 }
 
