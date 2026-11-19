@@ -253,7 +253,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 			continue // no pending messages for this task
 		}
 		for i, msg := range pending.pendingMessages {
-			pending.pendingMessages[i] = message.ClearReplicateHeader(msg)
+			pending.pendingMessages[i] = forcePromoteSupplement(msg)
 		}
 		s.Logger().Info(ctx,
 			"Delegating incomplete task to broadcastScheduler",
@@ -266,6 +266,21 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 	}
 	s.Logger().Info(ctx, "All incomplete broadcasts fixed and tombstoned")
 	return nil
+}
+
+// The source synthesized here can be replicated to another site after promotion.
+// Keep its provenance in the WAL even when CDC supplies a new replicate header.
+func forcePromoteSupplement(msg message.MutableMessage) message.MutableMessage {
+	msg = message.ClearReplicateHeader(msg)
+	if msg.MessageType() == message.MessageTypeSplitShard {
+		split := message.MustAsMutableSplitShardMessageV2(msg)
+		header := split.Header()
+		if msg.VChannel() == header.GetSourceVchannel() {
+			header.SupplementalSourceFence = true
+			split.OverwriteHeader(header)
+		}
+	}
+	return msg
 }
 
 // doAckCallback executes the ack callback.

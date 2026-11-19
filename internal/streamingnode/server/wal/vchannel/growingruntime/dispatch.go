@@ -185,11 +185,16 @@ func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, reque
 }
 
 func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
+	return r.applyTransformLogEntryTo(ctx, entry, r.segmentsSnapshot())
+}
+
+// applyTransformLogEntryTo applies the delete blocks of entry to segments.
+func (r *Runtime) applyTransformLogEntryTo(ctx context.Context, entry *streamingpb.TransformLogEntry, segments []*growingSegment) error {
 	if entry == nil || entry.GetDelete() == nil {
 		return nil
 	}
 	for _, block := range entry.GetDelete().GetBlocks() {
-		if err := r.deleteFromSegments(ctx, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
+		if err := deleteFromSegmentList(ctx, segments, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
 			return err
 		}
 	}
@@ -197,10 +202,14 @@ func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb
 }
 
 func (r *Runtime) deleteFromSegments(ctx context.Context, partitionID int64, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
+	return deleteFromSegmentList(ctx, r.segmentsSnapshot(), partitionID, primaryKeys, timestamps)
+}
+
+func deleteFromSegmentList(ctx context.Context, segments []*growingSegment, partitionID int64, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
 	if primaryKeys.Len() == 0 {
 		return nil
 	}
-	for _, segment := range r.segmentsSnapshot() {
+	for _, segment := range segments {
 		if partitionID != common.AllPartitionsID && segment.partitionID != partitionID {
 			continue
 		}
@@ -224,6 +233,7 @@ func (r *Runtime) markSegmentSealed(segmentID int64, sealedAt qviews.DataVersion
 	if r.hasTruncateDataVersion && segment.shouldReleaseAt(r.truncateDataVersion, r.appliedGrowingTimeTick.Load()) {
 		r.removeSegmentMetadataLocked(segmentID)
 		release = segment
+		r.finishLineageIfResidualGoneLocked()
 	}
 	r.mu.Unlock()
 	if release != nil {

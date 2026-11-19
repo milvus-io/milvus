@@ -1219,3 +1219,46 @@ func useTestClusterPrefix(t *testing.T) {
 	oldPrefix := prefix.SwapTempValue("by-dev")
 	t.Cleanup(func() { prefix.SwapTempValue(oldPrefix) })
 }
+
+// A channel discovered by dynamic expansion must finish opening its WAL before
+// a split can choose it. Ordinary allocation keeps its historical semantics.
+func TestSplitAllocationWaitsForReadWriteWAL(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+	m := &ChannelManager{
+		cond:     syncutil.NewContextCond(&sync.Mutex{}),
+		channels: make(map[ChannelID]*PChannelMeta),
+	}
+	for _, name := range []string{"pending", "assigning", "readonly", "ready", "excluded"} {
+		p := NewPChannelMeta(name, types.AccessModeRW)
+		p.inner.Node = &streamingpb.StreamingNodeInfo{ServerId: 1}
+		p.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
+		switch name {
+		case "pending":
+			p.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED
+		case "assigning":
+			p.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING
+		case "readonly":
+			p.inner.Channel.AccessMode = streamingpb.PChannelAccessMode(types.AccessModeRO)
+		case "excluded":
+			p.availableInReplication = false
+		}
+		m.channels[p.ChannelID()] = p
+	}
+	_, err := m.AllocVirtualChannels(t.Context(), AllocVChannelParam{CollectionID: 100, Num: 2, RequireReady: true})
+	require.Error(t, err)
+	channels, err := m.AllocVirtualChannels(t.Context(), AllocVChannelParam{CollectionID: 100, Num: 1, RequireReady: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"ready_100v0"}, channels)
+	channels, err = m.AllocVirtualChannels(t.Context(), AllocVChannelParam{CollectionID: 100, Num: 1000, RequireReady: true, AllowPartial: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"ready_100v0"}, channels)
+	// The same channel becomes eligible only after assignment completion.
+	m.channels[ChannelID{Name: "pending"}].inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
+	channels, err = m.AllocVirtualChannels(t.Context(), AllocVChannelParam{CollectionID: 100, Num: 2, RequireReady: true})
+	require.NoError(t, err)
+	require.Equal(t, []string{"pending_100v0", "ready_100v1"}, channels)
+	channels, err = m.AllocVirtualChannels(t.Context(), AllocVChannelParam{CollectionID: 100, Num: 4})
+	require.NoError(t, err)
+	require.Len(t, channels, 4)
+}

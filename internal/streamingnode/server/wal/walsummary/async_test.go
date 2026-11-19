@@ -154,6 +154,8 @@ func TestAsyncRestoredFrontierAndNonRecordMessages(t *testing.T) {
 	manager.InitLastAcked(checkpoint.TimeTick)
 	require.Equal(t, uint64(10), manager.LastAcked())
 	manager.ObserveMessage(ctx, newTestBarrierMessage(t, "v1", 20))
+	require.Equal(t, uint64(10), manager.LastAcked(), "initial replay floor must be published first")
+	require.NoError(t, drainSummary(ctx, manager))
 	require.Equal(t, uint64(20), manager.LastAcked())
 	require.False(t, manager.HasPendingWork())
 }
@@ -186,13 +188,13 @@ func TestAsyncConfirmationIncludesBarrierBeforeLaterPendingData(t *testing.T) {
 	manager.RequestFlushThrough(200)
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 2))
 	scheduler := manager.cfg.Runtime.Scheduler.(*recordingScheduler)
-	require.Len(t, scheduler.tasks, 1)
+	require.Len(t, scheduler.tasks, 2, "initial replay metadata publication and first chunk")
 	require.NoError(t, drainSummary(ctx, manager))
 	require.Equal(t, uint64(200), manager.LastAcked(),
 		"the sealed batch covers the barrier but cannot cover later staged data")
 	require.True(t, manager.HasPendingWork())
 	manager.RequestFlushThrough(300)
-	require.Len(t, scheduler.tasks, 3)
+	require.Len(t, scheduler.tasks, 4)
 	require.NoError(t, drainSummary(ctx, manager))
 	require.Equal(t, uint64(300), manager.LastAcked())
 }

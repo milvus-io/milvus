@@ -95,7 +95,9 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
-	flush := isL0FlushMessage(msg.MessageType())
+	// The fence of a shard split is the last event of its vchannel. Its deletes
+	// are materialized at the fence instead of at the next stale flush.
+	flush := isL0FlushMessage(msg.MessageType()) || messageutil.IsSplitShardFence(msg)
 	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
 	m.mu.Lock()
 	if m.terminalErr != nil {

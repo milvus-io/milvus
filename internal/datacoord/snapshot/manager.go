@@ -19,7 +19,6 @@ package snapshot
 import (
 	"context"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -926,6 +925,9 @@ func (sm *Manager) finishRestoreSnapshot(
 	if sm.CollectionRestorer != nil {
 		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
 	}
+	if snapshotData.Collection.GetRoutingModulus() != 0 {
+		return 0, merr.WrapErrServiceNotReadyMsg("snapshot residue routing requires the WAL restore recipe")
+	}
 	snapshotFingerprint := ""
 	if external {
 		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
@@ -1578,28 +1580,11 @@ func (sm *Manager) buildChannelMapping(
 		return nil, err
 	}
 
-	// Validate count
-	if len(targetChannels) != len(snapshotChannels) {
-		return nil, merr.WrapErrDataIntegrityMsg(
-			"channel count mismatch between snapshot and target collection: snapshot=%d, target=%d",
-			len(snapshotChannels), len(targetChannels))
-	}
-
-	// Build mapping (sorted)
-	sort.Strings(snapshotChannels)
-
 	targetChannelNames := make([]string, len(targetChannels))
-	for i, ch := range targetChannels {
-		targetChannelNames[i] = ch.GetName()
+	for i, channel := range targetChannels {
+		targetChannelNames[i] = channel.GetName()
 	}
-	sort.Strings(targetChannelNames)
-
-	mapping := make(map[string]string)
-	for i, targetChannel := range targetChannelNames {
-		mapping[snapshotChannels[i]] = targetChannel
-	}
-
-	return mapping, nil
+	return pairSnapshotChannels(snapshotChannels, targetChannelNames)
 }
 
 // createRestoreJob creates a copy segment job for snapshot restore.

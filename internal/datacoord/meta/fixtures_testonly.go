@@ -36,6 +36,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -61,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -328,6 +330,24 @@ const RestartBuildID = UniqueID(8100)
 
 type metaMemoryKV struct {
 	memkv.MemoryKV
+	guardMu sync.Mutex
+}
+
+// Production etcd/TiKV provide atomic guarded transactions. Serialize guarded
+// fixture transactions, whose guard keys are only changed through this method.
+func (mm *metaMemoryKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	mm.guardMu.Lock()
+	defer mm.guardMu.Unlock()
+	for _, pred := range preds {
+		value, err := mm.Load(ctx, pred.Key())
+		if pred.Target() == predicates.PredTargetKeyExistence && errors.Is(err, merr.ErrIoKeyNotFound) {
+			continue
+		}
+		if err != nil || !pred.IsTrue(value) {
+			return merr.WrapErrIoFailedReason("fixture transaction predicate failed")
+		}
+	}
+	return mm.MemoryKV.MultiSaveAndRemove(ctx, saves, removals)
 }
 
 func NewMetaMemoryKV() *metaMemoryKV {

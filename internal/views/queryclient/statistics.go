@@ -4,8 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	"golang.org/x/sync/errgroup"
-
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -14,22 +13,26 @@ import (
 // Statistics makes one SN call per attempt, followed only by the selected QNs.
 // Counts are current physical statistics, not MVCC/TTL-filtered query results.
 // barrierMVCC reuses Phase 1 barrier coverage; zero uses ordinary Strong sampling.
-func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
-	defer func() { err = toMilvusError(err) }()
-	vchannels, err := c.shardResolver.ResolveVChannels(ctx, collectionID)
+func (c *legacyClient) statisticsCollection(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
+	shards, err := resolver.ResolveShards(ctx, c.shardResolver, collectionID)
 	if err != nil {
 		return 0, err
 	}
-	counts := make([]int64, len(vchannels))
-	group, groupCtx := errgroup.WithContext(ctx)
-	for i, channel := range vchannels {
-		group.Go(func() error {
-			rows, err := c.shardClient.statistics(groupCtx, channel, collectionID, req, barrierMVCC)
-			counts[i] = rows
-			return err
-		})
-	}
-	if err := group.Wait(); err != nil {
+	counts := make([]int64, len(shards))
+	// Zero barrierMVCC samples at Strong, the zero consistency level.
+	err = c.shardClient.fanOutShards(ctx, shards, requestReadPoint{barrierMVCC: barrierMVCC}, func(ctx context.Context, i int, read shardReadPoint) error {
+		var rows int64
+		var err error
+		if read.mvcc == nil && read.onPlan == nil {
+			// An ordinary shard: the request's own barrier, as before.
+			rows, err = c.shardClient.statistics(ctx, read.vchannel, collectionID, req, read.barrierMVCC)
+		} else {
+			rows, err = c.shardClient.statisticsAt(ctx, collectionID, req, read)
+		}
+		counts[i] = rows
+		return err
+	})
+	if err != nil {
 		return 0, err
 	}
 	var rows int64
@@ -40,10 +43,17 @@ func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *
 }
 
 func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
+	return s.statisticsAt(ctx, collectionID, req, shardReadPoint{vchannel: channel, barrierMVCC: barrierMVCC})
+}
+
+// statisticsAt counts one shard at the read point its serving list assigns it.
+func (s *shardViewQueryClient) statisticsAt(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, read shardReadPoint) (int64, error) {
 	var rows atomic.Int64
-	_, err := s.executeShard(ctx, channel, &shardExecParams{
+	_, err := s.executeShard(ctx, read.vchannel, &shardExecParams{
 		collectionID: collectionID,
-		barrierMVCC:  barrierMVCC,
+		mvcc:         read.mvcc,
+		barrierMVCC:  read.barrierMVCC,
+		observePlan:  read.onPlan,
 		buildPlanReq: func(shard qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: collectionID, ShardId: shard.IntoProto(),
@@ -82,4 +92,13 @@ func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, c
 		return 0, err
 	}
 	return rows.Load(), nil
+}
+
+func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, collectionID, func() error { count, err = c.statisticsCollection(ctx, collectionID, req, barrierMVCC); return err })
+	return count, toMilvusError(err)
 }

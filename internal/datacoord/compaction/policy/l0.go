@@ -100,7 +100,7 @@ func (policy *L0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	return events, err
 }
 
-func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, collectionID int64) ([]view.CompactionView, int64, error) {
+func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, collectionID int64, filters ...meta.SegmentFilter) ([]view.CompactionView, int64, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "start trigger collection l0 compaction")
 	collection := policy.Meta.GetCollection(collectionID)
@@ -112,7 +112,7 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 		log.Info(ctx, "skip trigger l0 compaction for external collection")
 		return nil, 0, nil
 	}
-	allL0Segments := policy.Meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
+	filters = append(filters, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 		return meta.IsSegmentHealthy(segment) &&
 			meta.IsFlushed(segment) &&
 			!segment.IsCompacting && // not compacting now
@@ -120,6 +120,7 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 			segment.GetLevel() == datapb.SegmentLevel_L0
 	}))
 
+	allL0Segments := policy.Meta.SelectSegments(ctx, filters...)
 	if len(allL0Segments) == 0 {
 		return nil, 0, nil
 	}
@@ -136,6 +137,11 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 func (policy *L0CompactionPolicy) GroupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*view.SegmentView, triggerID UniqueID) []view.CompactionView {
 	partChanView := make(map[string]*view.LevelZeroCompactionView) // "part-chan" as key
 	for _, segView := range levelZeroSegments {
+		if policy.Meta.IsL0CompactionSuspended(segView.Label.Channel) {
+			// A target of a shard split that is not adopted yet: its L0
+			// segments are still needed by the segments of the source.
+			continue
+		}
 		key := segView.Label.Key()
 		if _, ok := partChanView[key]; !ok {
 			earliestGrowingStartPos := policy.Meta.GetEarliestStartPositionOfGrowingSegments(segView.Label.CollectionID, segView.Label.PartitionID, segView.Label.Channel)

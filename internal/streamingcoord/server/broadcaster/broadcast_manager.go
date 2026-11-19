@@ -9,12 +9,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -128,6 +130,7 @@ type broadcastTaskManager struct {
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
 	ackScheduler       *ackCallbackScheduler // the scheduler of the ack task
+	appended           appendedCopies        // copies reported appended, see ReportVChannelAppended
 }
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
@@ -318,6 +321,11 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 			"broadcast task not found, it may already acked, ignore the request", mlog.FieldBroadcastID(broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
+	// This RPC carries only a channel name. A reconstructed copy uses the
+	// first observed replica's properties and cannot attest a source WAL position.
+	if task.BroadcastMessage().MessageType() == message.MessageTypeSplitShard {
+		return merr.WrapErrParameterInvalidMsg("acknowledging a split requires the consumed WAL message")
+	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
 		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.FieldMessage(task.BroadcastMessage()), mlog.String("vchannel", vchannel))
@@ -337,13 +345,106 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
+		// ForcePromote can complete a split with a supplemental source copy before
+		// its genuine replicated source consumer reports the original WAL position.
+		if t != nil && messageutil.IsSplitShardFence(msg) && msg.ReplicateHeader() != nil {
+			return registry.CallConsumerAckObserver(ctx, msg, true)
+		}
 		bm.Logger().Debug(ctx,
 			"task is tombstone, ignored the ack request",
 			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
+	// Before the task: an observer that fails leaves the copy unacknowledged,
+	// so the StreamingNode sends the acknowledgement again.
+	if err := registry.CallConsumerAckObserver(ctx, msg, false); err != nil {
+		return err
+	}
 	return t.Ack(ctx, msg)
+}
+
+// waitVChannelsAckedPollInterval is how often WaitVChannelsAcked looks again.
+const waitVChannelsAckedPollInterval = 50 * time.Millisecond
+
+// WaitVChannelsAcked blocks until every given vchannel of a broadcast is
+// acknowledged on this cluster, and returns the greatest time tick they were
+// acknowledged at. Before that, it returns as soon as every given vchannel
+// was reported appended (ReportVChannelAppended), with the greatest reported
+// time tick.
+//
+// The task need not exist when the call arrives: on a secondary a task is
+// created by the first acknowledgement of one of its copies. If there is no
+// task, the resolver of the message type is asked whether the effect of the
+// broadcast is already recorded; that is the case of a copy that is delivered
+// again after its task was collected. If neither holds, the call waits. It
+// ends with the context of the caller or when the broadcaster closes; the
+// caller then calls again.
+func (bm *broadcastTaskManager) WaitVChannelsAcked(ctx context.Context, typ message.MessageType, broadcastID uint64, vchannels []string) (uint64, error) {
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return 0, status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
+	defer cancel()
+
+	ticker := time.NewTicker(waitVChannelsAckedPollInterval)
+	defer ticker.Stop()
+	for {
+		bm.mu.Lock()
+		task := bm.tasks[broadcastID]
+		bm.mu.Unlock()
+		if task != nil {
+			timeTick, acked, err := task.AckedTimeTick(vchannels)
+			if err != nil || acked {
+				return timeTick, err
+			}
+		}
+		if timeTick, ok := bm.appended.TimeTickOf(broadcastID, vchannels); ok {
+			return timeTick, nil
+		}
+		if task == nil {
+			timeTick, applied, err := registry.ResolveAppendFirstApplied(ctx, typ, vchannels)
+			if err != nil || applied {
+				return timeTick, err
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return 0, context.Cause(ctx)
+		case <-ticker.C:
+		}
+	}
+}
+
+// ReportVChannelAppended records that the copy of a broadcast on vchannel was
+// appended to the WAL of this cluster at timeTick.
+//
+// The replicate service of a secondary reports the append-first copies it
+// appends. Their consumer acknowledges them only when every module of the
+// StreamingNode releases them, which for the fence of a shard split is after
+// the residual of the source has flushed; the copies that wait for the
+// append-first ones need only a barrier above its time tick, which the
+// append result already gives.
+//
+// The record is in memory. Any reported time tick is a time tick of a
+// persisted copy, so it is at or above the time tick of the first copy, the
+// one the consumer acknowledges; a barrier at it is a barrier above the
+// acknowledged one. A coordinator that lost the record answers from the
+// acknowledgement, which comes later.
+func (bm *broadcastTaskManager) ReportVChannelAppended(ctx context.Context, broadcastID uint64, vchannel string, timeTick uint64) error {
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+	if broadcastID == 0 || vchannel == "" || timeTick == 0 {
+		return status.NewInvalidArgument("report of an appended copy needs a broadcast id, a vchannel and a time tick, got %d, %q, %d",
+			broadcastID, vchannel, timeTick)
+	}
+	bm.appended.Record(broadcastID, vchannel, timeTick)
+	bm.Logger().Info(ctx, "copy of a broadcast reported appended",
+		mlog.FieldBroadcastID(broadcastID), mlog.String("vchannel", vchannel), mlog.Uint64("timeTick", timeTick))
+	return nil
 }
 
 // DropTombstones drops the tombstones of the broadcast tasks with one catalog
@@ -494,6 +595,7 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastIDs ...uint64) {
 		}
 		delete(bm.tasks, broadcastID)
 	}
+	bm.appended.Forget(broadcastIDs...)
 }
 
 // getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.

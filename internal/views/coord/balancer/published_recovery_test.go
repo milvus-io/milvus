@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -113,9 +114,62 @@ func TestPublishedRecoveryPreservesPartitionStats(t *testing.T) {
 		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}},
 		QueryNode:     []*viewpb.QueryViewOfQueryNode{{NodeId: 10, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 2, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{4}}}}},
 	}
+	original.Meta.SnapshotHistoryFloor = 200
 	base := newPublishedRecoveryBase(id, &coordview.PublishedRecovery{View: original})
 	data := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: original.Meta.Version.DataVersion, Shards: []*viewpb.DataViewOfShard{shardDataViewToProto(base.shard)}}
 	replacement := qviews.NewQueryViewAtCoordBuilder(1, data, id.VChannel).SetAssignments(map[int64]map[int64][]int64{20: {2: {101}}}).Build()
+	require.EqualValues(t, 200, replacement.GetMeta().GetSnapshotHistoryFloor())
 	require.Equal(t, original.StreamingNode.PartitionStats, replacement.StreamingNode.PartitionStats)
 	require.Equal(t, []int64{4}, replacement.QueryNode[0].Partitions[0].SegmentManifestVersions)
+}
+
+func TestAdoptedSourceRebuildsPublishedG1WithoutSchemaChange(t *testing.T) {
+	patch := mockey.Mock(testLatestSchema).Return(int32(0), nil).Build()
+	defer patch.UnPatch()
+	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
+		for _, views := range group.ViewsByNode {
+			for _, view := range views {
+				response := view.View.IntoProto()
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStatePreparing {
+					response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+				}
+				view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+			}
+		}
+		return nil
+	})
+	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	source := cacheShard(1, 10)
+	oldData := cacheData(1, source.VChannel, 100)
+	oldData.ShardSetEpoch = 2
+	oldData.Shards[0].Lineage = &viewpb.QueryViewLineage{Vchannels: []string{"p1_1v1", "p2_1v2"}, SwitchTimetick: 100}
+	c.PublishDataView(1, oldData)
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	c.MarkReady()
+	controller := NewDefaultBalancer(c, registry, nil, testLatestSchema)
+	controller.Trigger()
+	require.NoError(t, controller.Reconcile(t.Context()))
+	manager := registry.Get(source)
+	require.Eventually(t, func() bool { return manager.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	old := *manager.Stats().UpVersion
+	manager.PublishSchema(0)
+	manager.PublishServingGeneration(2, 0)
+	require.Nil(t, manager.PublishedRecovery(0), "no newer schema is pending")
+	require.NotNil(t, manager.PublishedGenerationRecovery())
+	targets := &CollectionDataView{CollectionID: 1, ShardSetEpoch: 3, DataVersion: qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, Shards: []*ShardDataView{{VChannel: "p1_1v1", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 100}, {VChannel: "p2_1v2", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 100}}}
+	c.PublishDataView(1, api.PrepareCollectionDataView(targets))
+	c.PublishNode(1, nil)
+	c.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
+	controller.Trigger(TriggerScope{DirtyCollections: []int64{1}})
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Eventually(t, func() bool { up := manager.Stats().UpVersion; return up != nil && up.GT(old) }, 5*time.Second, time.Millisecond)
+	require.Equal(t, old.DataVersion, manager.Stats().UpVersion.DataVersion)
+	recovered := manager.PublishedGenerationRecovery()
+	require.NotNil(t, recovered)
+	require.EqualValues(t, 2, recovered.View.GetMeta().GetShardSetEpoch())
+	require.Equal(t, oldData.Shards[0].Lineage.GetVchannels(), recovered.View.GetMeta().GetLineage().GetVchannels())
+	require.EqualValues(t, 100, recovered.View.GetMeta().GetLineage().GetSwitchTimetick())
+	manager.PublishServingGeneration(3, 0)
+	require.Nil(t, manager.PublishedGenerationRecovery(), "g2 publication ends the old source recovery obligation")
 }

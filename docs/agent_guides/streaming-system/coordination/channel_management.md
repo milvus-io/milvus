@@ -6,7 +6,7 @@ Singletons running inside StreamingCoord that manage [PChannel/VChannel/CChannel
 
 - **PChannel assignment**: Assigns each PChannel to exactly one StreamingNode via a pluggable balance policy (default: `vchannelfair`). Rebalancing is triggered by node join/leave, VChannel count change, periodic timer, or manual `Trigger()`.
 - **Node health monitoring**: Watches StreamingNode status. Unhealthy nodes have their PChannels marked UNAVAILABLE and reassigned. StreamingNode file-resource consumers prepare their own inventories through the pull path; QN file-resource push acknowledgments are not a prerequisite for SN assignment.
-- **VChannel allocation**: `AllocVirtualChannels()` assigns new VChannels to the least-loaded `AvailableInReplication` PChannels.
+- **VChannel allocation**: `AllocVirtualChannels()` assigns new VChannels to the least-loaded `AvailableInReplication` PChannels. Callers setting `RequireReady` additionally require an ASSIGNED read-write WAL; shard split uses this option before its irreversible source fence. Default collection allocation retains its existing readiness behavior.
 - **CChannel management**: Persists which PChannel hosts the singleton CChannel. Assigned once at initialization, never changes.
 - **Assignment publishing**: Exposes gRPC `AssignmentDiscover` endpoint for StreamingClient. Versioned by `(Global, Local)` pair.
 - **Replication config**: Persists `ReplicateConfiguration` and maintains the per-PChannel `AvailableInReplication` flag. When false, the PChannel is excluded from VChannel allocation and DDL broadcasts. `UpdateReplicateConfiguration()` recomputes this flag for all PChannels and creates CDC tasks for newly added target clusters. `AvailableInReplication` works as below:

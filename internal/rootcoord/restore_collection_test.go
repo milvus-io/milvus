@@ -24,7 +24,9 @@ import (
 
 	kvrootcoord "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -52,4 +54,26 @@ func TestRestoreCollectionVisibilityAfterDurableCompletion(t *testing.T) {
 	view, ok := mt.collViews.Get(10)
 	require.True(t, ok)
 	require.Equal(t, etcdpb.CollectionState_CollectionCreated, view.State, "completion publishes the view")
+}
+
+func TestRestoreRoutingSurvivesCreationReplayAndRecovery(t *testing.T) {
+	want := routing.Routing{Modulus: 4, ShardBy: "hash(pk)", Shards: []routing.Shard{{VChannel: "p_1v0", Buckets: []uint64{0}}, {VChannel: "p_1v1", Buckets: []uint64{1, 3}}, {VChannel: "p_1v2", Buckets: []uint64{2}}}}
+	collection := &model.Collection{CollectionID: 1, VirtualChannelNames: want.VChannels(), ShardsNum: 3, PhysicalChannelNames: []string{"p", "p", "p"}, ShardInfos: map[string]*model.ShardInfo{}}
+	for _, channel := range collection.VirtualChannelNames {
+		collection.ShardInfos[channel] = &model.ShardInfo{VChannelName: channel}
+	}
+	postImage := &message.SplitShardRouting{RoutingModulus: want.Modulus, ShardBy: want.ShardBy, Shards: want.ShardInfos()}
+	for range 2 {
+		require.NoError(t, applyRestoredCollectionRouting(collection, postImage))
+		require.Equal(t, want, collection.Routing())
+		require.Empty(t, collection.SplitLineages, "restored rows begin on their new physical owners")
+	}
+	recovered := model.UnmarshalCollectionModel(model.MarshalCollectionModel(collection))
+	require.Equal(t, want, recovered.Routing())
+	legacy := &model.Collection{VirtualChannelNames: []string{"p_2v0"}, ShardInfos: map[string]*model.ShardInfo{"p_2v0": {VChannelName: "p_2v0"}}}
+	require.NoError(t, applyRestoredCollectionRouting(legacy, nil))
+	require.Zero(t, legacy.RoutingModulus)
+	postImage.Shards[0].VchannelName = "foreign"
+	require.Error(t, applyRestoredCollectionRouting(collection, postImage))
+	require.Equal(t, want, collection.Routing(), "invalid replay cannot replace a valid placement")
 }

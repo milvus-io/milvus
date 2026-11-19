@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -181,6 +180,8 @@ func TestPublishGroup_WithDataView(t *testing.T) {
 	require.NoError(t, err)
 
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	before, err := dv.RecomputeNow(ctx, 10, m.LoadableProjection)
+	require.NoError(t, err)
 	require.NoError(t, m.PublishGroup(ctx, ready, meta.NewMockAllocator(t)))
 
 	// DataView side: one snapshot with the member in, the parent out, and only
@@ -190,7 +191,9 @@ func TestPublishGroup_WithDataView(t *testing.T) {
 	require.NotNil(t, ref)
 	defer ref.Deref()
 	latest := ref.DataView()
-	require.Equal(t, &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, latest.GetDataVersion())
+	require.Equal(t, before.GetStreamingVersion(), latest.GetDataVersion().GetStreamingVersion())
+	require.Equal(t, before.GetCompactVersion()+1, latest.GetDataVersion().GetCompactVersion())
+	require.EqualValues(t, 1, latest.GetShards()[0].GetSnapshotHistoryFloor())
 	partition := latest.GetShards()[0].GetPartitions()[0]
 	require.Equal(t, []int64{1001}, partition.GetSegmentIds())
 	require.Equal(t, []int64{0}, partition.GetSegmentManifestVersions())

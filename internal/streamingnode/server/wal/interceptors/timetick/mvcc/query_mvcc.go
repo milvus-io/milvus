@@ -78,6 +78,17 @@ func (cm *QueryMVCCManager) Minimum(channel string, strong bool) uint64 {
 	return minimum
 }
 
+// Prefix samples, under one lock, the complete published prefix of the PChannel,
+// the prefix a Strong read of channel must cover, and the channel's frontiers at
+// the published prefix. It never waits: a caller that fixes one read point
+// across several channels takes its bounds from here and then establishes the
+// point through SnapshotAt. A zero pair denotes an absent channel.
+func (cm *QueryMVCCManager) Prefix(channel string) (through uint64, strongMinimum uint64, snapshot QueryVChannelMVCC) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.through, max(cm.through, cm.pending[channel], cm.pendingAll), cm.frontiers[channel]
+}
+
 // Snapshot returns one pair from one complete prefix, never append-time maxima.
 // A ready zero pair denotes an absent channel. The caller's minimum is fixed
 // while waiting, so concurrent writes cannot keep moving the wait target.
@@ -184,19 +195,27 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 		return
 	}
 	current, live := cm.frontiers[channel]
-	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot {
+	// A vchannel comes into existence by a CreateCollection or RestoreSnapshot
+	// message, or as the target of a shard split. Nothing else opens a frontier.
+	splitGenesis := messageutil.IsSplitShardGenesis(msg)
+	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot && !splitGenesis {
 		return
 	}
 	if kind == message.MessageTypeCommitTxn && insertOnly {
 		kind = message.MessageTypeInsert
 	}
-	switch kind {
-	case message.MessageTypeCreateCollection, message.MessageTypeRestoreSnapshot:
+	switch {
+	case kind == message.MessageTypeCreateCollection, kind == message.MessageTypeRestoreSnapshot, splitGenesis && !live:
 		current.GrowingTimetick = tick
 		current.TransformingTimetick = tick
-	case message.MessageTypeInsert:
+	case splitGenesis:
+		// The genesis of a target that is appended again, on a vchannel that
+		// may already hold data. It must not move a frontier backwards.
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
-	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
+		current.TransformingTimetick = max(current.TransformingTimetick, tick)
+	case kind == message.MessageTypeInsert:
+		current.GrowingTimetick = max(current.GrowingTimetick, tick)
+	case kind == message.MessageTypeDelete, kind == message.MessageTypeCommitTxn:
 		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:

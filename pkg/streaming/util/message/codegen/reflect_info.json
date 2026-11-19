@@ -16,6 +16,7 @@
         "messagespb.PartitionSegmentAssignment",
         "messagespb.SegmentAssignment",
         "messagespb.ManualFlushExtraResponse",
+        "messagespb.SplitShardRouting",
         "messagespb.RoleBinding",
         "messagespb.AlterLoadConfigOfAlterDatabase",
         "messagespb.AlterLoadConfigOfAlterCollection",
@@ -25,6 +26,16 @@
         "messagespb.LegacyProxyCollectionMetaCache"
     ],
     "messageReflectInfoTable": [
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RetireSplitShardMessageHeader",
+                "BodyType": "messagespb.RetireSplitShardMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRetireSplitShard",
+                "Version": 2
+            }
+        },
         {
             "MessageSpecializedType": {
                 "HeaderType": "messagespb.AddFileResourceMessageHeader",
@@ -152,6 +163,16 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeUpdateImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.SplitShardMessageHeader",
+                "BodyType": "messagespb.SplitShardMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeSplitShard",
                 "Version": 2
             }
         },

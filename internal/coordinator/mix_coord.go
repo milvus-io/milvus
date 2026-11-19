@@ -276,6 +276,9 @@ func (s *mixCoordImpl) enableExternalAccess() {
 	// invoke DataCoord or QueryCoord callbacks while handling collection DDLs.
 	datacoord.RegisterDDLCallbacks(s.datacoordServer)
 	querycoordv2.RegisterDDLCallbacks(s.queryCoordServer)
+	// Before RootCoord registers the SplitShard ack callback: a callback that
+	// is recovered must find DataCoord's hooks.
+	registerShardSplit(s.datacoordServer, s.rootcoordServer)
 	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
 	RegisterWALCallbacks(s)
 
@@ -946,6 +949,9 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 
 	// If a processing role is specified, the corresponding role will be used for processing
 	ret := gjson.Parse(in.GetRequest())
+	if ret.Get(metricsinfo.MetricTypeKey).String() == metricsinfo.SplitRetirementKey {
+		return s.GetDcMetrics(ctx, in)
+	}
 	processRole, _ := metricsinfo.ParseMetricProcessInRole(ret)
 	if len(processRole) > 0 && processRole == typeutil.QueryCoordRole {
 		return s.GetQcMetrics(ctx, in)
@@ -1705,4 +1711,24 @@ func (s *mixCoordImpl) initDataAndQueryCoord() error {
 	}
 
 	return nil
+}
+
+// QueryViewSplitSources retains S through adoption until the local retirement
+// record advances. RootCoord's immutable lineage is not a local lifecycle flag.
+func (s *mixCoordImpl) QueryViewSplitSources(ctx context.Context, id int64) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	store := s.datacoordServer.ShardSplitStore()
+	if store == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("split lifecycle is not recovered")
+	}
+	return store.Sources(id, datapb.SplitShardTaskState_SplitShardTaskRetired), nil
+}
+
+func (s *mixCoordImpl) QueryViewSplitLifecycle() qvresource.SplitLifecycle {
+	if s.datacoordServer == nil {
+		return nil
+	}
+	return s.datacoordServer
 }

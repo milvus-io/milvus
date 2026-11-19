@@ -23,9 +23,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
@@ -56,15 +58,172 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
-	FileResourceIds      []int64
-	ExternalSource       string
-	ExternalSpec         string
+	// RoutingModulus is the modulus the residues of the shards are taken
+	// against. Zero on a collection that was never split; it routes by
+	// hash % ShardsNum.
+	RoutingModulus uint64
+	// ShardBy is the routing key expression, "hash(<field>)". Empty if it was
+	// never declared.
+	ShardBy string
+	// SplitLineages has one record for every shard of the collection that was
+	// split. A split shard is not in VirtualChannelNames, PhysicalChannelNames
+	// or ShardInfos: it accepts no DML and receives no DDL broadcast.
+	SplitLineages   []*ShardSplitLineage
+	FileResourceIds []int64
+	ExternalSource  string
+	ExternalSpec    string
 }
 
 type ShardInfo struct {
 	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
 	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
 	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+	// Buckets are the residues the shard owns, taken against the
+	// RoutingModulus of the collection. Empty on a collection that was never
+	// split.
+	Buckets []uint64
+}
+
+// ShardSplitLineage records that a shard was split. It is written once, when
+// the SplitShard message is applied, and never changed.
+type ShardSplitLineage struct {
+	SourceVChannel  string
+	SourcePChannel  string
+	TargetVChannels []string
+	// SwitchTimeTick is the time tick of the SplitShard message on the source
+	// vchannel, in the WAL of this cluster.
+	SwitchTimeTick uint64
+	SplitTaskID    int64
+}
+
+func (l *ShardSplitLineage) clone() *ShardSplitLineage {
+	return &ShardSplitLineage{
+		SourceVChannel:  l.SourceVChannel,
+		SourcePChannel:  l.SourcePChannel,
+		TargetVChannels: slices.Clone(l.TargetVChannels),
+		SwitchTimeTick:  l.SwitchTimeTick,
+		SplitTaskID:     l.SplitTaskID,
+	}
+}
+
+func cloneSplitLineages(lineages []*ShardSplitLineage) []*ShardSplitLineage {
+	if lineages == nil {
+		return nil
+	}
+	cloned := make([]*ShardSplitLineage, 0, len(lineages))
+	for _, lineage := range lineages {
+		cloned = append(cloned, lineage.clone())
+	}
+	return cloned
+}
+
+// Routing returns the routing of the collection: the shards that accept DML,
+// in the order of VirtualChannelNames, with the residues they own.
+func (c *Collection) Routing() routing.Routing {
+	r := routing.Routing{
+		Modulus: c.RoutingModulus,
+		ShardBy: c.ShardBy,
+		Shards:  make([]routing.Shard, 0, len(c.VirtualChannelNames)),
+	}
+	for _, vchannel := range c.VirtualChannelNames {
+		shard := routing.Shard{VChannel: vchannel}
+		if info, ok := c.ShardInfos[vchannel]; ok {
+			shard.Buckets = slices.Clone(info.Buckets)
+		}
+		r.Shards = append(r.Shards, shard)
+	}
+	return r
+}
+
+// SplitLineageOf returns the lineage record of a shard that was split, or nil.
+func (c *Collection) SplitLineageOf(vchannel string) *ShardSplitLineage {
+	for _, lineage := range c.SplitLineages {
+		if lineage.SourceVChannel == vchannel {
+			return lineage
+		}
+	}
+	return nil
+}
+
+// SplitSourceVChannels returns the vchannels of the collection that were split.
+func (c *Collection) SplitSourceVChannels() []string {
+	vchannels := make([]string, 0, len(c.SplitLineages))
+	for _, lineage := range c.SplitLineages {
+		vchannels = append(vchannels, lineage.SourceVChannel)
+	}
+	return vchannels
+}
+
+// SplitSourceBuckets returns the residues, at the current RoutingModulus, of
+// the keys a split source owned before it was split. They are the residues of
+// the shards that own its keys now: its targets, or, for a target that was
+// split in turn, the targets of that target. The modulus only grows by
+// doubling and a split moves no key of another shard, so the union is exact.
+//
+// It returns nil if vchannel is not a split source, or if a shard on the way
+// is neither a shard of the routing nor a split source (malformed metadata).
+func (c *Collection) SplitSourceBuckets(vchannel string) []uint64 {
+	if c.RoutingModulus == 0 || c.SplitLineageOf(vchannel) == nil {
+		return nil
+	}
+	var buckets []uint64
+	visited := make(map[string]struct{})
+	var collect func(vchannel string) bool
+	collect = func(vchannel string) bool {
+		if info, ok := c.ShardInfos[vchannel]; ok {
+			buckets = append(buckets, info.Buckets...)
+			return len(info.Buckets) > 0
+		}
+		lineage := c.SplitLineageOf(vchannel)
+		if _, seen := visited[vchannel]; seen || lineage == nil {
+			return false
+		}
+		visited[vchannel] = struct{}{}
+		for _, target := range lineage.TargetVChannels {
+			if !collect(target) {
+				return false
+			}
+		}
+		return len(lineage.TargetVChannels) > 0
+	}
+	if !collect(vchannel) {
+		return nil
+	}
+	slices.Sort(buckets)
+	return slices.Compact(buckets)
+}
+
+// ApplyShardSplit replaces the routing of the collection by the routing after
+// a shard split and records the lineage of the shard that was split.
+//
+// The source leaves VirtualChannelNames, PhysicalChannelNames and ShardInfos.
+// A shard that exists before and after keeps its last truncate time tick; a
+// new shard starts at zero. The caller validates next and lineage.
+func (c *Collection) ApplyShardSplit(next routing.Routing, lineage *ShardSplitLineage) {
+	vchannels := next.VChannels()
+	pchannels := make([]string, 0, len(vchannels))
+	shardInfos := make(map[string]*ShardInfo, len(vchannels))
+	for _, shard := range next.Shards {
+		pchannel := funcutil.ToPhysicalChannel(shard.VChannel)
+		info := &ShardInfo{
+			VChannelName: shard.VChannel,
+			PChannelName: pchannel,
+			Buckets:      slices.Clone(shard.Buckets),
+		}
+		if old, ok := c.ShardInfos[shard.VChannel]; ok {
+			info.PChannelName = old.PChannelName
+			info.LastTruncateTimeTick = old.LastTruncateTimeTick
+		}
+		pchannels = append(pchannels, info.PChannelName)
+		shardInfos[shard.VChannel] = info
+	}
+	c.VirtualChannelNames = vchannels
+	c.PhysicalChannelNames = pchannels
+	c.ShardInfos = shardInfos
+	c.ShardsNum = int32(len(vchannels))
+	c.RoutingModulus = next.Modulus
+	c.ShardBy = next.ShardBy
+	c.SplitLineages = append(cloneSplitLineages(c.SplitLineages), lineage.clone())
 }
 
 func (c *Collection) Available() bool {
@@ -98,6 +257,9 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
+		RoutingModulus:       c.RoutingModulus,
+		ShardBy:              c.ShardBy,
+		SplitLineages:        c.SplitLineages,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -111,6 +273,7 @@ func (c *Collection) Clone() *Collection {
 			VChannelName:         channelName,
 			PChannelName:         shardInfo.PChannelName,
 			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
+			Buckets:              slices.Clone(shardInfo.Buckets),
 		}
 	}
 	return &Collection{
@@ -139,6 +302,9 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       c.RoutingModulus,
+		ShardBy:              c.ShardBy,
+		SplitLineages:        cloneSplitLineages(c.SplitLineages),
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
@@ -253,19 +419,26 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 	}
 	shardInfos := make(map[string]*ShardInfo, len(coll.VirtualChannelNames))
 	for idx, channelName := range coll.VirtualChannelNames {
-		if len(coll.ShardInfos) == 0 {
-			shardInfos[channelName] = &ShardInfo{
-				VChannelName:         channelName,
-				PChannelName:         coll.PhysicalChannelNames[idx],
-				LastTruncateTimeTick: 0,
-			}
-		} else {
-			shardInfos[channelName] = &ShardInfo{
-				VChannelName:         channelName,
-				PChannelName:         coll.PhysicalChannelNames[idx],
-				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
-			}
+		info := &ShardInfo{
+			VChannelName: channelName,
+			PChannelName: coll.PhysicalChannelNames[idx],
 		}
+		// A record written before shard infos existed has none.
+		if idx < len(coll.ShardInfos) {
+			info.LastTruncateTimeTick = coll.ShardInfos[idx].GetLastTruncateTimeTick()
+			info.Buckets = slices.Clone(coll.ShardInfos[idx].GetHashRouting().GetBuckets())
+		}
+		shardInfos[channelName] = info
+	}
+	var splitLineages []*ShardSplitLineage
+	for _, lineage := range coll.GetSplitLineages() {
+		splitLineages = append(splitLineages, &ShardSplitLineage{
+			SourceVChannel:  lineage.GetSourceVchannel(),
+			SourcePChannel:  lineage.GetSourcePchannel(),
+			TargetVChannels: slices.Clone(lineage.GetTargetVchannels()),
+			SwitchTimeTick:  lineage.GetSwitchTimeTick(),
+			SplitTaskID:     lineage.GetSplitTaskId(),
+		})
 	}
 
 	return &Collection{
@@ -291,6 +464,9 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       coll.GetRoutingModulus(),
+		ShardBy:              coll.GetShardBy(),
+		SplitLineages:        splitLineages,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
@@ -361,17 +537,32 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
-	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))
+	// Sized by the vchannel list, which is what the loop indexes by.
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.VirtualChannelNames))
 	for idx, channelName := range coll.VirtualChannelNames {
+		info := &schemapb.CollectionShardInfo{}
 		if shard, ok := coll.ShardInfos[channelName]; ok {
-			shardInfos[idx] = &pb.CollectionShardInfo{
-				LastTruncateTimeTick: shard.LastTruncateTimeTick,
-			}
-		} else {
-			shardInfos[idx] = &pb.CollectionShardInfo{
-				LastTruncateTimeTick: 0,
+			info.LastTruncateTimeTick = shard.LastTruncateTimeTick
+			// A collection that was never split stores no name and no residues,
+			// so its record is byte-identical to one written before shard split.
+			if len(shard.Buckets) > 0 {
+				info.VchannelName = channelName
+				info.Routing = &schemapb.CollectionShardInfo_HashRouting{
+					HashRouting: &schemapb.HashRouting{Buckets: slices.Clone(shard.Buckets)},
+				}
 			}
 		}
+		shardInfos[idx] = info
+	}
+	var splitLineages []*pb.ShardSplitLineage
+	for _, lineage := range coll.SplitLineages {
+		splitLineages = append(splitLineages, &pb.ShardSplitLineage{
+			SourceVchannel:  lineage.SourceVChannel,
+			SourcePchannel:  lineage.SourcePChannel,
+			TargetVchannels: slices.Clone(lineage.TargetVChannels),
+			SwitchTimeTick:  lineage.SwitchTimeTick,
+			SplitTaskId:     lineage.SplitTaskID,
+		})
 	}
 	collectionPb := &pb.CollectionInfo{
 		ID:                   coll.CollectionID,
@@ -387,6 +578,9 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Properties:           coll.Properties,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		ShardInfos:           shardInfos,
+		RoutingModulus:       coll.RoutingModulus,
+		ShardBy:              coll.ShardBy,
+		SplitLineages:        splitLineages,
 	}
 
 	if c.withPartitions {

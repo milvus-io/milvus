@@ -20,7 +20,9 @@ type ShardResolver interface {
 // It is implemented by the proxy via its GetCollection flow (metacache).
 type CollectionVChannelProvider interface {
 	// GetCollectionVChannels returns the vchannels of a collection.
-	GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, error)
+	// The local-split marker and current write owners must come from the same
+	// immutable collection snapshot; neither value may be refreshed separately.
+	GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, bool, error)
 }
 
 // NewShardResolverImpl creates a ShardResolverImpl.
@@ -40,9 +42,22 @@ type ShardResolverImpl struct {
 }
 
 func (t *ShardResolverImpl) ResolveVChannels(ctx context.Context, collectionID int64) ([]string, error) {
-	return t.vchannels.GetCollectionVChannels(ctx, collectionID)
+	vchannels, _, err := t.vchannels.GetCollectionVChannels(ctx, collectionID)
+	return vchannels, err
 }
 
 // Close releases the resolver. It is a no-op: the resolver keeps no background
 // goroutine or watcher.
 func (t *ShardResolverImpl) Close() {}
+
+// RequiresServingGeneration keeps never-split collections on the original
+// metadata path, without adding a Coordinator dependency to successful reads.
+func (t *ShardResolverImpl) RequiresServingGeneration(ctx context.Context, id int64) ([]string, bool, error) {
+	return t.vchannels.GetCollectionVChannels(ctx, id)
+}
+
+func (t *ShardResolverImpl) RefreshServingGeneration(ctx context.Context, id int64) {
+	if provider, ok := t.vchannels.(interface{ RefreshShardRouting(context.Context, int64) }); ok {
+		provider.RefreshShardRouting(ctx, id)
+	}
+}

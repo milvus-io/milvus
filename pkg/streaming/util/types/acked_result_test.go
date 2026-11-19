@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -84,6 +85,12 @@ func (s *AckedResultTestSuite) TestIsAllAcked() {
 	})
 	s.False(result.IsAllAcked())
 
+	data, err := proto.Marshal(result.AckedResult)
+	s.Require().NoError(err)
+	restored := &streamingpb.AckedResult{}
+	s.Require().NoError(proto.Unmarshal(data, restored))
+	result = types.NewAckedPendingsFromProto(restored)
+	s.Require().False(result.IsAllAcked())
 	// Ack second channel
 	result.Ack(types.AckedCheckpoint{
 		Channel:                "ch2",

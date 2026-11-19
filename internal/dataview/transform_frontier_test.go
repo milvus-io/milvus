@@ -73,7 +73,7 @@ func TestTransformFrontierDoesNotFabricateCoverage(t *testing.T) {
 
 func TestTransformFrontierRecoveryIsDynamicAndVersionOrdered(t *testing.T) {
 	bounds := map[string]uint64{"v1": 200}
-	manager := newManager(context.Background(), nil, nil, WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) { return bounds, nil }))
+	manager := newManager(context.Background(), nil, nil, WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) { return bounds, nil }))
 	state := newCollectionState(1)
 	// Old empty and compacted Views retain their own base coverage. There is
 	// deliberately no persisted F, and no lookup of current Segment revisions.
@@ -95,7 +95,7 @@ func TestTransformFrontierRecoveryIsDynamicAndVersionOrdered(t *testing.T) {
 
 func TestTransformCursorStaysWithResolvedManifest(t *testing.T) {
 	view := transformTestView(1, 50)
-	require.NoError(t, rebuildSegments(view, []LoadableSegment{{SegmentID: 10, VChannel: "v1", PartitionID: 1, ManifestVersion: 0, TransformStartAfterTimetick: 90}}))
+	require.NoError(t, newManager(t.Context(), nil, nil).rebuildSegmentBases(t.Context(), view, []LoadableSegment{{SegmentID: 10, VChannel: "v1", PartitionID: 1, ManifestVersion: 0, TransformStartAfterTimetick: 90}}))
 	partition := view.Shards[0].Partitions[0]
 	require.Equal(t, []int64{1}, partition.SegmentManifestVersions)
 	require.Equal(t, []uint64{50}, partition.SegmentTransformStartAfterTimeticks)
@@ -104,7 +104,7 @@ func TestTransformCursorStaysWithResolvedManifest(t *testing.T) {
 func TestTransformFrontierRetriesRecoveryWithoutMutatingPublishedViews(t *testing.T) {
 	ctx := context.Background()
 	ready := false
-	manager := newManager(ctx, nil, nil, WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+	manager := newManager(ctx, nil, nil, WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 		if !ready {
 			return nil, merr.WrapErrServiceNotReadyMsg("checkpoint is recovering")
 		}

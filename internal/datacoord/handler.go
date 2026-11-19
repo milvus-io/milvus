@@ -705,6 +705,10 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		Value: strconv.Itoa(int(collInfo.ConsistencyLevel)),
 	})
 
+	var shardInfos []*schemapb.CollectionShardInfo
+	if collInfo.Routing.Modulus != 0 {
+		shardInfos = collInfo.Routing.ShardInfos()
+	}
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			CollectionId:         collectionID,
@@ -720,6 +724,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			Properties:          common.CloneKeyValuePairs(collInfo.PropertyPairs),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: slices.Clone(collInfo.VChannelNames),
+			RoutingModulus:      collInfo.Routing.Modulus,
+			ShardBy:             collInfo.Routing.ShardBy,
+			ShardInfos:          shardInfos,
 		},
 		Indexes:  indexInfos,
 		Segments: segDescList,

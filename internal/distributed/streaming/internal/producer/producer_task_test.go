@@ -18,6 +18,7 @@ package producer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -307,6 +309,61 @@ func TestProduceGuardOrdinaryTxnExpiredReplaysWholeTransaction(t *testing.T) {
 	require.Equal(t, []message.TxnID{1, 2}, commitIDs)
 	require.Equal(t, len(msgs), bodyCount[1])
 	require.Equal(t, len(msgs), bodyCount[2])
+}
+
+// Exercise both retry loops: produceInternal must stop on Invalid, and
+// produceTxn must not start a new transaction or turn it into a CAS rebuild.
+func TestProduceGuardUnknownCommitOutcomeIsNotReplayed(t *testing.T) {
+	for _, cas := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cas=%t", cas), func(t *testing.T) {
+			msgs := []message.MutableMessage{createRealInsertMessage(t, "test-v"), createRealInsertMessage(t, "test-v")}
+			if cas {
+				msgs = []message.MutableMessage{createRealPartialUpdateInsertMessage(t, "test-v")}
+			}
+			p := mock_producer.NewMockProducer(t)
+			p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+			p.EXPECT().IsAvailable().Return(true).Maybe()
+			p.EXPECT().Close().Return().Maybe()
+			var mu sync.Mutex
+			var begins, bodies, commits int
+			p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				switch msg.MessageType() {
+				case message.MessageTypeBeginTxn:
+					begins++
+					return &types.AppendResult{TxnCtx: &message.TxnContext{TxnID: 1, Keepalive: time.Second}}, nil
+				case message.MessageTypeCommitTxn:
+					commits++
+					// The stream client reconstructs this exact code/cause from
+					// ProduceMessageResponse_Error; it has no retry projection.
+					return nil, status.New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, "commit outcome is unknown on split source")
+				default:
+					bodies++
+					return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+				}
+			}).Times(len(msgs) + 2)
+			rp := NewResumableProducer(func(context.Context, *handler.ProducerOptions) (producer.Producer, error) {
+				return p, nil
+			}, &ProducerOptions{PChannel: "test"})
+			defer rp.Close()
+			guard := &ProduceGuard{producer: rp, msgs: msgs}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			result, err := guard.produceTxn(ctx, msgs...)
+			require.Nil(t, result)
+			require.Error(t, err)
+			se := status.AsStreamingError(err)
+			require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, se.Code)
+			require.True(t, se.IsUnrecoverable())
+			require.False(t, se.IsTxnExpired())
+			require.False(t, se.IsPartialUpdateRetryableCAS())
+			require.False(t, se.IsShardFenced())
+			require.Equal(t, 1, begins)
+			require.Equal(t, len(msgs), bodies)
+			require.Equal(t, 1, commits)
+		})
+	}
 }
 
 func TestProduceGuardCommitExistingPartialUpdateTxnIsNotRewrapped(t *testing.T) {

@@ -54,9 +54,9 @@ type staticVChannelProvider struct {
 	err       error
 }
 
-func (p *staticVChannelProvider) GetCollectionVChannels(_ context.Context, collectionID int64) ([]string, error) {
+func (p *staticVChannelProvider) GetCollectionVChannels(_ context.Context, collectionID int64) ([]string, bool, error) {
 	if p.err != nil {
-		return nil, p.err
+		return nil, false, p.err
 	}
-	return append([]string(nil), p.vchannels[collectionID]...), nil
+	return append([]string(nil), p.vchannels[collectionID]...), false, nil
 }

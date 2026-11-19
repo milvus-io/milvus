@@ -31,6 +31,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | RefreshExternalCollection | Broadcast: CChannel + collection VChannels (AckSyncUp) | No | — |
+| SplitShard | Broadcast: source VChannel + target VChannels + CChannel, source appended first | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 
 ## Message Descriptions
 
@@ -54,6 +55,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. Target business VChannels advance Transform MVCC; the callback persists their TimeTicks with the job. Legacy CChannel-only messages remain consumable. Job completion separately waits for schema publication and QueryView handoff after applying segment results.
+
+- **SplitShard**: Splits one shard (the source VChannel) into two new shards (the target VChannels). It is the only message of a shard split, and it is replicated. Each copy carries the same header and body; what a copy does depends on the VChannel it is on. The copy on the source fences DML: it seals every growing segment and the VChannel refuses Insert and Delete from then on with `STREAMING_CODE_SHARD_FENCED`. Its TimeTick is the switch TimeTick of the split. The source stays a NORMAL VChannel and still admits unreplicable messages. A copy on a target is the genesis of that VChannel and is handled like CreateCollection. The copy on the CChannel orders the ack callback, which records the split in the collection metadata. See [Shard Management](../wal/shard-management.md#shard-split) and the [design](../../../design-docs/design_docs/20261109-shard_split_on_queryview.md).
 
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.

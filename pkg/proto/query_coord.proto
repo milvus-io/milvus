@@ -1247,6 +1247,10 @@ message ListLoadedSegmentsResponse {
 }
 
 message GetQueryViewLoadInfoRequest {
+    // Internal write admission proof; works for unloaded split collections.
+    bool split_admission_only = 4;
+    string split_source = 5;
+    string split_target = 6;
     common.MsgBase base = 1;
     int64 collectionID = 2;
     uint64 version = 3;
@@ -1259,6 +1263,9 @@ message GetQueryViewLoadInfoResponse {
     repeated int64 partitionIDs = 4;
     repeated view.LoadFieldConfig load_fields = 5; // Explicit preload set within required_fields; empty means none.
     repeated index.IndexInfo index_info_list = 6;
+    bool split_admission_allowed = 10;
+    uint64 shard_set_epoch = 8;
+    repeated view.DataViewOfShard serving_shards = 9;
     repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
 }
 

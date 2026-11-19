@@ -13,6 +13,7 @@ import (
 func (info *VChannelView) SchemaCleanupPlan(
 	replayFloor uint64,
 	segments []segment.SchemaReference,
+	readSchemas ...int32,
 ) (*streamingpb.VChannelMeta, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
@@ -57,6 +58,18 @@ func (info *VChannelView) SchemaCleanupPlan(
 		for i := len(schemas) - 1; i >= 0; i-- {
 			if schemas[i].GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
 				schemas[i].GetSchema().GetVersion() == ref.SchemaVersion {
+				keep[i] = true
+				break
+			}
+		}
+	}
+	// A split target can serve an empty g1 without local Segment metadata. A
+	// later g2 or placement repair must still capture that View's read schema
+	// after the write schema has advanced on the WAL.
+	for _, version := range readSchemas {
+		for i := len(schemas) - 1; i >= 0; i-- {
+			if schemas[i].GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+				schemas[i].GetSchema() != nil && schemas[i].GetSchema().GetVersion() == version {
 				keep[i] = true
 				break
 			}

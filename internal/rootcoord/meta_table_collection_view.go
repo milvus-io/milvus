@@ -84,6 +84,7 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 		DroppingPartitions: dropping,
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
+		Routing:            coll.Routing(),
 		Properties:         funcutil.KeyValuePair2Map(coll.Properties),
 		PropertyPairs:      coll.Properties,
 		DatabaseName:       dbName,

@@ -53,13 +53,12 @@ func TestSegmentResourceClosingPreservesQueryMVCCWait(t *testing.T) {
 		f := setupResourceTest(t, nil)
 		caughtUp := make(chan struct{})
 		close(caughtUp)
-		f.registerMock.Return(&fakeTransformRegistration{waitCh: caughtUp}, nil)
 		unregistered := make(chan struct{})
-		mockey.Mock((*fakeTransformRegistration).Unregister).To(func(*fakeTransformRegistration) {
-			close(unregistered)
-		}).Build()
+		f.registerMock.Return(&fakeTransformRegistration{
+			waitCh: caughtUp, onUnregister: func() { close(unregistered) },
+		}, nil)
 		entered, visible := make(chan struct{}), make(chan struct{})
-		mockey.Mock((*fakeTransformRegistration).WaitTransformVisible).To(func(_ *fakeTransformRegistration, ctx context.Context, _ uint64) error {
+		waitVisibleMock := mockey.Mock((*fakeTransformRegistration).WaitTransformVisible).To(func(_ *fakeTransformRegistration, ctx context.Context, _ uint64) error {
 			close(entered)
 			select {
 			case <-visible:
@@ -70,6 +69,7 @@ func TestSegmentResourceClosingPreservesQueryMVCCWait(t *testing.T) {
 				return ctx.Err()
 			}
 		}).Build()
+		defer waitVisibleMock.UnPatch()
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		acquired := make(chan struct{})

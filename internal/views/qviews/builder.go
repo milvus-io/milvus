@@ -14,15 +14,21 @@ import (
 func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryViewAtCoordBuilder {
 	m := view.GetMeta()
 	b := &QueryViewAtCoordBuilder{
-		collectionID: m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
+		shardSetEpoch: m.GetShardSetEpoch(),
+		collectionID:  m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
 		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
 		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
+		snapshotHistoryFloor:        m.GetSnapshotHistoryFloor(),
 		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
 		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
 		streamingNode: proto.Clone(view.GetStreamingNode()).(*viewpb.QueryViewOfStreamingNode),
 	}
 	if m.Control != nil {
 		b.control = proto.Clone(m.Control).(*viewpb.QueryViewControl)
+	}
+	if m.GetLineage() != nil {
+		// A placement copy reads the same streams as its source.
+		b.lineage = proto.Clone(m.GetLineage()).(*viewpb.QueryViewLineage)
 	}
 	for _, node := range view.GetQueryNode() {
 		partitions := make(map[int64][]int64)
@@ -48,11 +54,13 @@ func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {
 	control                     *viewpb.QueryViewControl
+	shardSetEpoch               uint64
 	collectionID                int64
 	replicaID                   int64
 	vchannel                    string
 	dataVersion                 DataVersion
 	queryVersion                int64
+	snapshotHistoryFloor        uint64
 	transformStartAfterTimetick uint64
 	loadInfoVersion             uint64
 	schemaVersion               int32
@@ -60,6 +68,8 @@ type QueryViewAtCoordBuilder struct {
 	segmentManifestVersions     map[int64]int64
 	streamingNode               *viewpb.QueryViewOfStreamingNode
 	partitionStatsVersions      map[int64]int64
+	// lineage is nil for every shard that is not a split source being served.
+	lineage *viewpb.QueryViewLineage
 }
 
 func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfCollection, vchannel string) *QueryViewAtCoordBuilder {
@@ -84,11 +94,14 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		}
 	}
 	return &QueryViewAtCoordBuilder{
+		shardSetEpoch:               dataView.GetShardSetEpoch(),
+		lineage:                     shardView.GetLineage(),
 		collectionID:                dataView.CollectionId,
 		schemaVersion:               dataView.GetSchemaVersion(),
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),
+		snapshotHistoryFloor:        shardView.GetSnapshotHistoryFloor(),
 		transformStartAfterTimetick: min(shardView.GetGrowingTransformStartAfterTimetick(), shardView.GetCompactedTransformStartAfterTimetick()),
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
@@ -101,9 +114,12 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 // Maps are immutable after handing them to the builder; the builder only reads
 // them and never exposes them in the resulting protobuf.
 type QueryViewBuilderMetadata struct {
+	ShardSetEpoch               uint64
+	Lineage                     *viewpb.QueryViewLineage
 	CollectionID                int64
 	DataVersion                 DataVersion
 	SchemaVersion               int32
+	SnapshotHistoryFloor        uint64
 	TransformStartAfterTimetick uint64
 	SegmentManifestVersions     map[int64]int64
 	PartitionStatsVersions      map[int64]int64
@@ -113,9 +129,11 @@ type QueryViewBuilderMetadata struct {
 // when a planner already owns native immutable metadata.
 func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilderMetadata) *QueryViewAtCoordBuilder {
 	return &QueryViewAtCoordBuilder{
+		shardSetEpoch: metadata.ShardSetEpoch, lineage: metadata.Lineage,
 		collectionID: metadata.CollectionID, replicaID: id.ReplicaID, vchannel: id.VChannel,
 		dataVersion: metadata.DataVersion, queryVersion: 1, schemaVersion: metadata.SchemaVersion,
 		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
+		snapshotHistoryFloor:        metadata.SnapshotHistoryFloor,
 		segmentManifestVersions:     metadata.SegmentManifestVersions,
 		partitionStatsVersions:      metadata.PartitionStatsVersions,
 	}
@@ -152,6 +170,18 @@ func (b *QueryViewAtCoordBuilder) SetPreparationPriority(priority int32) *QueryV
 	return b
 }
 
+// SetLineage marks the view as one of a split source shard: its segments also
+// replay the TransformLog of the given vchannels from switchTimetick. Without
+// vchannels the view carries no lineage.
+func (b *QueryViewAtCoordBuilder) SetLineage(vchannels []string, switchTimetick uint64) *QueryViewAtCoordBuilder {
+	if len(vchannels) == 0 {
+		b.lineage = nil
+		return b
+	}
+	b.lineage = &viewpb.QueryViewLineage{Vchannels: slices.Clone(vchannels), SwitchTimetick: switchTimetick}
+	return b
+}
+
 func (b *QueryViewAtCoordBuilder) SetAssignments(assignments map[int64]map[int64][]int64) *QueryViewAtCoordBuilder {
 	b.assignments = assignments
 	return b
@@ -159,20 +189,25 @@ func (b *QueryViewAtCoordBuilder) SetAssignments(assignments map[int64]map[int64
 
 func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 	meta := &viewpb.QueryViewMeta{
-		CollectionId: b.collectionID,
-		ReplicaId:    b.replicaID,
-		Vchannel:     b.vchannel,
+		ShardSetEpoch: b.shardSetEpoch,
+		CollectionId:  b.collectionID,
+		ReplicaId:     b.replicaID,
+		Vchannel:      b.vchannel,
 		Version: &viewpb.QueryViewVersion{
 			DataVersion:  b.dataVersion.IntoProto(),
 			QueryVersion: b.queryVersion,
 		},
 		State:                       viewpb.QueryViewState_QueryViewStatePreparing,
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
+		SnapshotHistoryFloor:        b.snapshotHistoryFloor,
 		LoadInfoVersion:             b.loadInfoVersion,
 		SchemaVersion:               b.schemaVersion,
 	}
 	if b.control != nil {
 		meta.Control = proto.Clone(b.control).(*viewpb.QueryViewControl)
+	}
+	if b.lineage != nil {
+		meta.Lineage = proto.Clone(b.lineage).(*viewpb.QueryViewLineage)
 	}
 
 	nodeIDs := make([]int64, 0, len(b.assignments))

@@ -19,6 +19,7 @@ package metacache
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -36,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -73,6 +75,14 @@ type Cache interface {
 	// ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID typeutil.UniqueID) []string
+	// RefreshCollectionByID drops the cached entry of one collection so that
+	// its next lookup describes it again. It is not an invalidation: it does
+	// not drain in-flight fills (see MetaCache.fillMu), so it never waits for a
+	// describe of any other collection, and a fill of this one that read an
+	// older snapshot may still write it back afterwards. For a caller that
+	// learned its entry is stale from a refusal it retries -- a write refused
+	// by a shard split's fence -- rather than from a DDL broadcast.
+	RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID)
 	// InvalidateCollectionMeta atomically applies the O(1) collection-cache
 	// invalidations carried by one expiration request: resolution by real name
 	// or alias, eviction by forwarded id, and optional alias-hint removal.
@@ -123,6 +133,126 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
+	// The routing of a collection that was split, as the coordinator reports
+	// it: the residues every vchannel owns and the modulus they are taken
+	// against. Empty on a collection that was never split. DescribeCollection
+	// returns them as they are; the write path routes by SplitRouting, which is
+	// derived from them.
+	ShardInfos     []*schemapb.CollectionShardInfo
+	RoutingModulus uint64
+	ShardBy        string
+	// SplitRouting is the routing of a collection that has been split (a
+	// non-zero RoutingModulus), derived once per describe so the write path does
+	// no per-request derivation. Nil for a collection that has never been split,
+	// which keeps the legacy hash % shardNum placement.
+	SplitRouting *SplitRouting
+}
+
+// SplitRouting is how the writes of a split collection are placed.
+type SplitRouting struct {
+	// Table maps the residue of a primary key to the vchannel that owns it.
+	// Nil when the routing metadata is malformed; Err then says why, and the
+	// write path refuses the collection rather than place its rows by position.
+	Table *routing.Table
+	Err   error
+	// Sources lists the split sources of the collection, which take no write
+	// but whose idempotency window may still answer for a keyed insert they
+	// took before their fence. RootCoord reports each one as a shard info in
+	// state ShardSplitting, next to the shards that take DML; a chain of
+	// splits lists every source of the chain. Empty means only that the
+	// describe named none.
+	Sources []SplitSource
+}
+
+// SplitSource is a split source of a collection as its describe names it.
+type SplitSource struct {
+	VChannel string
+	// Buckets are the residues, at the routing modulus of the collection, of
+	// the keys the source owned: a key of another residue was never written
+	// there. Empty when the shard info carries none or carries residues that
+	// are not below the modulus: the source may then hold any key.
+	Buckets []uint64
+}
+
+// MayHold reports whether the source can hold a key of the residue, taken at
+// the routing modulus of the collection.
+func (s SplitSource) MayHold(residue uint64) bool {
+	return len(s.Buckets) == 0 || slices.Contains(s.Buckets, residue)
+}
+
+// NewSplitRouting derives the routing of a split collection from its describe
+// response, or returns nil for one that was never split.
+//
+// The shard infos in state ShardNormal are the shards that take DML: they
+// must name exactly the vchannel list, in order, and their residues must tile
+// the modulus. The shard infos in state ShardSplitting are the split sources
+// (see SplitRouting.Sources): they are not in the vchannel list and never take
+// part in the routing. Anything else is malformed metadata.
+func NewSplitRouting(collection *milvuspb.DescribeCollectionResponse) *SplitRouting {
+	if collection.GetRoutingModulus() == 0 {
+		return nil
+	}
+	live := make([]*schemapb.CollectionShardInfo, 0, len(collection.GetShardInfos()))
+	var splitting []*schemapb.CollectionShardInfo
+	for _, info := range collection.GetShardInfos() {
+		if info.GetState() == schemapb.ShardState_ShardSplitting {
+			splitting = append(splitting, info)
+			continue
+		}
+		live = append(live, info)
+	}
+	r, err := routing.RoutingFromShardInfos(collection.GetRoutingModulus(), collection.GetShardBy(), live)
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	if !slices.Equal(r.VChannels(), collection.GetVirtualChannelNames()) {
+		return &SplitRouting{Err: merr.WrapErrServiceInternalMsg(
+			"the shard infos name the vchannels %v, the collection lists %v", r.VChannels(), collection.GetVirtualChannelNames())}
+	}
+	table, err := r.Table()
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	sources, err := splitSourcesOf(splitting, r.VChannels(), table.Modulus())
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	return &SplitRouting{Table: table, Sources: sources}
+}
+
+// splitSourcesOf reads the split sources from their shard infos. A source
+// with no vchannel, named twice, or also listed as a shard that takes DML is
+// malformed metadata. Residues that are not all below the modulus are
+// dropped rather than refused: they only narrow which sources a keyed insert
+// asks, and asking one more source is safe.
+func splitSourcesOf(infos []*schemapb.CollectionShardInfo, live []string, modulus uint64) ([]SplitSource, error) {
+	if len(infos) == 0 {
+		return nil, nil
+	}
+	sources := make([]SplitSource, 0, len(infos))
+	seen := make(map[string]struct{}, len(infos))
+	for i, info := range infos {
+		vchannel := info.GetVchannelName()
+		if vchannel == "" {
+			return nil, merr.WrapErrServiceInternalMsg("split source shard info %d carries no vchannel name", i)
+		}
+		if _, ok := seen[vchannel]; ok {
+			return nil, merr.WrapErrServiceInternalMsg("split source %s is listed twice", vchannel)
+		}
+		seen[vchannel] = struct{}{}
+		if slices.Contains(live, vchannel) {
+			return nil, merr.WrapErrServiceInternalMsg("vchannel %s is listed both as a split source and as a shard that takes DML", vchannel)
+		}
+		buckets := slices.Clone(info.GetHashRouting().GetBuckets())
+		for _, bucket := range buckets {
+			if bucket >= modulus {
+				buckets = nil
+				break
+			}
+		}
+		sources = append(sources, SplitSource{VChannel: vchannel, Buckets: buckets})
+	}
+	return sources, nil
 }
 
 type DatabaseInfo struct {
@@ -186,8 +316,8 @@ type MetaCache struct {
 
 	mu sync.RWMutex
 
-	sfGlobal conc.Singleflight[*CollectionInfo]
-	sfDB     conc.Singleflight[*DatabaseInfo]
+	sfGlobal cacheFillGroup[*CollectionInfo]
+	sfDB     cacheFillGroup[*DatabaseInfo]
 
 	idStart int64
 	idCount int64
@@ -221,11 +351,11 @@ type MetaCache struct {
 	// callbacks release the meta lock before the expiration fan-out, so a fill's
 	// describe RPC is never blocked by the DDL whose invalidation is waiting on
 	// that fill.
-	fillMu sync.RWMutex
+	fillMu fillBarrier
 
 	// testHookBeforeSingleflightReturn, when non-nil (tests only), runs after a
 	// collection fill has written back but before its singleflight callback
-	// returns. fillMu.RLock is still held across this hook and the subsequent
+	// returns. The fill read permit is still held across this hook and the subsequent
 	// singleflight cleanup.
 	testHookBeforeSingleflightReturn func()
 
@@ -242,7 +372,7 @@ type MetaCache struct {
 	// has no name filter), so a separate per-partition cache duplicated this data.
 	//
 	// A plain map guarded by m.mu and ordered against invalidations by fillMu,
-	// exactly like the primary store: a fill writes it back under fillMu.RLock,
+	// exactly like the primary store: a fill writes it back with a read permit,
 	// an invalidation deletes it under fillMu.Lock after draining in-flight
 	// fills. The list values are immutable once built and are handed out by
 	// pointer (Go's GC keeps a returned list alive independent of map
@@ -251,7 +381,7 @@ type MetaCache struct {
 	// delete is safe even while a request still routes over a list it already
 	// read.
 	partitionCache   map[string]*PartitionInfos
-	sfPartitionCache conc.Singleflight[*PartitionInfos]
+	sfPartitionCache cacheFillGroup[*PartitionInfos]
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -261,6 +391,7 @@ type MetaCache struct {
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	metaCache := &MetaCache{
 		mixCoord:       mixCoord,
+		fillMu:         newFillBarrier(),
 		dbInfo:         map[string]*DatabaseInfo{},
 		aliasInfo:      map[string]map[string]string{},
 		collections:    map[typeutil.UniqueID]*CollectionInfo{},
@@ -449,11 +580,15 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		UpdateTimestamp:       collection.UpdateTimestamp,
 		CollectionTTL:         GetCollectionTTL(schemaInfo.GetProperties()),
 		VChannels:             collection.VirtualChannelNames,
+		ShardInfos:            collection.GetShardInfos(),
+		RoutingModulus:        collection.GetRoutingModulus(),
+		ShardBy:               collection.GetShardBy(),
 		PChannels:             collection.PhysicalChannelNames,
 		NumPartitions:         collection.NumPartitions,
 		ShardsNum:             collection.ShardsNum,
 		Aliases:               collection.Aliases,
 		Properties:            collection.Properties,
+		SplitRouting:          NewSplitRouting(collection),
 	}
 }
 
@@ -494,22 +629,15 @@ func (m *MetaCache) updateWithSingleflight(
 	collectionName string,
 	collectionID typeutil.UniqueID,
 ) (*CollectionInfo, error) {
-	// The read lock must cover the entire singleflight.Do call, not only update().
-	// singleflight keeps a completed callback in its map until its own cleanup
-	// runs. Releasing fillMu inside update would let an invalidation evict the
-	// write-back while a post-invalidation caller could still join that old flight
-	// and receive its pre-DDL result directly, bypassing the cache maps.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-
-	collection, err, _ := m.sfGlobal.Do(key, func() (*CollectionInfo, error) {
+	// Draining a flight includes removal of its completed result. Otherwise
+	// a caller after invalidation could still join the pre-DDL flight.
+	return m.sfGlobal.Do(ctx, m.fillMu, key, func() (*CollectionInfo, error) {
 		info, err := m.update(ctx, database, collectionName, collectionID)
 		if h := m.testHookBeforeSingleflightReturn; h != nil {
 			h()
 		}
 		return info, err
 	})
-	return collection, err
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*CollectionInfo, error) {
@@ -852,9 +980,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	// Keep the fill lock through singleflight cleanup, not only its callback.
 	// Otherwise a partition invalidation can finish after the callback unlocks
 	// while a new caller still joins the completed pre-invalidation flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*PartitionInfos, error) {
+	partitionsInfo, err := m.sfPartitionCache.Do(ctx, m.fillMu, key, func() (*PartitionInfos, error) {
 		// Partition-key status is fixed at creation, so the resolved schema answers
 		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
 		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
@@ -879,7 +1005,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		//
 		// Only cache the list while the collection's PRIMARY entry is still live.
 		// The primary can be gone here in two ways: an invalidation in the
-		// resolve-to-lock gap (collectionID was resolved before fillMu.RLock was
+		// resolve-to-lock gap (collectionID was resolved before the read permit was
 		// taken), or RemoveDatabase's batched primary-store walk, which runs after
 		// it releases fillMu and so can overlap this RPC. Either way the
 		// collection may still exist and ShowPartitions succeeds, but writing
@@ -1167,6 +1293,19 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID type
 	return m.removeCollectionByID(ctx, collectionID)
 }
 
+// RefreshCollectionByID evicts the collection's entry under m.mu alone. A
+// racing fill is tolerated as evictCollectionEntryLocked allows: a fill writes
+// its entry and hints together under m.mu, so it either lands before the
+// eviction and is removed with its hints, or after it and stays -- at worst a
+// snapshot as old as the one just dropped, which the caller's next refusal
+// refreshes again. Taking fillMu instead would make every retry of every
+// refused write wait for the slowest describe in flight on the proxy.
+func (m *MetaCache) RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeCollectionByID(ctx, collectionID)
+}
+
 // evictCollectionEntryLocked is THE single eviction routine: it removes the
 // primary entry and everything the entry owns, all O(1)-reachable from the
 // entry in hand (no background GC exists):
@@ -1326,9 +1465,7 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*Data
 	// Keep the fill lock through singleflight cleanup, matching collection and
 	// partition fills. RemoveDatabase/RemoveDatabaseInfo must not finish while a
 	// new caller can still join a completed pre-invalidation database flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-	dbInfo, err, _ := m.sfDB.Do(database, func() (*DatabaseInfo, error) {
+	dbInfo, err := m.sfDB.Do(ctx, m.fillMu, database, func() (*DatabaseInfo, error) {
 		resp, err := m.describeDatabase(ctx, database)
 		if err != nil {
 			return nil, err
@@ -1445,7 +1582,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 // pre-invalidation flight.
 func (m *MetaCache) stalePartitionCacheLocked(collectionID typeutil.UniqueID) {
 	key := buildPartitionCacheKey(collectionID)
-	m.sfPartitionCache.Forget(key)
+	m.sfPartitionCache.flights.Delete(key)
 	delete(m.partitionCache, key)
 }
 

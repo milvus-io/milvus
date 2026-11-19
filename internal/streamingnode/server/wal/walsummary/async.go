@@ -56,13 +56,24 @@ func (m *Manager) flushBacklog(underPressure bool) {
 // InitLastAcked seeds the already published global checkpoint's logical frontier.
 func (m *Manager) InitLastAcked(timetick uint64) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.advanceLastAckedLocked(timetick)
+	initialize := m.manifest.Coverage == nil && m.manifest.InitialReplayTimeTick == nil && len(m.pendingSealed) == 0
+	if initialize {
+		// Persist this once even when no record ever creates a chunk. A later
+		// checkpoint does not mean the intervening empty history was truncated.
+		m.manifest.InitialReplayTimeTick = proto.Uint64(timetick)
+		m.manifestVersion++
+		m.initialReplayVersion = m.manifestVersion
+	}
 	if m.manifest.Coverage == nil && len(m.pendingSealed) == 0 {
-		// Physical replay may overlap the published checkpoint. These records
-		// predate Summary's initial coverage and must not enter its first chunk.
-		m.sealedThrough = max(m.sealedThrough, timetick)
+		m.sealedThrough = max(m.sealedThrough, m.manifest.GetInitialReplayTimeTick())
+		// Physical WAL replay may overlap the published checkpoint. These
+		// records are already durable and must not be staged a second time.
 		m.restoredTimeTick = max(m.restoredTimeTick, timetick)
+	}
+	m.mu.Unlock()
+	if initialize {
+		m.scheduleManifest()
 	}
 }
 
@@ -80,6 +91,11 @@ func (m *Manager) advanceLastAckedLocked(timetick uint64) {
 }
 
 func (m *Manager) refreshLastAckedLocked() {
+	// Until the original empty-history boundary is durable, a crash could
+	// recreate it at a later checkpoint and lose proof of the empty prefix.
+	if m.cfg.Store != nil && m.publishedVersion < m.initialReplayVersion {
+		return
+	}
 	// Current-term data is discoverable only after its first manifest PUT.
 	if m.manifestPublished {
 		m.advanceLastAckedLocked(m.manifest.GetCoverage().GetEndTimeTick())
