@@ -228,6 +228,15 @@ func TestImportResolvesSourceOnEachDispatch(t *testing.T) {
 	testBackupSourceOnEachDispatch(t, newImportWriterContextTask, "CreateImport")
 }
 
+func requireImportKeysets(t *testing.T, want, got []*commonpb.KeyValuePair) {
+	t.Helper()
+	require.Len(t, got, len(want))
+	for i, entry := range want {
+		require.Equal(t, entry.GetKey(), got[i].GetKey())
+		require.Equal(t, entry.GetValue(), got[i].GetValue())
+	}
+}
+
 func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, rpc string) {
 	t.Helper()
 	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
@@ -241,7 +250,7 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 		req := args.Get(1).(interface {
 			GetPluginContext() []*commonpb.KeyValuePair
 		})
-		require.Equal(t, []*commonpb.KeyValuePair{
+		requireImportKeysets(t, []*commonpb.KeyValuePair{
 			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="},
 			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="},
 		}, req.GetPluginContext())
@@ -429,7 +438,7 @@ func TestBackupImportPluginContexts(t *testing.T) {
 						req := args.Get(1).(interface {
 							GetPluginContext() []*commonpb.KeyValuePair
 						})
-						require.Equal(t, tc.want, req.GetPluginContext())
+						requireImportKeysets(t, tc.want, req.GetPluginContext())
 					}).Return(nil).Once()
 
 					task.CreateTaskOnWorker(42, cluster)
