@@ -227,6 +227,10 @@ func (v *BasePlanVisitor) VisitFieldReference(ctx *FieldReferenceContext) interf
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTextField(ctx *TextFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
 	return v.VisitChildren(ctx)
 }

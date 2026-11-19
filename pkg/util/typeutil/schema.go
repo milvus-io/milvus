@@ -2639,8 +2639,8 @@ func GetTotalFieldsNum(schema *schemapb.CollectionSchema) int {
 // GetAllFieldSchemas returns every FieldSchema contained
 // in CollectionSchema, including those under StructArrayField.
 func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
-	all := make([]*schemapb.FieldSchema, 0, len(schema.Fields)+5)
-	all = append(all, schema.Fields...)
+	all := make([]*schemapb.FieldSchema, 0, len(schema.GetFields())+5)
+	all = append(all, schema.GetFields()...)
 	for _, structField := range schema.GetStructArrayFields() {
 		all = append(all, structField.Fields...)
 	}

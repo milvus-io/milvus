@@ -250,6 +250,9 @@ class FieldMeta {
     }
 
     bool
+    is_varchar_array() const;
+
+    bool
     enable_match() const;
 
     bool

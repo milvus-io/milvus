@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -90,8 +91,10 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 		if typeutil.IsVectorType(field.GetDataType()) {
 			vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
 		}
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if h.EnableMatch() {
+		if schemautil.BuildTextStats(field) {
 			r.textStatsFieldIDs = append(r.textStatsFieldIDs, field.GetFieldID())
 		}
 		if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {

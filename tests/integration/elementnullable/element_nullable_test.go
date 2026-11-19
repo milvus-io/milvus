@@ -1039,17 +1039,26 @@ func (s *ElementNullableSuite) TestScalarArrayMatch() {
 		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
 		TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8")},
 	})
-	s.Require().NoError(merr.Error(s.create(ctx, schema)))
-	status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: name, FieldName: "legacy", IndexName: "legacy_inverted",
-		ExtraParams: []*commonpb.KeyValuePair{kv(common.IndexTypeKey, "INVERTED")},
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name: "tags", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8"), kv(common.MaxLengthKey, "64"),
+			kv(common.EnableAnalyzerKey, "true"), kv(common.EnableMatchKey, "true")},
 	})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	s.WaitForIndexBuilt(ctx, name, "legacy")
+	s.Require().NoError(merr.Error(s.create(ctx, schema)))
+	for _, field := range []string{"legacy", "tags"} {
+		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			CollectionName: name, FieldName: field, IndexName: field + "_inverted",
+			ExtraParams: []*commonpb.KeyValuePair{kv(common.IndexTypeKey, "INVERTED")},
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForIndexBuilt(ctx, name, field)
+	}
 	s.indexAndLoad(ctx, name)
 	arr := scalarField("scores", 110, longRow([]int64{7, 7}, true, false, true), longRow(nil))
 	typeutil.SetFieldDataValidData(arr, []bool{true, true, false})
-	s.Require().NoError(s.insert(ctx, name, append(insertFields(), arr)))
+	tags := scalarField("tags", 111, stringRow("new", "york"), stringRow("new york", "new york"))
+	typeutil.SetFieldDataValidData(tags, []bool{true, true, false})
+	s.Require().NoError(s.insert(ctx, name, append(insertFields(), arr, tags)))
 	for _, phase := range []string{"growing", "sealed"} {
 		if phase == "sealed" {
 			s.flushAndReload(ctx, name)
@@ -1068,6 +1077,10 @@ func (s *ElementNullableSuite) TestScalarArrayMatch() {
 			{"MATCH_ANY(legacy, 1 < $ <= 3)", []int64{3}},
 			{"MATCH_ANY(legacy, $ is not null)", []int64{1, 3}},
 			{"MATCH_ANY(legacy, $ is null)", nil},
+			{`MATCH_ANY(tags, PHRASE_MATCH($, "new york", 99))`, []int64{2}},
+			{`MATCH_EXACT(tags, TEXT_MATCH($, "new york", minimum_should_match=2), threshold=2)`, []int64{2}},
+			{`MATCH_ANY(tags, $ == "new" && TEXT_MATCH($, "york"))`, nil},
+			{`not MATCH_ANY(tags, PHRASE_MATCH($, "new york"))`, []int64{1}},
 		} {
 			result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 				CollectionName: name, Expr: tc.filter, OutputFields: []string{"pk"},
