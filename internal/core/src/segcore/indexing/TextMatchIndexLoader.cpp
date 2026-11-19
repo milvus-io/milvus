@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "segcore/indexing/TextMatchIndexLoader.h"
-#include "common/Utils.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -97,8 +96,7 @@ TextMatchIndexLoader::TextMatchIndexLoader(
     const auto& schema = file_manager_context_.fieldDataMeta.field_schema;
     const bool elements =
         schema.data_type() == proto::schema::DataType::Array &&
-        schema.element_type() == proto::schema::DataType::VarChar &&
-        IsStructSubField(schema.name());
+        schema.element_type() == proto::schema::DataType::VarChar;
     const auto value_type = elements
                                 ? DataType::VARCHAR
                                 : static_cast<DataType>(schema.data_type());

@@ -359,7 +359,10 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
     }
 }
 
-TEST_F(BuildSessionTest, StructTextRoundTripsElementDocuments) {
+class ArrayTextBuildSessionTest : public BuildSessionTest,
+                                  public ::testing::WithParamInterface<bool> {};
+
+TEST_P(ArrayTextBuildSessionTest, RoundTripsElementDocuments) {
     const std::vector<std::vector<std::string>> values{
         {"new", "york"}, {}, {"new york", "new york", "other"}};
     auto info = BuildInfo(schemapb::DataType::Array,
@@ -367,7 +370,7 @@ TEST_F(BuildSessionTest, StructTextRoundTripsElementDocuments) {
                           values.size(),
                           3);
     auto* schema = info.mutable_field_schema();
-    schema->set_name("reviews[body]");
+    schema->set_name(GetParam() ? "tags" : "reviews[body]");
     schema->set_element_type(schemapb::DataType::VarChar);
     for (const char* key : {"enable_analyzer", "enable_match"}) {
         auto* parameter = schema->add_type_params();
@@ -375,7 +378,12 @@ TEST_F(BuildSessionTest, StructTextRoundTripsElementDocuments) {
         parameter->set_value("true");
     }
     info.add_insert_files(InsertPath());
-    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::TextIndex);
+    // DataNode requests the text family through the generic scalar build API.
+    auto* text_param = info.add_index_params();
+    text_param->set_key("is_text_match");
+    text_param->set_value("true");
+    auto prepared = AdaptBuildIndexInfo(
+        info, GetParam() ? BuildPurpose::ScalarIndex : BuildPurpose::TextIndex);
     ASSERT_EQ(prepared.request.family, index::families::kText);
     auto data = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
     std::vector<Array> rows;
@@ -417,6 +425,10 @@ TEST_F(BuildSessionTest, StructTextRoundTripsElementDocuments) {
     EXPECT_TRUE(hits[2]);
     EXPECT_TRUE(hits[3]);
 }
+
+INSTANTIATE_TEST_SUITE_P(FieldShapes,
+                         ArrayTextBuildSessionTest,
+                         ::testing::Bool());
 
 TEST_F(BuildSessionTest, EmptyNestedSourceSkipsPersistence) {
     constexpr int64_t row_count = 8;

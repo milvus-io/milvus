@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -396,6 +397,9 @@ func validateArrayOfVectorFieldSchema(collectionName string, field *schemapb.Fie
 }
 
 func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
+	if err := schemautil.ValidateVarCharArrayTextMatch(field); err != nil {
+		return err
+	}
 	if field.GetTypeSchema() != nil {
 		rootCapacity, err := validateNestedArrayTypeParams(
 			collectionName, field.GetName(), field.GetTypeSchema())

@@ -1054,16 +1054,16 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 // text-match-enabled string column, and parse the query literal or template.
 func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parser.IExprContext, opName string, argName string) (*planpb.ColumnInfo, *planpb.GenericValue, string, bool, error) {
 	var columnInfo *planpb.ColumnInfo
-	if isValidStructSubField(identifier) {
+	if identifier == "$" || isValidStructSubField(identifier) {
 		if !v.inMatchPredicate {
-			return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("%s with a struct sub-field requires MATCH_*", opName)
+			return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("%s on an array element requires MATCH_*", opName)
 		}
 		info, err := v.getColumnInfoFromStructSubField(identifier)
 		if err != nil {
 			return nil, nil, "", false, err
 		}
 		if info.GetElementType() != schemapb.DataType_VarChar {
-			return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s requires a VarChar struct sub-field", opName)
+			return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s requires a VarChar element", opName)
 		}
 		columnInfo = info
 	} else {

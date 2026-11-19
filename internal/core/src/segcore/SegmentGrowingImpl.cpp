@@ -50,7 +50,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
-#include "common/StructTextValues.h"
+#include "common/ArrayTextValues.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/ColumnarArrayChunkBuilder.h"
@@ -1268,13 +1268,13 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
         }
     };
 
-    if (field_meta.is_struct_varchar()) {
+    if (field_meta.is_varchar_array()) {
         const auto feed = [&](const auto* column) {
             for (auto offset = row_begin; offset < row_end;
                  offset += batch_rows) {
                 const auto rows =
                     std::min<int64_t>(batch_rows, row_end - offset);
-                StructTextValues documents;
+                ArrayTextValues documents;
                 FixedVector<bool> present;
                 if (field_meta.is_nullable()) {
                     present.resize(rows);
@@ -3965,7 +3965,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
                 continue;
             }
 
-            if (appender->caps.text_match && !field_meta.is_struct_varchar()) {
+            if (appender->caps.text_match && !field_meta.is_varchar_array()) {
                 const bool has_default = field_meta.default_value().has_value();
                 AssertInfo(has_default || field_meta.is_nullable(),
                            "new non-nullable text field {} has no default",

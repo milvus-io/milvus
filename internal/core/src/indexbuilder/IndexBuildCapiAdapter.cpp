@@ -368,10 +368,8 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
         AssertInfo(IsStringDataType(field_type) ||
                        (field_type == DataType::ARRAY &&
                         info.field_schema().element_type() ==
-                            proto::schema::DataType::VarChar &&
-                        IsStructSubField(info.field_schema().name())),
-                   "text index build requires a string field or VarChar struct "
-                   "sub-field");
+                            proto::schema::DataType::VarChar),
+                   "text index build requires a string field or VarChar array");
     }
 
     auto params = AdaptParams(info);

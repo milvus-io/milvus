@@ -193,7 +193,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
 	// version, so only a new schema is checked for them.
 	if !t.preserveFieldID {
-		if err := schemautil.ValidateStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+		if err := validateCollectionArrayTextMatch(schema); err != nil {
 			return err
 		}
 	}
@@ -556,7 +556,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// The target schema is new input; validateSchema skips this check once
 	// preserveFieldID is set below.
-	if err := schemautil.ValidateStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+	if err := validateCollectionArrayTextMatch(schema); err != nil {
 		return err
 	}
 	t.preserveFieldID = true
@@ -968,6 +968,15 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 		return merr.WrapErrParameterInvalidMsg("multi analyzer must set default analyzer for all unknown value")
 	}
 	return nil
+}
+
+func validateCollectionArrayTextMatch(schema *schemapb.CollectionSchema) error {
+	for _, field := range schema.GetFields() {
+		if err := schemautil.ValidateVarCharArrayTextMatch(field); err != nil {
+			return err
+		}
+	}
+	return schemautil.ValidateStructSubFieldsTextMatch(schema.GetStructArrayFields())
 }
 
 func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {

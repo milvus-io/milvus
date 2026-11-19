@@ -26,29 +26,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ValidateVarCharArrayTextMatch checks text options on newly supplied VarChar arrays.
+func ValidateVarCharArrayTextMatch(field *schemapb.FieldSchema) error {
+	if field.GetDataType() != schemapb.DataType_Array || field.GetElementType() != schemapb.DataType_VarChar {
+		return nil
+	}
+	var match, analyzer bool
+	for _, kv := range field.GetTypeParams() {
+		if kv.GetKey() != common.EnableMatchKey && kv.GetKey() != common.EnableAnalyzerKey {
+			continue
+		}
+		value, err := strconv.ParseBool(kv.GetValue())
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid %s on field %s", kv.GetKey(), field.GetName())
+		}
+		if kv.GetKey() == common.EnableMatchKey {
+			match = value
+		} else {
+			analyzer = value
+		}
+	}
+	if match && !analyzer {
+		return merr.WrapErrParameterInvalidMsg("field %s with enable_match requires enable_analyzer", field.GetName())
+	}
+	return nil
+}
+
 // ValidateStructSubFieldTextMatch accepts text parameters on scalar VarChar
 // leaves. A nested Array has its own type schema and cannot be a text document.
 func ValidateStructSubFieldTextMatch(field *schemapb.FieldSchema) error {
 	if field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar {
-		var match, analyzer bool
-		for _, kv := range field.GetTypeParams() {
-			if kv.GetKey() != common.EnableMatchKey && kv.GetKey() != common.EnableAnalyzerKey {
-				continue
-			}
-			value, err := strconv.ParseBool(kv.GetValue())
-			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("invalid %s on struct sub-field %s", kv.GetKey(), field.GetName())
-			}
-			if kv.GetKey() == common.EnableMatchKey {
-				match = value
-			} else {
-				analyzer = value
-			}
-		}
-		if match && !analyzer {
-			return merr.WrapErrParameterInvalidMsg("struct sub-field %s with enable_match requires enable_analyzer", field.GetName())
-		}
-		return nil
+		return ValidateVarCharArrayTextMatch(field)
 	}
 	params := [][]*commonpb.KeyValuePair{field.GetTypeParams()}
 	for node := field.GetTypeSchema(); node != nil; node = node.GetArrayElement() {

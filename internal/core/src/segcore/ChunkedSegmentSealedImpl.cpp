@@ -61,7 +61,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
-#include "common/StructTextValues.h"
+#include "common/ArrayTextValues.h"
 #include "common/ColumnarArrayChunkBuilder.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
@@ -5923,7 +5923,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                "text index field {} has negative row count",
                field_id.get());
     const auto declared_row_count = static_cast<size_t>(row_count);
-    const bool elements = field_meta.is_struct_varchar();
+    const bool elements = field_meta.is_varchar_array();
     size_t document_count = elements ? 0 : declared_row_count;
     index::TextIndexBuildParams params{
         .field_name = unique_id,
@@ -5959,19 +5959,18 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
             if (elements) {
                 auto cursor = column->Scan(op_ctx, scan_options);
-                AssertInfo(cursor != nullptr,
-                           "struct text scan is unsupported");
+                AssertInfo(cursor != nullptr, "array text scan is unsupported");
                 ScanBatch batch;
                 size_t rows = 0;
                 while (cursor->Next(kTextLobIndexBuildBatchSize,
                                     ScanReadMode::DataAndValidity,
                                     &batch)) {
                     CheckCancellation(
-                        op_ctx, id_, field_id.get(), "build struct text index");
+                        op_ctx, id_, field_id.get(), "build array text index");
                     AssertInfo(batch.row_id_start == rows && batch.size > 0 &&
                                    batch.size <= declared_row_count - rows,
-                               "invalid struct text scan range");
-                    StructTextValues documents;
+                               "invalid array text scan range");
+                    ArrayTextValues documents;
                     for (int64_t i = 0; i < batch.size; ++i) {
                         if (batch.validity && !batch.validity[i]) {
                             continue;
@@ -5991,7 +5990,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     rows += batch.size;
                 }
                 AssertInfo(rows == declared_row_count,
-                           "incomplete struct text scan");
+                           "incomplete array text scan");
             } else if (field_meta.get_data_type() == DataType::TEXT) {
                 const auto* path_map = &target_runtime->text_lob_paths;
                 auto it = path_map->find(field_id);
@@ -6178,7 +6177,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     target_runtime->element_offsets_by_field.find(field_id);
                 AssertInfo(
                     it != target_runtime->element_offsets_by_field.end(),
-                    "missing struct element offsets");
+                    "missing array element offsets");
                 document_count = it->second->GetTotalElementCount();
             }
             AssertInfo(

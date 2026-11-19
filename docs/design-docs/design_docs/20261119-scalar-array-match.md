@@ -8,9 +8,12 @@ predicates keep binding a child with `$[child]`.
 A predicate uses the scalar operations supported on the same StructArray child
 type, including equality, membership, numeric arithmetic, string patterns, and
 element IS NULL / IS NOT NULL. It can combine predicates with AND, OR and NOT.
-The target is a single-level scalar array. Nested collection operations,
-correlated row references, text and phrase search, and element-returning
-element_filter are outside this change.
+For an `Array<VarChar>` with `enable_analyzer=true` and `enable_match=true`,
+`MATCH_ANY(tags, PHRASE_MATCH($, "new york"))` matches a phrase within one
+element. `TEXT_MATCH` accepts `minimum_should_match` and `PHRASE_MATCH`
+accepts slop, as on a scalar VarChar field. The target is a single-level
+scalar array. Nested collection operations, correlated row references and
+element-returning element_filter are outside this change.
 
 Count slots whose predicate is true. Duplicates count independently. ALL
 requires every slot to be true, so it accepts an empty list. ANY requires
@@ -24,5 +27,6 @@ only when the ID is absent, including plans from flattened legacy schemas.
 Scalar ARRAY writes only its field ID. A future JSON target will likewise
 bind by root field ID, with its path and missing-value semantics separate. Growing and
 sealed segments use the row-to-element offsets and evaluate the predicate
-against the raw array column. An ordinary scalar index returns row offsets and
+against the raw array column or, for text and phrase predicates, a text
+index with one document per element in array offset order. An ordinary scalar index returns row offsets and
 cannot supply these element hits.

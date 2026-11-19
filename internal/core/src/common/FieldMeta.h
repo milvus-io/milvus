@@ -283,7 +283,7 @@ class FieldMeta {
     }
 
     bool
-    is_struct_varchar() const;
+    is_varchar_array() const;
 
     bool
     enable_match() const;
