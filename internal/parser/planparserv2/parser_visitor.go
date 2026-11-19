@@ -3502,7 +3502,7 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 	if v.schema.GetStructArrayFieldFromName(collectionName) != nil {
 		match.StructName = collectionName
 	} else {
-		field, err := v.schema.GetUserFieldFromName(collectionName)
+		field, err := v.schema.GetFieldFromName(collectionName)
 		if err != nil || field.GetDataType() != schemapb.DataType_Array || !typeutil.IsPrimitiveType(field.GetElementType()) {
 			return merr.WrapErrParameterInvalidMsg("%s requires a scalar ARRAY or StructArray target, got %s", funcName, collectionName)
 		}
