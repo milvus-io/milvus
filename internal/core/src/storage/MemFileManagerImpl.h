@@ -89,10 +89,14 @@ class MemFileManagerImpl : public FileManagerImpl {
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
 
     std::vector<FieldDataPtr>
-    cache_raw_data_to_memory_internal(const Config& config);
+    cache_raw_data_to_memory_internal(
+        const Config& config,
+        const std::optional<proto::schema::TypeSchema>& array_type);
 
     std::vector<FieldDataPtr>
-    cache_raw_data_to_memory_storage_v2(const Config& config);
+    cache_raw_data_to_memory_storage_v2(
+        const Config& config,
+        const std::optional<proto::schema::TypeSchema>& array_type);
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
     cache_opt_field_memory(const Config& config);

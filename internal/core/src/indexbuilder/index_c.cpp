@@ -522,6 +522,7 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto storage_config =
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
+        config["is_text_match"] = true;
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{

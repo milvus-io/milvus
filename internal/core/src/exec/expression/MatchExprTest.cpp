@@ -39,6 +39,8 @@
 #include <vector>
 
 #include "common/Common.h"
+#include "common/ArrayTextValues.h"
+#include "common/FieldData.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
@@ -78,6 +80,8 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/ManifestTestUtil.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -4886,6 +4890,39 @@ TEST_P(MatchExprArrayText, QuantifiesTextDocumentsOnGrowingAndSealed) {
                 info.set_manifest_path(nlohmann::json{
                     {"base_path", path},
                     {"ver", version}}.dump());
+                // Exercise the stats builder's manifest reader with the same
+                // native-list column that the sealed segment is about to load.
+                auto config = get_default_local_storage_config();
+                storage::FileManagerContext ctx(
+                    storage::FieldDataMeta{1, 2, 3, body.get(), field},
+                    storage::IndexMeta{3, body.get(), 1, 1},
+                    storage::CreateChunkManager(config),
+                    storage::InitArrowFileSystem(config));
+                ctx.set_loon_ffi_properties(
+                    storage::LoonFFIPropertiesSingleton::GetInstance()
+                        .GetProperties());
+                storage::MemFileManagerImpl files(ctx);
+                auto batches = files.CacheRawDataToMemory(
+                    {{STORAGE_VERSION_KEY, STORAGE_V3},
+                     {SEGMENT_MANIFEST_KEY, info.manifest_path()},
+                     {DATA_TYPE_KEY, DataType::ARRAY},
+                     {ELEMENT_TYPE_KEY, DataType::VARCHAR},
+                     {"is_text_match", true}});
+                ASSERT_FALSE(batches.empty());
+                ArrayTextValues docs;
+                for (const auto& part : batches) {
+                    ASSERT_NE(
+                        dynamic_cast<const FieldData<ArrayValue>*>(part.get()),
+                        nullptr);
+                    for (int64_t i = 0; i < part->get_num_rows(); ++i) {
+                        docs.Append(
+                            static_cast<const ArrayValue*>(part->RawValue(i))
+                                ->View());
+                    }
+                }
+                ASSERT_EQ(docs.values.size(), 6);
+                ASSERT_EQ(docs.valid.size(), 6);
+                EXPECT_FALSE(docs.valid[5]);
                 auto loaded =
                     CreateSealedSegment(storage_schema, empty_index_meta, 3);
                 loaded->SetLoadInfo(info);
