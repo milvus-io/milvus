@@ -340,16 +340,17 @@ func TestLineageReadPointLowerBounds(t *testing.T) {
 		prefixCalls int
 	}{
 		// through_1 = 125 (Strong minimum 127), through_2 = 135 (Strong minimum 135).
-		"strong: larger Strong minimum":          {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Strong}, 135, 2},
-		"session: as strong":                     {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Session, guaranteeTimestamp: 999}, 135, 2},
-		"bounded: guarantee above min through":   {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 130}, 130, 2},
-		"bounded: guarantee below min through":   {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 90}, 125, 2},
-		"eventually: no lower bound":             {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Eventually, guaranteeTimestamp: 999}, 125, 2},
-		"customized: guarantee newer than both":  {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Customized, guaranteeTimestamp: 200}, 200, 2},
-		"customized: guarantee older":            {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Customized, guaranteeTimestamp: 50}, 125, 2},
-		"fixed point (iterator, delete by expr)": {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 999, barrierMVCC: 140}, 140, 0},
-		"fixed point below the published prefix": {requestReadPoint{barrierMVCC: 110}, 110, 0},
-		"statistics without barrier: strong":     {requestReadPoint{}, 135, 2},
+		"strong: larger Strong minimum":           {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Strong}, 135, 2},
+		"session: guarantee above both targets":   {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Session, guaranteeTimestamp: 999}, 999, 2},
+		"session: guarantee below strong minimum": {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Session, guaranteeTimestamp: 120}, 135, 2},
+		"bounded: guarantee above min through":    {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 130}, 130, 2},
+		"bounded: guarantee below min through":    {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 90}, 125, 2},
+		"eventually: no lower bound":              {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Eventually, guaranteeTimestamp: 999}, 125, 2},
+		"customized: guarantee newer than both":   {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Customized, guaranteeTimestamp: 200}, 200, 2},
+		"customized: guarantee older":             {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Customized, guaranteeTimestamp: 50}, 125, 2},
+		"fixed point (iterator, delete by expr)":  {requestReadPoint{consistencyLevel: commonpb.ConsistencyLevel_Bounded, guaranteeTimestamp: 999, barrierMVCC: 140}, 140, 0},
+		"fixed point below the published prefix":  {requestReadPoint{barrierMVCC: 110}, 110, 0},
+		"statistics without barrier: strong":      {requestReadPoint{}, 135, 2},
 	} {
 		sn := newLineageTestSN()
 		sn.setPrefix(lineageT1, 125, 127)
