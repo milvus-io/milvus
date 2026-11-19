@@ -32,6 +32,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -58,10 +59,11 @@ type Target struct {
 // Record is one split as the SplitShard ack callback observes it. Every time
 // tick is one of this cluster's own WAL.
 type Record struct {
-	TaskID       int64
-	CollectionID int64
-	Source       string
-	Targets      []Target
+	ReplicatedFrom string
+	TaskID         int64
+	CollectionID   int64
+	Source         string
+	Targets        []Target
 	// SwitchTimeTick is T_switch: the time tick of the copy on the source.
 	SwitchTimeTick uint64
 	// RoutingModulus is the modulus of the routing after the split, from the
@@ -108,6 +110,16 @@ func NewStore(ctx context.Context, catalog Catalog) (*Store, error) {
 // on this cluster: from the first consumer of its message to its adoption.
 func InWindow(state datapb.SplitShardTaskState) bool {
 	return state < datapb.SplitShardTaskState_SplitShardTaskAdopted
+}
+
+// HasSourceFenceProof admits a locally issued split as soon as it is recorded.
+// A replicated split must also have consumed the genuine upstream source fence.
+func HasSourceFenceProof(task *datapb.SplitShardTask) bool {
+	if task == nil || task.GetState() < InWindowOpenState {
+		return false
+	}
+	origin := task.GetReplicatedFromClusterId()
+	return origin == "" || task.GetReplicatedSourceFence().GetClusterId() == origin
 }
 
 func targetVChannels(task *datapb.SplitShardTask) []string {
@@ -283,22 +295,27 @@ func (s *Store) Record(ctx context.Context, record Record) (*datapb.SplitShardTa
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := &datapb.SplitShardTask{
-		TaskId:         record.TaskID,
-		CollectionId:   record.CollectionID,
-		SourceVchannel: record.Source,
-		Targets:        targets,
-		SwitchTimeTick: record.SwitchTimeTick,
-		RoutingModulus: record.RoutingModulus,
-		State:          datapb.SplitShardTaskState_SplitShardTaskWindowOpen,
-		RecordTime:     time.Now().Unix(),
+		TaskId:                  record.TaskID,
+		CollectionId:            record.CollectionID,
+		SourceVchannel:          record.Source,
+		Targets:                 targets,
+		ReplicatedFromClusterId: record.ReplicatedFrom,
+		SwitchTimeTick:          record.SwitchTimeTick,
+		RoutingModulus:          record.RoutingModulus,
+		State:                   datapb.SplitShardTaskState_SplitShardTaskWindowOpen,
+		RecordTime:              time.Now().Unix(),
 	}
 	if existing := s.tasks[record.TaskID]; existing != nil {
-		if err := checkSameSplit(existing, next); err != nil {
+		if err := checkSameSplit(existing, next.GetCollectionId(), next.GetSourceVchannel(), targetVChannels(next)); err != nil {
 			return nil, err
+		}
+		if proof := existing.GetReplicatedSourceFence(); proof != nil && proof.GetClusterId() != record.ReplicatedFrom {
+			return nil, merr.WrapErrServiceInternalMsg("source ACK of shard split %d came from %q, expected %q", record.TaskID, proof.GetClusterId(), record.ReplicatedFrom)
 		}
 		if existing.GetState() >= datapb.SplitShardTaskState_SplitShardTaskWindowOpen {
 			return existing, nil
 		}
+		next.ReplicatedSourceFence = existing.GetReplicatedSourceFence()
 		next.SourceAcked = existing.GetSourceAcked()
 		next.RecordTime = existing.GetRecordTime()
 	}
@@ -314,14 +331,14 @@ func (s *Store) Record(ctx context.Context, record Record) (*datapb.SplitShardTa
 
 // checkSameSplit refuses a record that names other shards than the one this
 // cluster holds under the same task id.
-func checkSameSplit(existing *datapb.SplitShardTask, next *datapb.SplitShardTask) error {
-	if existing.GetCollectionId() != next.GetCollectionId() ||
-		existing.GetSourceVchannel() != next.GetSourceVchannel() ||
-		!slices.Equal(targetVChannels(existing), targetVChannels(next)) {
+func checkSameSplit(existing *datapb.SplitShardTask, collectionID int64, source string, targets []string) error {
+	if existing.GetCollectionId() != collectionID ||
+		existing.GetSourceVchannel() != source ||
+		!slices.Equal(targetVChannels(existing), targets) {
 		return merr.WrapErrServiceInternalMsg(
 			"shard split task %d is recorded for collection %d, source %s, targets %v; it cannot be recorded for collection %d, source %s, targets %v",
 			existing.GetTaskId(), existing.GetCollectionId(), existing.GetSourceVchannel(), targetVChannels(existing),
-			next.GetCollectionId(), next.GetSourceVchannel(), targetVChannels(next))
+			collectionID, source, targets)
 	}
 	return nil
 }
@@ -330,13 +347,19 @@ func checkSameSplit(existing *datapb.SplitShardTask, next *datapb.SplitShardTask
 // acknowledged the SplitShard copy on the source: the residual of the source
 // is flushed. A window that is open moves to the residual-flushed state. If
 // the ack callback has not recorded the split yet, the fact is kept in a
-// pending record that the callback completes.
-func (s *Store) MarkSourceAcked(ctx context.Context, taskID int64, collectionID int64, source string, targets []string) error {
+// pending record that the callback completes. Only a real replicated source copy
+// supplies proof. It can arrive after a supplemental ACK and even after broadcast
+// completion. Collection drop removes the owner of any later proof.
+func (s *Store) MarkSourceAcked(ctx context.Context, taskID int64, collectionID int64, source string, targets []string, proof *commonpb.ReplicateCheckpoint, completed bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing := s.tasks[taskID]
 	var next *datapb.SplitShardTask
 	if existing == nil {
+		if completed {
+			// A late ACK after collection drop has no remaining owner.
+			return nil
+		}
 		next = &datapb.SplitShardTask{
 			TaskId:         taskID,
 			CollectionId:   collectionID,
@@ -348,10 +371,21 @@ func (s *Store) MarkSourceAcked(ctx context.Context, taskID int64, collectionID 
 			next.Targets = append(next.Targets, &datapb.SplitShardTaskTarget{Vchannel: target})
 		}
 	} else {
-		if existing.GetSourceAcked() {
+		if proof != nil {
+			if err := checkSameSplit(existing, collectionID, source, targets); err != nil {
+				return err
+			}
+		}
+		if existing.GetSourceAcked() && (proof == nil || existing.GetReplicatedSourceFence() != nil) {
 			return nil
 		}
 		next = proto.Clone(existing).(*datapb.SplitShardTask)
+	}
+	if proof != nil {
+		if next.GetState() >= InWindowOpenState && next.GetReplicatedFromClusterId() != proof.GetClusterId() {
+			return merr.WrapErrServiceInternalMsg("source ACK of shard split %d came from %q, expected %q", taskID, proof.GetClusterId(), next.GetReplicatedFromClusterId())
+		}
+		next.ReplicatedSourceFence = proof
 	}
 	next.SourceAcked = true
 	if next.GetState() == datapb.SplitShardTaskState_SplitShardTaskWindowOpen {

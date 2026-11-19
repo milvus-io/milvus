@@ -21,12 +21,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -60,6 +62,12 @@ func recordOf(ctx context.Context, result message.BroadcastResultSplitShardMessa
 		TaskID:       header.GetSplitTaskId(),
 		CollectionID: header.GetCollectionId(),
 		Source:       header.GetSourceVchannel(),
+	}
+	if rh := result.Message.ReplicateHeader(); rh != nil {
+		if rh.ClusterID == "" {
+			return Record{}, merr.WrapErrServiceInternalMsg("replicated shard split %d has no source cluster", record.TaskID)
+		}
+		record.ReplicatedFrom = rh.ClusterID
 	}
 	source := result.Results[record.Source]
 	if record.Source == "" || source == nil || source.TimeTick == 0 {
@@ -264,7 +272,7 @@ func (c *Callback) OnApplied(ctx context.Context, result message.BroadcastResult
 //
 // An error is returned to the StreamingNode, which sends the acknowledgement
 // again.
-func (c *Callback) OnSourceConsumed(ctx context.Context, msg message.ImmutableMessage) error {
+func (c *Callback) OnSourceConsumed(ctx context.Context, msg message.ImmutableMessage, completed bool) error {
 	if msg.MessageType() != message.MessageTypeSplitShard {
 		return nil
 	}
@@ -276,6 +284,18 @@ func (c *Callback) OnSourceConsumed(ctx context.Context, msg message.ImmutableMe
 	if msg.VChannel() != header.GetSourceVchannel() {
 		return nil
 	}
+	var proof *commonpb.ReplicateCheckpoint
+	if rh := msg.ReplicateHeader(); rh != nil && !header.GetSupplementalSourceFence() {
+		if rh.ClusterID == "" || rh.MessageID == nil || rh.TimeTick == 0 || rh.VChannel == "" || funcutil.IsControlChannel(rh.VChannel) {
+			return merr.WrapErrServiceInternalMsg("replicated source of shard split %d has no original source WAL position", header.GetSplitTaskId())
+		}
+		proof = &commonpb.ReplicateCheckpoint{
+			ClusterId: rh.ClusterID,
+			Pchannel:  funcutil.ToPhysicalChannel(rh.VChannel),
+			MessageId: rh.MessageID.IntoProto(),
+			TimeTick:  rh.TimeTick,
+		}
+	}
 	return c.Store.MarkSourceAcked(ctx, header.GetSplitTaskId(), header.GetCollectionId(),
-		header.GetSourceVchannel(), header.GetTargetVchannels())
+		header.GetSourceVchannel(), header.GetTargetVchannels(), proof, completed)
 }

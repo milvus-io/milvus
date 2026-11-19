@@ -120,12 +120,12 @@ func (s *Server) SplitShardAppliedHook(ctx context.Context, result message.Broad
 
 // ObserveSplitShardConsumerAck is the consumer ack observer of SplitShard
 // messages (split.Callback.OnSourceConsumed).
-func (s *Server) ObserveSplitShardConsumerAck(ctx context.Context, msg message.ImmutableMessage) error {
+func (s *Server) ObserveSplitShardConsumerAck(ctx context.Context, msg message.ImmutableMessage, completed bool) error {
 	callback, err := s.splitShardCallback()
 	if err != nil {
 		return err
 	}
-	return callback.OnSourceConsumed(ctx, msg)
+	return callback.OnSourceConsumed(ctx, msg, completed)
 }
 
 // SplitShard issues the split of one shard, whatever its size and whether the

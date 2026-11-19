@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
@@ -19,6 +20,8 @@ import (
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type handoverTestBackend struct {
@@ -189,4 +192,49 @@ func TestLoadedPendingAlterCanPlanRecoveredG2BeforePreparingNewSchema(t *testing
 	require.ErrorIs(t, <-done, context.Canceled)
 	_, ok := overrides.Load(int64(100))
 	require.False(t, ok, "normal target-schema gating resumes when recovery ends")
+}
+
+func TestSplitTargetAdmissionRequiresMatchingFenceAndServingState(t *testing.T) {
+	ctx := t.Context()
+	configs, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	registry, err := coordview.RecoverShardViewRegistry(ctx, &fakeQueryViewCatalog{}, &handoverSilentSyncer{})
+	require.NoError(t, err)
+	defer registry.Close()
+	c := cache.New(balancer.DefaultBalanceConfig())
+	backend := &handoverTestBackend{}
+	r := &qviewsRuntime{splitHandover: &splitHandover{backend: backend}, loadConfigStore: configs, balanceCache: c, shardViewRegistry: registry, resources: &qvresource.Resources{}}
+	server := &Server{qviewsRuntime: r}
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	req := &querypb.GetQueryViewLoadInfoRequest{CollectionID: 100, SplitSource: "s", SplitTarget: "t", SplitAdmissionOnly: true}
+	admitted := func() bool {
+		resp, err := server.GetQueryViewLoadInfo(ctx, req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.Status))
+		return resp.GetSplitAdmissionAllowed()
+	}
+	require.False(t, admitted())
+	c.PublishDataView(100, api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 100, ShardSetEpoch: 3, Shards: []*api.ShardDataView{{VChannel: "t"}}}))
+	require.False(t, admitted(), "DataView declaration precedes the durable split record")
+	task := &datapb.SplitShardTask{TaskId: 7, CollectionId: 100, SourceVchannel: "s", Targets: []*datapb.SplitShardTaskTarget{{Vchannel: "t"}}}
+	backend.task = task
+	require.False(t, admitted(), "a pending source ACK is insufficient")
+	task.State = datapb.SplitShardTaskState_SplitShardTaskWindowOpen
+	require.True(t, admitted(), "primary can write before the residual ACK")
+	task.ReplicatedFromClusterId = "A"
+	task.SourceAcked = true
+	task.State = datapb.SplitShardTaskState_SplitShardTaskRetired
+	require.False(t, admitted(), "local residual flush and retirement cannot prove an upstream prefix")
+	task.ReplicatedSourceFence = &commonpb.ReplicateCheckpoint{ClusterId: "B", Pchannel: "upstream", MessageId: &commonpb.MessageID{Id: "1"}, TimeTick: 10}
+	require.False(t, admitted())
+	task.ReplicatedSourceFence.ClusterId = "A"
+	require.True(t, admitted(), "unloaded collection with old views down")
+	req.SplitSource = "other"
+	require.False(t, admitted())
+	req.SplitSource = "s"
+	req.SplitTarget = "other"
+	require.False(t, admitted())
+	req.SplitTarget = "t"
+	c.PublishDataView(100, api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 100, ShardSetEpoch: 1, Shards: []*api.ShardDataView{{VChannel: "s"}}}))
+	require.False(t, admitted(), "a genuine source proof still needs a usable local generation")
 }

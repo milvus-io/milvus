@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -320,6 +321,11 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 			"broadcast task not found, it may already acked, ignore the request", mlog.FieldBroadcastID(broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
+	// This RPC carries only a channel name. A reconstructed copy uses the
+	// first observed replica's properties and cannot attest a source WAL position.
+	if task.BroadcastMessage().MessageType() == message.MessageTypeSplitShard {
+		return merr.WrapErrParameterInvalidMsg("acknowledging a split requires the consumed WAL message")
+	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
 		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.FieldMessage(task.BroadcastMessage()), mlog.String("vchannel", vchannel))
@@ -339,6 +345,11 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
+		// ForcePromote can complete a split with a supplemental source copy before
+		// its genuine replicated source consumer reports the original WAL position.
+		if t != nil && messageutil.IsSplitShardFence(msg) && msg.ReplicateHeader() != nil {
+			return registry.CallConsumerAckObserver(ctx, msg, true)
+		}
 		bm.Logger().Debug(ctx,
 			"task is tombstone, ignored the ack request",
 			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
@@ -347,7 +358,7 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	}
 	// Before the task: an observer that fails leaves the copy unacknowledged,
 	// so the StreamingNode sends the acknowledgement again.
-	if err := registry.CallConsumerAckObserver(ctx, msg); err != nil {
+	if err := registry.CallConsumerAckObserver(ctx, msg, false); err != nil {
 		return err
 	}
 	return t.Ack(ctx, msg)

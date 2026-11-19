@@ -430,7 +430,7 @@ func TestTriggerAdmissionRefusals(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
 		// Adoption alone is insufficient: g2 may not yet be published.
-		require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
+		require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil, nil, false))
 		require.Empty(t, env.manager.TriggerOnce())
 		require.NoError(t, env.store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 		require.ErrorIs(t, env.manager.checkState(ctx, testCollection), merr.ErrServiceUnavailable)
@@ -684,8 +684,8 @@ func TestManagerLoopSweepsStalePendingRecords(t *testing.T) {
 	env := newTriggerEnv(t)
 	saveParam(t, paramtable.Get().DataCoordCfg.ShardSplitCheckInterval.Key, "0")
 	// A pending record of a collection that is gone, and one of a live one.
-	require.NoError(t, env.store.MarkSourceAcked(ctx, 8, 999, "s8", nil))
-	require.NoError(t, env.store.MarkSourceAcked(ctx, 9, testCollection, testSource, nil))
+	require.NoError(t, env.store.MarkSourceAcked(ctx, 8, 999, "s8", nil, nil, false))
+	require.NoError(t, env.store.MarkSourceAcked(ctx, 9, testCollection, testSource, nil, nil, false))
 	env.store.mu.Lock()
 	env.store.tasks[8].RecordTime = time.Now().Add(-time.Hour).Unix()
 	env.store.tasks[9].RecordTime = time.Now().Add(-time.Hour).Unix()
@@ -700,7 +700,7 @@ func TestManagerLoopSweepsStalePendingRecords(t *testing.T) {
 
 	// A failed sweep is logged and tried again by the next round.
 	env.catalog.dropErr = errors.New("mock")
-	require.NoError(t, env.store.MarkSourceAcked(ctx, 10, 999, "s10", nil))
+	require.NoError(t, env.store.MarkSourceAcked(ctx, 10, 999, "s10", nil, nil, false))
 	env.store.mu.Lock()
 	env.store.tasks[10].RecordTime = time.Now().Add(-time.Hour).Unix()
 	env.store.mu.Unlock()

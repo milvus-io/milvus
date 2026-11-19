@@ -80,7 +80,10 @@ stream; the stream delivers the copy again after it reconnects.
 `registry.RegisterConsumerAckObserver(messageType, observer)` registers a
 function that the broadcaster calls for every acknowledgement a StreamingNode
 sends from the consuming side (`Broadcaster.Ack`), as long as the task is not a
-tombstone. It runs before the task records the acknowledgement. An error fails
+tombstone. A replicated SplitShard source copy also reaches the observer after
+completion, since a ForcePromote supplement can precede its genuine consumer
+ACK. A completed broadcast may update its existing DataCoord record only.
+For live broadcasts the observer runs before the task records the acknowledgement. An error fails
 the `Ack` RPC and the StreamingNode sends the acknowledgement again, so an
 observer can make a durable note of it.
 

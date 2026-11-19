@@ -18,6 +18,7 @@ package split
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"sync"
 	"testing"
@@ -293,7 +294,7 @@ func TestStoreSourceAckedAndAdvance(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- store.WaitResidualFlushed(ctx, 7) }()
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, targets))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, targets, nil, false))
 	require.NoError(t, <-done)
 	task := store.Get(7)
 	require.True(t, task.GetSourceAcked())
@@ -302,7 +303,7 @@ func TestStoreSourceAckedAndAdvance(t *testing.T) {
 
 	// Acknowledged again: nothing is written.
 	catalog.resetLog()
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, targets))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, targets, nil, false))
 	require.Empty(t, catalog.writes())
 
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRewriteDone))
@@ -334,7 +335,7 @@ func TestStoreSourceAckedBeforeTheRecord(t *testing.T) {
 	ctx := context.Background()
 	catalog := newFakeCatalog()
 	store := mustStore(t, catalog)
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}, nil, false))
 	pending := store.Get(7)
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPending, pending.GetState())
 	// A pending record keeps other splits of the collection out, and pins
@@ -362,7 +363,7 @@ func TestStoreRecoversFromTheCatalog(t *testing.T) {
 	second.CollectionID = testCollection + 1
 	_, err = store.Record(ctx, second)
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 8, second.CollectionID, testSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 8, second.CollectionID, testSource, nil, nil, false))
 
 	recovered := mustStore(t, catalog)
 	require.Len(t, recovered.List(), 2)
@@ -385,13 +386,13 @@ func TestStoreKeepsItsCacheWhenTheCatalogFails(t *testing.T) {
 	_, err := store.Record(ctx, testRecord(7))
 	require.Error(t, err)
 	require.Nil(t, store.Get(7))
-	require.Error(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
+	require.Error(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil, nil, false))
 	require.Nil(t, store.Get(7))
 
 	catalog.saveErr = nil
 	_, err = store.Record(ctx, testRecord(7))
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil, nil, false))
 	catalog.saveErr = errors.New("mock")
 	require.Error(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRewriteDone))
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskResidualFlushed, store.Get(7).GetState())
@@ -407,8 +408,8 @@ func TestStoreDrop(t *testing.T) {
 	store := mustStore(t, catalog)
 	_, err := store.Record(ctx, testRecord(7))
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 8, testCollection+1, "s8", []string{"t81", "t82"}))
-	require.NoError(t, store.MarkSourceAcked(ctx, 9, testCollection+2, "s9", []string{"t91", "t92"}))
+	require.NoError(t, store.MarkSourceAcked(ctx, 8, testCollection+1, "s8", []string{"t81", "t82"}, nil, false))
+	require.NoError(t, store.MarkSourceAcked(ctx, 9, testCollection+2, "s9", []string{"t91", "t92"}, nil, false))
 
 	// Only a pending record of a collection that is gone, older than the
 	// deadline, is swept.
@@ -658,7 +659,7 @@ func TestCallbackFlushOnATargetFindsItsShard(t *testing.T) {
 	require.EqualValues(t, 130, target.GetCompactedTransformStartAfterTimetick())
 
 	// After adoption, g2 publication and history folding release the pin.
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 	require.NoError(t, store.ResumeL0(ctx, 7))
 	require.NoError(t, store.ReleasePins(ctx, 7))
@@ -688,7 +689,7 @@ func TestCallbackHoldsUntilTheResidualHasFlushed(t *testing.T) {
 	}
 
 	// The copies on the targets and messages of other types do not release it.
-	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testTarget1)))
+	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testTarget1), false))
 	require.False(t, store.Get(7).GetSourceAcked())
 	select {
 	case err := <-released:
@@ -696,7 +697,7 @@ func TestCallbackHoldsUntilTheResidualHasFlushed(t *testing.T) {
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource)))
+	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource), false))
 	select {
 	case err := <-released:
 		require.NoError(t, err)
@@ -736,7 +737,7 @@ func TestCallbackSourceConsumedBeforeTheCallback(t *testing.T) {
 	callback := &Callback{Store: store, DataView: func() ShardDeclarer { return declarer }}
 	result := splitResult(7, [3]uint64{100, 110, 120})
 
-	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource)))
+	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource), false))
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPending, store.Get(7).GetState())
 	require.NoError(t, callback.OnAcked(ctx, result))
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskResidualFlushed, store.Get(7).GetState())
@@ -744,7 +745,7 @@ func TestCallbackSourceConsumedBeforeTheCallback(t *testing.T) {
 
 	catalog.saveErr = errors.New("mock")
 	other := splitResult(8, [3]uint64{100, 110, 120})
-	require.Error(t, callback.OnSourceConsumed(ctx, consumedCopy(t, other, testSource)))
+	require.Error(t, callback.OnSourceConsumed(ctx, consumedCopy(t, other, testSource), false))
 
 	// A message of another type is not a split.
 	flush := message.NewManualFlushMessageBuilderV2().
@@ -752,7 +753,7 @@ func TestCallbackSourceConsumedBeforeTheCallback(t *testing.T) {
 		WithBody(&message.ManualFlushMessageBody{}).
 		WithVChannel(testSource).MustBuildMutable().
 		WithTimeTick(1).WithLastConfirmed(rmq.NewRmqID(1)).IntoImmutableMessage(rmq.NewRmqID(1))
-	require.NoError(t, callback.OnSourceConsumed(ctx, flush))
+	require.NoError(t, callback.OnSourceConsumed(ctx, flush, false))
 }
 
 // A pending record names its targets but pins nothing: its targets are not
@@ -762,7 +763,7 @@ func TestStoreFlushableVChannelsNeedThePin(t *testing.T) {
 	store := mustStore(t, newFakeCatalog())
 	require.Empty(t, store.FlushableVChannels(testCollection))
 
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}, nil, false))
 	require.Equal(t, []string{testSource}, store.FlushableVChannels(testCollection))
 	// The placement of new targets still keeps away from them.
 	require.ElementsMatch(t, []string{testSource, testTarget1, testTarget2}, store.VChannels(testCollection))
@@ -813,7 +814,7 @@ func TestCallbackWaitForTheResidualIsVisible(t *testing.T) {
 	default:
 	}
 
-	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource)))
+	require.NoError(t, callback.OnSourceConsumed(ctx, consumedCopy(t, result, testSource), false))
 	require.NoError(t, <-released)
 	// The series is gone with the wait.
 	require.False(t, metrics.DataCoordShardSplitResidualWaitSeconds.DeleteLabelValues(label))
@@ -835,4 +836,106 @@ func TestCallbackAfterTheDataViewIsDroppedRecordsNothing(t *testing.T) {
 	require.Empty(t, catalog.tasks)
 	// Nothing to wait for either.
 	require.NoError(t, callback.OnApplied(ctx, result))
+}
+
+func TestReplicatedSourceProofAcrossPromotionAndRecovery(t *testing.T) {
+	ctx := t.Context()
+	catalog := newFakeCatalog()
+	callback := &Callback{Store: mustStore(t, catalog), DataView: func() ShardDeclarer { return &recordingDeclarer{catalog: catalog} }}
+	restart := func() { callback.Store = mustStore(t, catalog) }
+	result := splitResult(7, [3]uint64{100, 110, 120})
+	control := funcutil.GetControlChannel("upstream_3")
+	rh := func(channel string) *message.ReplicateHeader {
+		return &message.ReplicateHeader{ClusterID: "A", MessageID: rmq.NewRmqID(904), LastConfirmedMessageID: rmq.NewRmqID(903), TimeTick: 990, VChannel: channel}
+	}
+	immutable := func(msg message.MutableMessage) message.ImmutableMessage {
+		return msg.WithTimeTick(100).WithLastConfirmed(rmq.NewRmqID(89)).IntoImmutableMessage(rmq.NewRmqID(90))
+	}
+	var source, target, synthetic message.ImmutableMessage
+	for _, m := range result.Message.BroadcastMessage().SplitIntoMutableMessage() {
+		switch m.VChannel() {
+		case testSource:
+			source = immutable(m.WithReplicateHeader(rh("upstream_0_100v0")))
+			split := message.MustAsMutableSplitShardMessageV2(m)
+			h := split.Header()
+			h.SupplementalSourceFence = true
+			split.OverwriteHeader(h)
+			synthetic = immutable(message.ClearReplicateHeader(m))
+		case testTarget1:
+			target = immutable(m.WithReplicateHeader(rh("upstream_1_100v1")))
+		default:
+			if funcutil.IsControlChannel(m.VChannel()) {
+				// The control stream creates the durable broadcast before the source arrives.
+				result.Message = message.MustAsBroadcastSplitShardMessageV2(immutable(m.WithReplicateHeader(rh(control))).IntoBroadcastMutableMessage())
+			}
+		}
+	}
+	require.NotNil(t, source)
+	require.NoError(t, callback.OnSourceConsumed(ctx, target, false))
+	require.Nil(t, callback.Store.Get(7))
+	require.NoError(t, callback.OnSourceConsumed(ctx, synthetic, false))
+	require.False(t, HasSourceFenceProof(callback.Store.Get(7)))
+	restart()
+	require.NoError(t, callback.OnAcked(ctx, result))
+	require.NoError(t, callback.OnApplied(ctx, result))
+	task := callback.Store.Get(7)
+	require.Equal(t, "A", task.GetReplicatedFromClusterId())
+	require.True(t, task.GetSourceAcked())
+	require.False(t, HasSourceFenceProof(task))
+
+	// At a third site, forwarding the supplemental source under a fresh RH
+	// still carries the marker. It can never make this source authoritative.
+	relay := message.MustNewReplicateMessage("B", message.ImmutableMessageToMilvusMessage("", synthetic))
+	require.NoError(t, callback.OnSourceConsumed(ctx, immutable(relay), true))
+	restart()
+	require.False(t, HasSourceFenceProof(callback.Store.Get(7)))
+
+	invalid := message.NewMutableMessageBeforeAppend(source.Payload(), maps.Clone(source.Properties().ToRawMap()))
+	mark := rh(control)
+	require.Error(t, callback.OnSourceConsumed(ctx, immutable(message.ClearReplicateHeader(invalid).WithReplicateHeader(mark)), true))
+	mark = rh("upstream_0_100v0")
+	mark.ClusterID = "another-cluster"
+	require.Error(t, callback.OnSourceConsumed(ctx, immutable(message.ClearReplicateHeader(invalid).WithReplicateHeader(mark)), true))
+	mark.ClusterID = "A"
+	h := message.MustAsMutableSplitShardMessageV2(invalid)
+	header := h.Header()
+	header.CollectionId++
+	h.OverwriteHeader(header)
+	require.Error(t, callback.OnSourceConsumed(ctx, immutable(message.ClearReplicateHeader(invalid).WithReplicateHeader(mark)), true))
+	require.False(t, HasSourceFenceProof(callback.Store.Get(7)))
+
+	// A genuine copy already in the source WAL may finish after the broadcast.
+	catalog.saveErr = errors.New("catalog unavailable")
+	require.Error(t, callback.OnSourceConsumed(ctx, source, true))
+	require.False(t, HasSourceFenceProof(callback.Store.Get(7)))
+	catalog.saveErr = nil
+	require.NoError(t, callback.OnSourceConsumed(ctx, source, true))
+	restart()
+	proof := callback.Store.Get(7).GetReplicatedSourceFence()
+	require.Equal(t, "A", proof.GetClusterId())
+	require.Equal(t, "upstream_0", proof.GetPchannel())
+	require.True(t, proto.Equal(rmq.NewRmqID(904).IntoProto(), proof.MessageId))
+	require.EqualValues(t, 990, proof.GetTimeTick())
+	require.True(t, HasSourceFenceProof(callback.Store.Get(7)))
+	catalog.resetLog()
+	require.NoError(t, callback.OnSourceConsumed(ctx, source, true))
+	require.NoError(t, callback.OnSourceConsumed(ctx, synthetic, false))
+	require.NoError(t, callback.OnAcked(ctx, result))
+	require.True(t, proto.Equal(proof, callback.Store.Get(7).GetReplicatedSourceFence()))
+	require.NoError(t, callback.Store.DropCollection(ctx, testCollection))
+	require.NoError(t, callback.OnSourceConsumed(ctx, source, true))
+	require.Nil(t, callback.Store.Get(7))
+
+	// The other ordering occurs in ordinary CDC: durable source ACK, crash,
+	// then the broadcast callback. Pending alone never opens a target gate.
+	require.NoError(t, callback.OnSourceConsumed(ctx, source, false))
+	require.False(t, HasSourceFenceProof(callback.Store.Get(7)))
+	restart()
+	differentOrigin := testRecord(7)
+	differentOrigin.ReplicatedFrom = "B"
+	_, err := callback.Store.Record(ctx, differentOrigin)
+	require.Error(t, err)
+	require.NoError(t, callback.OnAcked(ctx, result))
+	require.True(t, HasSourceFenceProof(callback.Store.Get(7)))
+	require.True(t, proto.Equal(proof, callback.Store.Get(7).GetReplicatedSourceFence()))
 }

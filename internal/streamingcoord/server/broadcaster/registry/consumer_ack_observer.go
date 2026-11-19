@@ -20,10 +20,11 @@ import (
 // the only code that sees it.
 //
 // An observer runs for every acknowledgement the broadcaster receives for a
-// task that is not a tombstone yet, so it may run many times for one copy and
+// live task. A replicated split source may deliver proof even after completion.
+// A completed broadcast must never recreate removed coordinator state. Observers
 // must be idempotent. An error is returned to the StreamingNode, which sends
 // the acknowledgement again.
-type ConsumerAckObserver func(ctx context.Context, msg message.ImmutableMessage) error
+type ConsumerAckObserver func(ctx context.Context, msg message.ImmutableMessage, completed bool) error
 
 // consumerAckObserved is the fixed set of message types whose consumer-side
 // acknowledgements are observed. An acknowledgement of one of them waits until
@@ -75,7 +76,7 @@ func RegisterConsumerAckObserver(typ message.MessageType, observer ConsumerAckOb
 
 // CallConsumerAckObserver calls the observer of the type of the message. For
 // an observed type it waits until the observer is registered.
-func CallConsumerAckObserver(ctx context.Context, msg message.ImmutableMessage) error {
+func CallConsumerAckObserver(ctx context.Context, msg message.ImmutableMessage, completed bool) error {
 	consumerAckObserversMu.RLock()
 	slot, ok := consumerAckObservers[msg.MessageType()]
 	consumerAckObserversMu.RUnlock()
@@ -93,5 +94,5 @@ func CallConsumerAckObserver(ctx context.Context, msg message.ImmutableMessage) 
 	if observer == nil {
 		return nil
 	}
-	return observer(ctx, msg)
+	return observer(ctx, msg, completed)
 }

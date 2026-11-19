@@ -295,6 +295,8 @@ message SplitShardMessageHeader {
     string source_vchannel = 3;
     // The vchannels created by this message.
     repeated string target_vchannels = 4;
+    // ForcePromote appended this source copy locally. Replication preserves this marker.
+    bool supplemental_source_fence = 5;
 }
 
 // SplitShardMessageBody is the body of the split shard message.

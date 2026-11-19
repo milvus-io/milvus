@@ -22,17 +22,17 @@ func TestConsumerAckObserver(t *testing.T) {
 	// A message type that is not observed passes at once.
 	other := mock_message.NewMockImmutableMessage(t)
 	other.EXPECT().MessageType().Return(message.MessageTypeManualFlush)
-	require.NoError(t, CallConsumerAckObserver(ctx, other))
+	require.NoError(t, CallConsumerAckObserver(ctx, other, false))
 	require.Panics(t, func() { RegisterConsumerAckObserver(message.MessageTypeManualFlush, nil) })
 
 	// The acknowledgement of an observed type waits for the registration: it
 	// fails with the context of the caller, and is sent again.
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
-	require.ErrorIs(t, CallConsumerAckObserver(waitCtx, msg), context.DeadlineExceeded)
+	require.ErrorIs(t, CallConsumerAckObserver(waitCtx, msg, false), context.DeadlineExceeded)
 	cancel()
 
 	waiting := make(chan error, 1)
-	go func() { waiting <- CallConsumerAckObserver(ctx, msg) }()
+	go func() { waiting <- CallConsumerAckObserver(ctx, msg, false) }()
 	select {
 	case err := <-waiting:
 		require.FailNow(t, "the acknowledgement passed before the observer was registered", "%v", err)
@@ -41,7 +41,7 @@ func TestConsumerAckObserver(t *testing.T) {
 
 	calls := 0
 	observerErr := errors.New("mock")
-	RegisterConsumerAckObserver(message.MessageTypeSplitShard, func(_ context.Context, got message.ImmutableMessage) error {
+	RegisterConsumerAckObserver(message.MessageTypeSplitShard, func(_ context.Context, got message.ImmutableMessage, _ bool) error {
 		calls++
 		require.Equal(t, msg, got)
 		if calls == 1 {
@@ -50,11 +50,11 @@ func TestConsumerAckObserver(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, <-waiting, observerErr)
-	require.NoError(t, CallConsumerAckObserver(ctx, msg))
+	require.NoError(t, CallConsumerAckObserver(ctx, msg, false))
 	require.Equal(t, 2, calls)
 
 	// Registered again, the observer is replaced; a nil one observes nothing.
 	RegisterConsumerAckObserver(message.MessageTypeSplitShard, nil)
-	require.NoError(t, CallConsumerAckObserver(ctx, msg))
+	require.NoError(t, CallConsumerAckObserver(ctx, msg, false))
 	require.Equal(t, 2, calls)
 }

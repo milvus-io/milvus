@@ -103,7 +103,7 @@ func TestSplitNoDeletePinReleaseRequiresRealFlushedCertificate(t *testing.T) {
 	store, taskCatalog := newSplitTestStore(t)
 	_, err = store.Record(ctx, splitTestRecord(7))
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestTarget1, Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 100, NumOfRows: 1})))
 	mt.StreamingNodeCatalog = kvstreamingnode.NewCataLog(meta.NewMetaMemoryKV())
@@ -210,7 +210,7 @@ func TestSplitPinFlushFailureDoesNotPersistResume(t *testing.T) {
 	store, _ := newSplitTestStore(t)
 	_, err := store.Record(ctx, splitTestRecord(7))
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 	failure := merr.WrapErrServiceUnavailableMsg("injected target flush append failure")
 	appends := 0
@@ -269,7 +269,7 @@ func TestSplitFiniteBoundaryLostWriteAndLegacyResume(t *testing.T) {
 			store, taskCatalog := newSplitTestStore(t)
 			_, err = store.Record(ctx, splitTestRecord(7))
 			require.NoError(t, err)
-			require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+			require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 			require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 			if legacy {
 				require.NoError(t, store.ResumeL0(ctx, 7))
@@ -312,7 +312,7 @@ func TestSplitFiniteBoundaryAmbiguousWriteAndLegacyResume(t *testing.T) {
 			store, taskCatalog := newSplitTestStore(t)
 			_, err = store.Record(ctx, splitTestRecord(7))
 			require.NoError(t, err)
-			require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+			require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 			require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 			if legacy {
 				require.NoError(t, store.ResumeL0(ctx, 7))

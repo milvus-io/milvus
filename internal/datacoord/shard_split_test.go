@@ -151,7 +151,7 @@ func TestSplitShardHooksNeedRecoveredMetadata(t *testing.T) {
 	require.ErrorIs(t, s.SplitShardAckHook(ctx, result), merr.ErrServiceNotReady)
 	require.ErrorIs(t, s.SplitShardAppliedHook(ctx, result), merr.ErrServiceNotReady)
 	source := msg.SplitIntoMutableMessage()[0].WithTimeTick(100).WithLastConfirmed(rmq.NewRmqID(100)).IntoImmutableMessage(rmq.NewRmqID(100))
-	require.ErrorIs(t, s.ObserveSplitShardConsumerAck(ctx, source), merr.ErrServiceNotReady)
+	require.ErrorIs(t, s.ObserveSplitShardConsumerAck(ctx, source, false), merr.ErrServiceNotReady)
 	_, err := s.SplitShard(ctx, 100, splitTestSource)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 
@@ -200,7 +200,7 @@ func TestSplitShardHooksCarryASplitThroughItsCallback(t *testing.T) {
 	for _, mutable := range copies {
 		id := result.Results[mutable.VChannel()].MessageID
 		consumed := mutable.WithTimeTick(result.Results[mutable.VChannel()].TimeTick).WithLastConfirmed(id).IntoImmutableMessage(id)
-		require.NoError(t, s.ObserveSplitShardConsumerAck(ctx, consumed))
+		require.NoError(t, s.ObserveSplitShardConsumerAck(ctx, consumed, false))
 	}
 	require.NoError(t, <-released)
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskResidualFlushed, store.Get(7).GetState())
@@ -293,7 +293,7 @@ func TestSplitWindowRefusesSnapshotOnThePrimary(t *testing.T) {
 	require.Zero(t, broadcasts)
 
 	// After the adoption the snapshot is taken again.
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 	resp, err = s.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
 	require.NoError(t, err)
@@ -424,7 +424,7 @@ func TestSplitTargetFlushOnASecondaryWaitsForThePin(t *testing.T) {
 	}
 	require.NotNil(t, sourceCopy)
 	id := result.Results[splitTestSource].MessageID
-	require.NoError(t, s.ObserveSplitShardConsumerAck(ctx, sourceCopy.WithTimeTick(100).WithLastConfirmed(id).IntoImmutableMessage(id)))
+	require.NoError(t, s.ObserveSplitShardConsumerAck(ctx, sourceCopy.WithTimeTick(100).WithLastConfirmed(id).IntoImmutableMessage(id), false))
 	require.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPending, store.Get(7).GetState())
 
 	// 2. A replicated flush of a target segment: refused, nothing changes.
@@ -511,7 +511,7 @@ func TestSplitSourceIsDroppedAndTruncatedWithItsCollection(t *testing.T) {
 	addSplitSegment(t, mt, 44, splitTestSource, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L1, 10, 90)
 	require.NoError(t, s.truncateSplitSources(ctx, 100, map[string]uint64{splitTestSource: 1}))
 	require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 44).GetState())
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
 	require.NoError(t, s.truncateSplitSources(ctx, 100, map[string]uint64{splitTestTarget1: math.MaxUint64}))
 	require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 44).GetState())

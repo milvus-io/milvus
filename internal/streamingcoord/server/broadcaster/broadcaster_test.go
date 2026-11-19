@@ -131,7 +131,7 @@ func TestBroadcaster(t *testing.T) {
 	var observed atomic.Int32
 	registry.ResetConsumerAckObservers(message.MessageTypeDropCollection)
 	t.Cleanup(func() { registry.ResetConsumerAckObservers() })
-	registry.RegisterConsumerAckObserver(message.MessageTypeDropCollection, func(_ context.Context, msg message.ImmutableMessage) error {
+	registry.RegisterConsumerAckObserver(message.MessageTypeDropCollection, func(_ context.Context, msg message.ImmutableMessage, _ bool) error {
 		assert.Equal(t, uint64(7), msg.BroadcastHeader().BroadcastID)
 		if observed.Add(1) == 1 {
 			return errors.New("observer is not ready")
@@ -1326,4 +1326,57 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts to exit on cancel")
 		}
 	})
+}
+
+func TestForcePromoteSplitSourceProvenance(t *testing.T) {
+	const source = "p0_100v0"
+	const target = "p1_100v1"
+	const control = "p2_vcchan"
+	const broadcastID = 73
+	base := message.NewSplitShardMessageBuilderV2().WithHeader(&message.SplitShardMessageHeader{
+		CollectionId: 100, SplitTaskId: 7, SourceVchannel: source, TargetVchannels: []string{target},
+	}).WithBody(&message.SplitShardMessageBody{}).WithBroadcast([]string{source, target, control}, message.OptBuildBroadcastAppendFirst(source)).MustBuildBroadcast().WithBroadcastID(broadcastID)
+	id := walimplstest.NewTestMessageID(7)
+	immutable := func(m message.MutableMessage) message.ImmutableMessage {
+		return m.WithTimeTick(17).WithLastConfirmed(id).IntoImmutableMessage(id)
+	}
+	copies := map[string]message.ImmutableMessage{}
+	for _, m := range base.SplitIntoMutableMessage() {
+		original := immutable(m)
+		replica := message.MustNewReplicateMessage("A", message.ImmutableMessageToMilvusMessage("", original))
+		copies[m.VChannel()] = immutable(replica)
+	}
+	metrics := newBroadcasterMetrics()
+	task := newBroadcastTaskFromImmutableMessage(copies[control], metrics, nil)
+	task = newBroadcastTaskFromProto(proto.Clone(task.task).(*streamingpb.BroadcastTask), metrics, nil)
+	require.Equal(t, "A", task.BroadcastMessage().ReplicateHeader().ClusterID)
+	require.Equal(t, control, task.BroadcastMessage().ReplicateHeader().VChannel)
+	pending := newPendingBroadcastTask(task)
+	for _, m := range pending.pendingMessages {
+		supplemental := forcePromoteSupplement(m)
+		require.Nil(t, supplemental.ReplicateHeader())
+		forwarded := message.MustNewReplicateMessage("B", message.ImmutableMessageToMilvusMessage("", immutable(supplemental)))
+		require.Equal(t, m.VChannel() == source, message.MustAsMutableSplitShardMessageV2(forwarded).Header().GetSupplementalSourceFence())
+	}
+	require.Equal(t, control, task.BroadcastMessage().ReplicateHeader().VChannel)
+	require.False(t, message.MustAsBroadcastSplitShardMessageV2(task.BroadcastMessage()).Header().GetSupplementalSourceFence())
+	// A genuine source copy was already appended from A but its consumer ACK
+	// reaches the coordinator after the supplemented broadcast completed.
+	task.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	bm := &broadcastTaskManager{ctx: t.Context(), lifetime: typeutil.NewLifetime(), mu: &sync.Mutex{}, tasks: map[uint64]*broadcastTask{broadcastID: task}}
+	registry.ResetConsumerAckObservers()
+	t.Cleanup(func() { registry.ResetConsumerAckObservers() })
+	observed := 0
+	registry.RegisterConsumerAckObserver(message.MessageTypeSplitShard, func(_ context.Context, m message.ImmutableMessage, completed bool) error {
+		require.True(t, completed)
+		require.Equal(t, source, m.ReplicateHeader().VChannel)
+		observed++
+		return nil
+	})
+	require.Error(t, bm.LegacyAck(t.Context(), broadcastID, source))
+	require.NoError(t, bm.Ack(t.Context(), copies[target]))
+	require.NoError(t, bm.Ack(t.Context(), copies[control]))
+	require.Zero(t, observed)
+	require.NoError(t, bm.Ack(t.Context(), copies[source]))
+	require.Equal(t, 1, observed)
 }

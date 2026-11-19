@@ -78,5 +78,5 @@ func TestRegisterShardSplitConnectsTheCoordinators(t *testing.T) {
 	// here and refuses, so that the StreamingNode sends them again.
 	msg := mock_message.NewMockImmutableMessage(t)
 	msg.EXPECT().MessageType().Return(message.MessageTypeSplitShard)
-	require.ErrorIs(t, registry.CallConsumerAckObserver(ctx, msg), merr.ErrServiceNotReady)
+	require.ErrorIs(t, registry.CallConsumerAckObserver(ctx, msg, false), merr.ErrServiceNotReady)
 }
