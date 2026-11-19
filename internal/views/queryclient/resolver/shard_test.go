@@ -14,7 +14,8 @@ type lineageTestResolver struct {
 }
 
 func (r *lineageTestResolver) ResolveVChannels(ctx context.Context, collectionID int64) ([]string, error) {
-	return r.GetCollectionVChannels(ctx, collectionID)
+	vchannels, _, err := r.GetCollectionVChannels(ctx, collectionID)
+	return vchannels, err
 }
 
 func (r *lineageTestResolver) ResolveShards(context.Context, int64) ([]Shard, error) {

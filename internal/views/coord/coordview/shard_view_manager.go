@@ -52,9 +52,11 @@ type ShardViewManager struct {
 
 	// Fast pointers to the Preparing/Ready view and the newest Up view.
 	// Older schemas remain Up until read-schema publication retires them.
-	preparingView   *CoordQueryViewStateMachine // Preparing or Ready state; nil if none
-	upView          *CoordQueryViewStateMachine // newest Up across schemas; nil if none
-	publishedSchema *int32                      // nil until public metadata has been recovered
+	preparingView          *CoordQueryViewStateMachine // Preparing or Ready state; nil if none
+	upView                 *CoordQueryViewStateMachine // newest Up across schemas; nil if none
+	publishedServingEpoch  *uint64
+	publishedServingSchema int32
+	publishedSchema        *int32 // nil until public metadata has been recovered
 
 	// Accumulates persist and sync operations within a single lock-hold scope.
 	// The accumulated effects are moved into one immutable dirtyViewEvent before
@@ -719,7 +721,8 @@ func (m *ShardViewManager) advanceUnrecoverableToDropping() {
 func (m *ShardViewManager) downOlderUpView(newUp *CoordQueryViewStateMachine) {
 	for _, old := range m.views {
 		if old == newUp || old.State() != qviews.QueryViewStateUp ||
-			old.View().GetMeta().GetSchemaVersion() != newUp.View().GetMeta().GetSchemaVersion() {
+			old.View().GetMeta().GetSchemaVersion() != newUp.View().GetMeta().GetSchemaVersion() ||
+			old.View().GetMeta().GetShardSetEpoch() != newUp.View().GetMeta().GetShardSetEpoch() {
 			continue
 		}
 		// Recovery and delayed node reports can reach this path out of order.

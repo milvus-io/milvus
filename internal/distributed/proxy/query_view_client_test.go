@@ -59,8 +59,8 @@ type fakeViewQueryClientProxy struct {
 	types.ProxyComponent
 }
 
-func (fakeViewQueryClientProxy) GetCollectionVChannels(context.Context, int64) ([]string, error) {
-	return nil, merr.WrapErrCollectionNotLoaded(0)
+func (fakeViewQueryClientProxy) GetCollectionVChannels(context.Context, int64) ([]string, bool, error) {
+	return nil, false, merr.WrapErrCollectionNotLoaded(0)
 }
 
 func TestInitViewQueryClientInjectsClient(t *testing.T) {

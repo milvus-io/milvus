@@ -115,6 +115,11 @@ func prepareRunner(ctx context.Context, preparation *function.PreparationRequire
 // waitUntilGrowingSegmentReady waits until the growing segment is ready if msg is insert.
 func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context, msg message.MutableMessage) error {
 	if msg.MessageType() == message.MessageTypeInsert {
+		// Retired sources recover only their durable fence, with no writable
+		// partitions. Preserve the routing refusal before partition lookup.
+		if shards.IsSplitFenced(r.shardManager, msg.VChannel()) {
+			return status.NewShardFenced(msg.VChannel())
+		}
 		insertMessage := message.MustAsMutableInsertMessageV1(msg)
 		h := insertMessage.Header()
 		if len(h.Partitions) != 1 {

@@ -21,6 +21,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2099,9 +2100,10 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 	seedCollections(handler.s, &meta.CollectionInfo{
 		ID:                 200,
 		Schema:             schema,
-		ShardsNum:          1,
+		ShardsNum:          3,
 		ConsistencyLevel:   commonpb.ConsistencyLevel_Bounded,
-		VChannelNames:      []string{"ch-1"},
+		VChannelNames:      []string{"ch-1", "ch-2", "ch-3"},
+		Routing:            routing.Routing{Modulus: 4, ShardBy: "hash(pk)", Shards: []routing.Shard{{VChannel: "ch-1", Buckets: []uint64{0}}, {VChannel: "ch-2", Buckets: []uint64{1, 3}}, {VChannel: "ch-3", Buckets: []uint64{2}}}},
 		Partitions:         []int64{0},
 		PartitionIDsByName: map[string]int64{"_default": 0},
 		Properties:         properties,
@@ -2109,6 +2111,8 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 
 	positions := []*msgpb.MsgPosition{
 		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+		{ChannelName: "ch-2", Timestamp: 100, MsgID: []byte{1}},
+		{ChannelName: "ch-3", Timestamp: 100, MsgID: []byte{1}},
 	}
 
 	mockIndexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).
@@ -2126,6 +2130,9 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 	require.NotNil(t, snapshotData.Collection)
 	assert.Equal(t, commonpb.ConsistencyLevel_Bounded, snapshotData.Collection.GetConsistencyLevel())
 	assert.Equal(t, properties, snapshotData.Collection.GetProperties())
+	require.EqualValues(t, 4, snapshotData.Collection.GetRoutingModulus())
+	require.Equal(t, "hash(pk)", snapshotData.Collection.GetShardBy())
+	require.Equal(t, []uint64{1, 3}, snapshotData.Collection.GetShardInfos()[1].GetHashRouting().GetBuckets())
 	require.NotEmpty(t, snapshotData.Collection.GetProperties())
 	assert.NotSame(t, properties[0], snapshotData.Collection.GetProperties()[0])
 }

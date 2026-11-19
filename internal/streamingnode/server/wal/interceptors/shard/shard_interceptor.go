@@ -31,6 +31,8 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 // shardInterceptor is the implementation of shard management interceptor.
 type shardInterceptor struct {
 	genesis      sync.Map // collection ID -> splitGenesis on this PChannel
+	splitGateMu  sync.Mutex
+	splitGates   map[string]*splitTargetGate
 	shardManager shards.ShardManager
 	// txnManager ends the session a refused BeginTxn opened. Nil in tests
 	// that do not append transactions.
@@ -58,6 +60,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeAlterWAL:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
 		message.MessageTypeSplitShard:         impl.handleSplitShard,
+		message.MessageTypeRetireSplitShard:   impl.handleRetireSplitShard,
 		message.MessageTypeBeginTxn:           impl.handleBeginTxn,
 	}
 }
@@ -88,6 +91,9 @@ func (impl *shardInterceptor) Name() string {
 
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
+	if err := impl.checkSplitTargetAdmission(ctx, msg); err != nil {
+		return nil, err
+	}
 	op, ok := impl.ops[msg.MessageType()]
 	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.

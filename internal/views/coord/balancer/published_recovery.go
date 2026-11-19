@@ -15,6 +15,7 @@ import (
 // publishedRecoveryBase reuses ordinary placement policy with a retained read
 // obligation instead of the target schema's newer materialized membership.
 type publishedRecoveryBase struct {
+	shardSetEpoch   uint64
 	collectionID    int64
 	shardID         qviews.ShardID
 	dataVersion     qviews.DataVersion
@@ -26,6 +27,7 @@ type publishedRecoveryBase struct {
 func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRecovery) *publishedRecoveryBase {
 	meta := recovery.View.GetMeta()
 	shard := &ShardDataView{
+		Lineage:                              meta.GetLineage(),
 		VChannel:                             id.VChannel,
 		GrowingTransformStartAfterTimetick:   meta.GetTransformStartAfterTimetick(),
 		CompactedTransformStartAfterTimetick: meta.GetTransformStartAfterTimetick(),
@@ -55,7 +57,7 @@ func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRe
 	}
 	api.PrepareCollectionDataView(&CollectionDataView{Shards: []*ShardDataView{shard}})
 	return &publishedRecoveryBase{
-		collectionID: meta.GetCollectionId(), shardID: id,
+		collectionID: meta.GetCollectionId(), shardID: id, shardSetEpoch: meta.GetShardSetEpoch(),
 		dataVersion:   qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()),
 		schemaVersion: meta.GetSchemaVersion(), loadInfoVersion: meta.GetLoadInfoVersion(), shard: shard,
 	}
@@ -85,6 +87,9 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 			continue
 		}
 		recovery := manager.PublishedRecovery(p.targetSchemaVersion(cfg.CollectionID))
+		if recovery == nil && p.DataViewForShard(id) == nil {
+			recovery = manager.PublishedGenerationRecovery()
+		}
 		if recovery == nil {
 			continue
 		}

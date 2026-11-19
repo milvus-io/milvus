@@ -40,14 +40,17 @@ type Resources struct {
 	Balancer     interface {
 		Trigger(...balancer.TriggerScope)
 	}
-	BalanceCache    *cache.Cache
-	LoadConfigs     *loadmgr.LoadConfigStore
-	LoadManager     *loadmgr.CollectionLoadManager
-	ShardViews      *coordview.ShardViewRegistry
-	Readiness       *readiness.Notifications
-	Reconciler      DataViewReconciler
-	VChannels       func(context.Context, int64) ([]string, error)
-	RefreshVersions *sync.Map // collection ID -> greatest requested qviews.DataVersion
+	BalanceCache *cache.Cache
+	LoadConfigs  *loadmgr.LoadConfigStore
+	LoadManager  *loadmgr.CollectionLoadManager
+	ShardViews   *coordview.ShardViewRegistry
+	Readiness    *readiness.Notifications
+	Reconciler   DataViewReconciler
+	// SplitSources includes adopted sources until their local retirement completes.
+	FinishSplitAdoptionBeforeSchema func(context.Context, int64) error
+	SplitSources                    func(context.Context, int64) ([]string, error)
+	VChannels                       func(context.Context, int64) ([]string, error)
+	RefreshVersions                 *sync.Map // collection ID -> greatest requested qviews.DataVersion
 }
 
 // Init publishes a fully initialized instance before Coordinator serves DDLs.

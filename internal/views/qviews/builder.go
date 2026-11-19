@@ -14,7 +14,8 @@ import (
 func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryViewAtCoordBuilder {
 	m := view.GetMeta()
 	b := &QueryViewAtCoordBuilder{
-		collectionID: m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
+		shardSetEpoch: m.GetShardSetEpoch(),
+		collectionID:  m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
 		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
 		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
 		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
@@ -52,6 +53,7 @@ func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {
 	control                     *viewpb.QueryViewControl
+	shardSetEpoch               uint64
 	collectionID                int64
 	replicaID                   int64
 	vchannel                    string
@@ -90,6 +92,8 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		}
 	}
 	return &QueryViewAtCoordBuilder{
+		shardSetEpoch:               dataView.GetShardSetEpoch(),
+		lineage:                     shardView.GetLineage(),
 		collectionID:                dataView.CollectionId,
 		schemaVersion:               dataView.GetSchemaVersion(),
 		replicaID:                   replicaID,
@@ -107,6 +111,8 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 // Maps are immutable after handing them to the builder; the builder only reads
 // them and never exposes them in the resulting protobuf.
 type QueryViewBuilderMetadata struct {
+	ShardSetEpoch               uint64
+	Lineage                     *viewpb.QueryViewLineage
 	CollectionID                int64
 	DataVersion                 DataVersion
 	SchemaVersion               int32
@@ -119,6 +125,7 @@ type QueryViewBuilderMetadata struct {
 // when a planner already owns native immutable metadata.
 func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilderMetadata) *QueryViewAtCoordBuilder {
 	return &QueryViewAtCoordBuilder{
+		shardSetEpoch: metadata.ShardSetEpoch, lineage: metadata.Lineage,
 		collectionID: metadata.CollectionID, replicaID: id.ReplicaID, vchannel: id.VChannel,
 		dataVersion: metadata.DataVersion, queryVersion: 1, schemaVersion: metadata.SchemaVersion,
 		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
@@ -177,9 +184,10 @@ func (b *QueryViewAtCoordBuilder) SetAssignments(assignments map[int64]map[int64
 
 func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 	meta := &viewpb.QueryViewMeta{
-		CollectionId: b.collectionID,
-		ReplicaId:    b.replicaID,
-		Vchannel:     b.vchannel,
+		ShardSetEpoch: b.shardSetEpoch,
+		CollectionId:  b.collectionID,
+		ReplicaId:     b.replicaID,
+		Vchannel:      b.vchannel,
 		Version: &viewpb.QueryViewVersion{
 			DataVersion:  b.dataVersion.IntoProto(),
 			QueryVersion: b.queryVersion,

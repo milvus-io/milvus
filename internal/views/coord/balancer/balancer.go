@@ -222,6 +222,12 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	plan := b.policy.Plan(reader, dirty)
 	if plan != nil {
+		// A source removed by adoption is repaired from its retained published
+		// generation below, not from the latest DataView's absent shard.
+		plan.Retries = slices.DeleteFunc(plan.Retries, func(id qviews.ShardID) bool {
+			manager := b.viewRegistry.Get(id)
+			return reader.ConfigForShard(id) != nil && reader.DataViewForShard(id) == nil && manager != nil && manager.PublishedGenerationRecovery() != nil
+		})
 		// A suspended replica may shed serving capacity, but must retain the
 		// published schema's recovery base while a newer schema is pending.
 		// Otherwise resuming it can only plan the unmaterialized target. An

@@ -25,6 +25,9 @@ import (
 //
 // All methods are safe for concurrent use.
 type ShardViewRegistry struct {
+	servingMu      sync.Mutex
+	servingCatalog queryview.ServingGenerationCatalog
+	serving        map[int64]*viewpb.DataViewOfCollection
 	mu             sync.RWMutex
 	ctx            context.Context
 	flushScheduler *DirtyViewFlushScheduler
@@ -114,10 +117,29 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 		collectionShards: make(map[int64]map[qviews.ShardID]struct{}),
 		nodeShards:       make(map[int64]map[qviews.ShardID]struct{}),
 	}
+	if catalog, ok := catalog.(queryview.ServingGenerationCatalog); ok {
+		recovered, err := catalog.ListServingGenerations(ctx)
+		if err != nil {
+			flushScheduler.Close()
+			for _, manager := range shards {
+				manager.abortRecovery()
+			}
+			return nil, err
+		}
+		registry.servingCatalog = catalog
+		registry.serving = make(map[int64]*viewpb.DataViewOfCollection, len(recovered))
+		for _, generation := range recovered {
+			registry.serving[generation.GetCollectionId()] = generation
+		}
+	}
 	if len(loadInfoRefs) > 0 {
 		registry.loadInfoRefs = loadInfoRefs[0]
 	}
 	for sid, mgr := range shards {
+		_, collectionID, _, _ := funcutil.ParseVChannel(sid.VChannel)
+		if generation := registry.serving[collectionID]; generation != nil {
+			mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetSchemaVersion())
+		}
 		stats := mgr.Stats()
 		registry.stats[sid] = stats
 		registry.addCollectionShardLocked(sid)
@@ -171,6 +193,14 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	r.publishShardLocked(shardID, stats)
 	r.version++
 	r.mu.Unlock()
+	// Do not acquire servingMu while holding registry.mu: publication takes
+	// those locks in the other order. Align before exposing the new manager to
+	// its caller so a stale preparation cannot resurrect an obsolete epoch.
+	r.servingMu.Lock()
+	if generation := r.serving[collectionID]; generation != nil {
+		mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetSchemaVersion())
+	}
+	r.servingMu.Unlock()
 	return mgr
 }
 

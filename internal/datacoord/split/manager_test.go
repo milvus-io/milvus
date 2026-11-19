@@ -429,10 +429,12 @@ func TestTriggerAdmissionRefusals(t *testing.T) {
 		_, err = env.manager.Split(ctx, testCollection, testTarget1)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
-		// Until the adoption. Then a target can be split.
+		// Adoption alone is insufficient: g2 may not yet be published.
 		require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
 		require.Empty(t, env.manager.TriggerOnce())
 		require.NoError(t, env.store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
+		require.ErrorIs(t, env.manager.checkState(ctx, testCollection), merr.ErrServiceUnavailable)
+		require.NoError(t, env.store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRetired))
 		// Then a target can be split. The pchannels of the source and of both
 		// targets stay excluded for the collection, as is the one of the other
 		// shard: no pchannel is left for new targets.

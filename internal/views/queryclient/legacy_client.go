@@ -167,6 +167,7 @@ func newLegacyClient(
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
+	shardResolver = withServingResolver(shardResolver, cfg.LoadInfoClient)
 	return &legacyClient{
 		shardClient:   shardClient,
 		shardResolver: shardResolver,
@@ -177,8 +178,7 @@ func (c *legacyClient) MaxRetries() int {
 	return c.shardClient.maxRetries
 }
 
-func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
-	defer func() { err = ToMilvusError(err) }()
+func (c *legacyClient) search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
 	if req.AllowStreaming {
 		return c.searchStream(ctx, req, req.ReduceStreamChunkBytes)
 	}
@@ -344,8 +344,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 	return &LegacySearchResult{Stream: finalStreams[0], Plans: shardPlans, streamPlans: streamPlans}, nil
 }
 
-func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
-	defer func() { err = ToMilvusError(err) }()
+func (c *legacyClient) query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}
@@ -540,4 +539,26 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 		return nil, err
 	}
 	return &LegacyQueryResult{Results: results, Plans: req.Plans}, nil
+}
+
+func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.search(ctx, req); return err })
+	return result, ToMilvusError(err)
+}
+
+func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
+	if req.Plans != nil {
+		result, err = c.query(ctx, req)
+		return result, ToMilvusError(err)
+	}
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.query(ctx, req); return err })
+	return result, ToMilvusError(err)
 }

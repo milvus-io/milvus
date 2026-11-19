@@ -70,7 +70,11 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 
 	segmentIDs := dataViewShardSegmentIDs(shard, req.GetPartitionIds())
 	manifestVersions := make(map[int64]int64)
+	partitionOwners := make(map[int64]int64)
 	for _, partition := range shard.GetPartitions() {
+		for _, id := range partition.GetSegmentIds() {
+			partitionOwners[id] = partition.GetPartitionId()
+		}
 		for i, version := range partition.GetSegmentManifestVersions() {
 			manifestVersions[partition.GetSegmentIds()[i]] = version
 		}
@@ -79,20 +83,46 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		return resp, nil
 	}
 	byID := make(map[int64]*datapb.StreamingNodeBM25Resource, len(segmentIDs))
+	var adoptedView *viewpb.DataViewOfCollection
 	for _, segmentID := range segmentIDs {
 		segment := s.meta.GetSegment(ctx, segmentID)
 		if segment == nil {
 			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for data view"))
 			return resp, nil
 		}
-		if segment.GetInsertChannel() != "" && segment.GetInsertChannel() != req.GetVchannel() {
-			resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
-				"segment channel mismatch, segmentID=%d, expected=%s, actual=%s",
-				segment.GetID(),
-				req.GetVchannel(),
-				segment.GetInsertChannel(),
-			))
+		if segment.GetCollectionID() != req.GetCollectionId() || segment.GetPartitionID() != partitionOwners[segmentID] {
+			resp.Status = merr.Status(merr.WrapErrDataIntegrityMsg("segment %d does not belong to the requested DataView collection and partition", segmentID))
 			return resp, nil
+		}
+		if segment.GetInsertChannel() != "" && segment.GetInsertChannel() != req.GetVchannel() {
+			if s.isRetainedSplitSource(req.GetCollectionId(), req.GetVchannel(), segment.GetInsertChannel()) {
+				if adoptedView == nil {
+					latest, err := s.dataViewManager.Latest(ctx, req.GetCollectionId())
+					if err != nil {
+						resp.Status = merr.Status(err)
+						return resp, nil
+					}
+					if latest == nil {
+						resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("adopted DataView is unavailable"))
+						return resp, nil
+					}
+					defer latest.Deref()
+					adoptedView = latest.DataView()
+				}
+				if dataViewShard(adoptedView, req.GetVchannel()) != nil ||
+					!dataViewHasSegment(adoptedView, segment.GetInsertChannel(), segment.GetPartitionID(), segmentID) {
+					resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("split adoption of segment %d is not published", segmentID))
+					return resp, nil
+				}
+			} else {
+				resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+					"segment channel mismatch, segmentID=%d, expected=%s, actual=%s",
+					segment.GetID(),
+					req.GetVchannel(),
+					segment.GetInsertChannel(),
+				))
+				return resp, nil
+			}
 		}
 		manifestPath := segment.GetManifestPath()
 		if version, ok := manifestVersions[segmentID]; ok && version > 0 && manifestPath != "" {
@@ -134,6 +164,37 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		resp.Bm25Resources = append(resp.Bm25Resources, resource)
 	}
 	return resp, nil
+}
+
+// A retained pre-adoption DataView authorizes the old source's membership.
+// Current SegmentMeta alone cannot validate its owner: adoption moved it to a
+// target while g1 may still need to reconstruct the same immutable resources.
+func (s *Server) isRetainedSplitSource(collectionID int64, source, target string) bool {
+	if s.splitStore == nil {
+		return false
+	}
+	for _, task := range s.splitStore.List() {
+		if task.GetCollectionId() != collectionID || task.GetSourceVchannel() != source ||
+			task.GetState() < datapb.SplitShardTaskState_SplitShardTaskRewriteDone ||
+			task.GetState() >= datapb.SplitShardTaskState_SplitShardTaskRetired {
+			continue
+		}
+		for _, candidate := range task.GetTargets() {
+			if candidate.GetVchannel() == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dataViewHasSegment(view *viewpb.DataViewOfCollection, channel string, partitionID, segmentID int64) bool {
+	for _, partition := range dataViewShard(view, channel).GetPartitions() {
+		if partition.GetPartitionId() == partitionID && slices.Contains(partition.GetSegmentIds(), segmentID) {
+			return true
+		}
+	}
+	return false
 }
 
 func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {

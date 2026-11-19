@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -74,6 +75,7 @@ type CollectionInfo struct {
 	// partition may share it with a Dropping one; the live one wins.
 	PartitionIDsByName map[string]int64
 	VChannelNames      []string
+	Routing            routing.Routing
 	// Properties holds the collection properties in RootCoord's order,
 	// as describe reports them.
 	Properties     []*commonpb.KeyValuePair

@@ -747,6 +747,9 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
+		if epoch, ok := ctx.Value(servingEpochContextKey{}).(uint64); ok {
+			planReq.ShardSetEpoch = epoch
+		}
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
 			if retryableQueryError(err) {

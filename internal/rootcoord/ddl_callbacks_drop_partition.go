@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
@@ -86,6 +87,11 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 }
 
 func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result message.BroadcastResultDropPartitionMessageV1) error {
+	releaseLifecycle, err := qvresource.AcquireSplitLifecycle(ctx, result.Message.Header().CollectionId)
+	if err != nil {
+		return err
+	}
+	defer releaseLifecycle()
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 

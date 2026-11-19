@@ -90,6 +90,7 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
 		Properties:         schema.Properties,
+		Routing:            coll.Routing(),
 		DatabaseName:       dbName,
 		DatabaseID:         coll.DBID,
 		StartPositions:     coll.StartPositions,

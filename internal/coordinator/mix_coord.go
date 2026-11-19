@@ -1712,3 +1712,23 @@ func (s *mixCoordImpl) initDataAndQueryCoord() error {
 
 	return nil
 }
+
+// QueryViewSplitSources retains S through adoption until the local retirement
+// record advances. RootCoord's immutable lineage is not a local lifecycle flag.
+func (s *mixCoordImpl) QueryViewSplitSources(ctx context.Context, id int64) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	store := s.datacoordServer.ShardSplitStore()
+	if store == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("split lifecycle is not recovered")
+	}
+	return store.Sources(id, datapb.SplitShardTaskState_SplitShardTaskRetired), nil
+}
+
+func (s *mixCoordImpl) QueryViewSplitLifecycle() qvresource.SplitLifecycle {
+	if s.datacoordServer == nil {
+		return nil
+	}
+	return s.datacoordServer
+}

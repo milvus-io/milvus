@@ -68,6 +68,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	// its target vchannels. It is appended exclusively, so that no DML on the
 	// source vchannel is in flight when the fence is installed, and so that
 	// every transaction on it is aborted.
+	MessageTypeRetireSplitShard: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeSplitShard: {
 		ExclusiveRequired: true,
 	},

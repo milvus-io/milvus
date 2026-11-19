@@ -25,10 +25,46 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view load metadata is not initialized"))
 		return resp, nil
 	}
+	if req.GetSplitAdmissionOnly() {
+		allowed, err := s.qviewsRuntime.splitTargetAdmission(ctx, req)
+		resp.SplitAdmissionAllowed = allowed
+		if err != nil {
+			resp.Status = merr.Status(err)
+		}
+		return resp, nil
+	}
 	info, err := s.qviewsRuntime.loadConfigStore.GetLoadInfo(ctx, req.GetCollectionID(), req.GetVersion())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+	if req.GetVersion() == 0 && s.qviewsRuntime.balanceCache != nil {
+		entry := s.qviewsRuntime.balanceCache.GetCollection(req.GetCollectionID())
+		if entry != nil && entry.DataView() != nil && entry.DataView().ShardSetEpoch > 0 {
+			version := entry.DataView().DataVersion.IntoProto()
+			ref, err := s.qviewsRuntime.resources.DataViews.Get(ctx, req.GetCollectionID(), version)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			if ref == nil {
+				resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("serving DataView unavailable"))
+				return resp, nil
+			}
+			defer ref.Deref()
+			var replicas []int64
+			if cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID()); cfg != nil {
+				for _, replica := range cfg.Replicas {
+					replicas = append(replicas, replica.ReplicaID)
+				}
+			}
+			generation, err := s.qviewsRuntime.shardViewRegistry.ResolveServingGeneration(ctx, ref.DataView(), replicas)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			info.ShardSetEpoch, info.ServingShards = generation.GetShardSetEpoch(), generation.GetShards()
+		}
 	}
 	return info, nil
 }

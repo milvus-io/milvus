@@ -93,6 +93,23 @@ shard by shard. The client samples each target's published prefix with
 QueryNodes the legacy request timestamp is `read_timetick`. Shards outside a
 group, and every list without lineage, keep the per-shard path above unchanged.
 
+For a collection with local split history, shard resolution waits until the
+published serving list covers every current write owner. Write owners and the
+local-split marker come from one immutable collection metadata snapshot. This is
+only an admission lower bound: the actual read list, including any additional
+lineage source, still comes from Coordinator publication. The same check handles
+later splits without deriving epochs from split counts. During the wait, metadata
+is refreshed and read again, so a stale owner cannot remain pinned after its
+replacement is published. Having observed a split, a request does not fall back
+to g0 when an older in-flight cache fill temporarily reports no split history.
+
+The wait uses the original request context and exponential backoff, initially
+20 ms with a 200 ms nominal maximum interval and the existing backoff jitter.
+Release and metadata/RPC errors propagate; no extra worker or shared routing
+cache is introduced. Never-split collections and restored static residue tables
+without local lineage keep their metadata-only path. Retained requery skips shard
+resolution, and fixed MVCC pairs and scalar barriers are not advanced by this wait.
+
 A retryable View error restarts the shard from Phase 1. The client first cancels
 and joins all workers in that attempt, then clears the shard's partial results.
 A response completing after cancellation therefore cannot leak into the next

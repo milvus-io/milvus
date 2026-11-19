@@ -13,8 +13,7 @@ import (
 // Statistics makes one SN call per attempt, followed only by the selected QNs.
 // Counts are current physical statistics, not MVCC/TTL-filtered query results.
 // barrierMVCC reuses Phase 1 barrier coverage; zero uses ordinary Strong sampling.
-func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
-	defer func() { err = ToMilvusError(err) }()
+func (c *legacyClient) statisticsCollection(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
 	shards, err := resolver.ResolveShards(ctx, c.shardResolver, collectionID)
 	if err != nil {
 		return 0, err
@@ -87,4 +86,13 @@ func (s *shardViewQueryClient) statisticsAt(ctx context.Context, collectionID in
 		return 0, err
 	}
 	return rows.Load(), nil
+}
+
+func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, collectionID, func() error { count, err = c.statisticsCollection(ctx, collectionID, req, barrierMVCC); return err })
+	return count, ToMilvusError(err)
 }

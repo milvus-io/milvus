@@ -691,3 +691,20 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
 }
+
+func TestFailOneRefusedBeginPreservesOtherTransactions(t *testing.T) {
+	resource.InitForTest(t)
+	manager := NewTxnManager(types.PChannelInfo{Name: "p"}, nil)
+	first, err := manager.BeginNewTxn(t.Context(), newBeginTxnMessageWithVChannel("v", 100, time.Second))
+	require.NoError(t, err)
+	second, err := manager.BeginNewTxn(t.Context(), newBeginTxnMessageWithVChannel("v", 200, time.Second))
+	require.NoError(t, err)
+	manager.FailTxn(first.TxnContext().TxnID)
+	_, err = manager.GetSessionOfTxn(first.TxnContext().TxnID)
+	require.Error(t, err)
+	got, err := manager.GetSessionOfTxn(second.TxnContext().TxnID)
+	require.NoError(t, err)
+	require.Same(t, second, got)
+	manager.FailTxn(first.TxnContext().TxnID)
+	manager.FailTxn(second.TxnContext().TxnID)
+}

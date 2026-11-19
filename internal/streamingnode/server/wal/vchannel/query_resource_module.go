@@ -182,6 +182,10 @@ func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
 	if m.summaryManager == nil {
 		return
 	}
+	if m.vchannelView != nil && m.vchannelView.IsSplitRetired() {
+		m.releaseSplitQueryRetentionLocked()
+		return
+	}
 	// A fresh module exists before it observes CreateCollection. Pin the
 	// unknown prefix until that message establishes the collection origin.
 	var floor uint64

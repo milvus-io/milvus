@@ -46,6 +46,10 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 			m.mu.Unlock()
 			return nil, viewerror.NewViewInvalidated("query view %s segment %d is not ready", key.String(), id)
 		}
+		if registrationForView(b.prepared.base, v) == nil {
+			m.mu.Unlock()
+			return nil, viewerror.NewViewInvalidated("query view %s segment %d lost its own stream registration", key.String(), id)
+		}
 		for _, vchannel := range lineageVChannels {
 			var registration TransformRegistration
 			if lineage := b.prepared.base.lineage[vchannel]; lineage != nil && lineage.err == nil {
@@ -75,7 +79,7 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		v.operationRefs++
 		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.Collection(), read: read.read}
 		lineage := lineageRegistrations[id]
-		handles = append(handles, &resourceSegmentHandle{segment: segment, registration: read.base.registration, lineage: lineage, release: func() {
+		handles = append(handles, &resourceSegmentHandle{segment: segment, registration: registrationForView(read.base, v), lineage: lineage, release: func() {
 			defer r.operations.Done()
 			unpinRead()
 			m.mu.Lock()

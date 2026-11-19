@@ -535,17 +535,19 @@ func (node *Proxy) SetViewQueryClient(client queryclient.Client) {
 
 // GetCollectionVChannels returns the vchannels of a collection via the proxy's
 // GetCollection flow (metacache). It backs the QueryView client's
-// collection → vchannel resolution.
-func (node *Proxy) GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, error) {
+// collection → vchannel resolution. The local-split marker is taken from the
+// same immutable snapshot, so a racing metadata fill cannot mix generations.
+func (node *Proxy) GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, bool, error) {
 	metaCache := node.getMetaCache()
 	if metaCache == nil {
-		return nil, merr.WrapErrServiceInternalMsg("meta cache is not initialized")
+		return nil, false, merr.WrapErrServiceInternalMsg("meta cache is not initialized")
 	}
 	collInfo, err := metaCache.GetCollectionInfo(ctx, "", "", collectionID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return append([]string(nil), collInfo.VChannels...), nil
+	split, err := collectionHasShardSplit(collInfo)
+	return append([]string(nil), collInfo.VChannels...), split, err
 }
 
 // GetRateLimiter returns the rateLimiter in Proxy.
@@ -557,3 +559,29 @@ func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 }
 
 func (node *Proxy) ViewQueryClient() queryclient.Client { return node.viewQueryClient }
+
+func (node *Proxy) HasShardSplit(ctx context.Context, collectionID int64) (bool, error) {
+	_, split, err := node.GetCollectionVChannels(ctx, collectionID)
+	return split, err
+}
+
+func collectionHasShardSplit(info *collectionInfo) (bool, error) {
+	if info.RoutingModulus == 0 {
+		return false, nil
+	}
+	if info.SplitRouting == nil {
+		return false, merr.WrapErrServiceInternalMsg("explicit collection routing is not initialized")
+	}
+	if info.SplitRouting.Err != nil {
+		return false, info.SplitRouting.Err
+	}
+	// A restored collection starts with static residue owners and no local
+	// split history. Only a real lineage requires the serving-generation fence.
+	return len(info.SplitRouting.Sources) != 0, nil
+}
+
+func (node *Proxy) RefreshShardRouting(ctx context.Context, collectionID int64) {
+	if cache := node.getMetaCache(); cache != nil {
+		cache.RefreshCollectionByID(ctx, collectionID)
+	}
+}

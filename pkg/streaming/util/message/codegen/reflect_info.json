@@ -28,6 +28,16 @@
     "messageReflectInfoTable": [
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.RetireSplitShardMessageHeader",
+                "BodyType": "messagespb.RetireSplitShardMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRetireSplitShard",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.AddFileResourceMessageHeader",
                 "BodyType": "messagespb.AddFileResourceMessageBody"
             },

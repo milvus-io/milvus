@@ -81,6 +81,8 @@ enum MessageType {
     // is T_switch), a copy on a target is the genesis of that vchannel, and the
     // copy on the control channel only orders the ack callback.
     SplitShard                   = 52;
+    // Cluster-local retirement after this cluster publishes the adopted views.
+    RetireSplitShard             = 53;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -767,6 +769,8 @@ message RestoreSnapshotMessageBody {
     CreateCollectionMessageHeader collection_header = 1;
     msg.CreateCollectionRequest collection = 2;
     repeated index.FieldIndex indexes = 3;
+    // Full restored placement, using newly allocated target VChannel names.
+    SplitShardRouting routing = 4;
 }
 
 message AlterWALMessageHeader {
@@ -1085,3 +1089,10 @@ message RemoveFileResourceMessageBody {
     int64 resource_id = 1;
     string name = 2;
 }
+
+// This message must carry Unreplicable and target the fenced source.
+message RetireSplitShardMessageHeader {
+    int64 collection_id = 1;
+    int64 split_task_id = 2;
+}
+message RetireSplitShardMessageBody {}

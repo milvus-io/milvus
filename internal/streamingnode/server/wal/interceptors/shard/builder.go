@@ -24,6 +24,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		for channel, state := range snapshot.WritePathRecovery.VChannels {
 			if state.SplitGenesisTaskID != 0 {
 				shardInterceptor.genesis.Store(state.CollectionID, splitGenesis{state.SplitGenesisTaskID, state.SplitSourceVChannel, channel})
+				shardInterceptor.addSplitTargetGate(channel, state.CollectionID, state.SplitSourceVChannel)
 			}
 		}
 	}
