@@ -959,12 +959,27 @@ func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64)
 		return nil, err
 	}
 
-	// Unmarshal the response payload
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+	if state != taskcommon.Finished {
+		// Only a finished task needs segment results from the payload.
+		return &datapb.RefreshExternalCollectionTaskResponse{Status: resp.GetStatus(), State: state, FailReason: reason}, nil
+	}
+
 	result := &datapb.RefreshExternalCollectionTaskResponse{}
 	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
 		return nil, err
 	}
-
+	// An empty payload decodes to None. Only a finished worker result can
+	// supply the segment changes that DataCoord will publish.
+	if result.GetState() != taskcommon.Finished {
+		return nil, merr.WrapErrServiceInternalMsg("finished refresh task %d has result payload in state %s", taskID, result.GetState())
+	}
+	result.FailReason = reason
 	return result, nil
 }
 
