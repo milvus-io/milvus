@@ -2969,22 +2969,27 @@ void
 SegmentGrowingImpl::AppendArrayTextRows(index::TextMatchIndex& index,
                                         const FieldMeta& field,
                                         int64_t begin,
-                                        int64_t count) {
+                                        int64_t count,
+                                        bool rebuilding) {
     const auto id = field.get_id();
-    // All earlier rows have published their offsets. Schema backfill starts
-    // at document zero, before the new field's offsets alias is installed.
-    int64_t document = 0;
-    if (begin != 0) {
-        auto offsets = GetStructElementOffsets(id);
-        AssertInfo(offsets != nullptr,
-                   "missing array offsets for text field {}",
-                   id.get());
-        document = offsets->ElementIDRangeOfRow(begin).first;
+    std::lock_guard lock(array_text_mutex_);
+    if (rebuilding) {
+        // A schema backfill may be retried with a fresh, unpublished writer.
+        array_text_progress_.erase(id);
     }
+    if (count == 0) {
+        return;
+    }
+    auto& progress = array_text_progress_[id];
+    // PreInsert reserves row ranges that can finish out of order. A row's
+    // first element ID is known only once all preceding rows are available.
+    progress.ready_rows.AddSegment(begin, begin + count);
+    const auto end = progress.ready_rows.GetAck();
     const auto append = [&](const auto* column) {
-        for (auto row = begin; row < begin + count;) {
-            const auto n = std::min<int64_t>(begin + count - row,
-                                             kTextLobIndexBuildBatchSize);
+        while (progress.next_row < end) {
+            const auto row = progress.next_row;
+            const auto n =
+                std::min<int64_t>(end - row, kTextLobIndexBuildBatchSize);
             ArrayTextValues docs;
             for (int64_t i = row; i < row + n; ++i) {
                 if (!field.is_nullable() ||
@@ -2996,10 +3001,10 @@ SegmentGrowingImpl::AppendArrayTextRows(index::TextMatchIndex& index,
                 index.AddTextsGrowing(docs.values.size(),
                                       docs.values.data(),
                                       docs.Validity(),
-                                      document);
-                document += docs.values.size();
+                                      progress.next_document);
+                progress.next_document += docs.values.size();
             }
-            row += n;
+            progress.next_row += n;
         }
     };
     if (field.is_native_list_array()) {
@@ -3017,8 +3022,13 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
     auto schema = get_schema_snapshot();
-    auto index = BuildTextIndexForMeta(schema->operator[](field_id));
+    const auto& field_meta = (*schema)[field_id];
+    auto index = BuildTextIndexForMeta(field_meta);
     std::unique_lock lock(mutex_);
+    if (field_meta.is_varchar_array()) {
+        std::lock_guard progress_lock(array_text_mutex_);
+        array_text_progress_.erase(field_id);
+    }
     text_indexes_[field_id] = std::move(index);
 }
 
@@ -3222,7 +3232,8 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
                 text_indexes_.find(field_id) == text_indexes_.end()) {
                 auto index = BuildTextIndexForMeta(field_meta);
                 if (field_meta.is_varchar_array()) {
-                    AppendArrayTextRows(*index, field_meta, 0, row_count);
+                    AppendArrayTextRows(
+                        *index, field_meta, 0, row_count, /*rebuilding=*/true);
                 } else if (row_count > 0) {
                     const bool has_default =
                         field_meta.default_value().has_value();

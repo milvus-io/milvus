@@ -859,11 +859,20 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::unique_ptr<index::TextMatchIndex>
     BuildTextIndexForMeta(const FieldMeta& field_meta);
 
+    struct ArrayTextProgress {
+        AckResponder ready_rows;
+        int64_t next_row = 0;
+        int64_t next_document = 0;
+    };
+    std::mutex array_text_mutex_;
+    std::unordered_map<FieldId, ArrayTextProgress> array_text_progress_;
+
     void
     AppendArrayTextRows(index::TextMatchIndex& index,
                         const FieldMeta& field,
                         int64_t begin,
-                        int64_t count);
+                        int64_t count,
+                        bool rebuilding = false);
 
     /**
      * @brief Initialize TEXT LOB spillover files for each TEXT field

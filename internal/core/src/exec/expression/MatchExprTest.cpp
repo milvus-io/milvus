@@ -4938,11 +4938,31 @@ TEST_P(MatchExprArrayText, QuantifiesTextDocumentsOnGrowingAndSealed) {
         } else {
             auto growing = CreateGrowingSegment(schema, empty_index_meta);
             growing->PreInsert(n);
-            growing->Insert(0,
-                            n,
-                            ids.data(),
-                            generated.timestamps_.data(),
-                            generated.raw_);
+            auto insert_batch = [&](int64_t begin, int64_t count) {
+                InsertRecordProto batch;
+                batch.set_num_rows(count);
+                auto* fields = batch.mutable_fields_data();
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        ids.data() + begin, nullptr, count, (*schema)[pk])
+                        .release());
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        bodies.data() + begin, nullptr, count, (*schema)[body])
+                        .release());
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        scores.data() + begin, nullptr, count, (*schema)[score])
+                        .release());
+                growing->Insert(begin,
+                                count,
+                                ids.data() + begin,
+                                generated.timestamps_.data() + begin,
+                                &batch);
+            };
+            // Later rows arrive first. Document IDs must still follow array offsets.
+            insert_batch(2, n - 2);
+            insert_batch(0, 2);
             auto index = growing->GetTextIndex(nullptr, body);
             index.get()->Commit();
             index.get()->Reload();
