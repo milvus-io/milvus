@@ -176,7 +176,7 @@ func (kc *Catalog) PrepareSplitAdoption(ctx context.Context, record *model.Split
 	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{adoptionKey(record.CollectionID, record.TaskID): preparing}, nil, guard); err != nil {
 		return nil, err
 	}
-	record.MovesValue, err = kc.preparePagedValue(ctx, record.CollectionID, moves)
+	record.MovesValue, err = kc.preparePagedValue(ctx, record.CollectionID, nil, moves)
 	if err != nil {
 		return nil, err
 	}
@@ -203,11 +203,7 @@ func (kc *Catalog) CommitSplitAdoption(ctx context.Context, record *model.SplitA
 	if err != nil {
 		return err
 	}
-	encoded, err := proto.Marshal(view)
-	if err != nil {
-		return err
-	}
-	value, err := kc.preparePagedValue(ctx, record.CollectionID, encoded)
+	key, value, err := kc.prepareDataView(ctx, view)
 	if err != nil {
 		return err
 	}
@@ -220,7 +216,6 @@ func (kc *Catalog) CommitSplitAdoption(ctx context.Context, record *model.SplitA
 	if len(root)+len(value)+len(prepared)+1024 > metadataRootBytes {
 		return merr.Wrapf(merr.ErrServiceResourceInsufficient, "split adoption publication exceeds storage budget")
 	}
-	key := buildDataViewVersionKey(view.GetCollectionId(), view.GetDataVersion().GetStreamingVersion(), view.GetDataVersion().GetCompactVersion())
 	err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{adoptionKey(record.CollectionID, record.TaskID): root, key: value}, nil,
 		predicates.ValueEqual(adoptionKey(record.CollectionID, record.TaskID), prepared))
 	if err != nil {

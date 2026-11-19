@@ -98,7 +98,7 @@ func (c *splitTestCatalog) ListAllDataViews(context.Context) ([]*viewpb.DataView
 	return c.views, nil
 }
 
-func (c *splitTestCatalog) DropDataView(context.Context, int64, *viewpb.DataVersion) error {
+func (c *splitTestCatalog) DropDataView(context.Context, *viewpb.DataViewOfCollection) error {
 	return nil
 }
 

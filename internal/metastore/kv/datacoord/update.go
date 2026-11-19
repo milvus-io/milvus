@@ -154,16 +154,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			if e.DataView == nil || e.DataView.GetDataVersion() == nil {
 				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil DataView or DataVersion in UpdateAction")
 			}
-			key := buildDataViewVersionKey(
-				e.DataView.GetCollectionId(),
-				e.DataView.GetDataVersion().GetStreamingVersion(),
-				e.DataView.GetDataVersion().GetCompactVersion(),
-			)
-			encoded, err := proto.Marshal(e.DataView)
-			if err != nil {
-				return err
-			}
-			value, err := kc.prepareDataViewValue(ctx, e.DataView, encoded)
+			key, value, err := kc.prepareDataView(ctx, e.DataView)
 			if err != nil {
 				return err
 			}
