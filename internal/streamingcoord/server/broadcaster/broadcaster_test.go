@@ -1404,7 +1404,9 @@ func TestBroadcastEmptyControlCheckpointAfterDataAck(t *testing.T) {
 	}
 	require.False(t, task.isControlChannelAcked(), "the nonnil empty repeated message is still pending")
 	require.Zero(t, task.ControlChannelTimeTick())
-	legacy := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0, 1})
+	bitmap := make([]byte, len(msg.BroadcastHeader().VChannels))
+	bitmap[findIdxOfVChannel(control, msg.BroadcastHeader().VChannels)] = 1
+	legacy := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, bitmap)
 	legacy.AckedCheckpoints = nil
 	task = newBroadcastTaskFromProto(legacy, newBroadcasterMetrics(), nil)
 	require.Len(t, task.PendingBroadcastMessages(), 1)
