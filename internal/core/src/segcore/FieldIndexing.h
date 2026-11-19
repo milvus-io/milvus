@@ -309,7 +309,7 @@ class VectorFieldIndexing : public FieldIndexing {
                                  const FieldIndexMeta& field_index_meta,
                                  int64_t segment_max_row_count,
                                  const SegcoreConfig& segcore_config,
-                                 const VectorBase* field_raw_data);
+                                 VectorBase* field_raw_data);
 
     ~VectorFieldIndexing() override;
 
@@ -389,6 +389,8 @@ class VectorFieldIndexing : public FieldIndexing {
     get_search_params(const SearchInfo& searchInfo) const;
 
  private:
+    VectorBase* const raw_column_;  // InsertRecord outlives the build worker.
+
     void
     recreate_index(DataType data_type, const VectorBase* field_raw_data);
 
@@ -632,7 +634,7 @@ CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
             int64_t segment_max_row_count,
             const SegcoreConfig& segcore_config,
-            const VectorBase* field_raw_data = nullptr);
+            VectorBase* field_raw_data = nullptr);
 
 class IndexingRecord {
  public:

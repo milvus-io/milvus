@@ -2033,9 +2033,7 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     EXPECT_EQ(threshold_probe_sr->seg_offsets_[0], threshold_probe_offset);
     EXPECT_NEAR(threshold_probe_sr->distances_[0], 0.0f, 1e-5);
 
-    // A post-sync batch takes the kSynced Add branch; try_remove_chunks only
-    // runs on the insert path, so this batch is what reclaims the chunks
-    // (IVF_FLAT_CC keeps raw data, so the index owns it now).
+    // Later inserts go directly to the published index.
     InsertAsyncBatch(
         segment.get(), fixture.schema, per_batch, 42 + 10 * per_batch);
     auto* field_data =
@@ -2590,6 +2588,62 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 }
 
+TEST(GrowingIndexAsyncBuildTest, NullOnlyTailUsesUnlockedLogicalSlices) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async(config, true);
+    ApplyAsyncBuildConfig(config);
+    using Phase = VectorFieldIndexing::GrowingBuildPhase;
+    std::atomic<bool> at_finalize{false}, release{false};
+    std::atomic<int> tail_rounds{0};
+    ScopedBuildHook hook([&](Phase phase) {
+        if (phase == Phase::kBeforeFinalize && !at_finalize.exchange(true)) {
+            while (!release.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        } else if (phase == Phase::kAfterCatchupRound && release.load()) {
+            ++tail_rounds;
+        }
+    });
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              true);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit unblock(release);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    constexpr int64_t initial = 50000;
+    InsertAsyncBatch(segment.get(), fixture.schema, initial, 17);
+    ASSERT_TRUE(WaitFlag(at_finalize, 60000));
+
+    // More logical rows than one 8 MiB dense slice, zero physical rows.
+    constexpr int64_t tail = (8 << 20) / (kAsyncDim * sizeof(float)) + 1;
+    InsertAsyncBatch(
+        segment.get(), fixture.schema, tail, 19, [&](GeneratedData& batch) {
+            for (auto& field : *batch.raw_->mutable_fields_data()) {
+                if (field.field_id() == fixture.vec.get()) {
+                    auto* validity = MutableFieldDataRowValidData(&field);
+                    std::fill(validity->begin(), validity->end(), false);
+                    field.mutable_vectors()
+                        ->mutable_float_vector()
+                        ->clear_data();
+                }
+            }
+        });
+    release.store(true);
+    ASSERT_TRUE(WaitSynced(impl, fixture.vec, 60000));
+    EXPECT_GE(tail_rounds.load(), 2);
+    EXPECT_EQ(IndexedRowCount(impl, fixture.vec), initial / 2);
+    auto pin = impl->get_indexing_record()
+                   .get_vec_field_indexing(fixture.vec)
+                   .get_segment_indexing();
+    auto* index = dynamic_cast<milvus::index::VectorIndex*>(pin.get());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->GetLogicalCount(), initial + tail);
+}
+
 TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
@@ -3077,6 +3131,13 @@ TEST(GrowingIndexAsyncBuildTest, SearchDuringBuildUsesBruteForce) {
     release_after_build.store(true);
     ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), per_batch);
+    // The final insert returned while the worker was parked. It must
+    // reclaim the raw generation without another insert or load.
+    for (int waited = 0; field_data->num_chunk() && waited < 5000;
+         waited += 5) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(field_data->num_chunk(), 0);
     expect_searchable("after the publish");
 }
 

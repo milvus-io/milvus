@@ -294,8 +294,9 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
                                          const FieldIndexMeta& field_index_meta,
                                          int64_t segment_max_row_count,
                                          const SegcoreConfig& segcore_config,
-                                         const VectorBase* field_raw_data)
+                                         VectorBase* field_raw_data)
     : FieldIndexing(field_meta, segcore_config),
+      raw_column_(field_raw_data),
       built_(false),
       sync_with_index_(false),
       index_unavailable_(false),
@@ -1111,49 +1112,45 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             logical_tail));
     };
 
+    const bool mapping = field_raw_data->is_mapping_storage();
+    auto logical_cursor = [&]() -> int64_t {
+        return mapping ? index_->GetLogicalCount() : index_cur_.load();
+    };
+    const auto slice = CatchupSliceRows();
+    auto fits_budget = [&](int64_t rows) {
+        return rows <= slice &&
+               estimated_finalize_ms(rows) <= async_finalize_budget_ms_;
+    };
+
     for (;;) {
         if (IsCancelled()) {
             // Segment tearing down: stay kBuilding, never publish.
             return;
         }
         int64_t pending_snapshot = pending_upto_.load();
-        int64_t target = PhysicalTarget(field_raw_data, pending_snapshot);
-        int64_t gap = target - static_cast<int64_t>(index_cur_.load());
+        const auto round_from = logical_cursor();
+        const auto gap = pending_snapshot - round_from;
         if (gap > 0 && ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
-            estimated_finalize_ms(gap) > async_finalize_budget_ms_) {
+            !fits_budget(gap)) {
             throw_deadline(gap);
         }
         if (gap > 0) {
             auto round_start = std::chrono::steady_clock::now();
-            int64_t round_from = static_cast<int64_t>(index_cur_.load());
-            int64_t round_target =
-                std::min(target, round_from + CatchupSliceRows());
-            AddRange(field_raw_data, round_target, /*interruptible=*/true);
+            const auto logical_end = round_from + std::min(gap, slice);
+            AddRange(field_raw_data,
+                     PhysicalTarget(field_raw_data, logical_end),
+                     /*interruptible=*/true);
+            if (IsCancelled()) {
+                return;
+            }
+            RegisterNullLogicalTail(field_raw_data, logical_end);
             double round_ms = ElapsedMs(round_start);
-            int64_t round_rows =
-                static_cast<int64_t>(index_cur_.load()) - round_from;
-            if (round_rows > 0) {
-                consumed_rows += round_rows;
-                consumed_ms += round_ms;
-            }
-            // Once this round drained every physical row below the snapshot,
-            // the logical tail [OutCount, pending_snapshot) is null-only
-            // (a valid logical row always maps to a physical row that the
-            // drain just absorbed), so it can be registered OUTSIDE
-            // append_mutex_. This keeps the O(logical-tail) bitmap work off
-            // the locked finalize: the in-lock RegisterNullLogicalTail call
-            // below then only covers rows that slipped in after this
-            // snapshot -- about one insert batch.
-            if (static_cast<int64_t>(index_cur_.load()) >= target &&
-                field_raw_data->is_mapping_storage()) {
-                RegisterNullLogicalTail(field_raw_data, pending_snapshot);
-            }
+            const auto round_rows = logical_end - round_from;
+            consumed_rows += round_rows;
+            consumed_ms += round_ms;
             CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
 
-            int64_t latest_target =
-                PhysicalTarget(field_raw_data, pending_upto_.load());
-            int64_t latest_gap =
-                latest_target - static_cast<int64_t>(index_cur_.load());
+            const auto latest_gap = pending_upto_.load() - logical_cursor();
             double rate = consume_rate();
             double estimate_ms = estimated_finalize_ms(latest_gap);
             LOG_INFO(
@@ -1172,10 +1169,9 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
                 async_finalize_budget_ms_,
                 ElapsedMs(catchup_start),
                 async_catchup_deadline_ms_,
-                estimate_ms <= async_finalize_budget_ms_ ? "try_finalize"
-                                                         : "continue");
+                fits_budget(latest_gap) ? "try_finalize" : "continue");
 
-            if (estimate_ms > async_finalize_budget_ms_) {
+            if (!fits_budget(latest_gap)) {
                 if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
                     throw_deadline(latest_gap);
                 }
@@ -1198,15 +1194,12 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         int64_t final_target = PhysicalTarget(field_raw_data, pending);
         int64_t frozen_gap =
             final_target - static_cast<int64_t>(index_cur_.load());
-        bool is_mapping_storage = field_raw_data->is_mapping_storage();
-        // Under IdMap the logical registration travels with each physical Add
-        // (per-slice IdMapData in AddRange); only a null-only logical tail can
-        // remain after the drain, and it is registered inside the lock below.
-        int64_t index_logical =
-            is_mapping_storage ? index_->GetLogicalCount() : pending;
-        int64_t logical_tail = pending - index_logical;
-        double frozen_estimate_ms = estimated_finalize_ms(frozen_gap);
-        if (frozen_estimate_ms > async_finalize_budget_ms_) {
+        const auto logical_gap = pending - logical_cursor();
+        const auto logical_tail = logical_gap - frozen_gap;
+        const auto frozen_estimate_ms = estimated_finalize_ms(logical_gap);
+        // A null-only tail still allocates and consumes validity bits. Drain
+        // it outside the append lock even when its estimated cost is small.
+        if (logical_gap > 0 && (frozen_gap == 0 || !fits_budget(logical_gap))) {
             LOG_INFO(
                 "async growing index finalize deferred after locking: "
                 "frozen_gap_rows={}, estimated_finalize_ms={}, "
@@ -1221,15 +1214,16 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
                 lock_wait_ms,
                 ElapsedMs(catchup_start));
             lock.unlock();
-            if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
-                throw_deadline(frozen_gap, logical_tail);
+            if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
+                !fits_budget(logical_gap)) {
+                throw_deadline(logical_gap, logical_tail);
             }
             continue;
         }
 
         auto lock_hold_start = std::chrono::steady_clock::now();
         AddRange(field_raw_data, final_target, /*interruptible=*/false);
-        if (is_mapping_storage) {
+        if (mapping) {
             // Everything valid below `pending` is physical and drained; the
             // remaining logical tail is nulls by construction.
             RegisterNullLogicalTail(field_raw_data, pending);
@@ -1244,6 +1238,9 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         // every row whose AppendingIndex call has returned.
         sync_with_index_.store(true);
         state_.store(GrowingIndexState::kSynced);
+        const auto caught_up_rows = final_target - catchup_from;
+        const bool release_raw = has_raw_data();
+        lock.unlock();
         double lock_hold_ms = ElapsedMs(lock_hold_start);
         LOG_INFO(
             "async growing index finalized and published: frozen_gap_rows={}, "
@@ -1257,11 +1254,13 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             lock_wait_ms,
             lock_hold_ms,
             ElapsedMs(catchup_start));
+        if (release_raw) {
+            raw_column_->ReclaimRawChunks();
+        }
         milvus::monitor::internal_core_growing_index_catchup_latency.Observe(
             ElapsedMs(catchup_start));
         milvus::monitor::internal_core_growing_index_catchup_rows.Observe(
-            static_cast<double>(static_cast<int64_t>(index_cur_.load()) -
-                                catchup_from));
+            static_cast<double>(caught_up_rows));
         return;
     }
 }
@@ -1440,7 +1439,10 @@ VectorFieldIndexing::sync_data_with_index() const {
 
 bool
 VectorFieldIndexing::has_raw_data() const {
-    return !index_unavailable_.load() && index_->HasRawData();
+    return !index_unavailable_.load() &&
+           config_->GetIndexType() !=
+               knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR &&
+           index_->HasRawData();
 }
 
 template <typename T>
@@ -1711,7 +1713,7 @@ CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
             int64_t segment_max_row_count,
             const SegcoreConfig& segcore_config,
-            const VectorBase* field_raw_data) {
+            VectorBase* field_raw_data) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT ||
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
