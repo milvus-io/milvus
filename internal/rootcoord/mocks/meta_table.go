@@ -408,6 +408,53 @@ func (_c *IMetaTable_AlterRole_Call) RunAndReturn(run func(context.Context, stri
 	return _c
 }
 
+// ApplyShardSplit provides a mock function with given fields: ctx, result
+func (_m *IMetaTable) ApplyShardSplit(ctx context.Context, result message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) error {
+	ret := _m.Called(ctx, result)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyShardSplit")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) error); ok {
+		r0 = rf(ctx, result)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_ApplyShardSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyShardSplit'
+type IMetaTable_ApplyShardSplit_Call struct {
+	*mock.Call
+}
+
+// ApplyShardSplit is a helper method to define mock.On call
+//   - ctx context.Context
+//   - result message.BroadcastResult[*messagespb.SplitShardMessageHeader,*messagespb.SplitShardMessageBody]
+func (_e *IMetaTable_Expecter) ApplyShardSplit(ctx interface{}, result interface{}) *IMetaTable_ApplyShardSplit_Call {
+	return &IMetaTable_ApplyShardSplit_Call{Call: _e.mock.On("ApplyShardSplit", ctx, result)}
+}
+
+func (_c *IMetaTable_ApplyShardSplit_Call) Run(run func(ctx context.Context, result message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody])) *IMetaTable_ApplyShardSplit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ApplyShardSplit_Call) Return(_a0 error) *IMetaTable_ApplyShardSplit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ApplyShardSplit_Call) RunAndReturn(run func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) error) *IMetaTable_ApplyShardSplit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BackupRBAC provides a mock function with given fields: ctx, tenant
 func (_m *IMetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
 	ret := _m.Called(ctx, tenant)
@@ -1317,6 +1364,63 @@ func (_c *IMetaTable_CheckIfUpdateCredential_Call) Return(_a0 error) *IMetaTable
 }
 
 func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo) error) *IMetaTable_CheckIfUpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckShardSplit provides a mock function with given fields: ctx, result
+func (_m *IMetaTable) CheckShardSplit(ctx context.Context, result message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) (bool, error) {
+	ret := _m.Called(ctx, result)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckShardSplit")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) (bool, error)); ok {
+		return rf(ctx, result)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) bool); ok {
+		r0 = rf(ctx, result)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) error); ok {
+		r1 = rf(ctx, result)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_CheckShardSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckShardSplit'
+type IMetaTable_CheckShardSplit_Call struct {
+	*mock.Call
+}
+
+// CheckShardSplit is a helper method to define mock.On call
+//   - ctx context.Context
+//   - result message.BroadcastResult[*messagespb.SplitShardMessageHeader,*messagespb.SplitShardMessageBody]
+func (_e *IMetaTable_Expecter) CheckShardSplit(ctx interface{}, result interface{}) *IMetaTable_CheckShardSplit_Call {
+	return &IMetaTable_CheckShardSplit_Call{Call: _e.mock.On("CheckShardSplit", ctx, result)}
+}
+
+func (_c *IMetaTable_CheckShardSplit_Call) Run(run func(ctx context.Context, result message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody])) *IMetaTable_CheckShardSplit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckShardSplit_Call) Return(applied bool, err error) *IMetaTable_CheckShardSplit_Call {
+	_c.Call.Return(applied, err)
+	return _c
+}
+
+func (_c *IMetaTable_CheckShardSplit_Call) RunAndReturn(run func(context.Context, message.BroadcastResult[*messagespb.SplitShardMessageHeader, *messagespb.SplitShardMessageBody]) (bool, error)) *IMetaTable_CheckShardSplit_Call {
 	_c.Call.Return(run)
 	return _c
 }

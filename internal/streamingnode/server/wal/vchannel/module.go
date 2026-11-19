@@ -222,6 +222,8 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		if created := messageutil.RestoreCollectionMessage(msg); created != nil {
 			m.handleCreateCollectionMessage(created)
 		}
+	case message.MessageTypeSplitShard:
+		m.handleSplitShardMessage(ctx, retained)
 	case message.MessageTypeCreatePartition:
 		m.handleCreatePartitionMessage(message.MustAsImmutableCreatePartitionMessageV1(msg))
 	case message.MessageTypeSchemaChange:
@@ -377,6 +379,29 @@ func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.Immut
 		}
 	}
 	m.refreshQueryRetentionLocked()
+}
+
+// handleSplitShardMessage handles the copy of a SplitShard message on this
+// vchannel. A copy on a target vchannel is its genesis and takes the path of a
+// CreateCollection message. The copy on the source vchannel records the split
+// and seals every growing segment, the way a manual flush does: the sealed
+// segments flush through the normal path and stay segments of this vchannel.
+func (m *VChannelRecoveryModule) handleSplitShardMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := owned.Message()
+	if created := messageutil.SplitShardGenesisMessage(msg); created != nil {
+		m.handleCreateCollectionMessage(created)
+		return
+	}
+	if !messageutil.IsSplitShardFence(msg) {
+		return
+	}
+	if m.vchannelView != nil {
+		m.vchannelView.ObserveSplitShardFenceMessageV2(message.MustAsImmutableSplitShardMessageV2(msg))
+	}
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
 }
 
 func (m *VChannelRecoveryModule) handleCreatePartitionMessage(msg message.ImmutableCreatePartitionMessageV1) {

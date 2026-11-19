@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -123,6 +124,12 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
+	// The routing of a collection that was split, as the coordinator reports
+	// it: the residues every vchannel owns and the modulus they are taken
+	// against. Empty on a collection that was never split.
+	ShardInfos     []*schemapb.CollectionShardInfo
+	RoutingModulus uint64
+	ShardBy        string
 }
 
 type DatabaseInfo struct {
@@ -449,6 +456,9 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		UpdateTimestamp:       collection.UpdateTimestamp,
 		CollectionTTL:         GetCollectionTTL(schemaInfo.GetProperties()),
 		VChannels:             collection.VirtualChannelNames,
+		ShardInfos:            collection.GetShardInfos(),
+		RoutingModulus:        collection.GetRoutingModulus(),
+		ShardBy:               collection.GetShardBy(),
 		PChannels:             collection.PhysicalChannelNames,
 		NumPartitions:         collection.NumPartitions,
 		ShardsNum:             collection.ShardsNum,

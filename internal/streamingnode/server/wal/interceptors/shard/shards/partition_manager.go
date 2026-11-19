@@ -118,6 +118,17 @@ func (m *partitionManager) WaitPendingGrowingSegmentReady() <-chan struct{} {
 	return ready
 }
 
+// CancelPendingAlloc wakes every insert that waits for a segment that will
+// never be created. It is used when the vchannel is fenced by a shard split:
+// the create segment message of the allocation in flight is refused from then
+// on.
+func (m *partitionManager) CancelPendingAlloc() {
+	if m.onAllocating != nil {
+		close(m.onAllocating)
+		m.onAllocating = nil
+	}
+}
+
 // FlushAndDropPartition flushes all segments in the partition.
 // !!! caller should ensure that the returned segment is flushed by other message (not FlushMessage), such as DropPartition, DropCollection.
 func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int64 {

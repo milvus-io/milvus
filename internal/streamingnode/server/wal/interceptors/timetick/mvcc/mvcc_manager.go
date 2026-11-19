@@ -85,6 +85,14 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsControlChannel(vchannel) {
 		return
 	}
+	if messageutil.IsSplitShardGenesis(msg) {
+		// The copy of a SplitShard message on a target vchannel is the first
+		// message of that vchannel. It registers the shard as live, the way
+		// CreateCollection does. The copy on the source vchannel is an ordinary
+		// message of a live shard and takes the default branch below.
+		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
+		return
+	}
 	switch msgType {
 	case message.MessageTypeCreateSegment, message.MessageTypeFlush:
 		// These storage operations do not change query-visible data and are not

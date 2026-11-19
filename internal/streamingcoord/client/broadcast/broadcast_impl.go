@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -61,6 +62,40 @@ func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.Immutabl
 		BroadcastId: msg.BroadcastHeader().BroadcastID,
 		Vchannel:    msg.VChannel(),
 		Message:     msg.IntoImmutableMessageProto(),
+	})
+	return err
+}
+
+// WaitVChannelsAcked blocks until every given vchannel of a broadcast is
+// acknowledged at the streaming coord, and returns the greatest time tick they
+// were acknowledged at. An error is returned as it is: the caller calls again.
+func (c *GRPCBroadcastServiceImpl) WaitVChannelsAcked(ctx context.Context, typ message.MessageType, broadcastID uint64, vchannels []string) (uint64, error) {
+	client, err := c.service.GetService(ctx)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.WaitVChannelsAcked(ctx, &streamingpb.WaitVChannelsAckedRequest{
+		BroadcastId: broadcastID,
+		Vchannels:   vchannels,
+		MessageType: messagespb.MessageType(typ),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return resp.GetTimeTick(), nil
+}
+
+// ReportVChannelAppended tells the streaming coord that the copy of a
+// broadcast on vchannel was appended to the WAL of this cluster at timeTick.
+func (c *GRPCBroadcastServiceImpl) ReportVChannelAppended(ctx context.Context, broadcastID uint64, vchannel string, timeTick uint64) error {
+	client, err := c.service.GetService(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.ReportVChannelAppended(ctx, &streamingpb.ReportVChannelAppendedRequest{
+		BroadcastId: broadcastID,
+		Vchannel:    vchannel,
+		TimeTick:    timeTick,
 	})
 	return err
 }

@@ -13,6 +13,7 @@ type interceptorBuilder struct{}
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	shardInterceptor := &shardInterceptor{
 		shardManager: param.ShardManager,
+		txnManager:   param.TxnManager,
 	}
 	if schemaProvider, ok := param.ShardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {

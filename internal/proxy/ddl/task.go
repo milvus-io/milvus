@@ -1812,6 +1812,9 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
+	t.result.ShardInfos = result.GetShardInfos()
+	t.result.RoutingModulus = result.GetRoutingModulus()
+	t.result.ShardBy = result.GetShardBy()
 	t.result.CreatedTimestamp = result.CreatedTimestamp
 	t.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 	t.result.ShardsNum = result.ShardsNum

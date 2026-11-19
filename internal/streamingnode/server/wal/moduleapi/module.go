@@ -39,6 +39,10 @@ type VChannelWritePathRecoveryState struct {
 	PartitionIDs   []int64
 	Schema         *schemapb.CollectionSchema
 	SchemaTimeTick uint64
+	// SplitTaskID is the id of the shard split this vchannel is the source of,
+	// or zero if the vchannel was not split. The write path refuses DML on a
+	// vchannel that was split. Every other message is still admitted.
+	SplitTaskID int64
 }
 
 type SegmentWritePathRecoveryState struct {
