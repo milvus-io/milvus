@@ -6180,7 +6180,8 @@ func TestScalarArrayMatchBinding(t *testing.T) {
 		t.Run(filter, func(t *testing.T) {
 			expr, err := ParseExpr(helper, filter, nil)
 			require.NoError(t, err)
-			require.Positive(t, expr.GetMatchExpr().GetArrayFieldId())
+			require.NotNil(t, expr.GetMatchExpr().TargetFieldId)
+			require.Positive(t, expr.GetMatchExpr().GetTargetFieldId())
 			require.Empty(t, expr.GetMatchExpr().GetStructName())
 		})
 	}
@@ -6199,6 +6200,16 @@ func TestScalarArrayMatchBinding(t *testing.T) {
 	}
 }
 
+func TestMatchStructParentID(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	expr, err := ParseExpr(helper, "MATCH_ANY(struct_array, $[sub_int] > 0)", nil)
+	require.NoError(t, err)
+	match := expr.GetMatchExpr()
+	require.Equal(t, "struct_array", match.GetStructName())
+	require.EqualValues(t, structArrayFieldID, match.GetTargetFieldId())
+	require.EqualValues(t, structSubIntFieldID, match.GetPredicate().GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+}
+
 func TestMatchWithFlattenedStructSchema(t *testing.T) {
 	schema := newTestSchema(false)
 	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].GetFields()...)
@@ -6208,5 +6219,5 @@ func TestMatchWithFlattenedStructSchema(t *testing.T) {
 	expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_int] > 0)`, nil)
 	require.NoError(t, err)
 	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
-	require.Nil(t, expr.GetMatchExpr().GetCollection())
+	require.Nil(t, expr.GetMatchExpr().TargetFieldId)
 }
