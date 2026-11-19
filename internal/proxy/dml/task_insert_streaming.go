@@ -165,7 +165,22 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
 			failure = merr.ErrCollectionSchemaMismatch
 		}
-		it.result.Status = merr.Status(fence.finalError(ctx, collID, failure, writtenPart{what: "rows", pending: pending}))
+		failure = fence.finalError(ctx, collID, failure, writtenPart{what: "rows", pending: pending})
+		it.result.Status = merr.Status(failure)
+		if errors.Is(failure, merr.ErrCollectionMutationIncomplete) {
+			it.result.Timestamp = fence.maxTimeTick
+			it.result.SuccIndex = nil
+			durableIDs := &schemapb.IDs{}
+			for row := 0; row < pending.numRows; row++ {
+				if _, unconfirmed := pending.rows[row]; unconfirmed {
+					it.result.ErrIndex = append(it.result.ErrIndex, uint32(row))
+				} else {
+					it.result.SuccIndex = append(it.result.SuccIndex, uint32(row))
+					typeutil.AppendIDs(durableIDs, it.result.IDs, row)
+				}
+			}
+			it.result.IDs = durableIDs
+		}
 		return nil
 	}
 	// Update result.Timestamp for session consistency: the highest tick any

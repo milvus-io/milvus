@@ -1506,3 +1506,45 @@ func TestDeleteExecuteBacksOffOnATransientBuildFailureDuringARetry(t *testing.T)
 	assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
 	assert.GreaterOrEqual(t, calls, 3, "the transient failure cost one more attempt")
 }
+
+func TestInsertSchemaMismatchCannotReplayCommittedSibling(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := twoShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	f.cache.EXPECT().RemoveCollectionsByID(mock.Anything, splitFenceTestCollectionID).Return(nil).Once()
+	wal := installSplitFenceTestWAL(t, splitSource)
+	wal.failing[splitTarget0] = status.NewSchemaVersionMismatch("ALTER after source fence")
+	wal.failing[splitTarget1] = wal.failing[splitTarget0]
+	pks := seqPKs(16)
+	task := f.insertTask(pks)
+	require.NoError(t, task.Execute(t.Context()))
+	st := task.result.GetStatus()
+	require.EqualValues(t, 113, st.GetCode(), st.GetReason())
+	require.False(t, st.GetRetriable())
+	require.Contains(t, st.GetReason(), "partially applied")
+	durable := task.result.GetIDs().GetIntId().GetData()
+	require.NotEmpty(t, durable)
+	require.Len(t, durable, len(wal.insertedRowIDs[splitSibling]))
+	require.Len(t, task.result.GetErrIndex(), len(pks)-len(durable))
+	for i, offset := range task.result.GetSuccIndex() {
+		require.Equal(t, pks[offset], durable[i])
+	}
+	require.Len(t, wal.batches, 2)
+}
+
+func TestSchemaMismatchWithAmbiguousSiblingIsNotReplayable(t *testing.T) {
+	for _, sibling := range []error{status.NewShardFenced("b"), status.NewUnknownError("reply lost")} {
+		f := newSplitFence()
+		pending := newPendingRows(2)
+		msgs := fenceTestMessages(t, "a", "b")
+		err := f.settle(appendResponses(status.NewSchemaVersionMismatch("changed"), sibling), msgs, [][]int{{0}, {1}}, pending)
+		require.True(t, status.AsStreamingError(err).IsSchemaVersionMismatch())
+		st := merr.Status(f.finalError(t.Context(), 1, merr.ErrCollectionSchemaMismatch, writtenPart{what: "rows", pending: pending}))
+		if isShardRefusal(sibling) {
+			require.Equal(t, merr.Code(merr.ErrCollectionSchemaMismatch), st.Code)
+		} else {
+			require.Equal(t, merr.Code(merr.ErrCollectionMutationIncomplete), st.Code)
+			require.False(t, st.Retriable)
+		}
+	}
+}

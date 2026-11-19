@@ -418,6 +418,9 @@ type splitFence struct {
 	// follows a refusal: from then on a message the append did not answer is
 	// a failure, not a landed message (see settle).
 	strict bool
+	// A non-schema append error need not prove that shard wrote nothing.
+	// A sibling schema mismatch must not invite whole-request SDK replay.
+	ambiguousAppend bool
 	// routedInfo is the cache entry the latest attempt routed by, until the
 	// refresh that follows it (see refresh).
 	routedInfo *collectionInfo
@@ -512,6 +515,9 @@ func (f *splitFence) settle(resp streaming.AppendResponses, msgs []message.Mutab
 	pending.materialize()
 	var fatal error
 	fail := func(err error) {
+		if !status.AsStreamingError(err).IsSchemaVersionMismatch() {
+			f.ambiguousAppend = true
+		}
 		if fatal == nil {
 			fatal = err
 		}
@@ -667,7 +673,8 @@ type writtenPart struct {
 //     landed tombstones at a later tick (a delete); the message is what lets
 //     it decide.
 func (f *splitFence) finalError(ctx context.Context, collectionID int64, err error, parts ...writtenPart) error {
-	if err == nil || !f.strict {
+	schemaMismatch := errors.Is(err, merr.ErrCollectionSchemaMismatch)
+	if err == nil || (!f.strict && !schemaMismatch) {
 		return err
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil && !errors.IsAny(err, context.Canceled, context.DeadlineExceeded) &&
@@ -686,6 +693,9 @@ func (f *splitFence) finalError(ctx context.Context, collectionID int64, err err
 			landed = true
 		}
 		written = append(written, fmt.Sprintf("%d of %d %s", part.pending.landed(), part.pending.numRows, part.what))
+	}
+	if schemaMismatch && (landed || f.ambiguousAppend) {
+		err = merr.WrapErrCollectionMutationIncompleteErr(err)
 	}
 	if landed {
 		err = merr.Wrapf(err, "the request was partially applied: %s are durable and stay written", strings.Join(written, " and "))
