@@ -67,6 +67,13 @@ install_deps() {
     fi
 }
 
+# Parallel Go SDK test shards run this installer from the same checkout.
+# Hold the lock through the final check so each waiter sees the installed packages.
+if command -v flock >/dev/null 2>&1; then
+    exec 9<"${BASH_SOURCE[0]}"
+    flock -x 9
+fi
+
 ensure_python
 ensure_pip
 
