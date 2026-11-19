@@ -292,18 +292,16 @@ accumulation map itself. Group output is encoded into protobuf columns.
 | Query row | PK when present, returned fields, computed columns when present, optional matched-element indexes. |
 | Grouped Query partial | Group columns and partial aggregate columns. |
 
-Sizing counts the protobuf encoding of each Unit's reducible fields, including
-tags, lengths, wrappers, validity data and retained field descriptors. Shared
-wrappers are counted independently per Unit. It excludes result-level status,
-billing/MVCC/segment metadata and transport framing. Thus the sum of Unit sizes
-is neither `proto.Size(wholeChunk)` nor retained heap bytes.
+Sizing reuses the existing row size calculator: fixed-width values count by
+width, variable-width values by length, and nested array cells use their
+protobuf size. There is no separate charge for validity flags, outer field
+descriptors, result metadata or transport framing. The Chunk threshold is
+a payload target, not a wire-size limit or a heap bound.
 
-Calculations use existing field data directly, without constructing a temporary
-one-row result. Nullable-field mappings are reused per input Chunk; variable
-lengths and varint widths are counted where required. The shared implementation
-is in [row sizing](../../../internal/util/reduce/field_data_size.go), with callers in
-[Search](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L72) and
-[Query](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L111).
+The [row size calculator](../../../internal/util/queryutil/helpers.go) reads
+the existing columns without constructing a temporary one-row result.
+Ordered sizing reuses one nullable-vector cursor per source Chunk; the
+existing Batch quota keeps its own accounting and index preparation.
 
 For threshold `B`, all three policies preserve complete Units:
 

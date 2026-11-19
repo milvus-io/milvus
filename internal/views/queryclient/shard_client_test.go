@@ -270,12 +270,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
-	// Size two complete protobuf Units, excluding result metadata.
-	oneUnit := newTestQueryChunk([]int64{1})
-	timestamp := proto.Clone(rightChunk.FieldsData[1]).(*schemapb.FieldData)
-	timestamp.GetScalars().GetLongData().Data = timestamp.GetScalars().GetLongData().Data[:1]
-	oneUnit.FieldsData = append(oneUnit.FieldsData, timestamp)
-	chunkBytes := 2 * proto.Size(&internalpb.RetrieveResults{Ids: oneUnit.Ids, FieldsData: oneUnit.FieldsData})
+	chunkBytes := 2 * (8 + 8 + 8) // Two rows with int64 PK, value and timestamp.
 
 	stream, shardPlan, err := client.QueryStream(context.Background(), &ShardQueryRequest{
 		VChannel: shardID.VChannel,

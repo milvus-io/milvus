@@ -21,11 +21,11 @@ import (
 	"io"
 	"sync"
 
-	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -39,12 +39,11 @@ type ReduceStream = reduce.ReduceStream[*internalpb.SearchResults]
 
 // searchReduceUnit is one reducible Search hit, retaining its score and query-vector index for ranking.
 type searchReduceUnit struct {
-	result             *internalpb.SearchResults      // Source Chunk retained while the Unit is buffered.
-	data               *schemapb.SearchResultData     // Decoded Search data for the source Chunk.
-	queryIndex         int64                          // Query vector to which the Unit belongs.
-	rowIndex           int64                          // Row position in the source Search data.
-	byteSize           int                            // Encoded reducible-payload size of this Unit.
-	fieldIndexComputer *typeutil.FieldDataIdxComputer // Resolves nullable field positions in the source.
+	result     *internalpb.SearchResults  // Source Chunk retained while the Unit is buffered.
+	data       *schemapb.SearchResultData // Decoded Search data for the source Chunk.
+	queryIndex int64                      // Query vector to which the Unit belongs.
+	rowIndex   int64                      // Row position in the source Search data.
+	byteSize   int                        // Reducible-payload size of this Unit.
 }
 
 func (u searchReduceUnit) score() float32 {
@@ -64,60 +63,31 @@ func (b *orderedOutputBuffer) isEmpty() bool {
 	return len(b.units) == 0
 }
 
-func (u searchReduceUnit) reducibleByteSize() (int, error) {
-	data, row := u.data, u.rowIndex
-	if data == nil || row < 0 || row >= int64(len(data.GetScores())) {
-		return 0, merr.WrapErrServiceInternalMsg("Search Unit row %d is out of range", row)
-	}
-	idsSize, err := reduce.IDsRowSize(data.GetIds(), row)
-	if err != nil {
-		return 0, err
-	}
-	size := protowire.SizeTag(reduce.SearchScoresFieldNumber) + protowire.SizeBytes(protowire.SizeFixed32()) +
-		protowire.SizeTag(reduce.SearchIDsFieldNumber) + protowire.SizeBytes(idsSize)
-	computer := u.fieldIndexComputer
-	if computer == nil {
-		computer = typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
-	}
-	fieldIndexes := computer.Compute(row)
-	for i, field := range data.GetFieldsData() {
-		dataRow := row
-		if fieldIndexes != nil {
-			dataRow = fieldIndexes[i]
-		}
-		fieldSize, err := reduce.FieldDataRowSize(field, row, dataRow, true)
-		if err != nil {
-			return 0, err
-		}
-		size += protowire.SizeTag(reduce.SearchFieldsDataFieldNumber) + protowire.SizeBytes(fieldSize)
-	}
-	if indices := data.GetElementIndices(); indices != nil {
-		if row >= int64(len(indices.GetData())) {
-			return 0, merr.WrapErrServiceInternalMsg("Search Unit element index %d is out of range", row)
-		}
-		payload := protowire.SizeTag(reduce.LongArrayDataFieldNumber) + protowire.SizeBytes(protowire.SizeVarint(uint64(indices.Data[row])))
-		size += protowire.SizeTag(reduce.SearchElementIndicesFieldNumber) + protowire.SizeBytes(payload)
-	}
-	groupFields := data.GetGroupByFieldValues()
-	groupTag := reduce.SearchGroupByFieldValuesFieldNumber
-	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
-		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
-		groupTag = reduce.SearchGroupByFieldValueFieldNumber
-	}
-	for _, field := range groupFields {
-		fieldSize, err := reduce.GroupByFieldRowSize(field, row)
-		if err != nil {
-			return 0, err
-		}
-		size += protowire.SizeTag(groupTag) + protowire.SizeBytes(fieldSize)
-	}
-	return size, nil
-}
-
 type orderedChildBuffer struct {
 	units    []searchReduceUnit
 	cursor   int
 	groupKey func(int) (uint64, []any)
+	sizeRow  func(int64) int64 // Sizes fields and group keys in the current source Chunk.
+}
+
+// reducibleByteSize counts a Unit's payload while its source Chunk is still buffered.
+func (b *orderedChildBuffer) reducibleByteSize(u searchReduceUnit) (int, error) {
+	data, row := u.data, u.rowIndex
+	if data == nil || row < 0 || row >= int64(len(data.GetScores())) {
+		return 0, merr.WrapErrServiceInternalMsg("Search Unit row %d is out of range", row)
+	}
+	idsSize, err := queryutil.IDsRowSize(data.GetIds(), row)
+	if err != nil {
+		return 0, err
+	}
+	size := idsSize + 4 + int(b.sizeRow(row)) // Include one float32 score.
+	if indices := data.GetElementIndices(); indices != nil {
+		if row >= int64(len(indices.GetData())) {
+			return 0, merr.WrapErrServiceInternalMsg("Search Unit element index %d is out of range", row)
+		}
+		size += 8
+	}
+	return size, nil
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
@@ -135,6 +105,7 @@ func (b *orderedChildBuffer) pop() searchReduceUnit {
 		b.units = nil
 		b.cursor = 0
 		b.groupKey = nil
+		b.sizeRow = nil
 	}
 	return unit
 }
@@ -163,16 +134,22 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 
 	b.units = make([]searchReduceUnit, 0, hitCount)
 	b.cursor = 0
+	if hitCount == 0 {
+		return data, nil
+	}
+	groupFields := data.GetGroupByFieldValues()
+	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
+		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
+	}
+	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(data.GetFieldsData(), nil, groupFields).RowSize
 	rowIndex := int64(0)
-	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
 	for queryIndex, count := range data.GetTopks() {
 		for i := int64(0); i < count; i++ {
 			b.units = append(b.units, searchReduceUnit{
-				result:             chunk,
-				data:               data,
-				queryIndex:         int64(queryIndex),
-				rowIndex:           rowIndex,
-				fieldIndexComputer: fieldIndexComputer,
+				result:     chunk,
+				data:       data,
+				queryIndex: int64(queryIndex),
+				rowIndex:   rowIndex,
 			})
 			rowIndex++
 		}
@@ -255,7 +232,7 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 	start := 0
 	accumulatedBytes := 0
 	for end, unit := range buffer.units {
-		unitBytes, err := unit.reducibleByteSize()
+		unitBytes, err := buffer.reducibleByteSize(unit)
 		if err != nil {
 			return nil, err
 		}
@@ -737,7 +714,7 @@ func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer
 				return nil, false, nil
 			}
 		}
-		unitBytes, err := selected.reducibleByteSize()
+		unitBytes, err := readyBuffers[winner].reducibleByteSize(selected)
 		if err != nil {
 			return nil, false, err
 		}
@@ -966,9 +943,7 @@ func (s *OrderedReduceStream) closeChildren() error {
 	s.closed = true
 	s.closeErr = s.childStreams.Close()
 	for i := range s.childBuffers {
-		s.childBuffers[i].units = nil
-		s.childBuffers[i].cursor = 0
-		s.childBuffers[i].groupKey = nil
+		s.childBuffers[i] = orderedChildBuffer{}
 	}
 	s.metadata = nil
 	s.seenPKs = nil

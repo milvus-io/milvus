@@ -23,7 +23,6 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -46,10 +45,9 @@ type ReduceStream = reduce.ReduceStream[*internalpb.RetrieveResults]
 
 // queryReduceUnit is one reducible Query row, retaining its fields and timestamp for ordering and deduplication.
 type queryReduceUnit struct {
-	result             *internalpb.RetrieveResults
-	rowIndex           int64
-	byteSize           int
-	fieldIndexComputer *typeutil.FieldDataIdxComputer
+	result   *internalpb.RetrieveResults
+	rowIndex int64
+	byteSize int
 }
 
 func (u queryReduceUnit) pk() any {
@@ -104,57 +102,30 @@ func compareRetrieveUnits(left, right queryReduceUnit, orderByFields []*planpb.O
 	return queryutil.ComparePK(left.pk(), right.pk()), nil
 }
 
-// reducibleByteSize counts the encoded reducible fields of one Unit.
-func (u queryReduceUnit) reducibleByteSize() (int, error) {
+type orderedChildBuffer struct {
+	chunk         *internalpb.RetrieveResults
+	cursor        int64
+	hasMoreResult bool              // Retained from the first Chunk after its rows are consumed.
+	sizeRow       func(int64) int64 // Sizes fields in the current source Chunk.
+}
+
+// reducibleByteSize counts a Unit's payload while its source Chunk is still buffered.
+func (b *orderedChildBuffer) reducibleByteSize(u queryReduceUnit) (int, error) {
 	if u.rowIndex < 0 || u.rowIndex >= int64(queryutil.GetRowCount(u.result)) {
 		return 0, merr.WrapErrServiceInternalMsg("Query Unit row index %d is out of range", u.rowIndex)
 	}
-	computer := u.fieldIndexComputer
-	if computer == nil {
-		computer = typeutil.NewFieldDataIdxComputer(u.result.GetFieldsData())
+	idsSize, err := queryutil.IDsRowSize(u.result.GetIds(), u.rowIndex)
+	if err != nil {
+		return 0, err
 	}
-	fieldIndexes := computer.Compute(u.rowIndex)
-	size := 0
-	for i, field := range u.result.GetFieldsData() {
-		dataRow := u.rowIndex
-		if fieldIndexes != nil {
-			dataRow = fieldIndexes[i]
-		}
-		fieldSize, err := reduce.FieldDataRowSize(field, u.rowIndex, dataRow, false)
-		if err != nil {
-			return 0, err
-		}
-		size += protowire.SizeTag(reduce.RetrieveFieldsDataFieldNumber) + protowire.SizeBytes(fieldSize)
-	}
-	for _, field := range u.result.GetComputedResults() {
-		// Computed scalars retain a payload slot for every row, including NULLs.
-		fieldSize, err := reduce.FieldDataRowSize(field, u.rowIndex, u.rowIndex, false)
-		if err != nil {
-			return 0, err
-		}
-		size += protowire.SizeTag(reduce.RetrieveComputedResultsFieldNumber) + protowire.SizeBytes(fieldSize)
-	}
-	if ids := u.result.GetIds(); ids.GetIdField() != nil {
-		idsSize, err := reduce.IDsRowSize(ids, u.rowIndex)
-		if err != nil {
-			return 0, err
-		}
-		size += protowire.SizeTag(reduce.RetrieveIDsFieldNumber) + protowire.SizeBytes(idsSize)
-	}
+	size := idsSize + int(b.sizeRow(u.rowIndex))
 	if indices := u.result.GetElementIndices(); u.result.GetElementLevel() && len(indices) > 0 {
 		if u.rowIndex >= int64(len(indices)) {
 			return 0, merr.WrapErrServiceInternalMsg("Query Unit element index %d is out of range", u.rowIndex)
 		}
-		size += protowire.SizeTag(reduce.RetrieveElementIndicesFieldNumber) + protowire.SizeBytes(proto.Size(indices[u.rowIndex]))
+		size += 4 * len(indices[u.rowIndex].GetIndices())
 	}
 	return size, nil
-}
-
-type orderedChildBuffer struct {
-	chunk              *internalpb.RetrieveResults
-	cursor             int64
-	hasMoreResult      bool // Retained from the first Chunk after its rows are consumed.
-	fieldIndexComputer *typeutil.FieldDataIdxComputer
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
@@ -162,7 +133,7 @@ func (b *orderedChildBuffer) hasUnit() bool {
 }
 
 func (b *orderedChildBuffer) front() queryReduceUnit {
-	return queryReduceUnit{result: b.chunk, rowIndex: b.cursor, fieldIndexComputer: b.fieldIndexComputer}
+	return queryReduceUnit{result: b.chunk, rowIndex: b.cursor}
 }
 
 func (b *orderedChildBuffer) pop() queryReduceUnit {
@@ -171,7 +142,7 @@ func (b *orderedChildBuffer) pop() queryReduceUnit {
 	if !b.hasUnit() {
 		b.chunk = nil
 		b.cursor = 0
-		b.fieldIndexComputer = nil
+		b.sizeRow = nil
 	}
 	return unit
 }
@@ -193,7 +164,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	}
 	b.chunk = chunk
 	b.cursor = 0
-	b.fieldIndexComputer = typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
+	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(chunk.GetFieldsData(), chunk.GetComputedResults(), nil).RowSize
 	return nil
 }
 
@@ -379,27 +350,27 @@ func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer
 	// Resolve the trailing PK even after the byte threshold is reached.
 	// Returning its Chunk first would make a newer row in the next input Chunk too late.
 	if s.deduplicatePKs && len(outputBuffer) > 0 && queryutil.ComparePK(selected.pk(), s.lastPK) == 0 {
-		unit := winner.pop()
 		last := len(outputBuffer) - 1
-		if timestamp := unit.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
-			var err error
-			unit.byteSize, err = unit.reducibleByteSize()
+		if timestamp := selected.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
+			unitBytes, err := winner.reducibleByteSize(selected)
 			if err != nil {
 				return outputBuffer, outputBytes, false, err
 			}
-			outputBytes += unit.byteSize - outputBuffer[last].byteSize
-			outputBuffer[last] = unit
+			selected.byteSize = unitBytes
+			outputBytes += unitBytes - outputBuffer[last].byteSize
+			outputBuffer[last] = selected
 		}
+		winner.pop()
 		return outputBuffer, outputBytes, false, nil
 	}
 	if outputBytes >= s.chunkBytes {
 		return outputBuffer, outputBytes, true, nil
 	}
-	unitBytes, err := selected.reducibleByteSize()
+	unitBytes, err := winner.reducibleByteSize(selected)
 	if err != nil {
 		return outputBuffer, outputBytes, false, err
 	}
-	if unitBytes > s.chunkBytes && outputBytes > 0 {
+	if unitBytes > s.chunkBytes && len(outputBuffer) > 0 {
 		return outputBuffer, outputBytes, true, nil
 	}
 
@@ -804,14 +775,14 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	chunks := make([]*internalpb.RetrieveResults, 0)
 	units := make([]queryReduceUnit, 0)
 	accumulatedBytes := 0
-	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
+	buffer := orderedChildBuffer{sizeRow: queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), result.GetComputedResults(), nil).RowSize}
 	for row := 0; row < rowCount; row++ {
-		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: fieldIndexComputer}
-		unitBytes, err := unit.reducibleByteSize()
+		unit := queryReduceUnit{result: result, rowIndex: int64(row)}
+		unitBytes, err := buffer.reducibleByteSize(unit)
 		if err != nil {
 			return nil, err
 		}
-		if unitBytes > chunkBytes && accumulatedBytes > 0 {
+		if unitBytes > chunkBytes && len(units) > 0 {
 			chunk, err := buildRetrieveChunk(units)
 			if err != nil {
 				return nil, err

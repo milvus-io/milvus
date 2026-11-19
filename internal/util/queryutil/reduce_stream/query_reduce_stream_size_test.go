@@ -1,4 +1,4 @@
-// Verify exact Query protobuf sizing without copying Units.
+// Verify Query Chunk accounting without copying Units.
 package reducestream
 
 import (
@@ -10,18 +10,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func queryUnitReferenceSize(t testing.TB, unit queryReduceUnit) int {
-	t.Helper()
-	chunk, err := buildRetrieveChunk([]queryReduceUnit{unit})
-	require.NoError(t, err)
-	return proto.Size(&internalpb.RetrieveResults{Ids: chunk.GetIds(), FieldsData: chunk.GetFieldsData(), ComputedResults: chunk.GetComputedResults(), ElementIndices: chunk.GetElementIndices()})
-}
-
-func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
+func TestRetrieveUnitByteSizePayload(t *testing.T) {
 	values := []int64{0, 127, 128, -1, math.MinInt64, math.MaxInt64}
 	result := newQueryTestChunk(values, values)
 	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
@@ -30,26 +24,26 @@ func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
 			Dim: 768, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, len(values)*768)}},
 		}},
 	})
-	calculator := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
+	buffer := orderedChildBuffer{}
+	require.NoError(t, buffer.accept(result))
 	for row := range values {
-		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
-		got, err := unit.reducibleByteSize()
+		unit := queryReduceUnit{result: result, rowIndex: int64(row)}
+		got, err := buffer.reducibleByteSize(unit)
 		require.NoError(t, err)
-		require.Equal(t, queryUnitReferenceSize(t, unit), got)
-		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+		require.Equal(t, 8+8+768*4, got)
+		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = buffer.reducibleByteSize(unit) }))
 		require.NoError(t, err)
 	}
 	result.ReqID = 123
 	result.AllRetrieveCount = math.MaxInt64
-	unit := queryReduceUnit{result: result, fieldIndexComputer: calculator}
-	got, err := unit.reducibleByteSize()
+	unit := queryReduceUnit{result: result}
+	got, err := buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
-	require.Equal(t, queryUnitReferenceSize(t, unit), got)
-	result.FieldsData[0].FieldName = "field descriptors count toward the encoded size"
-	renamed, err := unit.reducibleByteSize()
+	require.Equal(t, 8+8+768*4, got)
+	result.FieldsData[0].FieldName = "field descriptors are not part of the payload"
+	renamed, err := buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
-	require.Greater(t, renamed, got)
-	require.Equal(t, queryUnitReferenceSize(t, unit), renamed)
+	require.Equal(t, got, renamed)
 }
 
 func TestRetrieveUnitComputedBytes(t *testing.T) {
@@ -63,12 +57,14 @@ func TestRetrieveUnitComputedBytes(t *testing.T) {
 			}}},
 		}},
 	}}
+	buffer := orderedChildBuffer{}
+	require.NoError(t, buffer.accept(result))
 	for row := int64(0); row < 3; row++ {
-		unit := queryReduceUnit{result: result, rowIndex: row, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.FieldsData)}
-		got, err := unit.reducibleByteSize()
+		unit := queryReduceUnit{result: result, rowIndex: row}
+		got, err := buffer.reducibleByteSize(unit)
 		require.NoError(t, err)
-		require.Equal(t, queryUnitReferenceSize(t, unit), got)
-		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+		require.Equal(t, 16+len(result.ComputedResults[0].GetScalars().GetJsonData().GetData()[row]), got)
+		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = buffer.reducibleByteSize(unit) }))
 		require.NoError(t, err)
 	}
 	threshold := queryChunkBytes(t, result, 2) - 1
@@ -77,7 +73,7 @@ func TestRetrieveUnitComputedBytes(t *testing.T) {
 	require.Len(t, chunks, 2)
 	require.Equal(t, []int64{1, 2}, queryTestIDs(chunks[0]))
 	require.Equal(t, []int64{3}, queryTestIDs(chunks[1]))
-	require.Greater(t, proto.Size(chunks[1]), threshold)
+	require.Greater(t, queryChunkBytes(t, chunks[1], 1), threshold)
 }
 
 // TestRetrieveUnitByteSizeMixedFields covers variable fields and compact nullable vectors.
@@ -105,26 +101,27 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 			}},
 		},
 	)
-	calculator := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
-	for row := 0; row < 3; row++ {
-		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
-		got, err := unit.reducibleByteSize()
+	buffer := orderedChildBuffer{}
+	require.NoError(t, buffer.accept(result))
+	for row, want := range []int{16 + 1 + 2 + 8, 16, 16 + 6 + 3 + 16} {
+		unit := queryReduceUnit{result: result, rowIndex: int64(row)}
+		got, err := buffer.reducibleByteSize(unit)
 		require.NoError(t, err)
-		require.Equal(t, queryUnitReferenceSize(t, unit), got)
-		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+		require.Equal(t, want, got)
+		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = buffer.reducibleByteSize(unit) }))
 		require.NoError(t, err)
 	}
 	result.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"id", "", "long-id"}}}}
-	unit := queryReduceUnit{result: result, rowIndex: 2, fieldIndexComputer: calculator}
-	got, err := unit.reducibleByteSize()
+	unit := queryReduceUnit{result: result, rowIndex: 2}
+	got, err := buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
-	require.Equal(t, queryUnitReferenceSize(t, unit), got)
+	require.Equal(t, 7+8+6+3+16, got)
 	result.Ids = nil                          // Grouped Query Units need not carry a PK.
 	result.FieldsData = result.FieldsData[:3] // Group keys and aggregates are scalar fields.
-	unit.fieldIndexComputer = typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
-	got, err = unit.reducibleByteSize()
+	buffer.sizeRow = queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), nil, nil).RowSize
+	got, err = buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
-	require.Equal(t, queryUnitReferenceSize(t, unit), got)
+	require.Equal(t, 8+6+3, got)
 }
 
 func TestBuildRetrieveChunkReusesSources(t *testing.T) {
@@ -176,10 +173,15 @@ func TestRetrieveUnitByteSizeVectorArray(t *testing.T) {
 			Type: schemapb.DataType_ArrayOfVector, FieldId: 101,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: []bool{valid}, Data: &schemapb.VectorField_VectorArray{VectorArray: array}}},
 		})
-		unit := queryReduceUnit{result: result}
-		got, err := unit.reducibleByteSize()
+		buffer := orderedChildBuffer{}
+		require.NoError(t, buffer.accept(result))
+		got, err := buffer.reducibleByteSize(buffer.front())
 		require.NoError(t, err)
-		require.Equal(t, queryUnitReferenceSize(t, unit), got)
+		want := 16
+		if valid {
+			want += proto.Size(array.Data[0])
+		}
+		require.Equal(t, want, got)
 	}
 }
 
@@ -187,21 +189,19 @@ func TestRetrieveUnitByteSizeVectorArray(t *testing.T) {
 func TestRetrieveUnitByteSizeCalculatorLifetime(t *testing.T) {
 	buffer := &orderedChildBuffer{}
 	require.NoError(t, buffer.accept(newQueryTestChunk([]int64{1, 2}, []int64{10, 20})))
-	calculator := buffer.fieldIndexComputer
-	first, second := buffer.pop(), buffer.pop()
-	require.Same(t, calculator, first.fieldIndexComputer)
-	require.Same(t, calculator, second.fieldIndexComputer)
-	require.Nil(t, buffer.fieldIndexComputer)
-	for _, unit := range []queryReduceUnit{first, second} {
-		got, err := unit.reducibleByteSize()
-		require.NoError(t, err)
-		require.Equal(t, queryUnitReferenceSize(t, unit), got)
-	}
-	_, err := (queryReduceUnit{result: first.result, rowIndex: -1}).reducibleByteSize()
+	_, err := buffer.reducibleByteSize(queryReduceUnit{result: buffer.chunk, rowIndex: -1})
 	require.Error(t, err)
+	for range 2 {
+		require.NotNil(t, buffer.sizeRow)
+		got, err := buffer.reducibleByteSize(buffer.front())
+		require.NoError(t, err)
+		require.Equal(t, 16, got)
+		buffer.pop()
+	}
+	require.Nil(t, buffer.sizeRow)
 }
 
-// BenchmarkRetrieveUnitByteSize compares exact arithmetic sizing with a one-row copy.
+// BenchmarkRetrieveUnitByteSize compares payload sizing with measuring a copied row.
 func BenchmarkRetrieveUnitByteSize(b *testing.B) {
 	result := newQueryTestChunk([]int64{10000}, []int64{10000})
 	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
@@ -210,13 +210,15 @@ func BenchmarkRetrieveUnitByteSize(b *testing.B) {
 			Dim: 768, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 768)}},
 		}},
 	})
-	unit := queryReduceUnit{result: result, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.GetFieldsData())}
+	buffer := orderedChildBuffer{}
+	require.NoError(b, buffer.accept(result))
+	unit := buffer.front()
 	for _, mode := range []string{"direct", "materialized"} {
 		b.Run(mode, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				if mode == "direct" {
-					if _, err := unit.reducibleByteSize(); err != nil {
+					if _, err := buffer.reducibleByteSize(unit); err != nil {
 						b.Fatal(err)
 					}
 				} else {

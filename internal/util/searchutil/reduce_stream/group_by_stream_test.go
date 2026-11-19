@@ -58,11 +58,14 @@ func TestSplitSearchResultPreservesGroupColumns(t *testing.T) {
 			_, err := buffer.accept(chunk, 2, 2)
 			require.NoError(t, err)
 			unit := buffer.front()
-			withGroup, err := unit.reducibleByteSize()
+			withGroup, err := buffer.reducibleByteSize(unit)
 			require.NoError(t, err)
 			unit.data.GroupByFieldValue = nil
 			unit.data.GroupByFieldValues = nil
-			withoutGroup, err := unit.reducibleByteSize()
+			buffer = &orderedChildBuffer{}
+			_, err = buffer.accept(chunk, 2, 2)
+			require.NoError(t, err)
+			withoutGroup, err := buffer.reducibleByteSize(unit)
 			require.NoError(t, err)
 			require.Greater(t, withGroup, withoutGroup)
 		}

@@ -30,6 +30,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -117,7 +118,7 @@ type testHit struct {
 	score float32
 }
 
-func TestSearchUnitByteSizeMatchesChunk(t *testing.T) {
+func TestSearchUnitByteSizePayload(t *testing.T) {
 	result := newSearchChunk(1, 2, []testHit{{id: 1, score: 0}, {id: 129, score: 0.5}})
 	result.ResultData.FieldsData = append(result.ResultData.FieldsData,
 		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldName: "text", FieldId: 120, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"", "hello"}}}, ValidData: []bool{false, true}}}},
@@ -126,19 +127,21 @@ func TestSearchUnitByteSizeMatchesChunk(t *testing.T) {
 		&schemapb.FieldData{Type: schemapb.DataType_Float, FieldName: "float", FieldId: 123, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{0, 1}}}}}},
 		&schemapb.FieldData{Type: schemapb.DataType_Double, FieldName: "double", FieldId: 124, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{0, 1}}}}}},
 	)
+	buffer := orderedChildBuffer{}
+	_, err := buffer.accept(result, 1, 2)
+	require.NoError(t, err)
 	for _, stringPK := range []bool{false, true} {
 		if stringPK {
 			result.ResultData.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"", "pk"}}}}
 		}
-		for row := int64(0); row < 2; row++ {
-			unit := searchReduceUnit{data: result.ResultData, rowIndex: row}
-			got, err := unit.reducibleByteSize()
+		for row, unit := range buffer.units {
+			got, err := buffer.reducibleByteSize(unit)
 			require.NoError(t, err)
-			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 2, "", false, false, nil)
-			require.NoError(t, err)
-			data := chunk.GetResultData()
-			want := proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
-			require.Equal(t, want, got)
+			idBytes := 8
+			if stringPK {
+				idBytes = len(result.ResultData.GetIds().GetStrId().GetData()[row])
+			}
+			require.Equal(t, idBytes+8+4+1+4+4+8+[]int{0, 5}[row], got)
 		}
 	}
 }
@@ -157,7 +160,7 @@ func TestSearchUnitByteSizeCompound(t *testing.T) {
 		&schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 203, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 1000, ValidData: []bool{true, false, true}, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 1000, Contents: [][]byte{make([]byte, 8), make([]byte, 16)}}}}}},
 	)
 	data.ElementIndices = &schemapb.LongArray{Data: []int64{0, 128, -1}}
-	group := &schemapb.FieldData{Type: schemapb.DataType_Int64, FieldName: "group", FieldId: 204, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10000, 10000, -1}}}, ValidData: []bool{true, false, true}}}}
+	group := &schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldName: "group", FieldId: 204, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"g", "longer"}}}, ValidData: []bool{true, false, true}}}}
 	for _, legacy := range []bool{false, true} {
 		data.GroupByFieldValues, data.GroupByFieldValue = nil, nil
 		if legacy {
@@ -168,15 +171,19 @@ func TestSearchUnitByteSizeCompound(t *testing.T) {
 		buffer := &orderedChildBuffer{}
 		_, err := buffer.accept(result, 2, 2)
 		require.NoError(t, err)
-		for _, unit := range buffer.units {
-			got, err := unit.reducibleByteSize()
+		for i, unit := range buffer.units {
+			got, err := buffer.reducibleByteSize(unit)
 			require.NoError(t, err)
 			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 2, 2, "", false, false, nil)
 			require.NoError(t, err)
 			row := chunk.GetResultData()
-			want := proto.Size(&schemapb.SearchResultData{FieldsData: row.FieldsData, Ids: row.Ids, Scores: row.Scores, ElementIndices: row.ElementIndices, GroupByFieldValue: row.GroupByFieldValue, GroupByFieldValues: row.GroupByFieldValues})
-			require.Equal(t, want, got, "legacy=%v row=%d", legacy, unit.rowIndex)
-			require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+			field := reduce.FindGroupByFieldData(row, group.GetFieldId(), legacy)
+			require.Equal(t, []any{"g", nil, "longer"}[i], typeutil.GetDataIterator(field)(0))
+			const fixedBytes = 8 + 8 + 4 + 8 // PK, int64 field, score and element index.
+			array := data.FieldsData[2].GetScalars().GetArrayData().GetData()[i]
+			want := fixedBytes + proto.Size(array) + []int{2 + 8 + 8 + 1, 3, 8 + 16 + 6}[i]
+			require.Equal(t, want, got, "legacy=%v row=%d", legacy, i)
+			require.Zero(t, testing.AllocsPerRun(100, func() { _, err = buffer.reducibleByteSize(unit) }))
 			require.NoError(t, err)
 		}
 	}
@@ -220,13 +227,16 @@ func BenchmarkSearchUnitByteSize(b *testing.B) {
 				}}},
 			})
 		}
-		unit := searchReduceUnit{data: data, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(data.FieldsData)}
+		buffer := orderedChildBuffer{}
+		_, err := buffer.accept(result, 1, 1)
+		require.NoError(b, err)
+		unit := buffer.front()
 		for _, mode := range []string{"direct", "materialized"} {
 			b.Run(shape+"/"+mode, func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
 					if mode == "direct" {
-						if _, err := unit.reducibleByteSize(); err != nil {
+						if _, err := buffer.reducibleByteSize(unit); err != nil {
 							b.Fatal(err)
 						}
 					} else {
@@ -252,7 +262,7 @@ func searchChunkBytes(t *testing.T, hits ...testHit) int {
 
 	bytes := 0
 	for _, unit := range buffer.units {
-		unitBytes, err := unit.reducibleByteSize()
+		unitBytes, err := buffer.reducibleByteSize(unit)
 		require.NoError(t, err)
 		bytes += unitBytes
 	}
@@ -288,7 +298,7 @@ func assertRetainedInputBound(t *testing.T, stream *OrderedReduceStream) retaine
 		bufferedBytes := 0
 		lastUnitBytes := 0
 		for _, unit := range buffer.units {
-			unitBytes, err := unit.reducibleByteSize()
+			unitBytes, err := buffer.reducibleByteSize(unit)
 			require.NoError(t, err)
 			bufferedBytes += unitBytes
 			lastUnitBytes = unitBytes
@@ -347,15 +357,22 @@ func TestOrderedReduceStreamReturnsPartialFinalChunk(t *testing.T) {
 	assertSearchChunk(t, recvChunk(t, stream), []int64{3}, []float32{0.7}, []int64{1})
 }
 
-func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
-	largeID := int64(1 << 56)
-	child := &fakeReduceStream{recv: []fakeStreamRecv{{chunk: newSearchChunk(1, 2, []testHit{
-		{id: 1, score: 0.9},
-		{id: largeID, score: 0.8},
-	})}}}
-	chunkBytes := searchChunkBytes(t, testHit{id: 1, score: 0.9}) + 1
-	require.Greater(t, searchChunkBytes(t, testHit{id: largeID, score: 0.8}), chunkBytes)
+func TestSearchEmitsOversizedUnitAlone(t *testing.T) {
+	result := newSearchChunk(1, 2, []testHit{{1, 0.9}, {2, 0.8}})
+	result.ResultData.FieldsData = append(result.ResultData.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldId: 102,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "a larger payload"}}},
+		}},
+	})
+	const chunkBytes = 22 // First hit is 21 bytes; the second exceeds the budget on its own.
+	chunks, err := SplitSearchResult(result, chunkBytes)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	assertSearchChunk(t, chunks[0], []int64{1}, []float32{0.9}, []int64{1})
+	assertSearchChunk(t, chunks[1], []int64{2}, []float32{0.8}, []int64{1})
 
+	child := &fakeReduceStream{recv: []fakeStreamRecv{{chunk: result}}}
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 2, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{child},
@@ -363,7 +380,7 @@ func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assertSearchChunk(t, recvChunk(t, stream), []int64{1}, []float32{0.9}, []int64{1})
-	assertSearchChunk(t, recvChunk(t, stream), []int64{largeID}, []float32{0.8}, []int64{1})
+	assertSearchChunk(t, recvChunk(t, stream), []int64{2}, []float32{0.8}, []int64{1})
 }
 
 func TestOrderedReduceStreamAllocBufferStartsEmpty(t *testing.T) {
@@ -929,22 +946,6 @@ func TestSplitSearchResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
 	assertSearchChunk(t, chunks[1], []int64{3}, []float32{0.7}, []int64{1})
 }
 
-func TestSplitSearchResultEmitsOversizedUnitAlone(t *testing.T) {
-	largeID := int64(1 << 56)
-	result := newSearchChunk(1, 2, []testHit{
-		{id: 1, score: 0.9},
-		{id: largeID, score: 0.8},
-	})
-	chunkBytes := searchChunkBytes(t, testHit{id: 1, score: 0.9}) + 1
-	require.Greater(t, searchChunkBytes(t, testHit{id: largeID, score: 0.8}), chunkBytes)
-
-	chunks, err := SplitSearchResult(result, chunkBytes)
-	require.NoError(t, err)
-	require.Len(t, chunks, 2)
-	assertSearchChunk(t, chunks[0], []int64{1}, []float32{0.9}, []int64{1})
-	assertSearchChunk(t, chunks[1], []int64{largeID}, []float32{0.8}, []int64{1})
-}
-
 func TestSplitSearchResultEmitsMetadataOnce(t *testing.T) {
 	result := newSearchChunk(1, 3,
 		[]testHit{{id: 1, score: 0.9}, {id: 2, score: 0.8}, {id: 3, score: 0.7}},
@@ -1213,8 +1214,13 @@ func TestOrderedReduceStreamCloseIsIdempotent(t *testing.T) {
 		1,
 	)
 	require.NoError(t, err)
+	buffer := &stream.(*OrderedReduceStream).childBuffers[0]
+	_, err = buffer.accept(newSearchChunk(1, 1, []testHit{{id: 1, score: 0.9}}), 1, 1)
+	require.NoError(t, err)
+	require.NotNil(t, buffer.sizeRow)
 
 	require.ErrorIs(t, stream.Close(), closeErr)
+	require.Nil(t, buffer.sizeRow)
 	require.ErrorIs(t, stream.Close(), closeErr)
 	_, closeCalls := child.calls()
 	require.Equal(t, 1, closeCalls)

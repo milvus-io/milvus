@@ -179,8 +179,7 @@ func TestSplitRetrieveResultEmitsOversizedUnitAlone(t *testing.T) {
 		}},
 	})
 	firstUnitBytes := queryChunkBytes(t, result, 1)
-	largeUnitBytes, err := (queryReduceUnit{result: result, rowIndex: 1}).reducibleByteSize()
-	require.NoError(t, err)
+	largeUnitBytes := queryChunkBytes(t, result, 2) - firstUnitBytes
 	chunkBytes := firstUnitBytes + 1
 	require.Greater(t, largeUnitBytes, chunkBytes)
 
@@ -209,9 +208,22 @@ func TestSplitRetrieveResultWithGroupedUnits(t *testing.T) {
 	require.Zero(t, chunks[1].GetReqID())
 }
 
+func TestSplitRetrieveResultOversizedUnitAfterEmptyPayload(t *testing.T) {
+	ids := []string{"", "a long key"}
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: ids}}},
+	}
+	chunks, err := SplitRetrieveResult(result, 1)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	for i, chunk := range chunks {
+		require.Equal(t, ids[i:i+1], chunk.GetIds().GetStrId().GetData())
+	}
+}
+
 func TestSplitRetrieveResultIncludesElementIndexBytes(t *testing.T) {
 	result := makeElementLevelResult([]int64{1, 2}, []int64{10, 20}, [][]int32{{0}, {1, 2, 3, 4, 5, 6, 7, 8}})
-	expectedBytes := queryUnitReferenceSize(t, queryReduceUnit{result: result})
+	const expectedBytes = 8 + 8 + 4 // int64 PK, int64 timestamp, one int32 index.
 	require.Equal(t, expectedBytes, queryChunkBytes(t, result, 1))
 	chunks, err := SplitRetrieveResult(result, expectedBytes+1)
 	require.NoError(t, err)
@@ -400,9 +412,9 @@ func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
 		}},
 	})
 	child := &queryTestStream{recv: []queryTestRecv{{chunk: result}}}
-	chunkBytes := queryChunkBytes(t, result, 1) + 1
-	largeUnitBytes, err := (queryReduceUnit{result: result, rowIndex: 1}).reducibleByteSize()
-	require.NoError(t, err)
+	firstUnitBytes := queryChunkBytes(t, result, 1)
+	chunkBytes := firstUnitBytes + 1
+	largeUnitBytes := queryChunkBytes(t, result, 2) - firstUnitBytes
 	require.Greater(t, largeUnitBytes, chunkBytes)
 
 	stream, err := NewReduceStream(
@@ -826,9 +838,10 @@ func newGroupQueryTestChunk(groups, values []int64) *internalpb.RetrieveResults 
 
 func queryChunkBytes(t *testing.T, result *internalpb.RetrieveResults, unitCount int) int {
 	t.Helper()
+	buffer := orderedChildBuffer{sizeRow: queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), result.GetComputedResults(), nil).RowSize}
 	bytes := 0
 	for row := 0; row < unitCount; row++ {
-		unitBytes, err := (queryReduceUnit{result: result, rowIndex: int64(row)}).reducibleByteSize()
+		unitBytes, err := buffer.reducibleByteSize(queryReduceUnit{result: result, rowIndex: int64(row)})
 		require.NoError(t, err)
 		bytes += unitBytes
 	}

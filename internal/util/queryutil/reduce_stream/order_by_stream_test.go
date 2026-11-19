@@ -256,14 +256,47 @@ func TestShardOrderByStreamEmptyMetadata(t *testing.T) {
 func TestShardOrderByStreamEnforcesOutputQuotaBeforeTopK(t *testing.T) {
 	params := paramtable.Get()
 	key, old := params.QuotaConfig.MaxOutputSize.Key, params.QuotaConfig.MaxOutputSize.GetValue()
-	require.NoError(t, params.Save(key, "1"))
 	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
-	stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{
-		Limit: 1, OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
-	}, nil, []ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1, 2}, []int64{10, 20})}}}}, 1)
-	require.NoError(t, err)
-	chunk, err := stream.Recv()
-	require.Nil(t, chunk)
-	require.ErrorContains(t, err, "maxOutputSize")
-	require.NoError(t, stream.Close())
+	result := newQueryTestChunk([]int64{1, 2}, []int64{10, 20})
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_FloatVector, FieldId: 102, ValidData: []bool{true, false},
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+		}},
+	})
+	firstCell := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}
+	secondCell := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{3}}}}
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_ArrayOfStruct, FieldId: 103,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Array, FieldId: 104,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{firstCell, secondCell},
+				}},
+			}},
+		}}}},
+	})
+	total := int64(2*8 + 2*4 + proto.Size(firstCell) + proto.Size(secondCell))
+	for _, quota := range []int64{total - 1, total} {
+		t.Run(fmt.Sprint(quota), func(t *testing.T) {
+			require.NoError(t, params.Save(key, fmt.Sprint(quota)))
+			_, batchErr := queryutil.NewDeduplicatePKOperator(quota, nil).Run(t.Context(), nil, []*internalpb.RetrieveResults{result})
+			stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{
+				Limit: 1, OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+			}, nil, []ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: result}}}}, 1)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, stream.Close()) }()
+			chunk, streamErr := stream.Recv()
+			if quota < total {
+				require.ErrorContains(t, batchErr, "maxOutputSize")
+				require.ErrorContains(t, streamErr, "maxOutputSize")
+				require.Nil(t, chunk)
+			} else {
+				require.NoError(t, batchErr)
+				require.NoError(t, streamErr)
+				require.Equal(t, []int64{1}, queryTestIDs(chunk))
+			}
+		})
+	}
 }

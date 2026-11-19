@@ -1438,14 +1438,17 @@ func usesCompactNullableVectorData(vf *schemapb.VectorField, validData []bool) b
 	}
 }
 
-// calcRowSize computes the size in bytes of a single row in a RetrieveResult
-// by summing the per-element size of each field. This is used during the
-// merge selection phase (Phase 1) to track accumulated output size before
-// the actual memory-copy phase (Phase 2), enabling early termination
-// when maxOutputSize would be exceeded.
+// rowSizeCalculator estimates a row's column bytes before the reducer copies
+// the row. Batch uses the estimate for its output quota; ReduceStream uses it
+// to decide when to emit a Chunk.
 type rowSizeCalculator struct {
-	result         *internalpb.RetrieveResults
+	fields         []*schemapb.FieldData
+	computedFields []*schemapb.FieldData
 	compactIndices [][]int
+	// The cursor computes compact slots as rows advance; Batch's compactIndices stores a slot per row.
+	compactIndexCursor *typeutil.FieldDataIdxComputer
+	groupFields        []*schemapb.FieldData
+	groupIndices       [][]int
 
 	// arrowFixed is the summed per-row size of the Arrow columns whose width is
 	// constant, and arrowVarLen holds the ones whose is not. Both are zero on
@@ -1462,13 +1465,12 @@ type rowSizeCalculator struct {
 	arrowVarLen []varLenArrowCol
 	// arrowNullable are the nullable VECTOR columns, and ONLY those. The
 	// protobuf side charges 0 for a null row of a compact-nullable vector
-	// (calcFieldElementSizeWithCompactIndex's compactIdx test, which lives
-	// inside its GetVectors() branch), so charging the full width here would
+	// (a -1 entry in compactIndices), so charging the full width here would
 	// trip the guard earlier on the Arrow path than on the protobuf one.
 	//
 	// Nullable SCALARS must NOT be in here. compactIndices is only populated
 	// for IsCompactNullableVectorFieldData, and the scalar branch of
-	// calcFieldElementSizeWithCompactIndex returns the fixed width
+	// fieldElementSize returns the fixed width
 	// unconditionally -- it never looks at validity. So a nullable scalar is
 	// charged its full width on the protobuf path, and anything else here
 	// undercounts, which is the exact failure class this calculator exists to
@@ -1476,10 +1478,13 @@ type rowSizeCalculator struct {
 	arrowNullable []nullableArrowCol
 }
 
+// newRowSizeCalculator prepares compact vector indexes for sizing Query rows
+// in any order without rescanning validity flags.
 func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator {
 	fieldsData := result.GetFieldsData()
 	c := &rowSizeCalculator{
-		result:         result,
+		fields:         fieldsData,
+		computedFields: result.GetComputedResults(),
 		compactIndices: make([][]int, len(fieldsData)),
 	}
 	for fieldIdx, fd := range fieldsData {
@@ -1541,13 +1546,33 @@ func (c *rowSizeCalculator) withArrowRecord(rec arrow.Record) *rowSizeCalculator
 	return c
 }
 
-// rowSize accounts for ordinary and computed output fields.
+// rowSize sums the column bytes at logical rowIdx, including computed columns
+// and any group or Arrow columns supplied to this calculator.
 func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
-	for fieldIdx, fd := range c.result.GetFieldsData() {
+	if c.compactIndexCursor != nil {
+		dataRows := c.compactIndexCursor.Compute(rowIdx)
+		for i, field := range c.fields {
+			size += calcFieldElementSizeWithDataRow(field, int(rowIdx), int(dataRows[i]))
+		}
+		for _, field := range c.computedFields {
+			size += calcFieldElementSizeWithDataRow(field, int(rowIdx), int(rowIdx))
+		}
+		for i, field := range c.groupFields {
+			dataRow := int(rowIdx)
+			if slots := c.groupIndices[i]; slots != nil && dataRow < len(slots) {
+				dataRow = slots[dataRow]
+			} else if valid := typeutil.GetFieldDataValidData(field); dataRow < len(valid) && !valid[dataRow] {
+				dataRow = -1 // The group writer zero-fills null keys.
+			}
+			size += fieldElementSize(field, dataRow)
+		}
+		return size
+	}
+	for fieldIdx, fd := range c.fields {
 		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
 	}
-	for _, fd := range c.result.GetComputedResults() {
+	for _, fd := range c.computedFields {
 		size += calcFieldElementSize(fd, int(rowIdx))
 	}
 	size += c.arrowFixed
@@ -1635,8 +1660,8 @@ func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
 	return newRowSizeCalculator(result).rowSize(rowIdx)
 }
 
-// calcFieldElementSize returns the byte size of a single
-// element at rowIdx within a FieldData.
+// calcFieldElementSize sizes one value at logical rowIdx, building a compact
+// vector index if needed. Use a prepared calculator for repeated calls.
 func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 	var compactIdx []int
 	if typeutil.IsCompactNullableVectorFieldData(fd) {
@@ -1645,7 +1670,32 @@ func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 	return calcFieldElementSizeWithCompactIndex(fd, rowIdx, compactIdx)
 }
 
+// calcFieldElementSizeWithCompactIndex uses a prepared lookup to map a logical
+// row to its payload slot. A nil lookup means the two indexes are the same.
 func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, compactIdx []int) int64 {
+	if compactIdx != nil {
+		if rowIdx < 0 || rowIdx >= len(compactIdx) || compactIdx[rowIdx] < 0 {
+			return 0
+		}
+		rowIdx = compactIdx[rowIdx]
+	}
+	return fieldElementSize(fd, rowIdx)
+}
+
+// calcFieldElementSizeWithDataRow checks vector validity at the logical row,
+// then sizes the value at the already resolved payload slot dataRow.
+func calcFieldElementSizeWithDataRow(field *schemapb.FieldData, row, dataRow int) int64 {
+	if field.GetVectors() != nil {
+		if valid := typeutil.GetFieldDataValidData(field); row < len(valid) && !valid[row] {
+			return 0
+		}
+	}
+	return fieldElementSize(field, dataRow)
+}
+
+// fieldElementSize applies the byte-counting rule for one field at a resolved
+// payload slot. It does not map logical rows to compact slots.
+func fieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 	if scalars := fd.GetScalars(); scalars != nil {
 		switch data := scalars.GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
@@ -1660,37 +1710,37 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 			return 8
 		case *schemapb.ScalarField_StringData:
 			d := data.StringData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
 		case *schemapb.ScalarField_BytesData:
 			d := data.BytesData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
 		case *schemapb.ScalarField_JsonData:
 			d := data.JsonData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
 		case *schemapb.ScalarField_ArrayData:
 			d := data.ArrayData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(proto.Size(d[rowIdx]))
 			}
 			return 0
 		case *schemapb.ScalarField_GeometryData:
 			d := data.GeometryData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
 		case *schemapb.ScalarField_GeometryWktData:
 			d := data.GeometryWktData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
@@ -1698,17 +1748,15 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 			return 8
 		case *schemapb.ScalarField_MolData:
 			d := data.MolData.GetData()
-			if rowIdx < len(d) {
+			if rowIdx >= 0 && rowIdx < len(d) {
 				return int64(len(d[rowIdx]))
 			}
 			return 0
 		}
 	}
 	if vectors := fd.GetVectors(); vectors != nil {
-		if compactIdx != nil {
-			if rowIdx < 0 || rowIdx >= len(compactIdx) || compactIdx[rowIdx] < 0 {
-				return 0
-			}
+		if rowIdx < 0 {
+			return 0
 		}
 		dim := int(vectors.GetDim())
 		switch vectors.GetData().(type) {
@@ -1723,13 +1771,9 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 		case *schemapb.VectorField_Int8Vector:
 			return int64(dim)
 		case *schemapb.VectorField_SparseFloatVector:
-			dataIdx := rowIdx
-			if compactIdx != nil {
-				dataIdx = compactIdx[rowIdx]
-			}
 			contents := vectors.GetSparseFloatVector().GetContents()
-			if dataIdx < len(contents) {
-				return int64(len(contents[dataIdx]))
+			if rowIdx < len(contents) {
+				return int64(len(contents[rowIdx]))
 			}
 			return 0
 		case *schemapb.VectorField_VectorArray:
@@ -1739,6 +1783,13 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 			}
 			return 0
 		}
+	}
+	if children := fd.GetStructArrays().GetFields(); len(children) > 0 {
+		var size int64
+		for _, child := range children {
+			size += calcFieldElementSizeWithDataRow(child, rowIdx, rowIdx)
+		}
+		return size
 	}
 	return 0
 }
