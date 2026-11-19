@@ -56,7 +56,7 @@ func (m *collectionPropertiesMixCoord) GetCollectionProperties(ctx context.Conte
 
 func TestCoordinatorBrokerGetCollectionProperties(t *testing.T) {
 	ctx := context.Background()
-	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}}
+	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "20"}}
 	for _, tc := range []struct {
 		name       string
 		properties []*commonpb.KeyValuePair

@@ -166,7 +166,7 @@ func TestDataViewCompactionAdmissionFlattensUnsortedChain(t *testing.T) {
 	admissionFinishIndexes(m, 5, 10, 11, 12)
 	require.Equal(t, before, admissionRecompute(t, m, 1, 2), "one sorted branch is insufficient for the M:N replacement")
 	collector := &gc.GarbageCollector{Meta: m, Option: gc.GcOption{DataViewGC: m.DataViewManager}}
-	protected := collector.DataViewCompactionProtectionForTest(m.SelectSegments(t.Context(), meta.WithCollection(1)))
+	protected := collector.DataViewCompactionProtectionForTest(compactionChildren(m.SelectSegments(t.Context(), meta.WithCollection(1))))
 	for _, id := range []int64{1, 2, 3, 4, 5, 6} {
 		require.Contains(t, protected, id)
 	}
@@ -174,11 +174,11 @@ func TestDataViewCompactionAdmissionFlattensUnsortedChain(t *testing.T) {
 	after := admissionRecompute(t, m, 5, 6)
 	require.Equal(t, before.GetCompactVersion()+1, after.GetCompactVersion())
 	require.NoError(t, m.DataViewManager.GarbageCollect(t.Context(), 1, 1))
-	protected = collector.DataViewCompactionProtectionForTest(m.SelectSegments(t.Context(), meta.WithCollection(1)))
+	protected = collector.DataViewCompactionProtectionForTest(compactionChildren(m.SelectSegments(t.Context(), meta.WithCollection(1))))
 	require.Contains(t, protected, int64(1), "old QueryViews still retain the parent frontier")
 	held.Deref()
 	require.NoError(t, m.DataViewManager.GarbageCollect(t.Context(), 1, 1))
-	protected = collector.DataViewCompactionProtectionForTest(m.SelectSegments(t.Context(), meta.WithCollection(1)))
+	protected = collector.DataViewCompactionProtectionForTest(compactionChildren(m.SelectSegments(t.Context(), meta.WithCollection(1))))
 	for _, id := range []int64{1, 2, 3, 4} {
 		require.NotContains(t, protected, id)
 	}
@@ -214,4 +214,14 @@ func TestDataViewCompactionAdmissionNoIndexAndEmptyOutput(t *testing.T) {
 	// All rows removed by the next compaction: no output needs index/sort.
 	admissionRetire(m, 2)
 	admissionRecompute(t, m)
+}
+
+func compactionChildren(segments []*meta.SegmentInfo) map[int64][]int64 {
+	children := make(map[int64][]int64)
+	for _, segment := range segments {
+		for _, parent := range segment.GetCompactionFrom() {
+			children[parent] = append(children[parent], segment.GetID())
+		}
+	}
+	return children
 }

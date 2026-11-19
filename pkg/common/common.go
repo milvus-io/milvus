@@ -429,14 +429,14 @@ const (
 //  Collection properties key
 
 const (
-	CollectionTTLConfigKey          = "collection.ttl.seconds"
-	CollectionAutoReleaseIdleTTLKey = "collection.autorelease.ttl.seconds"
-	CollectionAutoCompactionKey     = "collection.autocompaction.enabled"
-	CollectionDescription           = "collection.description"
-	CollectionExternalSource        = "collection.external_source"
-	CollectionExternalSpec          = "collection.external_spec"
-	CollectionTTLFieldKey           = "ttl_field"
-	MaxTTLSeconds                   = 3155760000 // 100 years
+	CollectionTTLConfigKey      = "collection.ttl.seconds"
+	CollectionAutoReleaseTTIKey = "collection.autorelease.tti.seconds"
+	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
+	CollectionDescription       = "collection.description"
+	CollectionExternalSource    = "collection.external_source"
+	CollectionExternalSpec      = "collection.external_spec"
+	CollectionTTLFieldKey       = "ttl_field"
+	MaxTTLSeconds               = 3155760000 // 100 years
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -1134,21 +1134,21 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 	return kv.GetValue(), true
 }
 
-// GetCollectionAutoReleaseIdleTTL returns zero when the property is absent,
+// GetCollectionAutoReleaseTTI returns zero when the property is absent,
 // a positive duration for an override, or -time.Second to disable auto release.
-func GetCollectionAutoReleaseIdleTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {
-	var ttl time.Duration
+func GetCollectionAutoReleaseTTI(kvs []*commonpb.KeyValuePair) (time.Duration, error) {
+	var tti time.Duration
 	for _, kv := range kvs {
-		if kv.GetKey() != CollectionAutoReleaseIdleTTLKey {
+		if kv.GetKey() != CollectionAutoReleaseTTIKey {
 			continue
 		}
 		seconds, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 		if err != nil || seconds < -1 || seconds == 0 || seconds > math.MaxInt64/int64(time.Second) {
-			return 0, merr.WrapErrParameterInvalidMsg("%s must be -1 or an integer between 1 and %d seconds, got %q", CollectionAutoReleaseIdleTTLKey, math.MaxInt64/int64(time.Second), kv.GetValue())
+			return 0, merr.WrapErrParameterInvalidMsg("%s must be -1 or an integer between 1 and %d seconds, got %q", CollectionAutoReleaseTTIKey, math.MaxInt64/int64(time.Second), kv.GetValue())
 		}
-		ttl = time.Duration(seconds) * time.Second
+		tti = time.Duration(seconds) * time.Second
 	}
-	return ttl, nil
+	return tti, nil
 }
 
 func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {

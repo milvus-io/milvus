@@ -134,7 +134,7 @@ func TestPublishedRecoveryRetainsHistoricalPartitions(t *testing.T) {
 	result := allocate(p, id, map[int64]int64{}, false)
 	require.NotNil(t, result)
 	require.Equal(t, map[int64]int64{201: 2}, result.assignments, "recovery must not use the newer partition scope")
-	view := result.builder.Build()
+	view := result.materialize(p, id).Build()
 	require.Equal(t, uint64(77), view.Meta.LoadInfoVersion)
 	require.Equal(t, int32(3), view.Meta.SchemaVersion)
 	require.Equal(t, []int64{9}, view.QueryNode[0].Partitions[0].SegmentManifestVersions)

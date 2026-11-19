@@ -223,6 +223,8 @@ type RequestRates struct {
 
 func (*ReplicaFeedbackStore) GetViewFeedback(replicaID int64) (*Snapshot, bool)
 func (*ReplicaFeedbackStore) GetGlobalRequestRates() *RequestRates
+func (*ReplicaFeedbackStore) GetPlanningSnapshot() *PlanningSnapshot
+func (*PlanningSnapshot) GetReplicaFeedback(replicaID int64, resourceGroup string) (*Snapshot, RequestRates)
 ```
 
 Reports and actual expiration update private shard counters/rates, then publish
@@ -274,6 +276,34 @@ per affected Replica per batch/sweep. Reads are O(1). Configuration callbacks,
 reports, and cleanup share only the feedback store's lock, but their CPU,
 allocation, and lock-wait costs can still indirectly delay synchronous metadata
 publication. They do not acquire state-machine locks.
+
+### Resource-group rates for preparation planning
+
+The store tracks Replica resource-group membership from LoadConfig. Each
+Replica snapshot replacement subtracts the old contribution and adds the new
+one to that RG's four rates, under the same write lock. RG migration transfers
+existing rates even if the Replica feedback pointer did not change. Expiration,
+shard-count changes and withdrawal use the same publication path; empty groups
+are removed, including any floating-point subtraction residue. Global rates
+retain their existing cross-RG semantics.
+
+`GetPlanningSnapshot` returns a single immutable version containing both Replica
+feedback and RG totals. It takes a read lock only to read the version pointer,
+with no traversal or allocation. Readers retain this version for an operation;
+`GetReplicaFeedback` returns the Replica numerator and RG denominator from that
+same version. Unknown Replicas or a membership mismatch with the supplied RG
+return unavailable feedback and zero rates. Expired feedback retains LastAccess
+and zero rates. A LoadConfig/feedback publication race cannot combine a Replica
+in one RG with the denominator of a different RG.
+
+The version uses persistent radix indexes for Replica IDs and RG names. Writes
+copy changed index paths instead of cloning the whole Replica map. Reports and
+expiration finish all replacements under the store lock before a reader can
+capture the resulting version. Old roots retain only immutable feedback/index
+objects, not shard window buffers. No-op publication preserves the root; Close
+publishes an empty root without invalidating retained versions. Balancer reads
+this root lazily when creating a new View, including published-schema recovery
+and manual operations; unchanged optional candidates do not read feedback.
 
 ## 7. Startup and shutdown
 
