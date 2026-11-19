@@ -24,6 +24,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <ranges>
 #include <string.h>
 #include <unordered_map>
@@ -208,11 +209,11 @@ PrefetchStatsColumn(OpContext* ctx,
     if (PrefetchCanceled(ctx) || (batch && !batch->Claim(column))) {
         return;
     }
-    // Release each pin before requesting the next cell so a projection need
-    // not fit in cache as a unit.
-    const auto count = column->num_chunks();
-    for (int64_t cell = 0; cell < count && !PrefetchCanceled(ctx); ++cell) {
-        column->PrefetchChunks(ctx, {cell});
+    // Submitting all IDs together lets the cache batch cold loads.
+    std::vector<int64_t> cell_ids(column->num_chunks());
+    std::iota(cell_ids.begin(), cell_ids.end(), int64_t{0});
+    if (!cell_ids.empty() && !PrefetchCanceled(ctx)) {
+        column->PrefetchChunks(ctx, cell_ids);
     }
 }
 

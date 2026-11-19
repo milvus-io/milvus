@@ -23,10 +23,11 @@ projection. EXISTS warms matching path components. A missing typed projection
 warms the BSON posting index used by shared-data fallback.
 
 An expression set shares a `JsonStatsPrefetchBatch`. It claims each physical
-column or posting-index slot once, retaining its identity without retaining all
-of its data cells. Prefetch visits cells individually so that the projection
-does not have to fit in the cache as a unit. Demand reads retain the cache's
-existing synchronization and loading rules.
+column or posting-index slot once. Like a raw scalar column, a selected
+projection submits all its cell IDs in one `PrefetchChunks` call so the cache
+can batch cold loads. The call can pin the whole projection until it returns.
+Evaluation waits for prefetch and acquires cells as it scans, including when
+the cache could not admit the speculative batch.
 
 The expression-result-cache probe uses the request's segment generation, the
 expression signature and active row count. Retired generations are misses. The
@@ -83,8 +84,8 @@ change. No persisted state, storage layout, dependency pin or public API changes
 
 Regression coverage includes typed projection selection, shared physical reads,
 transient and persistent JSON stats read failures, deferred cursor advances,
-vector consumption, queued cancellation, stopping between cells, draining after
-failure, cache generations, and preserving existing filter trace fields.
+vector consumption, queued cancellation, stopping between projections, draining
+after failure, cache generations, and preserving existing filter trace fields.
 
 These tests establish functional behavior. Any production latency improvement
 requires a baseline-versus-patch benchmark with identical prefetch settings.
