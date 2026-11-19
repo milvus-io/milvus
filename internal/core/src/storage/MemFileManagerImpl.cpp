@@ -18,7 +18,7 @@
 
 #include <atomic>
 #include <exception>
-#include <future>
+#include <folly/futures/Future.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -143,14 +143,14 @@ MemFileManagerImpl::LoadIndexToMemory(
 
     auto LoadBatchIndexFiles = [&]() {
         auto& pool =
-            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-        std::vector<std::future<std::unique_ptr<DataCodec>>> index_datas;
+            ThreadPools::GetExecutor(milvus::PriorityForLoad(priority));
+        std::vector<folly::SemiFuture<std::unique_ptr<DataCodec>>> index_datas;
         index_datas.reserve(batch_files.size());
         for (const auto& path : batch_files) {
             index_datas.push_back(
-                pool.Submit([manager = rcm_, path, priority, token] {
+                folly::via(&pool, [manager = rcm_, path, priority, token] {
                     return ReadLegacyIndexFile(*manager, path, priority, token);
-                }));
+                }).semi());
         }
         size_t idx = 0;
         storage::ProcessFuturesInOrder(

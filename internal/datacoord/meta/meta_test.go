@@ -245,14 +245,16 @@ func TestMeta_Basic(t *testing.T) {
 		// comparing the argument against the result would compare an object
 		// with itself and pass whatever the store did. Assert against
 		// independently-built expectations instead.
-		collInfo.Properties = map[string]string{
-			common.CollectionTTLConfigKey: "3600",
+		collInfo.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "3600"},
 		}
 		meta.AddCollection(collInfo)
 		ret = meta.GetCollection(collInfo.ID)
 		require.NotNil(t, ret)
 		assert.Equal(t, collInfo.ID, ret.ID)
-		assert.Equal(t, "3600", ret.Properties[common.CollectionTTLConfigKey])
+		ttl, ok := common.GetStringValue(ret.Properties, common.CollectionTTLConfigKey)
+		assert.True(t, ok)
+		assert.Equal(t, "3600", ttl)
 		assert.Empty(t, ret.StartPositions)
 
 		// A re-add must replace the entry wholesale, not merge into it.
@@ -2654,6 +2656,8 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 }
 
 func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	startTime := time.Date(2026, time.May, 20, 12, 0, 0, 0, time.UTC).Unix()
 	expectedCreateTS := tsoutil.ComposeTSByTimeWithLogical(time.Unix(startTime, 0), 7)
@@ -2804,6 +2808,8 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 }
 
 func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	newMetaWithDataView := func(t *testing.T) (*Meta, dataviewpkg.Manager) {
 		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
@@ -2983,6 +2989,8 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 }
 
 func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("false")
+	t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 	ctx := context.Background()
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	metaStore := metacache.NewMetaStore(nil)

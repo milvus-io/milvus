@@ -11,7 +11,8 @@
 
 FROM python:3.12-bullseye
 
-RUN apt-get update && apt-get install -y jq
+RUN apt-get update && apt-get install -y --no-install-recommends jq openjdk-17-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY ./tests/python_client/requirements.txt /requirements.txt
 

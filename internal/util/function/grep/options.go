@@ -49,6 +49,7 @@ type Spec struct {
 	patternKind PatternKind
 	caseMode    CaseMode
 	boundary    Boundary
+	maxCount    *uint64
 }
 
 // PatternCount returns the number of parsed patterns.
@@ -61,3 +62,12 @@ func (s Spec) Pattern(index int) string { return s.patterns[index] }
 func (s Spec) PatternKind() PatternKind { return s.patternKind }
 func (s Spec) CaseMode() CaseMode       { return s.caseMode }
 func (s Spec) Boundary() Boundary       { return s.boundary }
+
+// MaxCount limits matching lines per field value. An absent limit is unlimited;
+// an explicitly supplied zero selects no records.
+func (s Spec) MaxCount() (uint64, bool) {
+	if s.maxCount == nil {
+		return 0, false
+	}
+	return *s.maxCount, true
+}

@@ -1,0 +1,28 @@
+{
+  "stage": "FunctionChainStageL2Rerank",
+  "ops": [
+    {
+      "op": "merge",
+      "params": {
+        "strategy": {
+          "stringValue": "weighted"
+        },
+        "weights": {
+          "arrayValue": {
+            "values": [
+              {
+                "doubleValue": 0.7
+              },
+              {
+                "doubleValue": 0.3
+              }
+            ]
+          }
+        },
+        "norm_score": {
+          "boolValue": true
+        }
+      }
+    }
+  ]
+}

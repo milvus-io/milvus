@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -89,7 +90,7 @@ func (c *Checker) scheduleSnapshotPreparation(job ImportJob) {
 
 func (c *Checker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 	// Recovered jobs must validate the reference before doing source I/O.
-	err := importutilv2.ValidateSnapshotImportPlan(job.GetFiles(), job.GetOptions(), nil)
+	err := importutilv2.ValidateImportPlan(job.GetFiles(), job.GetOptions(), nil)
 	var files []*internalpb.ImportFile
 	var options importutilv2.Options
 	var sources []*internalpb.SnapshotImportL0Source
@@ -117,7 +118,7 @@ func (c *Checker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 		// Expansion can rebase paths and add external/routing descriptors after
 		// its intermediate checks. Validate the complete durable plan, including
 		// allocated IDs, before publishing any executable files to the checker.
-		err = importutilv2.ValidateSnapshotImportPlan(files, options, sources)
+		err = importutilv2.ValidateImportPlan(files, options, sources)
 	}
 	if ctx.Err() != nil {
 		return
@@ -175,7 +176,7 @@ func readSnapshotImportMetadata(ctx context.Context, cm milvusstorage.ChunkManag
 func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milvusstorage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile, options importutilv2.Options,
 ) ([]*internalpb.ImportFile, importutilv2.Options, error) {
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, err
 	}
 	if !importutilv2.IsSnapshotSource(options) {
@@ -192,10 +193,11 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
-	if bucket == "" {
-		return nil, nil, merr.WrapErrImportFailedMsg("snapshot-source import requires a complete metadata URI")
-	}
-	if !importutilv2.HasExternalSource(options) {
+	if importutilv2.HasExternalSource(options) {
+		if bucket == "" {
+			return nil, nil, merr.WrapErrImportFailedMsg("snapshot-source import with external_spec requires a complete metadata URI")
+		}
+	} else {
 		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), uri); err != nil {
 			return nil, nil, err
 		}
@@ -213,10 +215,13 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := storage.RebaseBareImportSelfContainedSnapshot(uri, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+		return nil, nil, err
+	}
 	if err := storage.ValidateSnapshotMetadataLocation(uri, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, err
 	}
-	if err := storage.ValidateExternalSnapshotPaths(uri, snapshot, nil); err != nil {
+	if err := storage.ValidateSnapshotImportPaths(uri, snapshot, nil); err != nil {
 		return nil, nil, err
 	}
 	options, err = prepareSnapshotImportOptions(schema, snapshot.Collection.GetSchema(), options)
@@ -259,7 +264,7 @@ func expandSnapshotImportFiles(
 	options importutilv2.Options,
 	metadata *datapb.SnapshotMetadata,
 ) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, nil, err
 	}
 	if cm == nil {
@@ -274,10 +279,11 @@ func expandSnapshotImportFiles(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if bucket == "" {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import requires a complete metadata URI; bare object keys are not supported")
-	}
-	if !importutilv2.HasExternalSource(options) {
+	if importutilv2.HasExternalSource(options) {
+		if bucket == "" {
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import with external_spec requires a complete metadata URI; bare object keys are not supported")
+		}
+	} else {
 		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), metadataPath); err != nil {
 			return nil, nil, nil, err
 		}
@@ -296,6 +302,9 @@ func expandSnapshotImportFiles(
 	}
 	if snapshot == nil {
 		return nil, nil, nil, merr.WrapErrImportSysFailed("snapshot reader returned no data")
+	}
+	if err := storage.RebaseBareImportSelfContainedSnapshot(metadataPath, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+		return nil, nil, nil, err
 	}
 	if err := storage.ValidateSnapshotMetadataLocation(metadataPath, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, nil, err
@@ -319,6 +328,18 @@ func expandSnapshotImportFiles(
 	partitionMapping, err := resolveSnapshotPartitionMapping(snapshot.Collection.GetPartitions(), targetPartitionIDs, targetSchema, options)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	// Preserve the Avro association before filtering L0 or sorting data segments.
+	if len(snapshot.Segments) != len(snapshot.ManifestPaths) {
+		return nil, nil, nil, merr.WrapErrDataIntegrityMsg("snapshot segment and Avro manifest counts differ")
+	}
+	manifestBySegment := make(map[int64]string, len(snapshot.Segments))
+	for i, segment := range snapshot.Segments {
+		if segment.GetStorageVersion() != milvusstorage.StorageV2 || segment.GetSegmentLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		manifestBySegment[segment.GetSegmentId()] = snapshot.ManifestPaths[i]
 	}
 
 	// The snapshot defines the source scope. Import all data partitions while
@@ -347,12 +368,28 @@ func expandSnapshotImportFiles(
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(segments))
 	}
 
+	hasV2 := false
 	seenManifests := make(map[string]struct{}, len(segments))
 	result := make([]*internalpb.ImportFile, 0, len(segments))
 	for _, segment := range segments {
+		if segment.GetStorageVersion() == milvusstorage.StorageV2 {
+			hasV2 = true
+			ref := &internalpb.SnapshotImportV2Reference{
+				SegmentId:             segment.GetSegmentId(),
+				SnapshotManifestPath:  manifestBySegment[segment.GetSegmentId()],
+				SnapshotFormatVersion: metadata.GetFormatVersion(),
+			}
+			if snapshot.Layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+				if prefix, found := storage.DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location()); found {
+					ref.OriginalKeyPrefix = &prefix
+				}
+			}
+			result = append(result, &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{V2Reference: ref}})
+			continue
+		}
 		if segment.GetStorageVersion() != milvusstorage.StorageV3 {
 			return nil, nil, nil, merr.WrapErrOperationNotSupportedMsg(
-				"snapshot-source import only supports StorageV3 segments, segment %d uses storage version %d",
+				"snapshot-source import only supports StorageV2 and StorageV3 segments, segment %d uses storage version %d",
 				segment.GetSegmentId(), segment.GetStorageVersion(),
 			)
 		}
@@ -395,16 +432,20 @@ func expandSnapshotImportFiles(
 		if segment.GetManifestPath() == "" {
 			continue
 		}
-		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-		if err != nil {
-			return nil, nil, nil, err
+		base := segment.GetManifestPath()
+		// V2 also permits a plain manifest object key in snapshot metadata.
+		if segment.GetStorageVersion() != milvusstorage.StorageV2 || strings.HasPrefix(strings.TrimSpace(base), "{") {
+			base, _, err = packed.UnmarshalManifestPath(base)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 		}
 		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
 	}
-	if err := storage.ValidateExternalSnapshotPaths(metadataPath, snapshot, refs); err != nil {
+	if err := storage.ValidateSnapshotImportPaths(metadataPath, snapshot, refs); err != nil {
 		return nil, nil, nil, err
 	}
-	needsSourceContext := len(applicable) != 0
+	needsSourceContext := hasV2 || len(applicable) != 0
 	for _, segment := range segments {
 		// Compaction can move L0 deletes into a data segment's manifest. The
 		// commit-time override still applies after the standalone L0 disappears;
@@ -418,21 +459,15 @@ func expandSnapshotImportFiles(
 			return nil, nil, nil, err
 		}
 	}
+	// Encode the complete job-wide capabilities once, after attaching source context.
 	external := importutilv2.HasExternalSource(options)
-	if external || partitionMapping != nil {
-		// Select the complete contract once: external storage adds 1, target
-		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
-		// must reject capabilities they cannot preserve, never ignore them.
-		version := uint32(1)
-		if external {
-			version++
-		}
-		if partitionMapping != nil {
-			version += 2
-		}
-		if len(l0Sources) != 0 {
-			version += 4
-		}
+	if needsSourceContext || external || partitionMapping != nil {
+		version := importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{
+			ExternalStorage:  external,
+			PartitionMapping: partitionMapping != nil,
+			SharedL0:         len(l0Sources) != 0,
+			V2Reference:      hasV2,
+		})
 		for i, file := range result {
 			if file.SnapshotSource == nil {
 				file.SnapshotSource = &internalpb.SnapshotImportSource{ManifestPath: file.GetPaths()[0]}
@@ -550,11 +585,12 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		return group
 	}
 	for i, segment := range data {
-		source := &internalpb.SnapshotImportSource{
-			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
+		source := files[i].GetSnapshotSource()
+		if source == nil {
+			source = &internalpb.SnapshotImportSource{ManifestPath: segment.GetManifestPath()}
 		}
+		source.SourceCommitTimestamp = segment.GetCommitTimestamp()
 		if len(deltas) != 0 {
-			source.Version = 5
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()
 			groupFor(source.SourceChannel, source.SourcePartitionId)
@@ -603,7 +639,7 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 			if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot L0", objectPath, ""); err != nil {
 				return nil, err
 			}
-			if err := storage.ValidateExternalSnapshotPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
+			if err := storage.ValidateSnapshotImportPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
 				Path: objectPath, NormalizedPath: storage.NormalizeSnapshotObjectPath(objectPath), Type: storage.SnapshotFileTypeDeltaBinlog,
 			}}); err != nil {
 				return nil, err
@@ -749,5 +785,77 @@ func prepareSnapshotImportOptions(target, source *schemapb.CollectionSchema, opt
 	// Renaming a field does not remap its data; callers must retain the intended
 	// field-ID correspondence, just as when importing binlog backups. Optional
 	// target columns, AutoID and target routing use the existing Import behavior.
+	if err := validateSnapshotSchema(target, source); err != nil {
+		return nil, err
+	}
 	return options, nil
+}
+
+func validateSnapshotSchema(target, source *schemapb.CollectionSchema) error {
+	sourceFields := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range typeutil.GetAllFieldSchemas(source) {
+		sourceFields[field.GetFieldID()] = field
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		sourceField := sourceFields[field.GetFieldID()]
+		if sourceField == nil {
+			continue // Missing columns retain reader validation and default filling.
+		}
+		if sourceField.GetNullable() != field.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetNullable(), field.GetNullable())
+		}
+		if sourceField.GetDataType() == schemapb.DataType_VarChar && field.GetDataType() == schemapb.DataType_VarChar {
+			sourceLength, err := parameterutil.GetMaxLength(sourceField)
+			if err != nil {
+				return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+			}
+			targetLength, err := parameterutil.GetMaxLength(field)
+			if err != nil {
+				return merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+			}
+			if sourceLength > targetLength {
+				return merr.WrapErrImportFailedMsg(
+					"source max_length exceeds target for field %s (ID %d): source %d, target %d",
+					field.GetName(), field.GetFieldID(), sourceLength, targetLength)
+			}
+			continue
+		}
+		if sourceField.GetDataType() != field.GetDataType() &&
+			(typeutil.IsVectorType(sourceField.GetDataType()) || typeutil.IsVectorType(field.GetDataType())) {
+			return merr.WrapErrImportFailedMsg(
+				"vector data type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetDataType(), field.GetDataType())
+		}
+		if !typeutil.IsFixDimVectorType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
+			continue
+		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementType() != field.GetElementType() {
+			return merr.WrapErrImportFailedMsg(
+				"vector element type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementType(), field.GetElementType())
+		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementNullable() != field.GetElementNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"vector element nullable mismatch for field %s (ID %d): source %t, target %t",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementNullable(), field.GetElementNullable())
+		}
+		sourceDim, err := typeutil.GetDim(sourceField)
+		if err != nil {
+			return merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+		}
+		targetDim, err := typeutil.GetDim(field)
+		if err != nil {
+			// The target schema comes from coordinator-owned collection metadata.
+			return merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+		}
+		// Reject before FFI can interpret the source buffer with the target width.
+		if sourceDim != targetDim {
+			return merr.WrapErrImportFailedMsg(
+				"vector dimension mismatch for field %s (ID %d): source %d, target %d",
+				field.GetName(), field.GetFieldID(), sourceDim, targetDim)
+		}
+	}
+	return nil
 }

@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -120,6 +121,45 @@ func TestStatusIfCanceled(t *testing.T) {
 	status := statusIfCanceled(ctx, merr.Status(context.Canceled))
 	assert.ErrorIs(t, merr.Error(status), merr.ErrRequestCanceled)
 	assert.False(t, status.GetRetriable())
+}
+
+// finishRequest is the last step of Search, HybridSearch and Query. A cancel
+// reported to the operator as canceled must reach the client as
+// ErrRequestCanceled even when the request already has a result, and a cancel
+// that comes after must be reported as not found and leave the result alone.
+func TestFinishRequest(t *testing.T) {
+	t.Run("canceled after the result was computed", func(t *testing.T) {
+		node := &Proxy{requests: newTestRequests()}
+		ctx, entry := node.registerRequest(context.Background(), queryRequestInfo(&milvuspb.QueryRequest{CollectionName: "c"}))
+		defer node.unregisterRequest(entry)
+
+		canceled, notFound := node.cancelRequests(context.Background(), []string{entry.RequestID()}, "", "root", "late")
+		require.Len(t, canceled, 1)
+		require.Empty(t, notFound)
+
+		status := finishRequest(ctx, entry, merr.Success())
+		assert.ErrorIs(t, merr.Error(status), merr.ErrRequestCanceled)
+	})
+
+	t.Run("cancel after the answer is fixed", func(t *testing.T) {
+		node := &Proxy{requests: newTestRequests()}
+		ctx, entry := node.registerRequest(context.Background(), queryRequestInfo(&milvuspb.QueryRequest{CollectionName: "c"}))
+		defer node.unregisterRequest(entry)
+
+		ok := merr.Success()
+		require.Same(t, ok, finishRequest(ctx, entry, ok))
+
+		canceled, notFound := node.cancelRequests(context.Background(), []string{entry.RequestID()}, "", "root", "late")
+		assert.Empty(t, canceled)
+		assert.Equal(t, []string{entry.RequestID()}, notFound)
+		assert.Same(t, ok, statusIfCanceled(ctx, ok), "the answer does not change after finishRequest")
+		assert.Empty(t, node.listRunningRequests(reqregistry.Filter{}))
+	})
+
+	t.Run("unregistered request", func(t *testing.T) {
+		ok := merr.Success()
+		assert.Same(t, ok, finishRequest(context.Background(), nil, ok))
+	})
 }
 
 func TestRegisterAndCancelRequestOnProxy(t *testing.T) {
@@ -266,6 +306,12 @@ func TestListLocalRunningRequests(t *testing.T) {
 	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: 1 << 40})
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetRequests())
+
+	// the largest threshold the field can carry excludes every request
+	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: math.MaxInt64})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Empty(t, resp.GetRequests())
 }
 
 func TestCancelLocalRequests(t *testing.T) {
@@ -276,7 +322,8 @@ func TestCancelLocalRequests(t *testing.T) {
 	defer node.unregisterRequest(entry)
 
 	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{
-		RequestIds: []string{testReqID(1), testReqID(2)},
+		// a repeated id does not repeat its row in the answer
+		RequestIds: []string{testReqID(1), testReqID(2), testReqID(1), testReqID(2)},
 		Reason:     "too heavy",
 	})
 	require.NoError(t, err)

@@ -78,7 +78,7 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config);
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties);
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
 
 struct LoonManifestPath {
     std::string base_path;

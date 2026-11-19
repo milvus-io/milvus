@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2573,17 +2574,20 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
-	it.Result().UpsertCnt = int64(request.NumRows)
+	if request.GetWriteCondition() == nil {
+		it.Result().UpsertCnt = int64(request.NumRows)
+	}
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
+	requestSize, mutationSize := it.AccountingSizes()
 	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.Request()),
+		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
@@ -2597,7 +2601,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))
 	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -2685,8 +2689,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = statusIfCanceled(ctx, rsp.Status)
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -2834,7 +2839,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -2843,10 +2848,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -2931,8 +2934,9 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
-		rsp.Status = statusIfCanceled(ctx, rsp.Status)
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -3053,7 +3057,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(len(request.GetRequests()) * int(qt.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -3062,10 +3066,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3657,10 +3659,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
+			extension.QueryResourceGroupFromContext(ctx),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
-			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true
@@ -3696,7 +3696,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
-		return &milvuspb.QueryResults{Status: statusIfCanceled(ctx, merr.Status(err))}, nil
+		return &milvuspb.QueryResults{Status: finishRequest(ctx, entry, merr.Status(err))}, nil
+	}
+	// A cancel can land after the last cancellation check of the query task,
+	// while the result is being reduced or on the way out of this method. It
+	// was reported as canceled to the operator, so the client must not get
+	// the result.
+	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
+		return &milvuspb.QueryResults{Status: status}, nil
 	}
 	return result, nil
 }

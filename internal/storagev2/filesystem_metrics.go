@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -214,11 +215,16 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	values = append(values, strconv.FormatBool(storageConfig.GetUseCrc32CChecksum()))
 
 	if storageConfig.GetStorageType() != "local" {
+		// Match the shared filesystem, which cannot assume a caller's read stage.
+		var talonMode uint32
+		if mask := storageConfig.GetTalonEnabledStages(); mask == 0 || mask == common.TalonStagesAll {
+			talonMode = storageConfig.GetTalonMode()
+		}
 		for _, property := range []struct {
 			key   string
 			value uint32
 		}{
-			{"fs.talon.mode", storageConfig.GetTalonMode()},
+			{"fs.talon.mode", talonMode},
 			{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
 			{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
 			{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},

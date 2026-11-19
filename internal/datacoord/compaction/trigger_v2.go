@@ -222,10 +222,14 @@ func (m *CompactionTriggerManager) handleSortSignal(ctx context.Context, segID i
 	// sort of a flushed segment is left to the sort sweep, so it is capped only
 	// while the sweep runs.
 	clusteringOutput := segment.GetIsInvisible() && segment.GetCreatedByCompaction()
-	m.notify(ctx, policy.TriggerTypeSort, []view.CompactionView{cv}, !clusteringOutput && m.singlePolicy.Enable())
+	groupOutput := m.meta.GroupSortCandidates(segment.GetCollectionID())[segID]
+	m.notify(ctx, policy.TriggerTypeSort, []view.CompactionView{cv}, !clusteringOutput && !groupOutput && m.singlePolicy.Enable())
 }
 
 func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType TickerType) {
+	if tickerType == SingleTicker && m.meta != nil && m.singlePolicy != nil {
+		m.scheduleRequiredGroupSort(ctx)
+	}
 	pol, exists := m.policies[tickerType]
 	if !exists {
 		mlog.Warn(ctx, "Policy not found for ticker type", mlog.Any("tickerType", tickerType))
@@ -254,6 +258,28 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 			continue
 		}
 		m.notify(ctx, triggerType, views, true)
+	}
+}
+
+// A staged group can hold a root task until its output is sorted. Schedule one
+// required sort independently of the automatic-compaction switch and task cap;
+// repeating the sweep also restores the dependency after coordinator restart.
+func (m *CompactionTriggerManager) scheduleRequiredGroupSort(ctx context.Context) {
+	candidates := m.meta.GroupSortCandidates(0)
+	if len(candidates) == 0 {
+		return
+	}
+	if m.inspector.getCompactionTasksNum(func(task ctask.CompactionTask) bool {
+		return task.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction
+	}) > 0 {
+		return
+	}
+	for id := range candidates {
+		cv := m.singlePolicy.TriggerSegmentSortCompaction(ctx, id)
+		if cv != nil {
+			m.notify(ctx, policy.TriggerTypeSort, []view.CompactionView{cv}, false)
+			return
+		}
 	}
 }
 
@@ -779,7 +805,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		log.Info(ctx, "skip submitting schema bump compaction for external collection", mlog.Int64("collectionID", collection.ID))
 		return
 	}
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit schema bump compaction because get collection ttl failed", mlog.Err(err))
 		return

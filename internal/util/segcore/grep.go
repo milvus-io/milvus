@@ -74,6 +74,10 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 		max_regex_bytes: C.uint64_t(c.MaxRegexBytes), max_dfa_cache_bytes: C.uint64_t(c.MaxDFACacheBytes),
 		max_result_bytes: C.uint64_t(e.MaxResultBytes),
 	}
+	if count, present := req.Spec.MaxCount(); present {
+		options.has_max_count = 1
+		options.max_count = C.uint64_t(count)
+	}
 	var patterns *C.uint8_t
 	if len(blob) > 0 {
 		patterns = (*C.uint8_t)(unsafe.Pointer(&blob[0]))

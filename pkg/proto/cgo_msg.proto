@@ -50,3 +50,31 @@ message FunctionChainInput {
   repeated string nested_path = 4;
   bool is_json_path = 5;
 }
+
+// Internal condition-tree payload, not persisted index metadata or a public API.
+// Requires root and a selected kind on every node. Generated
+// protobuf parsing must be followed by the shape validation described
+// in docs/design-docs/design_docs/20261103-grep-ngram-index.md.
+// Extraction/planning budgets are optimization limits, not request limits:
+// weaken the condition or scan without an index when they are exceeded.
+message LiteralConditionTree {
+  LiteralCondition root = 1;
+}
+
+message LiteralCondition {
+  oneof kind {
+    AlwaysTrue always_true = 1;
+    // Nonempty case-sensitive UTF-8 bytes, including embedded NUL.
+    bytes literal = 2;
+    Conditions all = 3; // AND, without order/proximity constraints.
+    Conditions any = 4; // OR, preserving every alternative.
+  }
+}
+
+message AlwaysTrue {}
+
+message Conditions {
+  // At least two children. Tree-size budgets belong to extraction/planning,
+  // not the protobuf schema; exceeding them disables or weakens index pruning.
+  repeated LiteralCondition children = 1;
+}

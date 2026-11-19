@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -21,6 +20,6 @@ func (b broadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error 
 	}
 	defer b.lifetime.Done()
 
-	// retry until the ctx is canceled.
-	return retry.Do(ctx, func() error { return b.streamingCoordClient.Broadcast().Ack(ctx, msg) }, retry.AttemptAlways())
+	// The caller owns timeout and retry policy; pass its context through.
+	return b.streamingCoordClient.Broadcast().Ack(ctx, msg)
 }

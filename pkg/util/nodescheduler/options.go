@@ -26,11 +26,24 @@ import (
 )
 
 type taskOptions struct {
-	backoff typeutil.BackoffConfig
+	priority int32
+	backoff  typeutil.BackoffConfig
 }
 
 // Option configures one submitted task. Options may be reused across submissions.
 type Option func(*taskOptions)
+
+const (
+	// MinPriority and MaxPriority bound priorities accepted by this scheduler.
+	MinPriority int32 = -20
+	MaxPriority int32 = 20
+)
+
+func validatePriority(priority int32) {
+	if priority < MinPriority || priority > MaxPriority {
+		panic("node scheduler priority must be between -20 and 20")
+	}
+}
 
 // WithBackoff configures ErrDelay retries without affecting explicit DelayUntil
 // deadlines. InitialInterval must be positive, MaxInterval must be at least
@@ -44,7 +57,7 @@ func WithBackoff(config typeutil.BackoffConfig) Option {
 	return func(options *taskOptions) { options.backoff = config }
 }
 
-func newTaskBackoff(opts ...Option) *backoff.ExponentialBackOff {
+func newTaskOptions(opts ...Option) taskOptions {
 	options := taskOptions{backoff: typeutil.BackoffConfig{
 		InitialInterval: 10 * time.Millisecond,
 		Multiplier:      2,
@@ -53,6 +66,10 @@ func newTaskBackoff(opts ...Option) *backoff.ExponentialBackOff {
 	for _, opt := range opts {
 		opt(&options)
 	}
+	return options
+}
+
+func newTaskBackoff(options taskOptions) *backoff.ExponentialBackOff {
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = options.backoff.InitialInterval
 	b.Multiplier = options.backoff.Multiplier
@@ -61,4 +78,12 @@ func newTaskBackoff(opts ...Option) *backoff.ExponentialBackOff {
 	b.MaxElapsedTime = 0 // Retry until completion or cancellation, without a time limit.
 	b.Reset()
 	return b
+}
+
+// WithPriority sets an absolute scheduling priority. Larger values run first;
+// zero preserves the default priority and negative values remain runnable.
+// Values outside [MinPriority, MaxPriority] panic.
+func WithPriority(priority int32) Option {
+	validatePriority(priority)
+	return func(options *taskOptions) { options.priority = priority }
 }

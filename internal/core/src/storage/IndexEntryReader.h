@@ -19,7 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <future>
+#include <folly/futures/Future.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -193,9 +193,10 @@ class IndexEntryReader {
 
     // Submit download tasks for an entry to the futures vector (does not wait)
     void
-    SubmitEntryDownloadTasks(const EntryMeta& meta,
-                             EntryDownloadState& state,
-                             std::vector<std::future<void>>& futures);
+    SubmitEntryDownloadTasks(
+        const EntryMeta& meta,
+        EntryDownloadState& state,
+        std::vector<folly::SemiFuture<folly::Unit>>& futures);
 
     static size_t
     DownloadRangeCount(uint64_t size);
@@ -216,10 +217,11 @@ class IndexEntryReader {
     struct EntryStreamFailure;
 
     void
-    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
-                                   EntryStreamDownloadState& state,
-                                   std::vector<std::future<void>>& futures,
-                                   EntryStreamFailure& failure);
+    SubmitEntryStreamDownloadTasks(
+        const EntryMeta& meta,
+        EntryStreamDownloadState& state,
+        std::vector<folly::SemiFuture<folly::Unit>>& futures,
+        EntryStreamFailure& failure);
 
     static size_t
     StreamDownloadTaskCount(const EntryMeta& meta);

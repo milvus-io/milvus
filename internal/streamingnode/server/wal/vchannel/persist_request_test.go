@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -11,11 +12,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type recordingVChannelScheduler struct {
@@ -122,4 +126,39 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 	require.True(t, module.ObserveMessage(context.Background(), retained))
 	retained.Release()
 	owner.Release()
+}
+
+func TestPressureRequestRoutesToSelectedVChannel(t *testing.T) {
+	view := &segment.SegmentView{}
+	l0 := &l0materializer.WALMaterializer{}
+	module := &VChannelRecoveryModule{segments: map[int64]*segment.SegmentView{1: view}, l0Materializer: l0}
+	m := &PChannelRecoveryManager{modules: typeutil.NewConcurrentMap[string, *VChannelRecoveryModule]()}
+	m.modules.Insert("v1", module)
+	var segments, deletes int
+	p1 := mockey.Mock((*segment.SegmentView).RequestPersistThroughUnderPressure).To(func(s *segment.SegmentView, tt uint64) bool {
+		require.Same(t, view, s)
+		require.Equal(t, uint64(100), tt)
+		segments++
+		return true
+	}).Build()
+	defer p1.UnPatch()
+	p2 := mockey.Mock((*l0materializer.WALMaterializer).RequestPersistThroughUnderPressure).To(func(s *l0materializer.WALMaterializer, tt uint64) {
+		require.Same(t, l0, s)
+		require.Equal(t, uint64(100), tt)
+		deletes++
+	}).Build()
+	defer p2.UnPatch()
+	m.RequestPersistThrough("v1", 100)
+	module.RequestPersistThrough(100)
+	m.RequestPersistThroughUnderPressure("v1", 100)
+	require.Equal(t, 1, segments)
+	require.Equal(t, 1, deletes)
+	m.RequestPersistThroughUnderPressure("missing", 100)
+	m.RequestPersistThroughUnderPressure("", 100)
+	(*PChannelRecoveryManager)(nil).RequestPersistThroughUnderPressure("v1", 100)
+	(*VChannelRecoveryModule)(nil).RequestPersistThroughUnderPressure(100)
+	module.removed = true
+	m.RequestPersistThroughUnderPressure("v1", 100)
+	require.Equal(t, 1, segments)
+	require.Equal(t, 1, deletes)
 }

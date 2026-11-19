@@ -1477,7 +1477,8 @@ func TestFlushRequestsReachVChannelPersistence(t *testing.T) {
 				vchannel string
 				through  uint64
 			}, 1)
-			mock := mockey.Mock((*vchannel.PChannelRecoveryManager).RequestPersistThrough).To(func(
+			// Recovery-tail flush triggers use the pressure persistence path.
+			mock := mockey.Mock((*vchannel.PChannelRecoveryManager).RequestPersistThroughUnderPressure).To(func(
 				_ *vchannel.PChannelRecoveryManager, vc string, through uint64,
 			) {
 				requested <- struct {

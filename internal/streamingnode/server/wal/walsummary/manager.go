@@ -73,6 +73,7 @@ type Manager struct {
 	publishedVersion      uint64
 	manifestPublished     bool
 	manifestTask          *manifestWriteTask
+	pressureThrough       uint64
 	gcTask                *summaryGCTask
 	lastAcked             uint64
 	lastObserved          uint64

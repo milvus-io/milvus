@@ -49,6 +49,14 @@ class PhyLogicalUnaryExpr : public Expr {
     }
 
     bool
+    CanUseOffsetsForSequentialBatch() override {
+        return std::all_of(
+            inputs_.begin(), inputs_.end(), [](const auto& input) {
+                return input->CanUseOffsetsForSequentialBatch();
+            });
+    }
+
+    bool
     SupportOffsetInput() override {
         return inputs_[0]->SupportOffsetInput();
     }

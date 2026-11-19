@@ -11,6 +11,7 @@
 
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include "monitor/Monitor.h"
 #include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
@@ -52,6 +53,7 @@
 #include "knowhere/dataset.h"
 #include "knowhere/object.h"
 #include "knowhere/sparse_utils.h"
+#include "milvus-storage/packed/writer.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -66,10 +68,14 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadAdmissionController.h"
+#include "folly/coro/BlockingWait.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
+#include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus::segcore;
@@ -177,7 +183,36 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
-TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
+class GrowingManifestLoadTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        async_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        bytes_ = admission.CapacityBytes();
+        slots_ = admission.CapacitySlots();
+        storagev2translator::SetStorageV2AsyncLoadEnabled(GetParam());
+        admission.SetCapacityBytes(0);
+        admission.SetCapacitySlots(0);
+    }
+
+    void
+    TearDown() override {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled_);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacityBytes(bytes_);
+        admission.SetCapacitySlots(slots_);
+    }
+
+ private:
+    bool async_enabled_;
+    size_t bytes_;
+    size_t slots_;
+};
+
+INSTANTIATE_TEST_SUITE_P(LoadModes, GrowingManifestLoadTest, ::testing::Bool());
+
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -197,12 +232,25 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     schema->set_primary_field_id(pk);
 
     auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_checkpoint_row_cap")
+                      (GetParam() ? "growing_recovery_checkpoint_row_cap_async"
+                                  : "growing_recovery_checkpoint_row_cap_sync"))
                          .string();
     std::filesystem::remove_all(base_path);
-    milvus::test::V3SegmentTestData test_data(
-        schema, 2, 3, dim, TestLocalPath, base_path);
+    milvus::test::V3SegmentTestData test_data(schema,
+                                              2,
+                                              3,
+                                              dim,
+                                              TestLocalPath,
+                                              base_path,
+                                              "",
+                                              /*file_per_batch=*/true);
     ASSERT_EQ(test_data.NumColumnGroups(), 2);
+    for (int64_t i = 0; i < test_data.NumColumnGroups(); ++i) {
+        auto reader = test_data.CreateChunkReader(i);
+        auto rows = reader->get_chunk_rows();
+        ASSERT_TRUE(rows.ok());
+        ASSERT_EQ(rows.ValueOrDie(), (std::vector<uint64_t>{3, 3}));
+    }
     ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
     ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
 
@@ -220,7 +268,48 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    segment->Load(trace_ctx, nullptr);
+    // Force multiple async windows; synchronous recovery uses the sealed batch
+    // target and should merge the small groups, including the checkpoint tail.
+    const auto window_bytes =
+        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes();
+    storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    auto restore_window = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(
+            window_bytes);
+    });
+    const auto high_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_high
+            .Value();
+    const auto low_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value();
+    if (GetParam()) {
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacitySlots(1);
+        auto lease = folly::coro::blockingWait(admission.AcquireAsync(
+            {0, 1}, storage::LoadAdmissionPriority::High));
+        auto load = std::async(std::launch::async,
+                               [&] { segment->Load(trace_ctx, nullptr); });
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        lease.Release();
+        load.get();
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                .Value(),
+            high_tasks);
+    } else {
+        // Both optional admission limits are disabled; synchronous reads must
+        // still execute on the bounded HIGH pool.
+        segment->Load(trace_ctx, nullptr);
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                    .Value() -
+                high_tasks,
+            test_data.NumColumnGroups());
+    }
+    EXPECT_EQ(
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value(),
+        low_tasks);
     ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
     EXPECT_EQ(segment->get_real_count(), checkpoint_rows);
 
@@ -250,15 +339,17 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     std::filesystem::remove_all(base_path);
 }
 
-TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsShortRequiredRows) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
 
-    auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_short_required_rows")
-                         .string();
+    auto base_path =
+        (std::filesystem::path(TestLocalPath) /
+         (GetParam() ? "growing_recovery_short_required_rows_async"
+                     : "growing_recovery_short_required_rows_sync"))
+            .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
         schema, 1, 2, 1, TestLocalPath, base_path);
@@ -278,7 +369,188 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    try {
+        segment->Load(trace_ctx, nullptr);
+        FAIL() << "expected checkpoint row-count mismatch";
+    } catch (const SegcoreError& error) {
+        EXPECT_NE(std::string(error.what()).find("fewer rows than checkpoint"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    std::filesystem::remove_all(base_path);
+}
+
+class GrowingFunctionOutputRecoveryTest
+    : public testing::TestWithParam<int64_t> {};
+
+TEST_P(GrowingFunctionOutputRecoveryTest, RecoversSparseIndex) {
+    auto old_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(old_schema);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    old_schema->set_schema_version(1);
+
+    auto schema = std::make_shared<Schema>(*old_schema);
+    schema->set_schema_version(2);
+    auto sparse = schema->AddDebugField("sparse_out",
+                                        DataType::VECTOR_SPARSE_U32_F32,
+                                        0,
+                                        knowhere::metric::BM25);
+    schema->add_function_output_field_id(sparse);
+    constexpr int64_t rows = 64;
+    FieldIndexMeta sparse_index(sparse,
+                                {{"index_type", "SPARSE_INVERTED_INDEX"},
+                                 {"metric_type", "BM25"},
+                                 {"bm25_k1", "1.2"},
+                                 {"bm25_b", "0.75"},
+                                 {"bm25_avgdl", "100"}},
+                                {});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        rows, std::map<FieldId, FieldIndexMeta>{{sparse, sparse_index}});
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_enable_interim_segment_index(true);
+    config.set_nlist(1);
+
+    for (bool has_output : {false, true}) {
+        SCOPED_TRACE(has_output);
+        milvus::test::TmpPath path;
+        auto stored_schema = has_output ? schema : old_schema;
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(3);
+        load_info.set_storageversion(GetParam());
+        load_info.set_num_of_rows(rows);
+        if (GetParam() == STORAGE_V3) {
+            milvus::test::V3SegmentTestData data(
+                stored_schema, 1, rows, 1, TestLocalPath, path.get().string());
+            ASSERT_EQ(ManifestHasField(data, sparse), has_output);
+            load_info.set_manifest_path(data.ManifestPathJson());
+        } else if (GetParam() == STORAGE_V2) {
+            auto arrow_schema = stored_schema->ConvertToArrowSchema();
+            auto data = DataGen(stored_schema, rows);
+            auto batch = ConvertToArrowRecordBatch(data, 1, arrow_schema);
+            // Group IDs deliberately differ from field IDs. Selection must
+            // inspect the columns stored in the packed file.
+            std::vector<std::string> files{path.get().string() + "/1"};
+            std::vector<std::vector<int>> groups(1);
+            for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+                groups.front().push_back(i);
+            }
+            milvus_storage::StorageConfig storage_config;
+            auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+                GetDefaultArrowFileSystem(),
+                files,
+                arrow_schema,
+                storage_config,
+                groups);
+            ASSERT_TRUE(writer_result.ok());
+            auto writer = writer_result.ValueOrDie();
+            ASSERT_TRUE(writer->Write(batch).ok());
+            ASSERT_TRUE(writer->Close().ok());
+            auto* group = load_info.add_binlog_paths();
+            group->set_fieldid(9999);
+            auto* binlog = group->add_binlogs();
+            binlog->set_entries_num(rows);
+            binlog->set_log_path(files.front());
+        } else {
+            auto data = DataGen(stored_schema, rows);
+            auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                          .GetRemoteChunkManager();
+            auto binlogs = PrepareInsertBinlog(
+                kCollectionID, kPartitionID, kSegmentID, data, cm);
+            ASSERT_EQ(binlogs.field_infos.contains(sparse.get()), has_output);
+            for (const auto& [id, info] : binlogs.field_infos) {
+                ASSERT_EQ(info.insert_files.size(), 1);
+                auto* field = load_info.add_binlog_paths();
+                field->set_fieldid(id);
+                auto* binlog = field->add_binlogs();
+                binlog->set_entries_num(rows);
+                binlog->set_log_path(info.insert_files.front());
+            }
+        }
+        auto segment = CreateGrowingSegment(schema, index_meta, 3, config);
+        ASSERT_FALSE(segment->HasIndex(sparse));
+        segment->SetLoadInfo(load_info);
+        milvus::tracer::TraceContext trace_ctx;
+        ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+        EXPECT_EQ(segment->get_row_count(), rows);
+        EXPECT_TRUE(segment->FieldAccessible(pk));
+        EXPECT_EQ(segment->FieldAccessible(sparse), has_output);
+        EXPECT_EQ(segment->HasIndex(sparse), has_output);
+        if (has_output) {
+            auto pin = segment->PinGrowingIndex(nullptr, sparse);
+            ASSERT_TRUE(pin);
+            EXPECT_EQ(pin.CoveredRowEnd(), rows);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(StorageVersions,
+                         GrowingFunctionOutputRecoveryTest,
+                         testing::Values(int64_t{1}, STORAGE_V2, STORAGE_V3));
+
+TEST(Growing, RegisterDenseFunctionOutputIndexOnInsert) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto embedding = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 8, knowhere::metric::L2);
+    schema->add_function_output_field_id(embedding);
+    FieldIndexMeta index(
+        embedding, {{"index_type", "HNSW"}, {"metric_type", "L2"}}, {});
+    auto meta = std::make_shared<CollectionIndexMeta>(
+        1000, std::map<FieldId, FieldIndexMeta>{{embedding, index}});
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_enable_interim_segment_index(true);
+    auto segment = CreateGrowingSegment(schema, meta, 3, config);
+    ASSERT_FALSE(segment->HasIndex(embedding));
+
+    auto data = DataGen(schema, 2);
+    auto offset = segment->PreInsert(2);
+    segment->Insert(offset,
+                    2,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*data.raw_));
+    EXPECT_TRUE(segment->HasIndex(embedding));
+    EXPECT_EQ(segment->get_row_count(), 2);
+}
+
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsMissingDataFile) {
+    auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      (GetParam() ? "growing_recovery_missing_data_file_async"
+                                  : "growing_recovery_missing_data_file_sync"))
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 1, 2, 1, TestLocalPath, base_path);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(4);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    const auto& files = test_data.GetColumnGroups()->at(0)->files;
+    ASSERT_FALSE(files.empty());
+    ASSERT_TRUE(std::filesystem::remove(files.front().path));
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_THROW(segment->Load(trace_ctx, nullptr), SegcoreError);
     EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);

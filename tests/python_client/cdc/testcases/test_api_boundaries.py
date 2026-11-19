@@ -7,7 +7,7 @@ from google.protobuf.message_factory import GetMessageClass
 from pymilvus import MilvusException
 from pymilvus.grpc_gen import milvus_pb2
 
-from .contract_helpers import assert_index_sync, rows_equal, rpc
+from .contract_helpers import logical_index, rows_equal, rpc
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -94,8 +94,8 @@ class TestCDCSnapshotBoundary:
         c.upstream.insert(name, c.data(10))
         c.assert_rows(name, c.data() + c.data(10))
 
-    def test_restore_snapshot_data_stays_local_and_cdc_continues(self, cdc_contract):
-        """Restore data stays on the primary; metadata and subsequent DML still replicate."""
+    def test_local_snapshot_restore_does_not_replicate_destination(self, cdc_contract):
+        """Restore the primary destination completely; keep it absent on the secondary while source DML replicates."""
         c = cdc_contract
         name = c.collection()
         c.upstream.insert(name, c.data())
@@ -114,20 +114,26 @@ class TestCDCSnapshotBoundary:
 
         c.wait(completed, "source restore completion")
         assert any(info.job_id == job for info in c.upstream.list_restore_snapshot_jobs(collection_name=target))
-        c.sync_schema(target)
-        assert_index_sync(c.upstream, c.downstream, target, "vector", c.timeout)
+        source_schema = c.upstream.describe_collection(name)
+        restored_schema = c.upstream.describe_collection(target)
+        assert restored_schema["fields"] == source_schema["fields"]
+        assert logical_index(c.upstream.describe_index(target, "vector")) == logical_index(
+            c.upstream.describe_index(name, "vector")
+        )
         c.upstream.load_collection(target)
         c.control_barrier()
         c.wait(lambda: rows_equal(c.upstream, target, c.data()), "primary restored rows")
-        c.wait(lambda: rows_equal(c.downstream, target, []), "secondary restored collection remains empty")
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
+        assert not c.downstream.has_collection(target, timeout=10)
+        assert job not in [info.job_id for info in c.downstream.list_restore_snapshot_jobs(timeout=10)]
 
-        # Observe subsequent DML on the same collection before checking absence again.
+        # Destination creation is part of the unreplicable restore message.
+        # Use the original collection to prove subsequent CDC progress.
         new_rows = c.data(100)
-        c.upstream.insert(target, new_rows)
-        c.wait(lambda: rows_equal(c.downstream, target, new_rows), "DML after local snapshot restore")
-        rows_equal(c.upstream, target, c.data() + new_rows)
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
+        c.upstream.insert(name, new_rows)
+        c.assert_rows(name, c.data() + new_rows)
+        rows_equal(c.upstream, target, c.data())
+        assert not c.downstream.has_collection(target, timeout=10)
+        assert job not in [info.job_id for info in c.downstream.list_restore_snapshot_jobs(timeout=10)]
 
     def test_manifest_secondary_rejected_without_data_changes(self, cdc_contract):
         c = cdc_contract

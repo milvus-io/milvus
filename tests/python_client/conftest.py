@@ -44,6 +44,11 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--pyudf-expected-commit",
+        default=None,
+        help="Optional deployed Git commit prefix for dedicated PyUDF profiles.",
+    )
+    parser.addoption(
         "--struct-max-array-capacity",
         type=int,
         default=None,

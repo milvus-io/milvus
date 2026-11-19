@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -108,6 +109,7 @@ func TestGetJSONParams(t *testing.T) {
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
+		EnableDeferredBloomFilter: paramtable.Get().DataNodeCfg.EnableDeferredBloomFilter.GetAsBool(),
 		StorageVersion:            storageVersion,
 		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
@@ -189,4 +191,28 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	emptyJSON := ``
 	_, err := ParseParamsFromJSON(emptyJSON)
 	assert.Error(t, err)
+}
+
+// The coordinator snapshots the flag into the plan; parsing on a DataNode must
+// not replace it with that node's current local configuration.
+func TestDeferredBloomFilterPlanParams(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	key := pt.DataNodeCfg.EnableDeferredBloomFilter.Key
+	defer pt.Reset(key)
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			require.NoError(t, pt.Save(key, strconv.FormatBool(enabled)))
+			payload, err := GenerateJSONParams(nil)
+			require.NoError(t, err)
+			require.NoError(t, pt.Save(key, strconv.FormatBool(!enabled)))
+			params, err := ParseParamsFromJSON(payload)
+			require.NoError(t, err)
+			assert.Equal(t, enabled, params.EnableDeferredBloomFilter)
+		})
+	}
+	require.NoError(t, pt.Save(key, "true"))
+	params, err := ParseParamsFromJSON(`{}`)
+	require.NoError(t, err)
+	assert.False(t, params.EnableDeferredBloomFilter, "old plans keep deferred sizing disabled")
 }

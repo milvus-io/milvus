@@ -599,7 +599,14 @@ TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
         primary->CaptureReadSnapshot());
     auto retained_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
         retained->CaptureReadSnapshot());
-    EXPECT_EQ(primary_state, retained_state);
+    // Forks own their cache lifetime while retaining the same immutable
+    // column/index resources. Copying metadata must not duplicate the data.
+    EXPECT_NE(primary_state, retained_state);
+    EXPECT_NE(primary_state->expr_cache_generation,
+              retained_state->expr_cache_generation);
+    EXPECT_EQ(primary_state->fields, retained_state->fields);
+    EXPECT_EQ(primary_state->load_info, retained_state->load_info);
+    EXPECT_EQ(primary_state->runtime, retained_state->runtime);
 
     query::Plan plan(schema);
     plan.target_entries_ = {pk_id, scalar_id};

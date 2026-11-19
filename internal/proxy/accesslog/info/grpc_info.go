@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -217,11 +216,11 @@ func (i *GrpcAccessInfo) respStatus() *commonpb.Status {
 
 func (i *GrpcAccessInfo) ErrorMsg() string {
 	if i.err != nil {
-		return strings.ReplaceAll(i.err.Error(), "\n", "\\n")
+		return i.err.Error()
 	}
 
 	if status := i.respStatus(); status != nil {
-		return strings.ReplaceAll(status.GetReason(), "\n", "\\n")
+		return status.GetReason()
 	}
 
 	return Unknown

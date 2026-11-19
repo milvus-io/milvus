@@ -395,7 +395,7 @@ func TestRequiredLoadResourceAppliesCollectionMmap(t *testing.T) {
 			require.NoError(t, params.Save(params.QueryNodeCfg.MmapScalarField.Key, test.global))
 			req := newAutoscalePrecheckTestRequest()
 			if test.collection != "" {
-				req.CollectionInfo.PropertyPairs = []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: test.collection}}
+				req.CollectionInfo.Properties = []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: test.collection}}
 			}
 			field := req.CollectionInfo.Schema.Fields[0]
 			if test.field != "" {

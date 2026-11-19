@@ -489,7 +489,11 @@ func TestRocksmq_Throughout(t *testing.T) {
 	assert.NoError(t, err)
 	defer rmq.DestroyTopic(channelName)
 
-	entityNum := 100000
+	// Each Produce now waits for WAL synchronization. Keep the unit test
+	// bounded on disks with expensive syncs while still exercising individual
+	// message acknowledgements and consumption; bulk throughput belongs in a
+	// benchmark using batched Produce calls.
+	entityNum := 1000
 
 	pt0 := time.Now().UnixNano() / int64(time.Millisecond)
 	for i := 0; i < entityNum; i++ {

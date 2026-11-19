@@ -103,7 +103,7 @@ struct FileManagerContext {
      */
     void
     set_loon_ffi_properties(
-        std::shared_ptr<milvus_storage::api::Properties> properties) {
+        std::shared_ptr<const milvus_storage::api::Properties> properties) {
         loon_ffi_properties = std::move(properties);
     }
 
@@ -126,7 +126,7 @@ struct FileManagerContext {
     std::optional<bool> use_async_load;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
-    std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    std::shared_ptr<const milvus_storage::api::Properties> loon_ffi_properties;
     std::string stats_base_path;
     StorageColumnMappings storage_column_mappings;
 };
@@ -419,7 +419,7 @@ class FileManagerImpl : public milvus::FileManager {
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
     std::optional<bool> use_async_load_;
-    std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
+    std::shared_ptr<const milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;
 

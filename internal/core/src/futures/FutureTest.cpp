@@ -41,7 +41,6 @@
 #include "monitor/Monitor.h"
 #include "segcore/OutputFields.h"
 #include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "test_utils/output_field_test_utils.h"
 
@@ -137,8 +136,8 @@ TEST_F(SearchFanoutPoolDeathTest, ConfigurationCreatesPoolAndResizesInPlace) {
         EXPECT_EQ(search->numThreads(), 7);
         executor_set_search_fanout_thread_core_coefficient(12.0f);
         EXPECT_EQ(milvus::futures::getSearchFanoutCPUExecutor(), search);
-        auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
-        EXPECT_EQ(middle.GetMaxThreadNum(), 6);
+        auto& middle = milvus::ThreadPools::GetExecutor(milvus::MIDDLE);
+        EXPECT_EQ(middle.numThreads(), 6);
         EXPECT_EQ(search->numThreads(), 24);
         EXPECT_NE(search, milvus::futures::getSearchCPUExecutor());
     });
@@ -163,14 +162,14 @@ TEST_F(SearchFanoutPoolDeathTest, SmallPositiveRatioAtStartupAndHotUpdate) {
 TEST_F(SearchFanoutPoolDeathTest, LiveResizeIsIndependentAndUncapped) {
     RunInChild([] {
         const auto load_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
-        auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+        auto& middle = milvus::ThreadPools::GetExecutor(milvus::MIDDLE);
         auto* search = milvus::futures::getSearchFanoutCPUExecutor();
         EXPECT_EQ(search->numThreads(), 4);
         for (const auto cap : {3, 0, 16}) {
             milvus::SetThreadPoolMaxThreadsSize(cap);
             milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
             const auto expected = cap == 3 ? 3 : 6;
-            EXPECT_EQ(middle.GetMaxThreadNum(), expected);
+            EXPECT_EQ(middle.numThreads(), expected);
             EXPECT_EQ(search->numThreads(), 4);
             EXPECT_EQ(
                 milvus::monitor::internal_storage_pool_capacity_middle.Value(),
@@ -184,7 +183,7 @@ TEST_F(SearchFanoutPoolDeathTest, LiveResizeIsIndependentAndUncapped) {
         }
         milvus::SetThreadPoolMaxThreadsSize(1);
         milvus::futures::setSearchFanoutThreadCoreCoefficient(12.0);
-        EXPECT_EQ(middle.GetMaxThreadNum(), 6);
+        EXPECT_EQ(middle.numThreads(), 6);
         EXPECT_EQ(search->numThreads(), 24);
         // Further configuration updates remain independent of the load limit.
         milvus::futures::setSearchFanoutThreadCoreCoefficient(20.0f);
@@ -205,11 +204,11 @@ TEST_F(SearchFanoutPoolDeathTest, LiveResizeIsIndependentAndUncapped) {
 
 TEST_F(SearchFanoutPoolDeathTest, InvalidResizeKeepsBothPools) {
     RunInChild([] {
-        auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+        auto& middle = milvus::ThreadPools::GetExecutor(milvus::MIDDLE);
         auto* search = milvus::futures::getSearchFanoutCPUExecutor();
         for (const auto ratio : {0.0f, -1.0f}) {
             milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, ratio);
-            EXPECT_EQ(middle.GetMaxThreadNum(), 2);
+            EXPECT_EQ(middle.numThreads(), 2);
             EXPECT_EQ(search->numThreads(), 4);
             EXPECT_EQ(milvus::MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load(),
                       1.0);
@@ -223,24 +222,23 @@ TEST_F(SearchFanoutPoolDeathTest,
        ExecutesWhileMiddleIsBlockedWithSeparateMetrics) {
     RunInChild([] {
         milvus::SetThreadPoolMaxThreadsSize(1);
-        auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+        auto& middle = milvus::ThreadPools::GetExecutor(milvus::MIDDLE);
         milvus::futures::getSearchFanoutCPUExecutor();
         std::promise<void> started;
         std::promise<void> unblock;
         auto gate = unblock.get_future().share();
-        auto blocker = middle.Submit([&started, gate] {
-            started.set_value();
-            gate.wait();
-        });
+        auto blocker = folly::via(&middle, [&started, gate] {
+                           started.set_value();
+                           gate.wait();
+                       }).semi();
         auto release = folly::makeGuard([&] {
             unblock.set_value();
             blocker.wait();
         });
         ASSERT_EQ(started.get_future().wait_for(std::chrono::seconds(2)),
                   std::future_status::ready);
-        auto queued = middle.Submit([] { return 1; });
-        EXPECT_EQ(queued.wait_for(std::chrono::milliseconds(0)),
-                  std::future_status::timeout);
+        auto queued = folly::via(&middle, [] { return 1; }).semi();
+        EXPECT_FALSE(queued.isReady());
         const auto middle_submitted =
             milvus::monitor::internal_storage_pool_task_submitted_total_middle
                 .Value();

@@ -84,6 +84,12 @@ tikv:
     tlsCert:  # path to your cert file
     tlsKey:  # path to your key file
     tlsCACert:  # path to your CACert file
+  gc:
+    # Whether MixCoord advances the GC safe point of the TiKV cluster, so that TiKV reclaims old versions of metadata keys.
+    # Enable it only on a dedicated TiKV cluster whose garbage collection is managed by Milvus.
+    enabled: false
+    lifeTime: 600 # seconds, how long TiKV keeps an overwritten or deleted version of a metadata key. A transaction that lasts longer fails.
+    interval: 600 # seconds, how often MixCoord advances the TiKV GC safe point
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
@@ -477,7 +483,7 @@ proxy:
   roleNameValidation:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
-  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests
+  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
@@ -626,10 +632,13 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   autoRelease:
-    enabled: false # whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true
-    idleTTLSeconds: 600
-    checkIntervalSeconds: 30
-    releaseConcurrency: 16 # maximum concurrent automatic collection releases in one scan; changes apply to the next release batch
+    enabled: false # whether QueryCoord releases collections after the configured time to idle (TTI) or under Worker QN memory pressure; effective only when proxy.enableAutoLoad is true
+    ttiSeconds: 3600
+    checkIntervalSeconds: 10
+    releaseConcurrency: 16 # maximum concurrent automatic collection releases per scan; runtime updates take effect on the next scan
+    lruHighWatermarkPercentage: 85 # Worker QueryNode pool anonymous resident memory percentage that starts collection LRU release; takes effect on the next scan
+    lruLowWatermarkPercentage: 80 # Worker QueryNode pool anonymous resident memory percentage that stops selecting collection LRU releases; must be below the high watermark
+    lruMaxEvictionsPerScan: 64 # maximum collection LRU releases selected per scan, independent of releaseConcurrency
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -1033,7 +1042,8 @@ dataCoord:
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   segmentChange:
-    stagingTimeout: 3600 # The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.
+    enabled: false # Experimental opt-in for staged segment membership publication. Do not enable in production until L0 and clustering fairness is implemented: continuous Flush-to-Sort groups can starve L0 delete and clustering compaction. Existing groups finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.
+    stagingTimeout: 3600 # The maximum duration in seconds that eligible compaction segment change groups may wait for readiness before aborting. Import, clustering, copy and external refresh use their producer lifecycle instead.
     maxMembersPerGroup: 512 # The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
@@ -1152,6 +1162,7 @@ dataNode:
     useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
     lobHoleRatioThreshold: 0.3 # The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.
+    enableDeferredBloomFilter: false # Enable deferred Bloom filter sizing for mix compactions estimated to produce multiple output segments. Read by DataCoord and passed to DataNode in the compaction plan. Single-output estimates use the existing path.
   text:
     inlineThreshold: 65536 # TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.
     maxLobFileBytes: 67108864 # Maximum size of a single LOB file for TEXT column storage (in bytes).
@@ -1316,7 +1327,7 @@ common:
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
-  gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
+  gracefulTime: 60000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: true # whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. Storage v2 segments only; manifest-based (v3) segments do not build this index yet.
@@ -1331,7 +1342,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: false
+    useLoonFFI: true
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
@@ -1343,7 +1354,8 @@ common:
       # The default matches the milvus-storage default.
       maxRate: 5000
     talon:
-      mode: 0 # Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.
       enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
       smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
       coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
@@ -1406,6 +1418,11 @@ common:
     # default password for root user. The maximum length is 72 characters. 
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
+    # Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+    # pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+    # Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+    # Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.
+    passwordHashAlgorithm: bcrypt
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy

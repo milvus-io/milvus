@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -343,6 +344,46 @@ func (s *ColumnBasedDataOptionSuite) TestTextColumnInsertAndUpsertRequests() {
 		s.Require().NotNil(textData)
 		s.Equal(schemapb.DataType_Text, textData.GetType())
 		s.Equal(values, textData.GetScalars().GetStringData().GetData())
+	}
+}
+
+func (s *ColumnBasedDataOptionSuite) TestTimestamptzColumnInsertAndUpsertRequests() {
+	const collectionName = "timestamptz_write_option"
+	values := []time.Time{
+		time.Date(2026, time.November, 16, 12, 30, 0, 0, time.UTC),
+		time.Date(2026, time.November, 16, 20, 30, 0, 123456789, time.FixedZone("UTC+8", 8*60*60)),
+	}
+	expected := []string{"2026-11-16T12:30:00Z", "2026-11-16T12:30:00.123456Z"}
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz)),
+	}
+
+	opt := NewColumnBasedInsertOption(collectionName).
+		WithTimestamptzColumn("created_at", values).
+		WithInt64Column("id", []int64{1, 2})
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(2, insertReq.GetNumRows())
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.EqualValues(2, upsertReq.GetNumRows())
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertReq.GetFieldsData(), upsertReq.GetFieldsData()} {
+		s.Require().Len(fieldsData, 2)
+		var timestampData *schemapb.FieldData
+		for _, fd := range fieldsData {
+			if fd.GetFieldName() == "created_at" {
+				timestampData = fd
+				break
+			}
+		}
+		s.Require().NotNil(timestampData)
+		s.Equal(schemapb.DataType_Timestamptz, timestampData.GetType())
+		s.Equal(expected, timestampData.GetScalars().GetStringData().GetData())
 	}
 }
 

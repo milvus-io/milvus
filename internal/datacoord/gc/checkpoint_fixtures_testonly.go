@@ -43,8 +43,8 @@ func (gc *GarbageCollector) CheckDroppedSegmentGCForTest(segment *meta.SegmentIn
 	return gc.checkDroppedSegmentGC(segment, compactTo, channelCP, expire)
 }
 
-func (gc *GarbageCollector) DataViewCompactionProtectionForTest(segments []*meta.SegmentInfo) map[int64]struct{} {
-	return gc.dataViewCompactionProtection(segments)
+func (gc *GarbageCollector) DataViewCompactionProtectionForTest(children map[int64][]int64) map[int64]struct{} {
+	return gc.dataViewCompactionProtection(children)
 }
 
 func (gc *GarbageCollector) ContextForTest() context.Context { return gc.ctx }

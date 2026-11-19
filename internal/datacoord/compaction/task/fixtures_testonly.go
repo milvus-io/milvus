@@ -28,9 +28,26 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// NewDefaultMockCompactionMeta supplies empty group behavior for legacy tests.
+func NewDefaultMockCompactionMeta(t *testing.T) *MockCompactionMeta {
+	t.Helper()
+	m := NewMockCompactionMeta(t)
+	m.EXPECT().CompactionContext().Return(context.Background()).Maybe()
+	m.EXPECT().GetCompactionChangeGroup(mock.Anything).Return((*model.SegmentChangeGroup)(nil), nil).Maybe()
+	m.EXPECT().GetProducerChangeGroup(mock.Anything, mock.Anything, mock.Anything).Return((*model.SegmentChangeGroup)(nil)).Maybe()
+	m.EXPECT().GetSegmentChangeGroupBySegmentID(mock.Anything, mock.Anything).Return((*model.SegmentChangeGroup)(nil)).Maybe()
+	m.EXPECT().RecomputeCompactionDataView(mock.Anything, mock.Anything).Return().Maybe()
+	m.EXPECT().UnpublishedSegmentMembers(mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet()).Maybe()
+	m.EXPECT().SegmentChangeL0Channels(mock.Anything).Return(typeutil.NewSet[string]()).Maybe()
+	m.EXPECT().ReserveGroupSort(mock.Anything).Return(false).Maybe()
+	return m
+}
 
 const Int64Field = "int64Field"
 

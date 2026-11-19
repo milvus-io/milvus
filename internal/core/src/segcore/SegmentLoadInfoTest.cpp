@@ -4121,6 +4121,78 @@ TEST(SealedFieldLayoutTest, ExplicitEmptyScopeDoesNotLoadAllFields) {
     EXPECT_TRUE(schema->IsFieldInLoadScope(id));
 }
 
+TEST(SealedFieldLayoutTest, CopiedFieldDescriptionsOutliveSchemaAndLayouts) {
+    auto schema = std::make_shared<Schema>();
+    const auto a = schema->AddDebugField("a", DataType::INT64);
+    const auto b = schema->AddDebugField("b", DataType::INT64);
+    schema->set_schema_version(1);
+    auto first =
+        std::make_unique<SealedFieldLayout>(schema, LoadScope({a.get()}));
+    auto second = std::make_unique<SealedFieldLayout>(
+        schema, LoadScope({a.get(), b.get()}));
+    auto group_fields = second->get_field_metas({a});
+    auto column_field = group_fields.at(a);
+    const auto* name = &(*schema)[a].get_name();
+
+    EXPECT_EQ(&(*first)[a].get_name(), name);
+    EXPECT_EQ(&(*second)[a].get_name(), name);
+    EXPECT_EQ(&group_fields.at(a).get_name(), name);
+    EXPECT_EQ(&column_field.get_name(), name);
+    EXPECT_FALSE(first->has_field(b));
+    EXPECT_TRUE(second->has_field(b));
+
+    std::weak_ptr<Schema> weak_schema = schema;
+    schema.reset();
+    EXPECT_FALSE(weak_schema.expired());
+    EXPECT_EQ((*first)[a].get_data_type(), DataType::INT64);
+    EXPECT_EQ((*second)[b].get_name().get(), "b");
+    first.reset();
+    second.reset();
+    EXPECT_TRUE(weak_schema.expired());
+    EXPECT_EQ(column_field.get_name().get(), "a");
+}
+
+TEST(SealedFieldLayoutTest, LatePreparationUsesItsExactSchemaDescription) {
+    proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_version(1);
+    auto* pk = schema_proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(101);
+    field->set_name("b");
+    field->set_data_type(proto::schema::DataType::Int64);
+    field->mutable_default_value()->set_long_data(1);
+    auto old_schema = Schema::ParseFrom(schema_proto);
+    const FieldId b(101);
+    SealedFieldLayout old_layout(old_schema, LoadScope({b.get()}));
+
+    schema_proto.set_version(2);
+    field->mutable_default_value()->set_long_data(2);
+    auto* added = schema_proto.add_fields();
+    added->set_fieldid(102);
+    added->set_name("c");
+    added->set_data_type(proto::schema::DataType::Int64);
+    auto new_schema = Schema::ParseFrom(schema_proto);
+    const FieldId c(102);
+    SealedFieldLayout early(new_schema, LoadScope({b.get(), c.get()}));
+    old_schema.reset();
+    SealedFieldLayout late(new_schema, LoadScope({b.get(), c.get()}));
+
+    EXPECT_NE(&old_layout[b].get_name(), &early[b].get_name());
+    EXPECT_EQ(&early[b].get_name(), &late[b].get_name());
+    EXPECT_EQ(&(*new_schema)[b].get_name(), &late[b].get_name());
+    EXPECT_FALSE(old_layout.has_field(c));
+    EXPECT_TRUE(early.has_field(c));
+    EXPECT_TRUE(late.has_field(c));
+    new_schema.reset();
+    EXPECT_EQ(old_layout[b].default_value()->long_data(), 1);
+    EXPECT_EQ(early[b].default_value()->long_data(), 2);
+    EXPECT_EQ(late[b].default_value()->long_data(), 2);
+}
+
 TEST(SealedFieldLayoutTest, ExplicitScopeIsIndependentOfLegacySchemaScope) {
     auto schema = std::make_shared<Schema>();
     auto a = schema->AddDebugField("a", DataType::INT64);

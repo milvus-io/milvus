@@ -12,15 +12,20 @@ import (
 // DefaultBalancePolicy retains target layouts across batches. Actual facts and
 // row predictions remain in the cache and call-local planning context respectively.
 type DefaultBalancePolicy struct {
-	mu      sync.Mutex
-	layouts layoutManager
-	fanouts map[qviews.ShardID]int
-	search  map[qviews.ShardID]*searchCursor
+	feedback ViewFeedbackReader
+	mu       sync.Mutex
+	layouts  layoutManager
+	fanouts  map[qviews.ShardID]int
+	search   map[qviews.ShardID]*searchCursor
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
-func NewDefaultBalancePolicy() *DefaultBalancePolicy {
-	return &DefaultBalancePolicy{}
+func NewDefaultBalancePolicy(options ...PolicyOption) *DefaultBalancePolicy {
+	p := &DefaultBalancePolicy{}
+	for _, option := range options {
+		option(p)
+	}
+	return p
 }
 
 type balanceCandidate struct {
@@ -41,6 +46,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		return plan
 	}
 	snap := newPlanningContext(reader)
+	snap.feedback = p.feedback
 	dirty = p.layouts.prepare(snap, dirty)
 	if p.fanouts == nil {
 		p.fanouts = make(map[qviews.ShardID]int)
@@ -101,28 +107,32 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 
 	projectedRows := initialProjectedRows(snap.NodesMap())
 	for _, shardID := range plan.Releases {
-		projectedRows = withoutRows(projectedRows, currentShardRows(snap, shardID))
+		subtractRows(projectedRows, currentShardRows(snap, shardID))
 		snap.acceptRows(shardID, nil)
 		delete(p.fanouts, shardID)
 		delete(p.search, shardID)
 	}
 
 	for _, candidate := range mandatory {
-		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows, false)
+		oldRows := currentShardRows(snap, candidate.shardID)
+		subtractRows(projectedRows, oldRows)
+		result := allocate(snap, candidate.shardID, projectedRows, false)
 		if result == nil {
+			addRows(projectedRows, oldRows)
 			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
 		}
 		snap.acceptRows(candidate.shardID, result.rowsByNode)
-		plan.Prepares[candidate.shardID] = result.builder
-		projectedRows = withRows(baseRows, result.rowsByNode)
+		plan.Prepares[candidate.shardID] = result.materialize(snap, candidate.shardID)
+		addRows(projectedRows, result.rowsByNode)
 	}
 
 	for _, candidate := range optional {
-		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows, true)
+		oldRows := currentShardRows(snap, candidate.shardID)
+		subtractRows(projectedRows, oldRows)
+		result := allocate(snap, candidate.shardID, projectedRows, true)
 		if result == nil {
+			addRows(projectedRows, oldRows)
 			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
 		}
@@ -130,11 +140,12 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 			plan.Continues = append(plan.Continues, candidate.shardID)
 		}
 		if assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
+			addRows(projectedRows, oldRows)
 			continue
 		}
 		snap.acceptRows(candidate.shardID, result.rowsByNode)
-		plan.Prepares[candidate.shardID] = result.builder
-		projectedRows = withRows(baseRows, result.rowsByNode)
+		plan.Prepares[candidate.shardID] = result.materialize(snap, candidate.shardID)
+		addRows(projectedRows, result.rowsByNode)
 	}
 
 	sort.Slice(plan.Releases, func(i, j int) bool {
@@ -165,34 +176,19 @@ func currentShardRows(snap balanceInput, shardID qviews.ShardID) map[int64]int64
 	return snap.CurrentSize(shardID)
 }
 
-func withoutRows(projected, remove map[int64]int64) map[int64]int64 {
-	result := cloneRows(projected)
-	for nodeID, rows := range remove {
-		if _, ok := result[nodeID]; !ok {
-			continue
-		}
-		result[nodeID] -= rows
-		if result[nodeID] < 0 {
-			result[nodeID] = 0
-		}
+// subtractRows mutates only the batch-owned prediction. Each shard is processed
+// once, and remove comes from the same pinned node versions as the baselines.
+// Rejected/failed allocations restore remove before planning the next shard.
+func subtractRows(projected, remove map[int64]int64) {
+	for node, rows := range remove {
+		projected[node] -= rows
 	}
-	return result
 }
 
-func withRows(base, add map[int64]int64) map[int64]int64 {
-	result := cloneRows(base)
-	for nodeID, rows := range add {
-		result[nodeID] += rows
+func addRows(projected, add map[int64]int64) {
+	for node, rows := range add {
+		projected[node] += rows
 	}
-	return result
-}
-
-func cloneRows(rows map[int64]int64) map[int64]int64 {
-	result := make(map[int64]int64, len(rows))
-	for nodeID, rowCount := range rows {
-		result[nodeID] = rowCount
-	}
-	return result
 }
 
 func assignmentsEqual(current, candidate map[int64]int64) bool {

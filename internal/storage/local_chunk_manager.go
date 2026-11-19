@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -96,7 +97,8 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 	return reader, nil
 }
 
-// Write writes the data to local storage.
+// Write atomically publishes the data, like an object store PUT (see
+// localstorage.WriteFileAtomic).
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	dir := path.Dir(filePath)
 	exist, err := lcm.Exist(ctx, dir)
@@ -109,7 +111,7 @@ func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, conten
 			return merr.WrapErrIoFailed(filePath, err)
 		}
 	}
-	return WriteFile(filePath, content, os.ModePerm)
+	return merr.WrapErrIoFailed(filePath, localstorage.WriteFileAtomic(filePath, content, os.ModePerm))
 }
 
 // MultiWrite writes the data to local storage.
@@ -155,6 +157,8 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	return results, el
 }
 
+// WalkWithPrefix skips unpublished writes (see localstorage.IsTemp), as object
+// stores do not list in-progress uploads.
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 	logger.Info(ctx, "start walk through objects")
@@ -171,6 +175,11 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 		return filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			// Unpublished writes are hidden, including one renamed away between
+			// reading its directory and stating it.
+			if localstorage.IsTemp(filePath) {
+				return nil
 			}
 			// A missing scan root is an empty listing, including repeated GC.
 			if filePath == dir && os.IsNotExist(err) {
@@ -204,6 +213,9 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 	for _, filePath := range globPaths {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if localstorage.IsTemp(filePath) {
+			continue
 		}
 
 		f, err := os.Stat(filePath)

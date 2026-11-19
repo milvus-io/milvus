@@ -336,6 +336,15 @@ func (m *VChannelRecoveryModule) IsActive() bool {
 // RequestPersistThrough schedules persistence for buffered data observed by
 // this VChannel through targetTimeTick.
 func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
+	m.requestPersistThrough(targetTimeTick, false)
+}
+
+// RequestPersistThroughUnderPressure promotes persistence needed by the recovery tail.
+func (m *VChannelRecoveryModule) RequestPersistThroughUnderPressure(targetTimeTick uint64) {
+	m.requestPersistThrough(targetTimeTick, true)
+}
+
+func (m *VChannelRecoveryModule) requestPersistThrough(targetTimeTick uint64, underPressure bool) {
 	if m == nil {
 		return
 	}
@@ -345,9 +354,17 @@ func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
 		return
 	}
 	for _, view := range m.segments {
-		view.RequestPersistThrough(targetTimeTick)
+		if underPressure {
+			view.RequestPersistThroughUnderPressure(targetTimeTick)
+		} else {
+			view.RequestPersistThrough(targetTimeTick)
+		}
 	}
-	m.l0Materializer.RequestPersistThrough(targetTimeTick)
+	if underPressure {
+		m.l0Materializer.RequestPersistThroughUnderPressure(targetTimeTick)
+	} else {
+		m.l0Materializer.RequestPersistThrough(targetTimeTick)
+	}
 }
 
 func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) {

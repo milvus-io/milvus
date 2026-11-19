@@ -8,6 +8,12 @@
 # Define reusable conditions and patterns for better maintainability
 # ==============================================================================
 misc:
+  # Mixed E2E test suites run E2E + Go SDK, but no build/UT pipeline.
+  - mixed_e2e_test_files: &MIXED_E2E_TEST_FILES
+      - files~=^tests/go_client/(?!.*\.md$).+
+      - files~=^tests/(python_client|restful_client_v2)/(?!.*\.md$).+
+      - -files~=^(?!tests/(go_client|python_client|restful_client_v2)/|.*\.md$).+
+
   # File pattern matchers
   - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
@@ -263,6 +269,17 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Test passed for mixed E2E test suites on 3.0
+    conditions:
+      - *3X_BRANCH
+      - and: *MIXED_E2E_TEST_FILES
+      - status-success=ci-v2/e2e-amd
+      - status-success=ci-v2/go-sdk
+    actions:
+      label:
+        add:
+          - ci-passed
+
   - name: Test passed for docs changed only
     conditions:
       - or: *BRANCHES
@@ -289,6 +306,8 @@ pull_request_rules:
       - *3X_BRANCH
       - or: *WHEN_E2E_AMD_SUCCESS
       - *no_source_code_files
+      - not:
+          and: *MIXED_E2E_TEST_FILES
     actions:
       label:
         add:
@@ -432,6 +451,20 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Remove ci-passed when mixed E2E test checks are not success on 3.0
+    conditions:
+      - *3X_BRANCH
+      - and: *MIXED_E2E_TEST_FILES
+      - label!=manual-pass
+      - label=ci-passed
+      - or:
+          - -status-success=ci-v2/e2e-amd
+          - -status-success=ci-v2/go-sdk
+    actions:
+      label:
+        remove:
+          - ci-passed
+
   - name: Remove ci-passed when Go unit tests are not success on 3.0
     conditions:
       - *3X_BRANCH
@@ -539,6 +572,9 @@ pull_request_rules:
       - *source_code_files
       # SDK-only changes are governed by the dedicated SDK rule above.
       - files~=^(?!tests/go_client/|.*\.md$).+
+      # Mixed E2E suites have their own E2E + Go SDK gate, without build/UT.
+      - not:
+          and: *MIXED_E2E_TEST_FILES
       - or:
         # build-ut-cov is required for every source-code pass path.
         - -status-success=ci-v2/build-ut-cov

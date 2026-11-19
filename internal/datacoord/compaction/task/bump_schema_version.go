@@ -197,6 +197,16 @@ func (t *BumpSchemaVersionTask) Clean() bool {
 }
 
 func (t *BumpSchemaVersionTask) doClean() error {
+	{
+		m := t.meta
+		g, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if err := m.AbortProducerChange(m.CompactionContext(), g, "schema bump task cleaned before publication"); err != nil {
+			return err
+		}
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()))
@@ -259,6 +269,19 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 }
 
 func (t *BumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	{
+		m := t.meta
+		g, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return
+		}
+		if g != nil {
+			if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(meta.CompactionGroupResultIDs(g, t.GetTaskProto()))); err == nil {
+				t.processMetaSaved()
+			}
+			return
+		}
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()))
@@ -403,8 +426,17 @@ func (t *BumpSchemaVersionTask) SaveSegmentMeta(result *datapb.CompactionPlanRes
 	// The SegmentMeta mutation is committed (schema bump rewrites manifests);
 	// schedule an asynchronous DataView snapshot reconciliation so consumers
 	// observe the new manifest versions.
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		g, err := mt.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if g == nil {
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		} else {
+			newSegmentIDs = meta.CompactionGroupResultIDs(g, t.GetTaskProto())
+		}
 	}
 
 	err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
@@ -536,6 +568,17 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 }
 
 func (t *BumpSchemaVersionTask) processMetaSaved() bool {
+	{
+		m := t.meta
+		if g, err := m.GetCompactionChangeGroup(t.GetTaskProto()); err != nil {
+			return false
+		} else if g != nil {
+			mt := NewMixCompactionTask(t.GetTaskProto(), t.allocator, t.meta, t.compactionTaskMeta, t.ievm)
+			finished := mt.processMetaSaved()
+			t.SetTask(mt.GetTaskProto())
+			return finished
+		}
+	}
 	err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed))
 	if err != nil {
 		mlog.Warn(context.TODO(), "bumpSchemaVersionTask unable to processMetaSaved",

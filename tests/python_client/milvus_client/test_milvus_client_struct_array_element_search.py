@@ -27,13 +27,8 @@ CATEGORIES = ["A", "B", "C", "D"]
 
 
 def _seed_vector(seed, dim=default_dim):
-    """Generate a deterministic vector from a seed."""
-    rng = np.random.RandomState(seed)
-    vec = rng.rand(dim).astype(np.float32)
-    norm = np.linalg.norm(vec)
-    if norm > 0:
-        vec = vec / norm
-    return vec.tolist()
+    """Generate a deterministic vector using the shared functional-test profile."""
+    return cf.gen_vectors(1, dim, seed=seed)[0]
 
 
 # ========== Ground Truth Computation ==========
@@ -347,17 +342,11 @@ def _diskann_search_params(**params):
 
 
 def _generate_float16_vector(dim, seed=None):
-    """Generate Float16 vector as np.ndarray(dtype=float16)."""
-    rng = np.random.RandomState(seed)
-    return rng.rand(dim).astype(np.float16)
+    return cf.gen_vectors(1, dim, DataType.FLOAT16_VECTOR, seed=seed)[0]
 
 
 def _generate_bfloat16_vector(dim, seed=None):
-    """Generate BFloat16 vector as np.ndarray(dtype=bfloat16) via ml_dtypes."""
-    import ml_dtypes  # noqa: F811
-
-    rng = np.random.RandomState(seed)
-    return rng.rand(dim).astype(ml_dtypes.bfloat16)
+    return cf.gen_vectors(1, dim, DataType.BFLOAT16_VECTOR, seed=seed)[0]
 
 
 def _generate_int8_vector(dim, seed=None):
@@ -5861,7 +5850,8 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             field_name="structA[embedding]",
             index_type=index_type,
             metric_type=metric_type,
-            params=INDEX_PARAMS if index_type == "HNSW" else {},
+            # Range boundaries and returned distances are checked against the original vectors.
+            params={**INDEX_PARAMS, "refine_quant_type": "NONE"} if index_type == "HNSW" else {},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 

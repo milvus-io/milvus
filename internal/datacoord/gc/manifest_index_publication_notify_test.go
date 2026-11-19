@@ -117,12 +117,13 @@ func TestManifestIndexGCNotifiesAfterBatchUnlock(t *testing.T) {
 }
 
 func TestCopyResultNotifiesAfterUnlockDespiteTaskCompletionFailure(t *testing.T) {
+	ctx := t.Context()
 	m, catalog, copies, task, result, _ := copyPublicationFixture(t)
 	paths := captureUnlockedManifestNotifications(t, m)
 	catalog.failCompletion = true
-	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
+	require.ErrorContains(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
 	require.Equal(t, []string{result.GetSegmentResults()[0].GetManifestPath()}, *paths)
 	catalog.failCompletion = false
-	require.NoError(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)))
 	require.Len(t, *paths, 1, "finalized-result replay must not publish the target again")
 }

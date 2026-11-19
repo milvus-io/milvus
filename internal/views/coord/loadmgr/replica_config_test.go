@@ -50,7 +50,7 @@ func TestUpdateReplicaConfig(t *testing.T) {
 			} {
 				t.Cleanup(func() { p.UnPatch() })
 			}
-			original := &LoadConfig{CollectionID: 1, PartitionIDs: []int64{100}, Replicas: []*ReplicaAssignment{{ReplicaID: 10, ResourceGroup: "a"}, {ReplicaID: 11, ResourceGroup: "a"}}}
+			original := &LoadConfig{CollectionID: 1, AutoLoad: true, PartitionIDs: []int64{100}, Replicas: []*ReplicaAssignment{{ReplicaID: 10, ResourceGroup: "a"}, {ReplicaID: 11, ResourceGroup: "a"}}}
 			if !tc.unloaded {
 				require.NoError(t, store.Put(t.Context(), original))
 			}
@@ -72,6 +72,7 @@ func TestUpdateReplicaConfig(t *testing.T) {
 				groups = append(groups, replica.ResourceGroup)
 				ids = append(ids, replica.ReplicaID)
 			}
+			require.True(t, store.GetConfig(1).AutoLoad, "replica placement updates preserve the loading source")
 			require.Equal(t, tc.wantGroups, groups)
 			require.Equal(t, tc.wantIDs, ids)
 			require.Equal(t, "a", original.Replicas[0].ResourceGroup, "published snapshots are immutable")

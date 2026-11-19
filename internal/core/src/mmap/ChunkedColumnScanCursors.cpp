@@ -21,7 +21,7 @@
 #include <utility>
 
 #include "mmap/ChunkedColumnFilter.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 namespace detail {
@@ -106,7 +106,7 @@ struct VectorArrayOwner {
 class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
  public:
     RawScanCursor(const ChunkedColumnInterface* column,
-                  const ColumnPlanner* planner,
+                  const RawColumnPlanner* planner,
                   milvus::OpContext* op_ctx,
                   int64_t start_offset,
                   ChunkedColumnInterface::TargetType target_type,
@@ -127,7 +127,9 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
                    start_offset,
                    planner_->NumRows());
         SetPhysicalPosition(start_offset);
-        if (prefetch) {
+        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
+            all_cell_pins_ = column_->GetAllChunks(op_ctx_);
+        } else if (prefetch) {
             if (filter_ != nullptr &&
                 filter_->Source() ==
                     ColumnFilter::MetricsSource::PreloadedStatistics) {
@@ -268,17 +270,19 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
 
     std::shared_ptr<PinnedScanInput>
     PinChunk(int64_t chunk_id) {
-        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::CursorOwned) {
+        if (pin_policy_ != ChunkedColumnInterface::ScanPinPolicy::ResultOwned) {
             if (cursor_input_ != nullptr) {
                 if (cursor_chunk_id_ == chunk_id) {
                     return cursor_input_;
                 }
-                // Release the previous Cell before pinning the next one. This
-                // keeps CursorOwned at one physical Cell pin throughout Scan.
+                // Release ordinary per-Cell pins before acquiring the next.
+                // AllCells keeps its complete pin set until destruction.
                 ReleaseCursorInput();
             }
             cursor_input_ = std::make_shared<PinnedScanInput>(
-                chunk_id, column_->GetChunk(op_ctx_, chunk_id));
+                chunk_id,
+                all_cell_pins_.empty() ? column_->GetChunk(op_ctx_, chunk_id)
+                                       : all_cell_pins_[chunk_id]);
             cursor_chunk_id_ = chunk_id;
             return cursor_input_;
         }
@@ -500,7 +504,7 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
     }
 
     const ChunkedColumnInterface* column_;
-    const ColumnPlanner* planner_{nullptr};
+    const RawColumnPlanner* planner_{nullptr};
     milvus::OpContext* op_ctx_;
     ChunkedColumnInterface::TargetType target_type_;
     ChunkedColumnInterface::ScanPinPolicy pin_policy_;
@@ -508,6 +512,7 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
     int64_t scan_pos_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_offset_{0};
+    std::vector<PinWrapper<Chunk*>> all_cell_pins_;
     std::shared_ptr<PinnedScanInput> cursor_input_;
     int64_t cursor_chunk_id_{-1};
     int64_t filter_cell_id_{-1};
@@ -515,54 +520,33 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
     std::vector<int8_t> prefetched_skip_decisions_;
 };
 
-inline ChunkedColumnInterface::ScanResult
-OpenDataScan(const ChunkedColumnInterface* column,
-             const ColumnPlanner* planner,
-             milvus::OpContext* op_ctx,
-             int64_t start_offset,
-             DataType data_type,
-             ChunkedColumnInterface::TargetType target_type,
-             ChunkedColumnInterface::ScanPinPolicy pin_policy,
-             bool prefetch,
-             ColumnFilterPtr filter) {
-    AssertInfo(target_type == ChunkedColumnInterface::TargetType::None ||
-                   CanReadAsTargetType(data_type, target_type),
-               "data scan target {} does not match column type {}",
-               static_cast<int>(target_type),
-               data_type);
-    return std::make_unique<RawScanCursor>(column,
-                                           planner,
-                                           op_ctx,
-                                           start_offset,
-                                           target_type,
-                                           pin_policy,
-                                           prefetch,
-                                           std::move(filter));
-}
-
 }  // namespace detail
 
-ChunkedColumnInterface::ScanResult
-ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
-                             const ScanOptions& options) const {
+RawColumnBase::ScanResult
+RawColumnBase::Scan(milvus::OpContext* op_ctx,
+                    const ScanOptions& options) const {
     ValidateArrayViewTarget(options.target_type);
     if (options.output != ScanOutput::Data ||
         options.predicate != ScanPredicate::None) {
         return nullptr;
     }
-    auto data_type = GetDefaultScanDataType();
+    const auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
         return nullptr;
     }
-    return detail::OpenDataScan(this,
-                                &Planner(),
-                                op_ctx,
-                                options.start_offset,
-                                *data_type,
-                                options.target_type,
-                                options.pin_policy,
-                                options.prefetch,
-                                options.filter);
+    AssertInfo(options.target_type == TargetType::None ||
+                   CanReadAsTargetType(*data_type, options.target_type),
+               "data scan target {} does not match column type {}",
+               static_cast<int>(options.target_type),
+               *data_type);
+    return std::make_unique<detail::RawScanCursor>(this,
+                                                   &Planner(),
+                                                   op_ctx,
+                                                   options.start_offset,
+                                                   options.target_type,
+                                                   options.pin_policy,
+                                                   options.prefetch,
+                                                   options.filter);
 }
 
 }  // namespace milvus

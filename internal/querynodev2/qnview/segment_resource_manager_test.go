@@ -48,6 +48,7 @@ func (*resourceTestMetadata) GetQueryViewSegmentLoadInfo(context.Context, int64,
 type resourceTestFixture struct {
 	dependencyMock *mockey.Mocker
 	loadMock       *mockey.Mocker
+	prepareMock    *mockey.Mocker
 	releaseMock    *mockey.Mocker
 	registerMock   *mockey.Mocker
 	manager        *SegmentResourceManager
@@ -68,7 +69,7 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 		f.loads.Add(1)
 		return &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID}, nil
 	}).Build()
-	mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, _ SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+	f.prepareMock = mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, _ SegmentLoadInfoSnapshot) (segments.ReadState, error) {
 		f.prepares.Add(1)
 		if prepare != nil {
 			if err := prepare(c); err != nil {

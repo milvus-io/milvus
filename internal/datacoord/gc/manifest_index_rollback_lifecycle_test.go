@@ -197,7 +197,7 @@ func TestManifestIndexRollbackDoesNotWaitForCopyAndRejectsDuplicateResult(t *tes
 	final := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 	// Supply the old task snapshot: only the current durable task state proves
 	// that a repeated worker result must not reinstall its pre-rollback pointer.
-	require.NoError(t, copysegment.SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+	require.NoError(t, copysegment.SyncCopySegmentTask(ctx, task, &datapb.QueryCopySegmentResponse{
 		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: meta.RestartSegID, ManifestPath: before}},
 	}, copies, m, m.IndexCatalog.(*index.IndexMeta)))
@@ -226,7 +226,7 @@ func TestManifestIndexRollbackRejectsLateCleanedCopyResult(t *testing.T) {
 			inspector.RunOnceForTest(ctx)
 			require.True(t, inspector.ReadyForTest())
 			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-			err = copysegment.SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+			err = copysegment.SyncCopySegmentTask(ctx, task, &datapb.QueryCopySegmentResponse{
 				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 			}, copies, m, m.IndexCatalog.(*index.IndexMeta))
 			require.ErrorContains(t, err, "cannot publish a failed copy task")

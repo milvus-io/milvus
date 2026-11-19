@@ -45,6 +45,29 @@ Explore is a separate layout: local temporary manifests live under
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
 
+## Ordinary import source overrides
+
+Ordinary imports with `storage.*` options use an independent S3-compatible
+source bucket and credentials. Their file paths are complete bucket-relative
+keys: no scheme or leading slash, and no root prefix or path normalization.
+The cluster's internal-layout denylist applies only to imports using cluster
+storage; explicitly authenticated external sources use their own object
+permissions. All output writes retain the cluster chunk manager and layout.
+See [source storage design](../../design-docs/design_docs/20261110-external-import-storage.md).
+
+## Delegator BM25 local cache
+
+The legacy delegator IDF oracle creates a unique directory per sealed-statistics
+entry under its channel-local BM25 root. Readers use the entry's `localDir`;
+cleanup must delete that exact directory, never reconstruct it from segment ID.
+These directories are downloaded caches, not recovery metadata.
+Reopen downloads missing fields into a separate unique directory under the same
+root, then installs complete field directories under the oracle and entry locks.
+Only after installation succeeds are fields, aggregate statistics and disk
+accounting published. An obsolete entry can be detached under the oracle lock
+and physically removed after unlocking without waiting for a replacement's
+remote download. The sync still waits for that entry's local readers and removal.
+
 ## Manifest index artifacts
 
 When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3
@@ -61,6 +84,17 @@ Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. Snapshot generation uses its selected segment metadata.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
+
+## Expression cache files
+
+Sealed expression caches are disposable local files under
+`<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>.cache`.
+The process-local generation belongs to a published sealed snapshot. Retirement
+uses the file object's original path and unlinks after publication/cache locks
+are released; it must never reconstruct a path from only the segment ID.
+Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
+The cache manager removes `.cache` files on rebuild and does not restore them
+across restarts. These files are not manifests or DataCoord GC objects.
 
 ## Local upgrade compatibility
 
@@ -106,6 +140,29 @@ metadata in the output manifest is not sufficient: readers reconstruct the LOB
 directory from the output manifest base.
 
 ## Necessary checks, at clear boundaries
+
+Snapshot restore fingerprints include segment path spelling. When a self-contained
+snapshot moves between storage identities with the same key prefix, the snapshot
+reader rewrites only URIs that still identify the original storage. References
+already pointing to the destination retain their spelling so persisted restore
+jobs can resume. This is a compatibility exception for persisted path spelling,
+not a general storage-routing rule. A prefix change retains the existing prefix
+replacement behavior. Restore admission still validates storage identity.
+
+For V2 data references in a self-contained snapshot Avro, DataNode reads object
+keys from the actual import storage; a bucket in an embedded URI does not select
+another storage.
+Root confinement still applies. Referenced snapshots retain source identity
+validation. Worker-side conversion to object keys does not define the restore
+fingerprint.
+
+Snapshot-source import without `external_spec` also accepts a bucket-relative
+metadata object key (`[prefix/]snapshots/<collection_id>/metadata/<snapshot_id>.json`)
+resolved against the active instance's configured bucket. Same-prefix
+self-contained bundles normalize origin-matching URIs to bare object keys during
+import preparation, while any remaining scheme-bearing internal reference is
+rejected by `ValidateSnapshotImportPaths`. Restore retains its URI-preserving
+behavior.
 
 - Configuration initialization requires an absolute local root and freezes it
   against runtime configuration updates.

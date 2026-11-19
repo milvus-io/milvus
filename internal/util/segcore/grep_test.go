@@ -62,7 +62,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			defer segment.Release()
 			_, err = segment.Insert(context.Background(), &segcore.InsertRequest{RowIDs: []int64{0, 1, 2, 3}, Timestamps: []uint64{1, 1, 1, 1}, Record: &segcorepb.InsertRecord{NumRows: 4, FieldsData: []*schemapb.FieldData{
 				{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 1, 2, 3}}}}}},
-				{FieldId: 101, Type: dataType, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: []bool{true, false, true, true}, Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"nothing", "timeout", "超时 timeout", "timeout"}}}}}},
+				{FieldId: 101, Type: dataType, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: []bool{true, false, true, true}, Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"nothing", "timeout", "超时 timeout", "timeout\ntimeout timeout"}}}}}},
 			}}})
 			require.NoError(t, err)
 			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
@@ -81,6 +81,40 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			require.Equal(t, []int{2}, result.Positions)
 			require.True(t, arrow.TypeEqual(native.GrepDetailsType(), result.Details.DataType()))
 			result.Release()
+			t.Run("per-field max-count", func(t *testing.T) {
+				for _, tc := range []struct {
+					args            string
+					rows, lastLines int
+				}{
+					{"-m1 -e timeout", 2, 1},
+					{"--max-count=2 -e timeout", 2, 2},
+					{"-e timeout", 2, 2},
+					{"-m0 -e timeout", 0, 0},
+					{"-m18446744073709551615 -e timeout", 2, 2},
+				} {
+					spec, err := grep.Parse(tc.args, 65536)
+					require.NoError(t, err)
+					request := req
+					request.Spec = *spec
+					request.Limit = 4
+					request.ExecutionLimits.BatchSize = 1
+					result, err := adapter.ScanGrep(context.Background(), offsets, request)
+					require.NoError(t, err)
+					require.Len(t, result.Positions, tc.rows)
+					if tc.rows > 0 {
+						require.Equal(t, []int{2, 3}, result.Positions)
+						var lines []struct {
+							Starts []int `json:"starts"`
+						}
+						require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(1), &lines))
+						require.Len(t, lines, tc.lastLines)
+						if tc.lastLines == 2 {
+							require.Equal(t, []int{0, 8}, lines[1].Starts)
+						}
+					}
+					result.Release()
+				}
+			})
 			t.Run("errors", func(t *testing.T) {
 				zeroSpec := req
 				zeroSpec.Spec = grep.Spec{}

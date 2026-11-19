@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -159,4 +160,27 @@ func TestTaskCondition_OnContextDone(t *testing.T) {
 		assert.Error(t, condition.WaitToFinish())
 		assert.Equal(t, int32(1), calls.Load())
 	})
+}
+
+func TestTaskCondition_CompletedResultWinsOverContextDone(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	expiredCtx, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+
+	for _, ctx := range []context.Context{canceledCtx, expiredCtx} {
+		for _, result := range []error{nil, errors.New("task failed")} {
+			for range 64 {
+				condition := NewTaskCondition(ctx)
+				canceled := false
+				condition.SetOnContextDone(func() {
+					canceled = true
+				})
+				condition.Notify(result)
+
+				require.Equal(t, result, condition.WaitToFinish(), "context error: %v", ctx.Err())
+				require.False(t, canceled, "completed tasks must not run the cancellation callback")
+			}
+		}
+	}
 }

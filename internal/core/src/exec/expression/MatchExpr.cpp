@@ -126,12 +126,20 @@ MatchEmptyElements(MatchType match_type, int64_t threshold) {
     return false;
 }
 
+// One offset snapshot per batch: sequential batches retain their prefix
+// table; explicit offset batches retain requested row ranges, including repeats.
+struct MatchBatchOffsets {
+    FixedVector<int32_t> starts;
+    FixedVector<std::pair<int32_t, int32_t>> ranges;
+};
+
 // Process contiguous rows [row_start, row_start + row_count)
 template <MatchType match_type, bool all_valid>
 void
 ProcessContiguousRows(int64_t row_count,
                       int64_t row_start,
                       int64_t elem_start,
+                      const MatchBatchOffsets& batch_offsets,
                       const IStructElementOffsets* struct_element_offsets,
                       const TargetBitmapView& match_bitset,
                       const TargetBitmapView& valid_bitset,
@@ -147,12 +155,14 @@ ProcessContiguousRows(int64_t row_count,
             match_bitset, elem_start, row_start, result_bitset);
         return;
     }
-    // ONE batched virtual call for the whole batch instead of one
-    // ElementIDRangeOfRow per row. Growing segments acquire-load one published
-    // watermark and read the whole batch from that lock-free snapshot.
-    FixedVector<int32_t> row_elem_starts(row_count + 1);
-    struct_element_offsets->CopyRowElementStarts(
-        row_start, row_count, row_elem_starts.data());
+    FixedVector<int32_t> copied_starts;
+    const int32_t* row_elem_starts = batch_offsets.starts.data();
+    if (batch_offsets.starts.empty()) {
+        copied_starts.resize(row_count + 1);
+        struct_element_offsets->CopyRowElementStarts(
+            row_start, row_count, copied_starts.data());
+        row_elem_starts = copied_starts.data();
+    }
     for (int64_t i = 0; i < row_count; ++i) {
         int64_t bitset_start = row_elem_starts[i] - elem_start;
         int64_t row_elem_count = row_elem_starts[i + 1] - row_elem_starts[i];
@@ -171,29 +181,30 @@ ProcessContiguousRows(int64_t row_count,
 // Process non-contiguous rows specified by offset_input
 template <MatchType match_type, bool all_valid>
 void
-ProcessOffsetRows(const OffsetVector* row_offsets,
-                  const IStructElementOffsets* struct_element_offsets,
+ProcessOffsetRows(const MatchBatchOffsets& batch_offsets,
+                  const OffsetVector* output_positions,
                   const TargetBitmapView& match_bitset,
                   const TargetBitmapView& valid_bitset,
                   TargetBitmapView& result_bitset,
                   int64_t threshold) {
-    // ONE batched virtual call for all requested rows instead of one
-    // ElementIDRangeOfRow per row (one lock-free snapshot on growing).
-    const auto row_count = static_cast<int64_t>(row_offsets->size());
-    FixedVector<std::pair<int32_t, int32_t>> ranges(row_count);
-    struct_element_offsets->CopyRowElementRanges(
-        row_offsets->data(), row_count, ranges.data());
-
+    const auto row_count = output_positions != nullptr
+                               ? output_positions->size()
+                               : batch_offsets.ranges.size();
     int64_t elem_cursor = 0;
-    for (int64_t i = 0; i < row_count; ++i) {
-        int64_t row_elem_count = ranges[i].second - ranges[i].first;
+    for (size_t i = 0; i < row_count; ++i) {
+        const auto position = output_positions ? (*output_positions)[i] : i;
+        const int64_t row_elem_count =
+            !batch_offsets.starts.empty() ? batch_offsets.starts[position + 1] -
+                                                batch_offsets.starts[position]
+                                          : batch_offsets.ranges[i].second -
+                                                batch_offsets.ranges[i].first;
 
         if (MatchSingleRow<match_type, all_valid>(elem_cursor,
                                                   row_elem_count,
                                                   match_bitset,
                                                   valid_bitset,
                                                   threshold)) {
-            result_bitset[i] = true;
+            result_bitset[position] = true;
         }
         elem_cursor += row_elem_count;
     }
@@ -205,15 +216,16 @@ DispatchMatchProcessing(bool use_offset_input,
                         int64_t row_count,
                         int64_t row_start,
                         int64_t elem_start,
-                        const OffsetVector* row_offsets,
+                        const MatchBatchOffsets& batch_offsets,
+                        const OffsetVector* output_positions,
                         const IStructElementOffsets* struct_element_offsets,
                         const TargetBitmapView& match_bitset,
                         const TargetBitmapView& valid_bitset,
                         TargetBitmapView& result_bitset,
                         int64_t threshold) {
     if (use_offset_input) {
-        ProcessOffsetRows<match_type, all_valid>(row_offsets,
-                                                 struct_element_offsets,
+        ProcessOffsetRows<match_type, all_valid>(batch_offsets,
+                                                 output_positions,
                                                  match_bitset,
                                                  valid_bitset,
                                                  result_bitset,
@@ -222,6 +234,7 @@ DispatchMatchProcessing(bool use_offset_input,
         ProcessContiguousRows<match_type, all_valid>(row_count,
                                                      row_start,
                                                      elem_start,
+                                                     batch_offsets,
                                                      struct_element_offsets,
                                                      match_bitset,
                                                      valid_bitset,
@@ -250,34 +263,148 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(struct_element_offsets != nullptr,
                "Struct element offsets not available");
 
-    int64_t batch_rows;
+    const int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return;
+    }
+
+    const auto& candidates = context.get_bitmap_input();
+    const bool has_candidates = !candidates.empty() && !candidates.all();
+    bool sparse_batch = false;
+    MatchBatchOffsets batch_offsets;
+    auto& starts = batch_offsets.starts;
+    int64_t selected_elements = 0;
+    if (has_candidates && !has_offset_input_) {
+        int64_t selected_row_count = 0;
+        starts.resize(batch_rows + 1);
+        struct_element_offsets->CopyRowElementStarts(
+            current_pos_, batch_rows, starts.data());
+        const int64_t total_elements = starts.back() - starts.front();
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            if (candidates[i]) {
+                ++selected_row_count;
+                selected_elements += starts[i + 1] - starts[i];
+            }
+        }
+        if (selected_elements == 0) {
+            // Every selected row is empty (or NULL). Quantifier results are
+            // constant; skip predicate Eval and do not join its data prefetch.
+            // MoveCursor selects/advances the appropriate sequential cursors.
+            inputs_[0]->MoveCursor();
+            TargetBitmap hits(batch_rows, false);
+            if (MatchEmptyElements(expr_->get_match_type(),
+                                   expr_->get_count())) {
+                hits.inplace_or(candidates, batch_rows);
+            }
+            auto empty_result = std::make_shared<ColumnVector>(
+                std::move(hits), TargetBitmap(batch_rows, true));
+            ApplyStructRowValidity(
+                empty_result.get(), field_meta.get_id(), input, batch_rows);
+            result = std::move(empty_result);
+            current_pos_ += batch_rows;
+            return;
+        }
+        // Offsets pay for expansion and random row access. Keep dense batches
+        // sequential, and never replace an index query with raw-data gathers.
+        // Limit both per-row lookup work and element expansion. Skewed arrays
+        // can select few elements while still requiring nearly every row.
+        if (total_elements > 0 && selected_elements <= total_elements / 20 &&
+            selected_row_count <= batch_rows / 20) {
+            inputs_[0]->WaitPrefetch();
+            sparse_batch = inputs_[0]->CanUseOffsetsForSequentialBatch();
+        }
+    }
+    const bool use_offsets = has_offset_input_ || sparse_batch;
+    const bool select_rows = has_candidates && use_offsets;
+    OffsetVector selected_rows;
+    OffsetVector output_positions;
+    const OffsetVector* row_offsets = input;
+    if (select_rows) {
+        output_positions.reserve(batch_rows);
+        if (has_offset_input_) {
+            selected_rows.reserve(batch_rows);
+        }
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            // The mask is indexed by input position, including duplicate IDs.
+            if (candidates[i]) {
+                output_positions.push_back(i);
+                if (has_offset_input_) {
+                    selected_rows.push_back((*input)[i]);
+                }
+            }
+        }
+        if (has_offset_input_) {
+            row_offsets = &selected_rows;
+        }
+    }
+
     int64_t elem_start;
     int64_t elem_count;
     FixedVector<int32_t> element_offsets_storage;
     EvalCtx eval_ctx(context.get_exec_context());
 
-    if (has_offset_input_) {
-        // offset_input mode: process all input row_ids at once
-        batch_rows = input->size();
-        element_offsets_storage =
-            struct_element_offsets->RowOffsetsToElementOffsets(*input);
+    if (use_offsets) {
+        // Expand from the same ranges later used by quantifier reduction.
+        // Exact sizing avoids average-length reserve estimates/reallocations.
+        if (!sparse_batch) {
+            batch_offsets.ranges.resize(row_offsets->size());
+            struct_element_offsets->CopyRowElementRanges(
+                row_offsets->data(),
+                row_offsets->size(),
+                batch_offsets.ranges.data());
+            for (const auto& range : batch_offsets.ranges) {
+                selected_elements += range.second - range.first;
+            }
+        }
+        element_offsets_storage.reserve(selected_elements);
+        if (sparse_batch) {
+            for (const auto position : output_positions) {
+                for (auto element = starts[position];
+                     element < starts[position + 1];
+                     ++element) {
+                    element_offsets_storage.push_back(element);
+                }
+            }
+        } else {
+            for (const auto& range : batch_offsets.ranges) {
+                for (auto element = range.first; element < range.second;
+                     ++element) {
+                    element_offsets_storage.push_back(element);
+                }
+            }
+        }
         eval_ctx.set_offset_input(&element_offsets_storage);
         elem_start = 0;
-        elem_count = element_offsets_storage.size();
+        elem_count = selected_elements;
     } else {
-        // Sequential batch mode
-        batch_rows = std::min(batch_size_, active_count_ - current_pos_);
-        auto start_range =
-            struct_element_offsets->ElementIDRangeOfRow(current_pos_);
-        auto end_range = struct_element_offsets->ElementIDRangeOfRow(
-            current_pos_ + batch_rows);
-        elem_start = start_range.first;
-        elem_count = end_range.first - elem_start;
-    }
-
-    if (batch_rows <= 0) {
-        result = nullptr;
-        return;
+        // Reuse the candidate-counting snapshot, if already acquired.
+        if (!starts.empty()) {
+            elem_start = starts.front();
+            elem_count = starts.back() - starts.front();
+        } else {
+            elem_start =
+                struct_element_offsets->ElementIDRangeOfRow(current_pos_).first;
+            elem_count = struct_element_offsets
+                             ->ElementIDRangeOfRow(current_pos_ + batch_rows)
+                             .first -
+                         elem_start;
+        }
+        if (has_candidates) {
+            // Keep index/dense execution sequential and expose candidates in
+            // the same element coordinates as this batch's result.
+            TargetBitmap element_candidates(elem_count, false);
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                if (candidates[i] && starts[i] < starts[i + 1]) {
+                    element_candidates.set(starts[i] - elem_start,
+                                           starts[i + 1] - starts[i],
+                                           true);
+                }
+            }
+            eval_ctx.set_bitmap_input(std::move(element_candidates));
+        }
     }
 
     result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
@@ -292,9 +419,15 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     VectorPtr match_result;
     if (elem_count > 0) {
         inputs_[0]->Eval(eval_ctx, match_result);
-    } else if (!has_offset_input_) {
+    } else if (!use_offsets) {
         // Keep element-level child expressions aligned across all-empty batches.
         inputs_[0]->MoveCursor();
+    }
+    if (sparse_batch) {
+        // Offset Eval and offset short-circuiting leave sequential state alone.
+        // Advance every leaf once, including leaves skipped by AND/OR, so the
+        // next batch can use either sequential or offset execution safely.
+        inputs_[0]->AdvanceSequentialBatch();
     }
     if (match_result == nullptr) {
         AssertInfo(elem_count == 0,
@@ -302,7 +435,13 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                    "batch, elem_count={}",
                    elem_count);
         if (MatchEmptyElements(match_type, threshold)) {
-            bitset_view.set();
+            if (select_rows) {
+                for (const auto position : output_positions) {
+                    bitset_view[position] = true;
+                }
+            } else {
+                bitset_view.set();
+            }
         }
         ApplyStructRowValidity(
             col_vec.get(), field_meta.get_id(), input, batch_rows);
@@ -332,11 +471,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         switch (match_type) {
             case MatchType::MatchAny:
                 DispatchMatchProcessing<MatchType::MatchAny, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    batch_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -345,11 +485,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchAll:
                 DispatchMatchProcessing<MatchType::MatchAll, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    batch_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -358,11 +499,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchLeast:
                 DispatchMatchProcessing<MatchType::MatchLeast, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    batch_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -371,11 +513,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchMost:
                 DispatchMatchProcessing<MatchType::MatchMost, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    batch_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,
@@ -384,11 +527,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             case MatchType::MatchExact:
                 DispatchMatchProcessing<MatchType::MatchExact, all_valid_v>(
-                    has_offset_input_,
+                    use_offsets,
                     batch_rows,
                     current_pos_,
                     elem_start,
-                    input,
+                    batch_offsets,
+                    select_rows ? &output_positions : nullptr,
                     struct_element_offsets.get(),
                     match_result_bitset_view,
                     match_result_valid_view,

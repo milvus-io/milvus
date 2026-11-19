@@ -240,11 +240,11 @@ TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
     auto texts = std::make_shared<std::vector<std::string>>();
 
     auto cached_reader =
-        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
+        cache->GetOrCreateReader(lob_base_path, nullptr, properties);
     ASSERT_NE(cached_reader, nullptr);
 
     ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
-        *texts = cache->ReadBatch(lob_base_path, nullptr, *properties, *refs);
+        *texts = cache->ReadBatch(lob_base_path, nullptr, properties, *refs);
     });
 
     EXPECT_EQ(*texts, (std::vector<std::string>{"mock-text", "mock-text"}));
@@ -269,12 +269,12 @@ TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
     dst->Add();
 
     auto cached_reader =
-        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
+        cache->GetOrCreateReader(lob_base_path, nullptr, properties);
     ASSERT_NE(cached_reader, nullptr);
 
     ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
         cache->ReadBatchInto(
-            lob_base_path, nullptr, *properties, *refs, dst.get());
+            lob_base_path, nullptr, properties, *refs, dst.get());
     });
 
     ASSERT_EQ(dst->size(), 2);
@@ -282,6 +282,23 @@ TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
     EXPECT_EQ(dst->Get(1), "mock-text");
     EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
     EXPECT_EQ(tracker->CallCount(), 1);
+}
+
+TEST(TextColumnCache, SharesPropertiesWithReader) {
+    auto properties = std::make_shared<const milvus_storage::api::Properties>();
+    std::shared_ptr<const milvus_storage::api::Properties> reader_properties;
+    auto tracker = std::make_shared<BlockingCallTracker>();
+    TextColumnCache cache(
+        TextColumnCacheConfig{},
+        [&](std::shared_ptr<arrow::fs::FileSystem>,
+            const LobColumnConfig& config)
+            -> arrow::Result<std::unique_ptr<LobColumnReader>> {
+            reader_properties = config.properties;
+            return std::unique_ptr<LobColumnReader>(
+                std::make_unique<InstrumentedLobColumnReader>(tracker));
+        });
+    cache.GetOrCreateReader("/tmp/text-column-cache", nullptr, properties);
+    EXPECT_EQ(reader_properties, properties);
 }
 
 TEST(TextColumnCache, PreservesStorageErrorWhenCreatingReader) {
@@ -294,7 +311,7 @@ TEST(TextColumnCache, PreservesStorageErrorWhenCreatingReader) {
             -> arrow::Result<std::unique_ptr<LobColumnReader>> {
             return status;
         });
-    milvus_storage::api::Properties properties;
+    auto properties = std::make_shared<const milvus_storage::api::Properties>();
 
     try {
         static_cast<void>(cache.GetOrCreateReader(

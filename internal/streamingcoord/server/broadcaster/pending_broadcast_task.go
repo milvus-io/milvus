@@ -51,29 +51,29 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	ctx = message.ExtractTraceContext(ctx, b.msg)
 
 	if err := b.InitializeRecovery(ctx); err != nil {
-		b.Logger().Warn(ctx, "broadcast task initialize recovery failed", mlog.Err(err))
+		b.Logger().Warn(ctx, "broadcast task initialize recovery failed", mlog.FieldMessage(b.BroadcastMessage()), mlog.Err(err))
 		return err
 	}
 
 	if len(b.pendingMessages) > 0 {
-		b.Logger().Debug(ctx, "broadcast task is polling to make sent...", mlog.Int("pendingMessages", len(b.pendingMessages)))
+		b.Logger().Debug(ctx, "broadcast task is polling to make sent...", mlog.FieldMessage(b.BroadcastMessage()), mlog.Int("pendingMessages", len(b.pendingMessages)))
 		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
 			if resp.Error != nil {
-				b.Logger().Warn(ctx, "broadcast task append message failed", mlog.Int("idx", idx), mlog.Err(resp.Error))
+				b.Logger().Warn(ctx, "broadcast task append message failed", mlog.FieldMessage(b.BroadcastMessage()), mlog.Int("idx", idx), mlog.Err(resp.Error))
 				newPendings = append(newPendings, b.pendingMessages[idx])
 				continue
 			}
 			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
 		}
 		b.pendingMessages = newPendings
-		b.Logger().Info(ctx, "broadcast task make a new broadcast done", mlog.Int("backoffRetryMessages", len(b.pendingMessages)))
+		b.Logger().Info(ctx, "broadcast task make a new broadcast done", mlog.FieldMessage(b.BroadcastMessage()), mlog.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
 		// trigger a fast ack operation when the broadcast operation is done.
 		if err := b.FastAck(ctx, b.appendResult); err != nil {
-			b.Logger().Warn(ctx, "broadcast task save task failed", mlog.Err(err))
+			b.Logger().Warn(ctx, "broadcast task save task failed", mlog.FieldMessage(b.BroadcastMessage()), mlog.Err(err))
 			return err
 		}
 		return nil

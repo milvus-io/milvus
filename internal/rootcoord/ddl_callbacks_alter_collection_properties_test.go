@@ -227,7 +227,7 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
-func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
+func TestCollectionAutoReleaseTTIPropertiesDDL(t *testing.T) {
 	// Keep the existing DDL fixture entirely on a private embedded etcd.
 	endpoint := func() url.URL {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -254,7 +254,7 @@ func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
 	}
 	client := v3client.New(server.Server)
 	t.Cleanup(func() { client.Close() })
-	getEtcd := mockey.Mock(kvfactory.GetEtcdAndPath).Return(client, "isolated-ttl").Build()
+	getEtcd := mockey.Mock(kvfactory.GetEtcdAndPath).Return(client, "isolated-tti").Build()
 	t.Cleanup(func() { getEtcd.UnPatch() })
 	core := initStreamingSystemAndCore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -263,20 +263,20 @@ func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
 		task.NotifyDone(task.Execute(ctx))
 		return nil
 	}}
-	createCollectionForTest(t, ctx, core, "ttl_db", "ttl_collection", &commonpb.KeyValuePair{
-		Key: common.CollectionAutoReleaseIdleTTLKey, Value: "invalid",
+	createCollectionForTest(t, ctx, core, "tti_db", "tti_collection", &commonpb.KeyValuePair{
+		Key: common.CollectionAutoReleaseTTIKey, Value: "invalid",
 	})
-	collection, err := core.meta.GetCollectionByName(ctx, "ttl_db", "ttl_collection", typeutil.MaxTimestamp, false)
+	collection, err := core.meta.GetCollectionByName(ctx, "tti_db", "tti_collection", typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	// No QueryCoord operation is expected while altering this property.
 	core.mixCoord = imocks.NewMixCoord(t)
 	for i, value := range []string{"invalid", "20", "5", "-1", "0", "invalid", ""} {
 		if i > 0 {
-			request := &milvuspb.AlterCollectionRequest{DbName: "ttl_db", CollectionName: "ttl_collection"}
+			request := &milvuspb.AlterCollectionRequest{DbName: "tti_db", CollectionName: "tti_collection"}
 			if value == "" {
-				request.DeleteKeys = []string{common.CollectionAutoReleaseIdleTTLKey}
+				request.DeleteKeys = []string{common.CollectionAutoReleaseTTIKey}
 			} else {
-				request.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}
+				request.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: value}}
 			}
 			status, err := core.AlterCollection(ctx, request)
 			require.NoError(t, merr.CheckRPCCall(status, err))
@@ -290,9 +290,9 @@ func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, properties, common.CloneKeyValuePairs(internalProperties).ToMap())
 		if value == "" {
-			require.NotContains(t, properties, common.CollectionAutoReleaseIdleTTLKey)
+			require.NotContains(t, properties, common.CollectionAutoReleaseTTIKey)
 		} else {
-			require.Equal(t, value, properties[common.CollectionAutoReleaseIdleTTLKey])
+			require.Equal(t, value, properties[common.CollectionAutoReleaseTTIKey])
 		}
 		// Read the persisted record independently of the live metadata map.
 		persisted, err := core.meta.(*MetaTable).catalog.GetCollectionByID(ctx, collection.DBID, typeutil.MaxTimestamp, collection.CollectionID)

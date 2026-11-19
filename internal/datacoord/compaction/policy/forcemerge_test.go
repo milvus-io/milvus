@@ -200,8 +200,8 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_WithCollectio
 	coll := &meta.CollectionInfo{
 		ID:     collectionID,
 		Schema: meta.NewTestSchema(),
-		Properties: map[string]string{
-			"collection.ttl.seconds": "86400",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "collection.ttl.seconds", Value: "86400"},
 		},
 	}
 

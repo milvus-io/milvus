@@ -126,13 +126,13 @@ EntryStreamMaxTransientBytes(size_t total_transient_bytes,
                  milvus::ComputeThreadPoolMaxThreads(
                      milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
     auto& high_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        milvus::ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
     auto& low_pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
-    const auto max_tasks =
-        std::max({static_cast<size_t>(configured_threads),
-                  std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()),
-                  live_worker_count});
+        milvus::ThreadPools::GetExecutor(milvus::ThreadPoolPriority::LOW);
+    const auto max_tasks = std::max(
+        {static_cast<size_t>(configured_threads),
+         std::max(high_pool.numActiveThreads(), low_pool.numActiveThreads()),
+         live_worker_count});
     const auto pool_bound =
         SaturatingMultiply(max_task_transient_bytes, max_tasks);
     const auto capacity =

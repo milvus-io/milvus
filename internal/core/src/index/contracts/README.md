@@ -105,6 +105,14 @@ template is an empty class; only the `T = std::string_view` specialization inher
 `IPatternMatchReader`. Numeric instantiations therefore do not expose the pattern-match capability,
 even when they appear in the same template inheritance list.
 
+Necessary-condition trees use `INgramReader::CanHandleConditionTree` and
+`ConditionTreeCandidates`, independently of `PatternOp` and `IPatternMatchReader`.
+Both accept a validated `RegexLiteralCondition` by const reference. The caller
+owns transport decoding and exact predicate refinement; the reader only plans
+for its min_gram and generates candidate supersets. Unselective conditions
+return false from `CanHandleConditionTree`. For Grep, the C++ caller decodes the
+Rust protobuf once before either reader call; malformed payloads throw there.
+
 ## Bitmaps, NULL, and coverage boundaries
 
 - In a scalar query bitmap, 1 means a hit. The bitmap size must equal the reader's `Count()`

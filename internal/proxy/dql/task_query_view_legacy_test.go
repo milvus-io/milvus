@@ -49,6 +49,7 @@ type fakeLegacyQueryClient struct {
 	queryCalled  int
 	searchResult *queryclient.LegacySearchResult
 	queryResult  *queryclient.LegacyQueryResult
+	lastQuery    *queryclient.LegacyQueryRequest
 	err          error
 }
 
@@ -59,6 +60,7 @@ func (c *fakeLegacyQueryClient) Search(ctx context.Context, req *queryclient.Leg
 
 func (c *fakeLegacyQueryClient) Query(ctx context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
 	c.queryCalled++
+	c.lastQuery = req
 	return c.queryResult, c.err
 }
 
