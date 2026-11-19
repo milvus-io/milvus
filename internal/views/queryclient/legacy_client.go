@@ -110,33 +110,32 @@ func newLegacyClient(
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
 	defer func() { err = toMilvusError(err) }()
-	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
+	shards, err := resolver.ResolveShards(ctx, c.shardResolver, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
 	}
 
 	collector := newLegacySearchCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				TotalChannelNum: int32(len(vchannels)),
-				VChannel:        vchannels[i],
-				Req:             req.Req,
-				MVCC:            req.MVCC,
-				BarrierMVCC:     req.BarrierMVCC,
-				Reducer:         collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans := make([]ShardPlan, len(shards))
+	err = c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
+		consistencyLevel: req.Req.GetConsistencyLevel(), guaranteeTimestamp: req.Req.GetGuaranteeTimestamp(), mvcc: req.MVCC, barrierMVCC: req.BarrierMVCC,
+	}, func(ctx context.Context, i int, read shardReadPoint) error {
+		plan, err := c.shardClient.Search(ctx, &ShardSearchRequest{
+			TotalChannelNum: int32(len(shards)),
+			VChannel:        read.vchannel,
+			Req:             req.Req,
+			MVCC:            read.mvcc,
+			BarrierMVCC:     read.barrierMVCC,
+			OnPlan:          read.onPlan,
+			Reducer:         collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+		if err != nil {
+			return err
+		}
+		shardPlans[i] = *plan
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req.Req, shardPlans)
@@ -154,32 +153,31 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}
-	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
+	shards, err := resolver.ResolveShards(ctx, c.shardResolver, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
 	}
 
 	collector := newLegacyQueryCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans := make([]ShardPlan, len(shards))
+	err = c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
+		consistencyLevel: req.Req.GetConsistencyLevel(), guaranteeTimestamp: req.Req.GetGuaranteeTimestamp(), mvcc: req.MVCC, barrierMVCC: req.BarrierMVCC,
+	}, func(ctx context.Context, i int, read shardReadPoint) error {
+		plan, err := c.shardClient.Query(ctx, &ShardQueryRequest{
+			VChannel:    read.vchannel,
+			Req:         req.Req,
+			MVCC:        read.mvcc,
+			BarrierMVCC: read.barrierMVCC,
+			OnPlan:      read.onPlan,
+			Reducer:     collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+		if err != nil {
+			return err
+		}
+		shardPlans[i] = *plan
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req, shardPlans)

@@ -685,6 +685,9 @@ message PChannelSummaryManifest {
     SummaryCoverage coverage = 2;
     // Readers before this boundary explicitly fast-forward past retired Deletes.
     map<string, uint64> transform_fast_forward_time_tick = 3;
+    // Immutable unknown-prefix boundary, including when no chunk exists yet.
+    // Presence distinguishes a valid zero origin from a legacy empty manifest.
+    optional uint64 initial_replay_time_tick = 4;
 }
 
 // SummaryCoverage describes the complete WAL prefix accounted for by Summary.
@@ -953,7 +956,7 @@ enum VChannelState {
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
     VCHANNEL_STATE_TOMBSTONED = 3; // vchannel data has caught up and this retained meta is a replay filter.
-    // VCHANNEL_STATE_SPLITTED = 4; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+    VCHANNEL_STATE_SPLITTED = 4; // local serving is retired; lineage remains a write fence.
 }
 
 // PartitionState is the state of partition
@@ -1162,6 +1165,8 @@ message CreateTransformSubscriptionRequest {
     // start_after_time_tick.
     uint64 start_after_time_tick = 3;
     uint64 end_time_tick = 4;
+    // Fail rather than skip a garbage-collected delete interval.
+    bool require_exact_start = 5;
 }
 
 message CloseTransformSubscriptionRequest {
@@ -1195,6 +1200,8 @@ message CreateTransformSubscriptionResponse {
     // Current SN TransformLog truncation cursor.
     uint64 truncate_time_tick = 4;
     uint64 end_time_tick = 5;
+    // Confirms enforcement; an old peer must not silently ignore strict replay.
+    bool require_exact_start = 6;
 }
 
 message CloseTransformSubscriptionResponse {

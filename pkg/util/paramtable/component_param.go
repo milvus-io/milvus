@@ -4719,6 +4719,8 @@ type queryNodeConfig struct {
 	MaterializeZstdMinBodySize ParamItem `refreshable:"true"`
 
 	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"true"`
+	QueryViewTransformLogCacheBytes       ParamItem `refreshable:"false"`
+	QueryViewTransformLogStreamCacheBytes ParamItem `refreshable:"false"`
 	StrictGroupStrategy                   ParamItem `refreshable:"true"`
 	StrictGroupPhase1CandidateWeight      ParamItem `refreshable:"true"`
 	StrictGroupSkipRefine                 ParamItem `refreshable:"true"`
@@ -6671,6 +6673,22 @@ user-task-polling:
 		},
 	}
 	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
+	p.QueryViewTransformLogCacheBytes = ParamItem{
+		Key:          "queryNode.queryView.transformLogCacheBytes",
+		Version:      "3.1.0",
+		DefaultValue: "67108864",
+		Doc:          "Node-wide retained TransformLog cache budget in bytes at startup. Missing cache pages are replayed from Summary; this does not limit durable history or the engine delete index. Zero disables this cache.",
+		Export:       true,
+	}
+	p.QueryViewTransformLogCacheBytes.Init(base.mgr)
+	p.QueryViewTransformLogStreamCacheBytes = ParamItem{
+		Key:          "queryNode.queryView.transformLogStreamCacheBytes",
+		Version:      "3.1.0",
+		DefaultValue: "8388608",
+		Doc:          "Per-VChannel retained TransformLog cache budget in bytes at startup, also constrained by the node-wide budget. Zero disables this cache.",
+		Export:       true,
+	}
+	p.QueryViewTransformLogStreamCacheBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -71,6 +71,7 @@ type fakeTransformRegistration struct {
 	waitErr      error
 	unregistered bool
 	onFailure    func(error)
+	onUnregister func()
 }
 
 func newFakeTransformRegistration() *fakeTransformRegistration {
@@ -88,6 +89,9 @@ func (r *fakeTransformRegistration) WaitCatchup(ctx context.Context) error {
 
 func (r *fakeTransformRegistration) Unregister() {
 	r.unregistered = true
+	if r.onUnregister != nil {
+		r.onUnregister()
+	}
 }
 
 type fakeTransformLogBuffer struct {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -208,6 +209,16 @@ func (s *resumableStream) resumeLoop() {
 		cancel()
 		_ = underlying.Close()
 		s.clearUnderlying(underlying)
+		s.mu.Lock()
+		strict := false
+		for _, sub := range s.subscriptions {
+			strict = strict || sub.requireExactStart
+		}
+		s.mu.Unlock()
+		if strict && err != nil && (errors.Is(err, wal.ErrTransformLogStartPointTruncated) || status.AsStreamingError(err).IsUnrecoverable()) {
+			finalErr = err
+			return
+		}
 		if idle {
 			// Idle retirement is not a failed attempt. Wait for new demand.
 			continue

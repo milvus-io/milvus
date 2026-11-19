@@ -569,8 +569,9 @@ func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *t
 
 	guard1.Release()
 	oldSegment := &fakeSegment{id: 11, vchannel: "v1", startAfter: 60}
-	_, err = buffer.RegisterSegment(context.Background(), oldSegment)
-	require.Error(t, err)
+	oldReg, err := buffer.RegisterSegment(context.Background(), oldSegment)
+	require.NoError(t, err, "old RAM range can be replayed from authoritative Summary")
+	oldReg.Unregister()
 
 	guard2.Release()
 	reg.Unregister()

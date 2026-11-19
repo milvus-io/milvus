@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -37,6 +38,9 @@ type Buffer struct {
 	drainConcurrency int
 	drainClosed      bool
 	drainWG          sync.WaitGroup
+	cacheLimit       int64
+	streamCacheLimit int64
+	cacheBytes       atomic.Int64
 }
 
 func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
@@ -45,6 +49,8 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 	}
 	b := &Buffer{
 		streams:           streams,
+		cacheLimit:        64 << 20,
+		streamCacheLimit:  8 << 20,
 		streamsByPChannel: make(map[string]*streamState),
 		channels:          make(map[string]*vchannelBuffer),
 	}
@@ -60,6 +66,7 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 func NewConfigured(ctx context.Context, streams wal.TransformLogStreamManager) *Buffer {
 	params := paramtable.Get()
 	b := New(streams, params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt())
+	b.SetCacheLimits(params.QueryNodeCfg.QueryViewTransformLogCacheBytes.GetAsInt64(), params.QueryNodeCfg.QueryViewTransformLogStreamCacheBytes.GetAsInt64())
 	refresh := func(*config.Event) {
 		b.drainMu.Lock()
 		defer b.drainMu.Unlock()
@@ -94,6 +101,25 @@ func (b *Buffer) Close() {
 		if b.unwatch != nil {
 			b.unwatch()
 		}
+		b.mu.Lock()
+		channels := make([]*vchannelBuffer, 0, len(b.channels))
+		for _, channel := range b.channels {
+			channels = append(channels, channel)
+		}
+		b.mu.Unlock()
+		for _, channel := range channels {
+			channel.mu.Lock()
+			channel.released = true
+			for _, reg := range channel.pending {
+				reg.cancel()
+			}
+			for _, reg := range channel.live {
+				reg.cancel()
+			}
+			channel.clearCacheLocked()
+			channel.mu.Unlock()
+			channel.fail(context.Canceled)
+		}
 		b.closeDrain()
 	})
 }
@@ -108,6 +134,8 @@ func (b *Buffer) closeDrain() {
 }
 
 // Bind records a range reference without opening a stream or doing I/O.
+// A view with lineage references one range per stream: its own from the view's
+// transform start, and every lineage stream from the switch tick.
 func (b *Buffer) Bind(view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGuard, error) {
 	if view == nil {
 		return nil, wal.ErrTransformLogInvalidReadOption
@@ -117,8 +145,23 @@ func (b *Buffer) Bind(view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGua
 	if channel == "" {
 		return nil, wal.ErrTransformLogInvalidReadOption
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	lineage := meta.GetLineage()
+	if lineage == nil {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		g, err := b.bindLocked(channel, start)
+		if err != nil {
+			return nil, err
+		}
+		return g, nil
+	}
+	if !qviews.ValidLineage(channel, lineage) {
+		return nil, wal.ErrTransformLogInvalidReadOption
+	}
+	return b.bindLineage(channel, start, lineage)
+}
+
+func (b *Buffer) bindLocked(channel string, start uint64) (*guard, error) {
 	buf := b.channels[channel]
 	if buf == nil {
 		buf = newVChannelBuffer(b, funcutil.ToPhysicalChannel(channel), channel, start)
@@ -128,6 +171,34 @@ func (b *Buffer) Bind(view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGua
 		return nil, err
 	}
 	return &guard{buffer: buf, startFrom: start}, nil
+}
+
+// bindLineage references every stream or none. A lineage stream whose retained
+// range starts above the switch tick has lost deletes the view's segments must
+// replay, so the bind fails instead of serving from a later start.
+func (b *Buffer) bindLineage(channel string, start uint64, lineage *viewpb.QueryViewLineage) (qnview.TransformLogGuard, error) {
+	b.mu.Lock()
+	own, err := b.bindLocked(channel, start)
+	if err != nil {
+		b.mu.Unlock()
+		return nil, err
+	}
+	bound := &lineageGuard{own: own}
+	for _, vchannel := range lineage.GetVchannels() {
+		g, bindErr := b.bindLocked(vchannel, lineage.GetSwitchTimetick())
+		if bindErr != nil {
+			err = merr.Wrapf(bindErr, "lineage transform log of %s cannot serve view of %s from the switch tick", vchannel, channel)
+			break
+		}
+		bound.lineage = append(bound.lineage, g)
+	}
+	b.mu.Unlock()
+	if err != nil {
+		// Releasing takes b.mu itself.
+		bound.Release()
+		return nil, err
+	}
+	return bound, nil
 }
 
 func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGuard, error) {
@@ -352,6 +423,37 @@ func (g *guard) WaitTransformVisible(ctx context.Context, timetick uint64) error
 	return g.buffer.waitTransformVisible(ctx, timetick)
 }
 
+// lineageGuard pins the view's own stream and all of its lineage streams for
+// one QueryView lifetime. The view-level frontier wait stays on the own stream;
+// lineage streams are waited per segment registration.
+type lineageGuard struct {
+	own     *guard
+	lineage []*guard
+}
+
+func (g *lineageGuard) Prepare(ctx context.Context) (bool, error) {
+	if retryable, err := g.own.Prepare(ctx); err != nil {
+		return retryable, err
+	}
+	for _, lineage := range g.lineage {
+		if retryable, err := lineage.Prepare(ctx); err != nil {
+			return retryable, err
+		}
+	}
+	return true, nil
+}
+
+func (g *lineageGuard) WaitTransformVisible(ctx context.Context, timetick uint64) error {
+	return g.own.WaitTransformVisible(ctx, timetick)
+}
+
+func (g *lineageGuard) Release() {
+	g.own.Release()
+	for _, lineage := range g.lineage {
+		lineage.Release()
+	}
+}
+
 type vchannelBuffer struct {
 	owner    *Buffer
 	pchannel string
@@ -362,6 +464,9 @@ type vchannelBuffer struct {
 
 	mu               sync.Mutex
 	retentionStart   uint64
+	cacheStart       uint64
+	cacheBytes       int64
+	released         bool
 	visibleTimeTick  uint64
 	visibilityNotify chan struct{}
 	guards           map[uint64]int
@@ -378,6 +483,7 @@ func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFro
 		pchannel:         pchannel,
 		vchannel:         vchannel,
 		retentionStart:   startFrom,
+		cacheStart:       startFrom,
 		visibleTimeTick:  startFrom,
 		visibilityNotify: make(chan struct{}),
 		guards:           make(map[uint64]int),
@@ -433,6 +539,7 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           b.vchannel,
 		StartAfterTimeTick: startAfter,
+		RequireExactStart:  true,
 		Handler:            bufEventHandler{buffer: b, stream: stream},
 	})
 	if streamErr := stream.Error(); streamErr != nil {
@@ -498,9 +605,9 @@ func (b *vchannelBuffer) acquireLocked(startFrom uint64) error {
 	if b.err != nil {
 		return b.err
 	}
-	if startFrom < b.retentionStart {
-		return merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve %d", b.retentionStart, startFrom)
-	}
+	// A RAM range is not authoritative retention. An older baseline is
+	// validated by strict Summary replay when its registration catches up.
+	b.retentionStart = min(b.retentionStart, startFrom)
 	b.guards[startFrom]++
 	return nil
 }
@@ -512,10 +619,7 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 		return nil, b.err
 	}
 	startFrom := segment.TransformStartAfterTimeTick()
-	if startFrom < b.retentionStart {
-		b.mu.Unlock()
-		return nil, merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
-	}
+	b.retentionStart = min(b.retentionStart, startFrom)
 	if err := ctx.Err(); err != nil {
 		b.mu.Unlock()
 		return nil, err
@@ -552,10 +656,34 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 	if b.syncUp {
 		reg.setCatchupFrontier(b.visibleTimeTick)
 	}
+	if after := reg.drainedTo.Load(); after < b.cacheStart {
+		through := b.cacheStart
+		b.mu.Unlock()
+		cursor, err := wal.ReplayTransformPage(ctx, b.owner.streams, b.vchannel, after, through, reg.apply)
+		if err != nil {
+			return false, false, err
+		}
+		reg.publishProgress(cursor)
+		return true, false, nil
+	}
 	first := sort.Search(len(b.entries), func(i int) bool {
 		return b.entries[i].GetTimeTick() > reg.drainedTo.Load()
 	})
-	end := min(first+256, len(b.entries))
+	end := first
+	var batchBytes int64
+	for end < len(b.entries) && end < first+256 {
+		bytes := wal.TransformEntryMemory(b.entries[end])
+		if end > first && batchBytes+bytes > wal.TransformReplayWorkspaceBytes {
+			break
+		}
+		batchBytes += bytes
+		end++
+	}
+	if !wal.TransformMemory.TryReserve(batchBytes) {
+		b.mu.Unlock()
+		return false, false, merr.Wrapf(merr.ErrServiceResourceInsufficient, "transform catchup workspace budget is occupied")
+	}
+	defer wal.TransformMemory.Release(batchBytes)
 	batch := append([]*streamingpb.TransformLogEntry(nil), b.entries[first:end]...)
 	frontier := b.visibleTimeTick
 	if end < len(b.entries) {
@@ -667,6 +795,8 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 	}
 	delete(b.guards, startFrom)
 	if len(b.guards) == 0 {
+		b.released = true
+		b.clearCacheLocked()
 		sub := b.sub
 		attempt := b.subscribeAttempt
 		stream := b.owner.removeLocked(b.vchannel, b)
@@ -710,6 +840,8 @@ func (b *vchannelBuffer) trimLocked() {
 	for _, entry := range b.entries {
 		if entry.GetTimeTick() > minStart {
 			kept = append(kept, entry)
+		} else {
+			b.releaseCacheEntryLocked(entry)
 		}
 	}
 	// Release payloads in the unused backing-array tail as well. The frontier
@@ -717,12 +849,13 @@ func (b *vchannelBuffer) trimLocked() {
 	clear(b.entries[len(kept):])
 	b.entries = kept
 	b.retentionStart = minStart
+	b.cacheStart = max(b.cacheStart, minStart)
 }
 
 func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 	b.mu.Lock()
-	if entry.GetTimeTick() > b.retentionStart {
-		b.entries = append(b.entries, entry)
+	if !b.released && entry.GetTimeTick() > max(b.retentionStart, b.cacheStart) {
+		b.cacheEntryLocked(entry)
 	}
 	applies := make([]*registration, 0, len(b.live))
 	for _, reg := range b.live {

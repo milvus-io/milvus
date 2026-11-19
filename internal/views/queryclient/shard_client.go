@@ -58,7 +58,9 @@ type ShardSearchRequest struct {
 	Req             *internalpb.SearchRequest
 	MVCC            *viewpb.QueryPlanMVCC
 	BarrierMVCC     uint64
-	Reducer         reducer.SearchResultReducer
+	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
+	OnPlan  func(*viewpb.QueryPlan)
+	Reducer reducer.SearchResultReducer
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
@@ -67,7 +69,9 @@ type ShardQueryRequest struct {
 	Req         *internalpb.RetrieveRequest
 	MVCC        *viewpb.QueryPlanMVCC
 	BarrierMVCC uint64
-	Reducer     reducer.RetrieveResultReducer
+	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
+	OnPlan  func(*viewpb.QueryPlan)
+	Reducer reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -80,6 +84,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		observePlan:      req.OnPlan,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -123,6 +128,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		observePlan:      req.OnPlan,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -164,6 +170,8 @@ type shardExecParams struct {
 	consistencyLevel commonpb.ConsistencyLevel
 	mvcc             *viewpb.QueryPlanMVCC
 	barrierMVCC      uint64
+	// observePlan sees every plan Phase 1 returns, before any dispatch.
+	observePlan func(*viewpb.QueryPlan)
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -244,6 +252,9 @@ func (s *shardViewQueryClient) executeShard(
 		plan := response.GetPlan()
 		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
 			return nil, err
+		}
+		if params.observePlan != nil {
+			params.observePlan(plan)
 		}
 		// A newer advertised version does not certify removal of a dead QN.
 		// Recheck the actual exact-schema plan before accepting inline results.
@@ -387,7 +398,8 @@ func legacyMVCCForNode(mvcc *viewpb.QueryPlanMVCC, node qviews.WorkNode) uint64 
 	if node.NodeType() == qviews.NodeTypeStreamingNode {
 		return mvcc.GetGrowingTimetick()
 	}
-	return mvcc.GetTransformingTimetick()
+	// The transform frontier, or the common read point of a lineage group.
+	return qviews.SealedReadTimestamp(mvcc)
 }
 
 func isEmptySuccessfulQueryResponse(resp *viewpb.QueryOnViewResponse) bool {

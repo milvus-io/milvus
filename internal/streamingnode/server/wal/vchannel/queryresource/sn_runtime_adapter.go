@@ -16,6 +16,24 @@ func (r *QueryRuntime) WaitMVCCVisible(ctx context.Context, growingTimetick uint
 	return runtime.WaitMVCCVisible(ctx, growingTimetick, transformingTimetick)
 }
 
+// WaitLineageVisible waits until the residual of a split source applied the
+// deletes of every target stream through the requested tick.
+func (r *QueryRuntime) WaitLineageVisible(ctx context.Context, ticks map[string]uint64) error {
+	runtime, ok := r.growingRuntime()
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("growing runtime module is not available")
+	}
+	waiter, ok := runtime.(lineageRuntime)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("growing runtime module cannot wait for split lineage streams")
+	}
+	return waiter.WaitLineageVisible(ctx, ticks)
+}
+
+type lineageRuntime interface {
+	WaitLineageVisible(ctx context.Context, ticks map[string]uint64) error
+}
+
 func (r *QueryRuntime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
 	runtime, ok := r.growingRuntime()
 	if !ok {

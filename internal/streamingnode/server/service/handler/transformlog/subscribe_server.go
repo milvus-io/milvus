@@ -87,7 +87,7 @@ func (s *SubscribeServer) Execute() error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.logStream.Done():
-			return s.logStream.Error()
+			return strictTransformError(s.logStream.Error())
 		case err := <-recvErr:
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -171,6 +171,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 		VChannel:           req.GetVchannel(),
 		StartAfterTimeTick: req.GetStartAfterTimeTick(),
 		EndTimeTick:        req.GetEndTimeTick(),
+		RequireExactStart:  req.GetRequireExactStart(),
 		Handler:            handler,
 	})
 	if err != nil {
@@ -204,6 +205,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 				Vchannel:           req.GetVchannel(),
 				StartAfterTimeTick: req.GetStartAfterTimeTick(),
 				EndTimeTick:        req.GetEndTimeTick(),
+				RequireExactStart:  req.GetRequireExactStart(),
 			},
 		},
 	}); err != nil {
@@ -218,6 +220,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 }
 
 func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel string, err error) error {
+	err = strictTransformError(err)
 	return s.send(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
 			SubscriptionError: &streamingpb.TransformSubscriptionError{
@@ -323,4 +326,11 @@ func (h *serverEventHandler) markReady() {
 	h.readyOnce.Do(func() {
 		close(h.ready)
 	})
+}
+
+func strictTransformError(err error) error {
+	if errors.Is(err, wal.ErrTransformLogStartPointTruncated) {
+		return status.NewUnrecoverableError("required transform history is truncated")
+	}
+	return err
 }

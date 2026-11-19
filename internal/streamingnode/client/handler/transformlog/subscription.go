@@ -2,18 +2,21 @@ package transformlog
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 )
 
 type eventSubscription struct {
-	stream         *EventStream
-	subscriptionID int64
-	vchannel       string
-	handler        wal.TransformLogEventHandler
-	done           chan struct{}
-	ready          chan struct{}
+	stream            *EventStream
+	subscriptionID    int64
+	vchannel          string
+	requireExactStart bool
+	strictConfirmed   atomic.Bool
+	handler           wal.TransformLogEventHandler
+	done              chan struct{}
+	ready             chan struct{}
 	// readyErr is the immutable creation result, published by closing ready.
 	// It is separate from err: a normal Close can abort pending creation.
 	readyErr error
@@ -27,12 +30,13 @@ type eventSubscription struct {
 
 func newEventSubscription(stream *EventStream, subscriptionID int64, opt wal.TransformLogSubscriptionOption) *eventSubscription {
 	return &eventSubscription{
-		stream:         stream,
-		subscriptionID: subscriptionID,
-		vchannel:       opt.VChannel,
-		handler:        opt.Handler,
-		done:           make(chan struct{}),
-		ready:          make(chan struct{}),
+		stream:            stream,
+		subscriptionID:    subscriptionID,
+		vchannel:          opt.VChannel,
+		requireExactStart: opt.RequireExactStart,
+		handler:           opt.Handler,
+		done:              make(chan struct{}),
+		ready:             make(chan struct{}),
 	}
 }
 
@@ -67,6 +71,9 @@ func (s *eventSubscription) Close() error {
 }
 
 func (s *eventSubscription) handle(event wal.TransformLogStreamEvent) {
+	if s.requireExactStart && !s.strictConfirmed.Load() {
+		return
+	}
 	s.handler.Handle(event)
 }
 

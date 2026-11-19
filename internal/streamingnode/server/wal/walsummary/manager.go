@@ -52,8 +52,9 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
-	chunkIndex     *chunkIndex
-	queryRetention map[string]uint64 // exclusive lower bound required by query snapshots
+	chunkIndex       *chunkIndex
+	transformOrigins map[string]uint64 // recovered vchannel genesis, not a retention watermark
+	queryRetention   map[string]uint64 // exclusive lower bound required by query snapshots
 
 	mu sync.Mutex
 	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
@@ -70,6 +71,7 @@ type Manager struct {
 	reopenedTerm          bool
 	manifest              *streamingpb.PChannelSummaryManifest
 	manifestVersion       uint64
+	initialReplayVersion  uint64 // publication that makes the initial replay floor durable
 	publishedVersion      uint64
 	manifestPublished     bool
 	manifestTask          *manifestWriteTask
@@ -753,4 +755,18 @@ func (m *Manager) AdvanceGCTimeTick(vchannel string, timetick uint64) {
 		m.gcFrontiers[vchannel] = timetick
 	}
 	m.mu.Unlock()
+}
+
+// SetTransformOrigin installs the WAL metadata's immutable genesis. It proves
+// that a strict replay starting before genesis skips no delete in that interval.
+// Owners restore it before accepting a view that depends on historical replay.
+func (m *Manager) SetTransformOrigin(vchannel string, tick uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.transformOrigins == nil {
+		m.transformOrigins = make(map[string]uint64)
+	}
+	if old := m.transformOrigins[vchannel]; old == 0 || tick < old {
+		m.transformOrigins[vchannel] = tick
+	}
 }
