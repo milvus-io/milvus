@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -388,10 +389,30 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
+// The separate Import V3 scheduler still uses its legacy backup key registration.
+func getImportV3ReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
+	artifact, _ := importutilv2.GetEZK(options)
+	readContext, err := hookutil.ImportEZ(artifact)
+	if err != nil {
+		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
+		return []*commonpb.KeyValuePair{}
+	}
+	return readContext
+}
+
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
 		return nil, err
+	}
+	var readContext []*commonpb.KeyValuePair
+	if task.GetType() == PreImportTaskV3Type {
+		readContext = getImportV3ReadPluginContext(job.GetOptions())
+	} else {
+		readContext, err = meta.GetReadPluginContext(job.GetOptions())
+		if err != nil {
+			return nil, err
+		}
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),
@@ -404,7 +425,7 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		SnapshotL0Source: l0Source,
 	}
 	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
@@ -469,6 +490,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
+	readContext, err := meta.GetReadPluginContext(job.GetOptions())
+	if err != nil {
+		return nil, err
+	}
 	req := &datapb.ImportRequest{
 		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:            task.GetJobID(),
@@ -485,7 +510,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		StorageConfig:    meta.CreateStorageConfig(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageVersion:   storageVersion,
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		UseLoonFfi:       useLoonFFI,
 		SnapshotL0Source: l0Source,
 	}

@@ -180,7 +180,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
 		LogRange: p.GetLogRange(), Slot: slot,
 		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext: getImportV3ReadPluginContext(job.GetOptions()),
 		Plan:          plan,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {

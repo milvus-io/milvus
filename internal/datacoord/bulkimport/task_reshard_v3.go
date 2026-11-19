@@ -199,7 +199,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
 		Slot: reshardSlot(job, cfg), StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext: getImportV3ReadPluginContext(job.GetOptions()),
 		Plan:          plan,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
