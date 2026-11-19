@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -74,6 +75,57 @@ func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
 	recordedNodeID, ok := task.queryChannelsNode.Get(channel)
 	require.True(t, ok)
 	assert.Equal(t, nodeID, recordedNodeID)
+}
+
+func TestSearchTask_SearchShardMergesStageCosts(t *testing.T) {
+	ctx := context.Background()
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	const nodeID int64 = 101
+
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+		Status:          merr.Success(),
+		CostAggregation: &internalpb.CostAggregation{},
+		StageCosts: []*internalpb.StageCost{
+			{Stage: searchprofile.QNSegmentSearch, SumUs: 9000, MaxUs: 5000, Count: 3, MaxNodeId: nodeID, MaxId: 42},
+		},
+	}, nil)
+
+	lb := shardclient.NewMockLBPolicy(t)
+	lb.EXPECT().UpdateCostMetrics(nodeID, mock.Anything).Return()
+
+	task := &SearchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Search,
+				SourceID: paramtable.GetNodeID(),
+			},
+		},
+		request: &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_search_shard_merges_stage_costs",
+		},
+		Condition: NewTaskCondition(ctx),
+		lb:        lb,
+		resultBuf: typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		profile:   searchprofile.NewRecorder(paramtable.GetNodeID()),
+	}
+
+	require.NoError(t, task.searchShard(ctx, nodeID, qn, channel))
+
+	stages := map[string]*internalpb.StageCost{}
+	for _, s := range task.StageCosts() {
+		stages[s.GetStage()] = s
+	}
+	rpc := stages[searchprofile.ProxyShardRPC]
+	require.NotNil(t, rpc)
+	assert.EqualValues(t, 1, rpc.GetCount())
+	assert.Equal(t, nodeID, rpc.GetMaxId())
+	seg := stages[searchprofile.QNSegmentSearch]
+	require.NotNil(t, seg)
+	assert.EqualValues(t, 9000, seg.GetSumUs())
+	assert.EqualValues(t, 42, seg.GetMaxId())
 }
 
 func TestSearchTask_SearchShardInvalidatesCacheOnCollectionNotLoaded(t *testing.T) {

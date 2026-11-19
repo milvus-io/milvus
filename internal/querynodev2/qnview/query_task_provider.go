@@ -2,7 +2,9 @@ package qnview
 
 import (
 	"context"
+	"time"
 
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -34,13 +36,18 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
+	profile := searchprofile.FromContext(ctx)
+	waitStart := time.Now()
 	if err := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
+	profile.ObserveSince(searchprofile.QNWaitTSafe, waitStart, 0)
+	pinStart := time.Now()
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	if err != nil {
 		return nil, err
 	}
+	profile.ObserveSince(searchprofile.QNPinSegments, pinStart, 0)
 	tasks := make([]QNSearchSegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, QNSearchSegmentTask{

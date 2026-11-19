@@ -107,6 +107,10 @@ const (
 	HookConfigsPath = "/_hook/configs"
 	// SlowQueryPath is the path to get slow queries metrics
 	SlowQueryPath = "/_cluster/slow_query"
+	// SearchProfilesPath is the page that lists the latest searches with a profile
+	SearchProfilesPath = "/_search/profiles"
+	// SearchProfilePath is the page that shows one search's profile, given as ?id=
+	SearchProfilePath = "/_search/profile"
 
 	// QCDistPath is the path to get QueryCoord distribution.
 	QCDistPath = "/_qc/dist"

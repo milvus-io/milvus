@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -90,7 +91,14 @@ func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment
 			return err
 		}
 		searchResults[idx] = searchResult
-		elapsed := float64(tr.ElapseSpan().Microseconds()) / 1000.0
+		span := tr.ElapseSpan()
+		if profile := searchprofile.FromContext(ctx); profile != nil {
+			profile.Observe(searchprofile.QNSegmentSearch, span, s.ID())
+			for _, cost := range searchResult.OperatorCosts() {
+				profile.Observe(searchprofile.OperatorPrefix+cost.OperatorType, cost.Duration, s.ID())
+			}
+		}
+		elapsed := float64(span.Microseconds()) / 1000.0
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(nodeIDStr,
 			metrics.SearchLabel, searchLabel).Observe(elapsed)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(nodeIDStr,

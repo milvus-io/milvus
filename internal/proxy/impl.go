@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2776,16 +2777,20 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			spanPerNq = span / time.Duration(qt.GetNq())
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			stages := qt.StageCosts()
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
-				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)),
+				mlog.String("stages", searchprofile.Format(stages)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
 			if node.slowQueries != nil {
-				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
+				slowQuery := metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID)
+				slowQuery.Stages = searchprofile.ToSlowQueryStages(stages)
+				node.slowQueries.Add(qt.BeginTs(), slowQuery)
 			}
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2880,6 +2885,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if qt.ProfileEnabled() {
+			span := tr.ElapseSpan()
+			SetSearchProfile(ctx, qt.Result().GetStatus(), request, span, qt.StageCosts())
+			node.recordSearchProfile(qt.ID(), username, request, span, qt.Result().GetStatus())
+		}
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -2995,16 +3005,20 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			spanPerNq = span / time.Duration(totalNq)
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			stages := qt.StageCosts()
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
-				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)))
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)),
+				mlog.String("stages", searchprofile.Format(stages)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
 			if node.slowQueries != nil {
-				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
+				slowQuery := metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID)
+				slowQuery.Stages = searchprofile.ToSlowQueryStages(stages)
+				node.slowQueries.Add(qt.BeginTs(), slowQuery)
 			}
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3098,6 +3112,11 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if qt.ProfileEnabled() {
+			span := tr.ElapseSpan()
+			SetSearchProfile(ctx, qt.Result().GetStatus(), newSearchReq, span, qt.StageCosts())
+			node.recordSearchProfile(qt.ID(), username, newSearchReq, span, qt.Result().GetStatus())
+		}
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
@@ -6415,6 +6434,10 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
+
+	// Pages listing the latest searches with a profile, and each profile
+	router.GET(http.SearchProfilesPath, getSearchProfiles(node))
+	router.GET(http.SearchProfilePath, getSearchProfile(node))
 
 	// QueryCoord requests that are forwarded from proxy
 	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.TargetKey))

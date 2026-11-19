@@ -60,6 +60,9 @@ const (
 	GroupByFieldsKey       = "group_by_fields"
 	OrderByFieldsKey       = "order_by_fields"
 	PipelineTraceKey       = "pipeline_trace"
+	// ProfileKey set to "true" in a search's params returns how long each
+	// stage of the search took.
+	ProfileKey = "profile"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)

@@ -3,11 +3,13 @@ package queryclient
 import (
 	"context"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -139,10 +141,12 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	reduceStart := time.Now()
 	results, err := collector.Reduce(ctx, req.Req, shardPlans)
 	if err != nil {
 		return nil, err
 	}
+	searchprofile.FromContext(ctx).ObserveSince(searchprofile.ProxyShardReduce, reduceStart, 0)
 	return &LegacySearchResult{
 		Results: results,
 		Plans:   shardPlans,
