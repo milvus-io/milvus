@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -277,8 +278,8 @@ func TestIndexTaskCountsLifecycle(t *testing.T) {
 	// Replacing field metadata must re-activate retained counts.
 	require.NoError(t, m.AlterIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10}))
 	assertIndexTaskCounts(t, m)
-	require.NoError(t, m.DeleteTask(30))
-	require.NoError(t, m.DeleteTask(30))
+	require.NoError(t, m.DeleteTask(30, storage.StorageV2))
+	require.NoError(t, m.DeleteTask(30, storage.StorageV2))
 	require.NoError(t, m.RemoveSegmentIndex(ctx, 30))
 	require.NoError(t, m.RemoveSegmentIndex(ctx, 30))
 	assertIndexTaskCounts(t, m)
@@ -336,7 +337,7 @@ func TestIndexTaskCountsPersistenceFailures(t *testing.T) {
 		"finish": func(m *IndexMeta) error {
 			return m.FinishTask(&workerpb.IndexTaskInfo{BuildID: 30, State: commonpb.IndexState_Finished, SerializedSize: 700})
 		},
-		"delete-task":  func(m *IndexMeta) error { return m.DeleteTask(30) },
+		"delete-task":  func(m *IndexMeta) error { return m.DeleteTask(30, storage.StorageV2) },
 		"mark-deleted": func(m *IndexMeta) error { return m.MarkIndexAsDeleted(ctx, 1, nil) },
 		"remove-task":  func(m *IndexMeta) error { return m.RemoveSegmentIndex(ctx, 30) },
 		"remove-index": func(m *IndexMeta) error { return m.RemoveIndex(ctx, 1, 10) },
@@ -385,7 +386,7 @@ func TestIndexTaskCountsRandomized(t *testing.T) {
 				require.NoError(t, m.UpdateIndexState(buildID, commonpb.IndexState(rng.Intn(7)), ""))
 			}
 		case 3:
-			require.NoError(t, m.DeleteTask(buildID))
+			require.NoError(t, m.DeleteTask(buildID, storage.StorageV2))
 		case 4:
 			require.NoError(t, m.RemoveSegmentIndex(ctx, buildID))
 		case 5:

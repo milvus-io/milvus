@@ -53,7 +53,7 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifestHasIndex(meta.RestartSegID)))
 			}
 			im := mDomains.IndexMeta
-			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: m.ChunkManager, IndexMeta: im, SnapshotMeta: mDomains.SnapshotMeta})
+			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: localIndexGCStorage(m), IndexMeta: im, SnapshotMeta: mDomains.SnapshotMeta})
 			defer gc.Option.RemoveObjectPool.Release()
 			var original func(*index.IndexMeta, int64) (*model.SegmentIndex, bool)
 			injected := false

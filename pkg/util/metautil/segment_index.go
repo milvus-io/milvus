@@ -72,6 +72,11 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 	return paths
 }
 
+// SegmentRootedIndexPrefix places an index attempt under the owning manifest base.
+func SegmentRootedIndexPrefix(base string, buildID, indexVersion int64) string {
+	return strings.TrimRight(base, "/") + "/_index/" + JoinIDPath(buildID, indexVersion)
+}
+
 // BuildPrefix returns the directory prefix containing all files for this index build.
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
 // v1: {root}/index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
@@ -79,7 +84,7 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 func (b *IndexPathBuilder) BuildPrefix() string {
 	if IsSegmentRooted(b.pathVersion) {
 		if b.segmentBase != "" {
-			return strings.TrimRight(b.segmentBase, "/") + "/_index/" + JoinIDPath(b.buildID, b.indexVersion)
+			return SegmentRootedIndexPrefix(b.segmentBase, b.buildID, b.indexVersion)
 		}
 		return path.Join(b.rootPath, common.SegmentInsertLogPath,
 			JoinIDPath(b.collID, b.partID, b.segID), "_index", JoinIDPath(b.buildID, b.indexVersion))

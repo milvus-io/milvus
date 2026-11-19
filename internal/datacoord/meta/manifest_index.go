@@ -251,7 +251,7 @@ func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.Manifes
 		if entry.BuildID != index.BuildID {
 			continue
 		}
-		if _, ok := ManifestIndexFilePathInfoForSegment(root, descriptor, entry); !ok || keys != nil ||
+		if !ValidManifestIndexForSegment(root, descriptor, entry) || keys != nil ||
 			entry.IndexID != index.IndexID || entry.IndexVersion != index.IndexVersion ||
 			entry.IndexStorePathVersion != index.IndexStorePathVersion || len(entry.IndexFileKeys) != index.IndexFileCount {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid file metadata for manifest index build %d", index.BuildID)
@@ -287,24 +287,31 @@ func (m *Meta) SegmentIndexFilePaths(ctx context.Context, index *model.SegmentIn
 		WithManifestPath(descriptor.GetManifestPath()).BuildFilePaths(keys), nil
 }
 
-// manifestIndexFilePathInfo projects one manifest index entry into the load
-// metadata QueryNode consumes. It returns false for an entry that cannot
-// produce a safe file list, which the caller treats as "no manifest artifact".
-func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
+func validManifestIndex(manifestIndex packed.ManifestIndexInfo) bool {
 	if manifestIndex.Path == "" || manifestIndex.IndexName == "" || manifestIndex.IndexType == "" ||
 		manifestIndex.IndexStorePathVersion < indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED ||
 		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 ||
 		len(manifestIndex.IndexFileKeys) == 0 {
-		return nil, false
+		return false
 	}
 
-	filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
 	for _, fileKey := range manifestIndex.IndexFileKeys {
 		// Index file keys are plain file names under Path. Reject anything that
 		// could escape the artifact directory of a manifest we did not write.
 		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
-			return nil, false
+			return false
 		}
+	}
+	return true
+}
+
+// manifestIndexFilePathInfo projects a validated artifact into QueryNode load metadata.
+func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
+	if !validManifestIndex(manifestIndex) {
+		return nil, false
+	}
+	filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
+	for _, fileKey := range manifestIndex.IndexFileKeys {
 		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
 			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
 		} else {
@@ -331,20 +338,23 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 	}, true
 }
 
-// manifestIndexFilePathInfoForSegment validates resolved reader paths against the
-// owning segment and storage root. Writers use manifestIndexFilePathInfo for
-// staged relative paths, before milvus-storage resolves them.
-func ManifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.SegmentInfo,
-	entry packed.ManifestIndexInfo,
-) (*indexpb.IndexFilePathInfo, bool) {
+func manifestIndexDirectoryMatches(rootPath string, segment *datapb.SegmentInfo, entry packed.ManifestIndexInfo) bool {
 	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
 		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
 		entry.BuildID, entry.IndexVersion).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
-		if entry.Path != expected {
-			return nil, false
-		}
-	} else if path.Clean(entry.Path) != expected {
+		return entry.Path == expected
+	}
+	return path.Clean(entry.Path) == expected
+}
+
+// ValidManifestIndexForSegment checks ownership and entry integrity without expanding file paths.
+func ValidManifestIndexForSegment(rootPath string, segment *datapb.SegmentInfo, entry packed.ManifestIndexInfo) bool {
+	return manifestIndexDirectoryMatches(rootPath, segment, entry) && validManifestIndex(entry)
+}
+
+func ManifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.SegmentInfo, entry packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
+	if !manifestIndexDirectoryMatches(rootPath, segment, entry) {
 		return nil, false
 	}
 	return manifestIndexFilePathInfo(segment.GetID(), entry)
@@ -523,7 +533,7 @@ func (m *Meta) recoverManifestIndexes(ctx context.Context, segment *SegmentInfo,
 	}
 	indexes := make([]*model.SegmentIndex, 0, len(entries))
 	for _, entry := range entries {
-		if _, ok := ManifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
+		if !ValidManifestIndexForSegment(rootPath, segment.SegmentInfo, entry) {
 			return nil, false, merr.Wrapf(merr.ErrDataIntegrity,
 				"segment %d manifest holds an unusable index entry: indexID %d buildID %d", segment.GetID(), entry.IndexID, entry.BuildID)
 		}

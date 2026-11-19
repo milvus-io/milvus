@@ -96,7 +96,9 @@ skip finalized targets even if the task completion write was lost.
 
 ## Garbage collection
 
-Recorded-file deletion uses version 2 and the segment's actual manifest base.
+V3 index retirement removes the build/version directories in each supported layout.
+The segment-rooted directory uses the actual manifest base. Dropped-segment GC
+removes the two external directories first and the whole segment directory last.
 The orphan scanner applies the existing build-state, import, age and snapshot
 protections to `insert_log/.../_index`. It skips ordinary data/stats/manifests,
 retains active builds and the complete current directory of each finished V3 build

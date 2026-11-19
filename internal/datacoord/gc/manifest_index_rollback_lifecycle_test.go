@@ -26,6 +26,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -96,7 +98,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AddSegmentIndex(ctx, record))
 				records = append(records, record)
 			}
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 			t.Cleanup(gc.Close)
 			files := make(map[string]struct{})
 			for _, record := range records {
@@ -271,16 +273,22 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	patch := mockey.Mock(meta.CommitManifestMutationForTest).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ meta.SegmentManifestCommit) bool {
-		close(entered)
+	local := localIndexGCStorage(m)
+	source := m.ChunkManager
+	copying := mocks.NewChunkManager(t)
+	copying.EXPECT().RootPath().Return(source.RootPath()).Maybe()
+	var copyingStarted sync.Once
+	copying.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, from, to string) error {
+		copyingStarted.Do(func() { close(entered) })
 		<-release
-		return false
-	}).Build()
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+		return source.Copy(ctx, from, to)
+	})
+	m.ChunkManager = copying
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: local, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
 	deleted := make(chan string, 1)
 	deletePatch := mockey.Mock((*GarbageCollector).RemoveDroppedSegmentFiles).To(
-		func(_ *GarbageCollector, _ context.Context, segment *meta.SegmentInfo, _ map[string]struct{}) error {
+		func(_ *GarbageCollector, _ context.Context, segment *meta.SegmentInfo, _ DroppedSegmentIndexes) error {
 			deleted <- segment.GetManifestPath()
 			return merr.ErrIoTooManyRequests
 		}).Build()
@@ -295,13 +303,12 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	t.Cleanup(func() {
 		once.Do(func() { close(release) })
 		workers.Wait()
-		patch.UnPatch()
 		deletePatch.UnPatch()
 	})
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("rollback did not enter manifest I/O")
+		t.Fatal("rollback did not start its index copy")
 	}
 	workers.Add(1)
 	go func() {
@@ -363,7 +370,7 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			require.False(t, sm.IsBuildIDGCBlocked(meta.RestartCollID, meta.RestartBuildID))
 			require.NoError(t, m.SetState(ctx, meta.RestartSegID, commonpb.SegmentState_Dropped))
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta), SnapshotMeta: sm})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta), SnapshotMeta: sm})
 			t.Cleanup(gc.Close)
 			files := recordedIndexFiles(t, gc, retired)
 			for file := range files {

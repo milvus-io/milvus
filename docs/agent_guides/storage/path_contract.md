@@ -89,7 +89,7 @@ fails and the segment has since published a different revision, the caller
 recaptures the segment and its indexes together.
 Once a snapshot is created, restore uses the revision recorded in that snapshot.
 When a new build replaces the same index, DataCoord keeps the displaced build's
-exact keys with its retained task record until rollback or cleanup.
+exact keys with its retained task record for a possible rollback.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Expression cache files
@@ -188,8 +188,17 @@ behavior.
 
 - V1/V2: delete recorded files and periodically scan standard layouts for
   orphans, including independent `bm25_stats` files.
-- Dropped V3 segments: remove the manifest base directory, including data and
-  stats, subject to retention and snapshot protection.
+- Dropped V3 segments: after retention and snapshot checks, remove the
+  `index_files` and `index_v1` directories for each known build ID and index
+  version, then the manifest base directory with its data, stats and `_index`.
+  A marked segment's manifest also identifies builds missing from task metadata.
+  The segment and its deletion markers survive a failed storage cleanup.
+- Dropping a single V3 index removes that build/version directory in all
+  three layouts before retracting its matching manifest entry. Both operations
+  locate directories without a per-build file-name lookup. If the segment
+  record is already gone, a manifest-backed build can still be cleaned in the
+  two external layouts. A catalog-only v0/v1 record without a segment row
+  retains legacy file-key cleanup because its storage version is unknown.
 - V3 orphan scan: enumerate `insert_log` and reclaim files without segment
   metadata after the protection period. Files belonging to registered V3
   segments are skipped, even if an individual file is absent from the manifest.

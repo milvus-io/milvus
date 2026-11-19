@@ -106,7 +106,7 @@ func SeedLegacyBackfillRecord(t *testing.T, m *meta.Meta, segmentID, buildID int
 		NumOfRows:      1000,
 		StorageVersion: storage.StorageV3,
 		ManifestPath: packed.MarshalManifestPath(
-			fmt.Sprintf("/tmp/test-backfill/insert_log/%d/%d/%d", meta.RestartCollID, RestartPartID, segmentID), 1),
+			storage.SegmentManifestBasePath(m.ChunkManager.RootPath(), meta.RestartCollID, RestartPartID, segmentID), 1),
 	})))
 	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, &model.SegmentIndex{
 		CollectionID:          meta.RestartCollID,

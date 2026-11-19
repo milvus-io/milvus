@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -1318,7 +1319,7 @@ func (m *IndexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 	return nil
 }
 
-func (m *IndexMeta) DeleteTask(buildID int64) error {
+func (m *IndexMeta) DeleteTask(buildID, storageVersion int64) error {
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
 
@@ -1332,12 +1333,21 @@ func (m *IndexMeta) DeleteTask(buildID int64) error {
 		return nil
 	}
 
-	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IsDeleted = true
-		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
+	// A V3 tombstone only needs the identity of the directories to retry.
+	// Older segments still need their recorded file keys after a restart.
+	updated := *segIdx
+	if storageVersion == storage.StorageV3 {
+		updated.IndexFileKeys = nil
+		updated.IndexFileCount = 0
+	} else {
+		full, err := m.segmentIndexWithFiles(m.ctx, segIdx)
+		if err != nil {
+			return err
+		}
+		updated = *full
 	}
-
-	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+	updated.IsDeleted = true
+	if err := m.alterSegmentIndexes([]*model.SegmentIndex{&updated}); err != nil {
 		return err
 	}
 

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -315,7 +316,7 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	require.True(t, present, "superseded artifact remains durably available to GC")
 	requireIndexFiles(t, restarted, restoredOld, "0", "1")
 	requireIndexFiles(t, restarted, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID], "replacement-a", "replacement-b")
-	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).DeleteTask(old.BuildID))
+	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).DeleteTask(old.BuildID, storage.StorageV3))
 	require.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID)
 	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).RemoveSegmentIndex(ctx, old.BuildID))
 	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID,

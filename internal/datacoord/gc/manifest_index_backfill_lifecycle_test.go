@@ -47,20 +47,20 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	index.SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 	observed := m.GetSegment(ctx, meta.RestartSegID)
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	item := segmentIndexGCItem{segIdx: record, files: recordedIndexFiles(t, gc, record)}
-	for file := range item.files {
+	files := recordedIndexFiles(t, gc, record)
+	for file := range files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 		t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
 	}
 	// Backfill passed its live-definition check before DDL retired the index.
 	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
-	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
+	gc.recycleRecordOnlySegmentIndex(ctx, observed, record)
 	_, exists := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, exists, "stale GC must preserve the driver of manifest retraction")
-	for file := range item.files {
+	for file := range files {
 		present, err := m.ChunkManager.Exist(ctx, file)
 		require.NoError(t, err)
 		assert.True(t, present, "recheck precedes deletion")
@@ -125,7 +125,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			second.IndexID++
 			second.BuildID++
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AddSegmentIndex(ctx, second))
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 			t.Cleanup(gc.Close)
 			for _, record := range []*model.SegmentIndex{first, second} {
 				for file := range recordedIndexFiles(t, gc, record) {
@@ -244,8 +244,9 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.NoError(t, m.SetState(ctx, meta.RestartSegID, commonpb.SegmentState_Dropped))
 			throttled := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrIoTooManyRequests).Build()
 			t.Cleanup(func() { throttled.UnPatch() })
-			_, err = gc.resolveRetainedIndexFiles(ctx, nil, build)
-			require.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+			_, _, blocked := gc.GetDroppedSegmentIndexes(ctx, NewGCManifestReadIO(t), build.SegmentID)
+			require.Equal(t, gcBlockedByManifest, blocked)
+			require.Equal(t, 1, throttled.MockTimes())
 		})
 	}
 }
