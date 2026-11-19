@@ -83,7 +83,7 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		return resp, nil
 	}
 	byID := make(map[int64]*datapb.StreamingNodeBM25Resource, len(segmentIDs))
-	var adoptedView *viewpb.DataViewOfCollection
+	var adoptionMoves map[int64]model.SplitAdoptionMove
 	for _, segmentID := range segmentIDs {
 		segment := s.meta.GetSegment(ctx, segmentID)
 		if segment == nil {
@@ -95,32 +95,18 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 			return resp, nil
 		}
 		if segment.GetInsertChannel() != "" && segment.GetInsertChannel() != req.GetVchannel() {
-			if s.isRetainedSplitSource(req.GetCollectionId(), req.GetVchannel(), segment.GetInsertChannel()) {
-				if adoptedView == nil {
-					latest, err := s.dataViewManager.Latest(ctx, req.GetCollectionId())
-					if err != nil {
-						resp.Status = merr.Status(err)
-						return resp, nil
-					}
-					if latest == nil {
-						resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("adopted DataView is unavailable"))
-						return resp, nil
-					}
-					defer latest.Deref()
-					adoptedView = latest.DataView()
-				}
-				if dataViewShard(adoptedView, req.GetVchannel()) != nil ||
-					!dataViewHasSegment(adoptedView, segment.GetInsertChannel(), segment.GetPartitionID(), segmentID) {
-					resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("split adoption of segment %d is not published", segmentID))
+			if adoptionMoves == nil {
+				adoptionMoves, err = s.retainedSourceAdoption(ctx, req.GetCollectionId(), req.GetVchannel())
+				if err != nil {
+					resp.Status = merr.Status(err)
 					return resp, nil
 				}
-			} else {
+			}
+			move, ok := adoptionMoves[segmentID]
+			if !ok || move.Target != segment.GetInsertChannel() || move.PartitionID != segment.GetPartitionID() {
 				resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
-					"segment channel mismatch, segmentID=%d, expected=%s, actual=%s",
-					segment.GetID(),
-					req.GetVchannel(),
-					segment.GetInsertChannel(),
-				))
+					"segment %d ownership on %s does not match the retained split source %s",
+					segmentID, segment.GetInsertChannel(), req.GetVchannel()))
 				return resp, nil
 			}
 		}
@@ -166,35 +152,34 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 	return resp, nil
 }
 
-// A retained pre-adoption DataView authorizes the old source's membership.
-// Current SegmentMeta alone cannot validate its owner: adoption moved it to a
-// target while g1 may still need to reconstruct the same immutable resources.
-func (s *Server) isRetainedSplitSource(collectionID int64, source, target string) bool {
-	if s.splitStore == nil {
-		return false
-	}
+// The referenced historical DataView pins the segment's resources even when
+// target compaction has replaced it in the latest DataView. The committed move
+// is the durable proof that the channel mismatch is this source's adoption.
+func (s *Server) retainedSourceAdoption(ctx context.Context, collectionID int64, source string) (map[int64]model.SplitAdoptionMove, error) {
 	for _, task := range s.splitStore.List() {
 		if task.GetCollectionId() != collectionID || task.GetSourceVchannel() != source ||
 			task.GetState() < datapb.SplitShardTaskState_SplitShardTaskRewriteDone ||
 			task.GetState() >= datapb.SplitShardTaskState_SplitShardTaskRetired {
 			continue
 		}
-		for _, candidate := range task.GetTargets() {
-			if candidate.GetVchannel() == target {
-				return true
-			}
+		catalog := s.meta.Catalog.(model.SplitAdoptionCatalog)
+		record, err := catalog.LoadSplitAdoption(ctx, collectionID, task.GetTaskId())
+		if err != nil {
+			return nil, err
 		}
-	}
-	return false
-}
-
-func dataViewHasSegment(view *viewpb.DataViewOfCollection, channel string, partitionID, segmentID int64) bool {
-	for _, partition := range dataViewShard(view, channel).GetPartitions() {
-		if partition.GetPartitionId() == partitionID && slices.Contains(partition.GetSegmentIds(), segmentID) {
-			return true
+		if record == nil || (record.State != "Committed" && record.State != "Cleaning" && record.State != "Done") {
+			return nil, merr.WrapErrServiceNotReadyMsg("split adoption of source %s is not committed", source)
 		}
+		if record.Source != source {
+			return nil, merr.WrapErrDataIntegrityMsg("split adoption does not match task source %s", source)
+		}
+		moves := make(map[int64]model.SplitAdoptionMove, len(record.Moves))
+		for _, move := range record.Moves {
+			moves[move.SegmentID] = move
+		}
+		return moves, nil
 	}
-	return false
+	return nil, merr.WrapErrServiceInternalMsg("segment channel mismatch for source %s without active adoption", source)
 }
 
 func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {
